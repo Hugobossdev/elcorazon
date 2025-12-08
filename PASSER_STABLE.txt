@@ -1,0 +1,56 @@
+═══════════════════════════════════════════════════════════════
+  GUIDE SIMPLE : PASSER FLUTTER AU CANAL STABLE
+═══════════════════════════════════════════════════════════════
+
+PROBLÈME ACTUEL:
+  - Flutter 3.39.0-beta a un bug Gradle
+  - Erreur: "Cannot run Project.afterEvaluate"
+
+SOLUTION: Passer au canal stable
+
+═══════════════════════════════════════════════════════════════
+  ÉTAPES À SUIVRE
+═══════════════════════════════════════════════════════════════
+
+1. NETTOYER LES FICHIERS FLUTTER
+   
+   Ouvrez PowerShell en ADMINISTRATEUR et exécutez:
+   
+   cd C:\flutter
+   git clean -fd
+   
+   (Cela supprime les fichiers non suivis qui bloquent le changement)
+
+2. CHANGER DE CANAL
+   
+   flutter channel stable
+
+3. METTRE À JOUR
+   
+   flutter upgrade
+
+4. VÉRIFIER
+   
+   flutter --version
+   
+   (Doit afficher "stable" et non "beta")
+
+5. NETTOYER VOTRE PROJET
+   
+   cd C:\Users\Administrateur\Desktop\elcora_fast
+   flutter clean
+   flutter pub get
+
+6. TESTER LE BUILD
+   
+   flutter build apk --release
+
+═══════════════════════════════════════════════════════════════
+  OU UTILISER LE SCRIPT AUTOMATIQUE
+═══════════════════════════════════════════════════════════════
+
+Exécutez simplement:
+   .\switch_to_stable_safe.ps1
+
+═══════════════════════════════════════════════════════════════
+
