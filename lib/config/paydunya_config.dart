@@ -1,25 +1,27 @@
 import 'package:elcora_fast/config/api_config.dart';
 
 /// Configuration PayDunya
-/// 
+///
 /// Ce fichier contient la configuration pour l'intégration PayDunya.
 /// Les clés API sont centralisées dans ApiConfig.
 class PayDunyaConfig {
   // Mode Sandbox (test) par défaut
-  static const bool isSandbox = ApiConfig.payDunyaIsSandbox;
+  static bool get isSandbox => ApiConfig.payDunyaIsSandbox;
 
   // Clés API PayDunya - Sandbox (Test)
   // Les clés sont récupérées depuis ApiConfig
-  static const String sandboxMasterKey = ApiConfig.payDunyaMasterKey;
-  static const String sandboxPrivateKey = ApiConfig.payDunyaPrivateKey;
-  static const String sandboxToken = ApiConfig.payDunyaToken;
+  static String get sandboxMasterKey => ApiConfig.payDunyaMasterKey;
+  static String get sandboxPrivateKey => ApiConfig.payDunyaPrivateKey;
+  static String get sandboxToken => ApiConfig.payDunyaToken;
 
   // Clés API PayDunya - Production
-  // Remplacez ces valeurs par vos vraies clés de production depuis votre compte PayDunya
-  // ⚠️ IMPORTANT: Ne commitez JAMAIS ces clés dans le repository
-  static const String productionMasterKey = 'your_production_master_key';
-  static const String productionPrivateKey = 'your_production_private_key';
-  static const String productionToken = 'your_production_token';
+  // Les clés sont récupérées depuis ApiConfig (qui lit depuis .env)
+  // ⚠️ IMPORTANT: Ne commitez JAMAIS le fichier .env dans le repository
+  static String get productionMasterKey =>
+      ApiConfig.payDunyaProductionMasterKey;
+  static String get productionPrivateKey =>
+      ApiConfig.payDunyaProductionPrivateKey;
+  static String get productionToken => ApiConfig.payDunyaProductionToken;
 
   // Informations du magasin
   static const String storeName = 'El Corazón - FastFoodGo';
@@ -49,10 +51,12 @@ class PayDunyaConfig {
   ];
 
   /// Récupère la clé master selon l'environnement
-  static String get masterKey => isSandbox ? sandboxMasterKey : productionMasterKey;
+  static String get masterKey =>
+      isSandbox ? sandboxMasterKey : productionMasterKey;
 
   /// Récupère la clé privée selon l'environnement
-  static String get privateKey => isSandbox ? sandboxPrivateKey : productionPrivateKey;
+  static String get privateKey =>
+      isSandbox ? sandboxPrivateKey : productionPrivateKey;
 
   /// Récupère le token selon l'environnement
   static String get token => isSandbox ? sandboxToken : productionToken;
@@ -67,11 +71,11 @@ class PayDunyaConfig {
     } else {
       // En mode production, on vérifie que les clés ne sont pas les valeurs par défaut
       return productionMasterKey.isNotEmpty &&
-          productionMasterKey != 'your_production_master_key' &&
+          productionMasterKey != 'your-production-master-key' &&
           productionPrivateKey.isNotEmpty &&
-          productionPrivateKey != 'your_production_private_key' &&
+          productionPrivateKey != 'your-production-private-key' &&
           productionToken.isNotEmpty &&
-          productionToken != 'your_production_token';
+          productionToken != 'your-production-token';
     }
   }
 }

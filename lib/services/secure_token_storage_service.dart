@@ -11,11 +11,7 @@ class SecureTokenStorageService {
   SecureTokenStorageService._internal();
 
   // Utiliser FlutterSecureStorage pour le stockage sécurisé
-  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage(
-    aOptions: AndroidOptions(
-      encryptedSharedPreferences: true,
-    ),
-  );
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   // Clés pour les tokens
   static const String _accessTokenKey = 'auth_access_token';

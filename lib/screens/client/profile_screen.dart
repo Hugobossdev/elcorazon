@@ -517,8 +517,6 @@ class ProfileScreen extends StatelessWidget {
         return '🛵';
       case UserRole.admin:
         return '👑';
-      default:
-        return '👤';
     }
   }
 
@@ -530,8 +528,6 @@ class ProfileScreen extends StatelessWidget {
         return 'Delivery Staff';
       case UserRole.admin:
         return 'Administrateur';
-      default:
-        return 'Utilisateur';
     }
   }
 

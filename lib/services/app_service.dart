@@ -16,7 +16,7 @@ import 'package:elcora_fast/services/wallet_service.dart';
 import 'package:elcora_fast/services/realtime_sync_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
-import 'package:elcora_fast/services/promo_code_service_supabase.dart';
+import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/menu_item_cache_service.dart';
 import 'package:elcora_fast/services/data_validator_service.dart';

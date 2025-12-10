@@ -1,50 +1,66 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Configuration centralisée des clés API
+/// Les valeurs sont chargées depuis le fichier .env pour la sécurité
 class ApiConfig {
   // Configuration Supabase
-  static const String supabaseUrl = 'https://fuvgfvonpivubkrvnsdt.supabase.co';
-  static const String supabaseAnonKey =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1dmdmdm9ucGl2dWJrcnZuc2R0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2OTM0MDUsImV4cCI6MjA3ODI2OTQwNX0.32onFnZ4vMQxkdh_oUS1oHsGUFX4SXhrb_388qnuS58';
+  static String get supabaseUrl => dotenv.env['SUPABASE_URL'] ?? '';
+  static String get supabaseAnonKey => dotenv.env['SUPABASE_ANON_KEY'] ?? '';
 
   // Configuration PayDunya (Mode Test)
-  static const String payDunyaMasterKey =
-      'wWr8BTxk-bSdK-uV9n-W45D-YZeArRLqmBqW';
-  static const String payDunyaPrivateKey =
-      'test_private_QaNmxsVwnkbTZAea83vPXu5VvN1';
-  static const String payDunyaToken = 'hiLPQQUFSy8NnAeLekrZ';
-  static const bool payDunyaIsSandbox = true;
+  static String get payDunyaMasterKey =>
+      dotenv.env['PAYDUNYA_MASTER_KEY'] ?? '';
+  static String get payDunyaPrivateKey =>
+      dotenv.env['PAYDUNYA_PRIVATE_KEY'] ?? '';
+  static String get payDunyaToken => dotenv.env['PAYDUNYA_TOKEN'] ?? '';
+  static bool get payDunyaIsSandbox =>
+      dotenv.env['PAYDUNYA_IS_SANDBOX']?.toLowerCase() == 'true';
+
+  // Configuration PayDunya (Mode Production)
+  static String get payDunyaProductionMasterKey =>
+      dotenv.env['PAYDUNYA_PRODUCTION_MASTER_KEY'] ?? '';
+  static String get payDunyaProductionPrivateKey =>
+      dotenv.env['PAYDUNYA_PRODUCTION_PRIVATE_KEY'] ?? '';
+  static String get payDunyaProductionToken =>
+      dotenv.env['PAYDUNYA_PRODUCTION_TOKEN'] ?? '';
 
   // Configuration Google Maps
-  static const String googleMapsApiKey =
-      'AIzaSyCtSGHbgwiNKhblSK7NpU7aVUvuxz-w-tM';
+  static String get googleMapsApiKey => dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
 
   // Configuration Firebase
-  static const String firebaseApiKey = 'your-api-key';
-  static const String firebaseAuthDomain = 'your-project.firebaseapp.com';
-  static const String firebaseProjectId = 'your-project-id';
-  static const String firebaseStorageBucket = 'your-project.appspot.com';
-  static const String firebaseMessagingSenderId = '123456789';
-  static const String firebaseAppId = 'your-app-id';
+  static String get firebaseApiKey => dotenv.env['FIREBASE_API_KEY'] ?? '';
+  static String get firebaseAuthDomain =>
+      dotenv.env['FIREBASE_AUTH_DOMAIN'] ?? '';
+  static String get firebaseProjectId =>
+      dotenv.env['FIREBASE_PROJECT_ID'] ?? '';
+  static String get firebaseStorageBucket =>
+      dotenv.env['FIREBASE_STORAGE_BUCKET'] ?? '';
+  static String get firebaseMessagingSenderId =>
+      dotenv.env['FIREBASE_MESSAGING_SENDER_ID'] ?? '';
+  static String get firebaseAppId => dotenv.env['FIREBASE_APP_ID'] ?? '';
 
   // Configuration Agora RTC
-  static const String agoraAppId = 'YOUR_AGORA_APP_ID'; // TODO: Ajouter votre App ID Agora
+  static String get agoraAppId => dotenv.env['AGORA_APP_ID'] ?? '';
 
   // Configuration Backend (Node.js/Express)
-  static const String backendUrl =
-      'http://localhost:3000'; // Change to your backend URL
+  static String get backendUrl =>
+      dotenv.env['BACKEND_URL'] ?? 'http://localhost:3000';
 
   // Configuration de l'environnement
-  static const String environment = 'development';
+  static String get environment => dotenv.env['ENVIRONMENT'] ?? 'development';
   static const bool debugMode = kDebugMode;
 
   /// Vérifie si toutes les clés API sont configurées
   static bool get isFullyConfigured {
     return supabaseUrl.isNotEmpty &&
         supabaseAnonKey.isNotEmpty &&
-        googleMapsApiKey != 'YOUR_GOOGLE_MAPS_API_KEY' &&
+        googleMapsApiKey.isNotEmpty &&
+        googleMapsApiKey != 'your-google-maps-api-key' &&
+        firebaseApiKey.isNotEmpty &&
         firebaseApiKey != 'your-api-key' &&
-        payDunyaMasterKey != 'your_master_key';
+        payDunyaMasterKey.isNotEmpty &&
+        payDunyaMasterKey != 'your-paydunya-master-key';
   }
 
   /// Vérifie si les services essentiels sont configurés
@@ -56,15 +72,21 @@ class ApiConfig {
   static List<String> get missingKeys {
     final List<String> missing = [];
 
-    if (googleMapsApiKey == 'YOUR_GOOGLE_MAPS_API_KEY') {
+    if (supabaseUrl.isEmpty) {
+      missing.add('Supabase URL');
+    }
+    if (supabaseAnonKey.isEmpty) {
+      missing.add('Supabase Anon Key');
+    }
+    if (googleMapsApiKey.isEmpty ||
+        googleMapsApiKey == 'your-google-maps-api-key') {
       missing.add('Google Maps API Key');
     }
-
-    if (firebaseApiKey == 'your-api-key') {
+    if (firebaseApiKey.isEmpty || firebaseApiKey == 'your-api-key') {
       missing.add('Firebase API Key');
     }
-
-    if (payDunyaMasterKey == 'your_master_key') {
+    if (payDunyaMasterKey.isEmpty ||
+        payDunyaMasterKey == 'your-paydunya-master-key') {
       missing.add('PayDunya Master Key');
     }
 

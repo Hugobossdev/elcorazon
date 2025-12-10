@@ -43,7 +43,7 @@ class ChatService extends ChangeNotifier {
       _currentToken = token;
 
       // Get backend URL from config
-      const backendUrl = ApiConfig.backendUrl;
+      final backendUrl = ApiConfig.backendUrl;
 
       debugPrint('ChatService: Connecting to $backendUrl');
 
@@ -104,7 +104,7 @@ class ChatService extends ChangeNotifier {
         if (roomId != null) {
           _typingUsers[roomId] = true;
           _typingController.add(Map.from(_typingUsers));
-          
+
           // Clear typing indicator after 3 seconds
           Future.delayed(const Duration(seconds: 3), () {
             _typingUsers[roomId] = false;
@@ -150,7 +150,8 @@ class ChatService extends ChangeNotifier {
       // Try to get existing room
       final response = await _supabase
           .from('chat_rooms')
-          .select('*, client:users!chat_rooms_client_id_fkey(id, name, profile_image), delivery:users!chat_rooms_delivery_id_fkey(id, name, profile_image)')
+          .select(
+              '*, client:users!chat_rooms_client_id_fkey(id, name, profile_image), delivery:users!chat_rooms_delivery_id_fkey(id, name, profile_image)')
           .eq('order_id', orderId)
           .maybeSingle();
 
@@ -177,7 +178,8 @@ class ChatService extends ChangeNotifier {
       // Fetch from Supabase
       final response = await _supabase
           .from('chat_messages')
-          .select('*, sender:users!chat_messages_sender_id_fkey(id, name, profile_image)')
+          .select(
+              '*, sender:users!chat_messages_sender_id_fkey(id, name, profile_image)')
           .eq('room_id', roomId)
           .order('created_at', ascending: true);
 
@@ -279,8 +281,9 @@ class ChatService extends ChangeNotifier {
   /// Get message stream for a room
   Stream<List<ChatMessage>> getMessageStream(String roomId) {
     if (!_messageControllers.containsKey(roomId)) {
-      _messageControllers[roomId] = StreamController<List<ChatMessage>>.broadcast();
-      
+      _messageControllers[roomId] =
+          StreamController<List<ChatMessage>>.broadcast();
+
       // Load initial messages
       getMessages(roomId).then((messages) {
         _messageControllers[roomId]!.add(messages);
@@ -317,4 +320,3 @@ class ChatService extends ChangeNotifier {
     super.dispose();
   }
 }
-

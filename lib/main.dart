@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
@@ -15,7 +16,7 @@ import 'package:elcora_fast/services/group_delivery_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
-import 'package:elcora_fast/services/promo_code_service_supabase.dart';
+import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/advanced_gamification_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
@@ -50,6 +51,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
+    // Load environment variables from .env file
+    await dotenv.load(fileName: '.env');
+    debugPrint('✅ Environment variables loaded');
+
     // Initialize only essential services at startup for better performance
     await _initializeEssentialServices();
 

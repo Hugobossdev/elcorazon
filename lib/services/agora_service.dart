@@ -18,8 +18,10 @@ class AgoraService extends ChangeNotifier {
   int? _remoteUid;
 
   // Streams
-  final StreamController<bool> _callStateController = StreamController<bool>.broadcast();
-  final StreamController<int?> _remoteUidController = StreamController<int?>.broadcast();
+  final StreamController<bool> _callStateController =
+      StreamController<bool>.broadcast();
+  final StreamController<int?> _remoteUidController =
+      StreamController<int?>.broadcast();
 
   Stream<bool> get callStateStream => _callStateController.stream;
   Stream<int?> get remoteUidStream => _remoteUidController.stream;
@@ -42,10 +44,12 @@ class AgoraService extends ChangeNotifier {
     try {
       // Create engine
       _engine = createAgoraRtcEngine();
-      await _engine!.initialize(const RtcEngineContext(
-        appId: ApiConfig.agoraAppId,
-        channelProfile: ChannelProfileType.channelProfileCommunication,
-      ),);
+      await _engine!.initialize(
+        RtcEngineContext(
+          appId: ApiConfig.agoraAppId,
+          channelProfile: ChannelProfileType.channelProfileCommunication,
+        ),
+      );
 
       // Set event handlers
       _engine!.registerEventHandler(
@@ -63,7 +67,8 @@ class AgoraService extends ChangeNotifier {
             _remoteUidController.add(remoteUid);
             notifyListeners();
           },
-          onUserOffline: (RtcConnection connection, int remoteUid, UserOfflineReasonType reason) {
+          onUserOffline: (RtcConnection connection, int remoteUid,
+              UserOfflineReasonType reason) {
             debugPrint('AgoraService: Remote user offline: $remoteUid');
             _remoteUid = null;
             _remoteUidController.add(null);
@@ -106,14 +111,15 @@ class AgoraService extends ChangeNotifier {
     try {
       _currentChannelId = channelId;
       _localUid = uid;
-      
+
       const channelMediaOptions = ChannelMediaOptions(
         clientRoleType: ClientRoleType.clientRoleBroadcaster,
         channelProfile: ChannelProfileType.channelProfileCommunication,
       );
 
       await _engine!.joinChannel(
-        token: '', // Use empty string for testing, or get token from your server
+        token:
+            '', // Use empty string for testing, or get token from your server
         channelId: channelId,
         uid: uid ?? 0,
         options: channelMediaOptions,
@@ -180,7 +186,7 @@ class AgoraService extends ChangeNotifier {
   /// Dispose
   Future<void> cleanup() async {
     await leaveChannel();
-    
+
     if (_engine != null) {
       await _engine!.release();
       _engine = null;
@@ -198,4 +204,3 @@ class AgoraService extends ChangeNotifier {
     super.dispose();
   }
 }
-

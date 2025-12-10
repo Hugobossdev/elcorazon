@@ -66,9 +66,7 @@ class LocationService extends ChangeNotifier {
       final hasPermission = await requestLocationPermission();
       if (!hasPermission) return null;
 
-      _currentPosition = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+      _currentPosition = await Geolocator.getCurrentPosition();
       notifyListeners();
       return _currentPosition;
     } catch (e) {

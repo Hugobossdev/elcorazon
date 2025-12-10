@@ -13,7 +13,7 @@ import 'package:elcora_fast/services/group_delivery_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
-import 'package:elcora_fast/services/promo_code_service_supabase.dart';
+import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/advanced_gamification_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:elcora_fast/services/promo_code_service_supabase.dart';
+import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/models/promo_code.dart';
 import 'package:elcora_fast/widgets/custom_text_field.dart';

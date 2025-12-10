@@ -90,9 +90,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   /// Met à jour la position actuelle
   Future<void> _updateLocation() async {
     try {
-      _currentPosition = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
+      _currentPosition = await Geolocator.getCurrentPosition();
 
       // Envoyer la position au serveur Supabase
       // Note: Il faudrait avoir un orderId actif pour mettre à jour la position

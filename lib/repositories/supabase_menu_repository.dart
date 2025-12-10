@@ -5,13 +5,20 @@ import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/supabase/supabase_config.dart';
 import 'package:elcora_fast/repositories/menu_repository.dart';
 
+import 'package:elcora_fast/config/api_config.dart';
+
 /// Implémentation Supabase du MenuRepository
 class SupabaseMenuRepository implements MenuRepository {
-  final SupabaseClient _supabase = SupabaseConfig.client;
+  // Use a getter to ensure we always get the current client instance
+  SupabaseClient get _supabase => SupabaseConfig.client;
 
   @override
   Future<List<MenuItem>> getMenuItems({String? categoryId}) async {
     try {
+      // Debug log to verify Supabase URL being used
+      debugPrint(
+          '🔍 Fetching menu items using Supabase URL: ${ApiConfig.supabaseUrl}');
+
       const fieldsString = '''
         id, name, description, price, image_url, category_id,
         is_available, is_popular, is_vegetarian, is_vegan,
@@ -19,9 +26,7 @@ class SupabaseMenuRepository implements MenuRepository {
         rating, review_count, is_vip_exclusive
       ''';
 
-      var queryBuilder = _supabase
-          .from('menu_items')
-          .select('''
+      var queryBuilder = _supabase.from('menu_items').select('''
             $fieldsString,
             menu_categories!left(id, name, display_name, emoji)
           ''');
@@ -48,14 +53,10 @@ class SupabaseMenuRepository implements MenuRepository {
   @override
   Future<MenuItem?> getMenuItemById(String id) async {
     try {
-      final response = await _supabase
-          .from('menu_items')
-          .select('''
+      final response = await _supabase.from('menu_items').select('''
             *,
             menu_categories!left(id, name, display_name, emoji)
-          ''')
-          .eq('id', id)
-          .maybeSingle();
+          ''').eq('id', id).maybeSingle();
 
       if (response == null) {
         return null;
@@ -84,7 +85,8 @@ class SupabaseMenuRepository implements MenuRepository {
     try {
       final response = await _supabase
           .from('menu_categories')
-          .select('id, name, display_name, emoji, description, sort_order, is_active')
+          .select(
+              'id, name, display_name, emoji, description, sort_order, is_active')
           .eq('is_active', true)
           .order('sort_order');
 
@@ -148,8 +150,8 @@ class SupabaseMenuRepository implements MenuRepository {
       return items;
     } catch (e) {
       debugPrint('❌ Error in SupabaseMenuRepository.getPopularMenuItems: $e');
-      throw Exception('Erreur lors de la récupération des items populaires: $e');
+      throw Exception(
+          'Erreur lors de la récupération des items populaires: $e');
     }
   }
 }
-

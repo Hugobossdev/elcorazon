@@ -113,16 +113,18 @@ class SubscriptionService extends ChangeNotifier {
 
     if (!_currentSubscription!.canUseMeal) {
       debugPrint(
-          'SubscriptionService: Cannot use meal - no meals remaining or inactive',);
+        'SubscriptionService: Cannot use meal - no meals remaining or inactive',
+      );
       return false;
     }
 
     try {
       // Call backend API to use subscription meal
-      const backendUrl = ApiConfig.backendUrl;
+      final backendUrl = ApiConfig.backendUrl;
       final response = await http.post(
         Uri.parse(
-            '$backendUrl/api/subscriptions/${_currentSubscription!.id}/use',),
+          '$backendUrl/api/subscriptions/${_currentSubscription!.id}/use',
+        ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'order_id': orderId}),
       );

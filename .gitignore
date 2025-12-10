@@ -48,6 +48,8 @@ app.*.map.json
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 
 # Secrets and API keys
 **/secrets.dart
