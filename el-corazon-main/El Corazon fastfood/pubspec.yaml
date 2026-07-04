@@ -1,0 +1,94 @@
+name: elcora_fast
+description: "El corazon - Application de livraison de repas avec amour comme ingrédient principal. Application Flutter complète avec gestion de commandes, paiements, suivi en temps réel, gamification et bien plus."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  
+  # State management
+  provider: ^6.1.2
+  flutter_riverpod: ^3.0.3
+  
+  # Backend & Database
+  supabase_flutter: ^2.12.0
+  
+  # Local storage
+  shared_preferences: ^2.3.2
+  
+  # Utilities
+  uuid: ^4.5.1
+  intl: ^0.20.2
+  
+  # UI components
+  badges: ^3.1.2
+  flutter_rating_bar: ^4.0.1
+  intl_phone_field: ^3.2.0
+  
+  # Notifications
+  flutter_local_notifications: ^19.5.0
+  
+  # Connectivity
+  connectivity_plus: ^7.0.0
+  
+  # Real-time communication
+  agora_rtc_engine: ^6.3.0
+  socket_io_client: ^2.0.3+1
+  url_launcher: ^6.3.0
+  
+  # Location & Maps
+  geolocator: ^14.0.2
+  google_maps_flutter: ^2.9.0
+  
+  # Database
+  sqflite: ^2.3.3+1
+  
+  # Security
+  flutter_secure_storage: ^10.0.0-beta.5
+  jwt_decoder: ^2.0.1
+  flutter_dotenv: ^6.0.0
+  
+  # Fonts
+  google_fonts: ^6.2.1
+  
+  # Package info
+  package_info_plus: ^8.3.1
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.8.1
+
+  http: any
+  path: any
+  timezone: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  
+  build_runner: ^2.4.8
+  freezed: ^2.5.8
+  json_serializable: ^6.9.5
+
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.0
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/logo/logo.png"
+  min_sdk_android: 21
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo/logo.png
+    - assets/icons/google.png
+    - .env
