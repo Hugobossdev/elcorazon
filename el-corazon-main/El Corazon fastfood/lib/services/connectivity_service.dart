@@ -168,6 +168,9 @@ class ConnectivityService extends ChangeNotifier {
         return 'Autre';
       case ConnectivityResult.none:
         return 'Aucune connexion';
+      case ConnectivityResult.satellite:
+        // Traite cette connexion comme une connexion mobile
+        return 'Données mobiles (satellite)';
     }
   }
 
