@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/services/database_service.dart';
+import 'package:elcora_fast/services/api/address_api.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 
 class AddressService extends ChangeNotifier {
@@ -139,8 +140,14 @@ class AddressService extends ChangeNotifier {
     if (_userId == null) return;
 
     try {
-      final remoteAddresses =
-          await _databaseService.fetchUserAddresses(_userId!);
+      // Source primaire : API Laravel ; repli automatique sur Supabase.
+      List<Address> remoteAddresses;
+      try {
+        remoteAddresses = await AddressApi().getAddresses();
+      } catch (e) {
+        debugPrint('⚠️ API adresses indisponible, repli Supabase: $e');
+        remoteAddresses = await _databaseService.fetchUserAddresses(_userId!);
+      }
       _addresses = remoteAddresses;
 
       if (_addresses.isNotEmpty) {
@@ -279,18 +286,33 @@ class AddressService extends ChangeNotifier {
               _addresses.map((a) => a.copyWith(isDefault: false)).toList();
         }
 
-        newAddress = await _databaseService.createAddress(
-          userId: _userId!,
-          name: name,
-          address: address,
-          city: city,
-          postalCode: postalCode,
-          type: type,
-          isDefault: shouldBeDefault,
-          isFavorite: isFavorite,
-          latitude: finalLatitude,
-          longitude: finalLongitude,
-        );
+        // Source primaire : API Laravel ; repli automatique sur Supabase.
+        try {
+          newAddress = await AddressApi().createAddress(
+            name: name,
+            address: address,
+            city: city,
+            postalCode: postalCode,
+            type: type,
+            isDefault: shouldBeDefault,
+            latitude: finalLatitude,
+            longitude: finalLongitude,
+          );
+        } catch (e) {
+          debugPrint('⚠️ API création adresse indisponible, repli Supabase: $e');
+          newAddress = await _databaseService.createAddress(
+            userId: _userId!,
+            name: name,
+            address: address,
+            city: city,
+            postalCode: postalCode,
+            type: type,
+            isDefault: shouldBeDefault,
+            isFavorite: isFavorite,
+            latitude: finalLatitude,
+            longitude: finalLongitude,
+          );
+        }
       } else {
         newAddress = Address(
           id: _uuid.v4(),
@@ -412,17 +434,33 @@ class AddressService extends ChangeNotifier {
         if (isDefault == true) {
           await _databaseService.unsetDefaultAddresses(_userId!);
         }
-        updatedAddress = await _databaseService.updateAddress(
-          addressId: addressId,
-          name: name,
-          address: address,
-          city: city,
-          postalCode: postalCode,
-          type: type,
-          isDefault: isDefault,
-          latitude: finalLatitude,
-          longitude: finalLongitude,
-        );
+        // Source primaire : API Laravel ; repli automatique sur Supabase.
+        try {
+          updatedAddress = await AddressApi().updateAddress(
+            addressId: addressId,
+            name: name,
+            address: address,
+            city: city,
+            postalCode: postalCode,
+            type: type,
+            isDefault: isDefault,
+            latitude: finalLatitude,
+            longitude: finalLongitude,
+          );
+        } catch (e) {
+          debugPrint('⚠️ API MAJ adresse indisponible, repli Supabase: $e');
+          updatedAddress = await _databaseService.updateAddress(
+            addressId: addressId,
+            name: name,
+            address: address,
+            city: city,
+            postalCode: postalCode,
+            type: type,
+            isDefault: isDefault,
+            latitude: finalLatitude,
+            longitude: finalLongitude,
+          );
+        }
       } else {
         updatedAddress = currentAddress.copyWith(
           name: name,
@@ -478,7 +516,13 @@ class AddressService extends ChangeNotifier {
       _addresses.removeAt(index);
 
       if (_userId != null) {
-        await _databaseService.deleteAddress(addressId);
+        // Source primaire : API Laravel ; repli automatique sur Supabase.
+        try {
+          await AddressApi().deleteAddress(addressId);
+        } catch (e) {
+          debugPrint('⚠️ API suppression adresse indisponible, repli Supabase: $e');
+          await _databaseService.deleteAddress(addressId);
+        }
       }
 
       // Si l'adresse supprimée était sélectionnée, sélectionner une autre

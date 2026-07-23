@@ -43,9 +43,21 @@ class ApiConfig {
   // Configuration Agora RTC
   static String get agoraAppId => dotenv.env['AGORA_APP_ID'] ?? '';
 
-  // Configuration Backend (Node.js/Express)
+  // Configuration Backend (Node.js/Express - legacy)
   static String get backendUrl =>
       dotenv.env['BACKEND_URL'] ?? 'http://localhost:3000';
+
+  /// URL de base de l'API Laravel (client REST de la Phase B).
+  /// Priorité à API_BASE_URL ; sinon dérivée de BACKEND_URL (+ /api).
+  static String get apiBaseUrl {
+    final explicit = dotenv.env['API_BASE_URL'];
+    if (explicit != null && explicit.isNotEmpty) {
+      return explicit.replaceAll(RegExp(r'/+$'), '');
+    }
+    final base = (dotenv.env['BACKEND_URL'] ?? 'http://localhost:8000')
+        .replaceAll(RegExp(r'/+$'), '');
+    return '$base/api';
+  }
 
   // Configuration de l'environnement
   static String get environment => dotenv.env['ENVIRONMENT'] ?? 'development';
