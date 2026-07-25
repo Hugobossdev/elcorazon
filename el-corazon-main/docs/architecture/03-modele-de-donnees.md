@@ -117,18 +117,58 @@ restaurateur a en tête.
 
 ---
 
+### `catalog`, `carts`, `orders`, `payments`, `delivery`, `tracking`
+
+Le reste du chemin critique. Plutôt que d'énumérer les colonnes, voici les
+endroits où la **structure** porte un invariant — c'est là que se joue l'écart
+avec l'implémentation précédente.
+
+| Invariant | Mécanisme structurel |
+|---|---|
+| **C1** — le prix ne vient jamais du client | `carts` **ne possède aucune colonne de montant**. Le panier retient l'article, les options et la quantité ; le prix est relu au catalogue. Ne pas avoir la colonne est plus solide que de la valider. |
+| **C2** — les montants d'une commande sont figés | `OrderLine` copie `item_name`, `unit_price` et les options. Un article renommé, repricé ou retiré du catalogue laisse la commande intacte. |
+| **C4** — code et schéma ne divergent pas | `state_check_constraint(ORDER_MACHINE, …)` génère la contrainte `CHECK` **depuis la machine à états**. Une origine unique, donc aucune divergence possible. |
+| — remise plafonnée | `order_discount_within_bounds` : au-delà du dû, le total deviendrait négatif et la commande rapporterait de l'argent au client. |
+| **P1** — webhook idempotent | Unicité de `(provider, event_id)`. Un rejeu concurrent est arrêté par la base, pas par un `if déjà_traité` que deux workers franchiraient ensemble. |
+| **P2** — part de paiement adossée à une transaction | `settled_share_requires_transaction` : une part `completed` sans transaction est **refusée en base**. C'est la faille de la commande gratuite, traitée à la racine et non par une restriction d'accès. |
+| **L2** — acceptation exclusive | `one_active_assignment_per_order`, index unique partiel. Tient même si le verrou applicatif est contourné. |
+| **L3** — pas de falsification du suivi | `LocationPing` est rattaché à une **course**, pas à un livreur : impossible d'écrire pour une commande qu'on ne dessert pas. |
+| **S1** — « achat vérifié » calculé serveur | `editable=False` : le champ ne peut venir ni d'un formulaire, ni d'un sérialiseur généré. |
+| **S5** — un avis par article et par client | `UniqueConstraint(menu_item, user)`. |
+
+Deux choix qui méritent d'être explicités.
+
+**Le panier vit dans `carts`, pas dans `orders`.** C'est un état éphémère,
+réécrit en permanence ; la commande est une écriture comptable définitive. Les
+héberger ensemble mélangerait deux cycles de vie opposés.
+
+**Les options du panier sont des clés étrangères, celles de la commande du
+JSON.** Ce n'est pas une incohérence : au panier, les options doivent être
+revalidées — existent-elles encore, sont-elles disponibles, respectent-elles
+les bornes de leur groupe ? Une clé étrangère rend cette vérification triviale.
+À la commande, ce sont des copies figées, qui ne doivent plus rien à l'état du
+catalogue.
+
+**Le dossier livreur est la seule machine cyclique du produit**
+(`require_acyclic=False`) : un dossier se ré-instruit après modification des
+pièces (L5), quand une commande ne se re-livre pas.
+
+### Vérification
+
+Chaque contrainte est couverte par un test qui **contourne délibérément la
+couche applicative** — `QuerySet.update()`, qui n'appelle ni `save()`, ni
+`full_clean()`, ni le moindre code métier. Si la base laisse passer, l'invariant
+n'est pas réellement tenu.
+
 ## 3. Ce qui vient ensuite
 
 | App | Entités | Points d'attention |
 |---|---|---|
-| `profiles` | `Address`, `Preference` | Suppression **dure** (RGPD) ; la commande garde une copie figée de l'adresse |
-| `catalog` | `Category`, `MenuItem`, `OptionGroup`, `Option`, `Review` | Prix relus serveur (C1) ; `is_verified_purchase` calculé serveur (S1) |
 | `inventory` | `StockItem`, `StockMovement` | Décrément lié au cycle de commande — absent de l'existant |
-| `carts` | `Cart`, `CartItem` | Revalidation des prix à chaque lecture ; fusion invité → client |
-| `orders` | `Order`, `OrderLine`, `StatusEvent`, `IdempotencyKey` | Machine à états + `CHECK` ; devise figée ; clé d'idempotence (ADR-009) |
-| `payments` | `Transaction`, `SplitPayment`, `SplitShare`, `Refund` | Part adossée à une transaction vérifiée (P2) ; remboursement plafonné (P3) |
-| `delivery` | `CourierProfile`, `Assignment` | Verrou d'acceptation (L2) ; dossier repassé en `pending` (L5) |
-| `tracking` | `LocationPing` | Écriture échantillonnée ; partitionnement à prévoir |
+| `notifications` | `Notification`, `Preference` | Canal transactionnel jamais coupé par les préférences marketing |
+| `promotions` | `Promotion`, `PromotionUsage` | Quota global **et** par utilisateur (F4) |
+| `loyalty` | `PointsLedger`, `Reward`, `Redemption`, `Subscription` | Journal immuable (F5) ; débit conditionnel atomique (F1) ; catalogue de plans tarifés serveur (P4) |
+| `gamification`, `social`, `support`, `analytics` | — | Second temps, après la mise en service du chemin critique |
 
 ---
 

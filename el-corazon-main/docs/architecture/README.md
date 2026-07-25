@@ -12,6 +12,7 @@ commit `56e0bec`).
 |---|---|
 | [01 — Analyse fonctionnelle](01-analyse-fonctionnelle.md) | Acteurs, parcours, **20 invariants métier**, besoins d'API et de temps réel, périmètre v2 |
 | [02 — Architecture générale](02-architecture-generale.md) | Composants, flux, découpage en applications, couches, déploiement |
+| [03 — Modèle de données](03-modele-de-donnees.md) | Schéma PostgreSQL/PostGIS, invariants portés par la structure |
 
 ## Décisions (ADR)
 
@@ -41,8 +42,8 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
 
 - [x] Phase 1 — Analyse fonctionnelle
 - [x] Phase 2 — Architecture générale et ADR
-- [ ] Phase 3 — Modèle de données
-- [ ] Phase 8 — Socle DevOps
+- [x] Phase 3 — Modèle de données du chemin critique (10 apps, 185 tests)
+- [x] Phase 8 — Socle DevOps (Docker, Compose, Nginx, CI)
 - [ ] Phase 4 — API REST v1
 - [ ] Phase 5 — Temps réel
 - [ ] Phase 6 — Flutter Clean Architecture
