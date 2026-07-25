@@ -9,13 +9,13 @@ name: Backend CI
 
 on:
   push:
-    paths: ["el-corazon-main/backend/**", ".github/workflows/backend-ci.yml"]
+    paths: ["el-corazon/backend/**", ".github/workflows/backend-ci.yml"]
   pull_request:
-    paths: ["el-corazon-main/backend/**", ".github/workflows/backend-ci.yml"]
+    paths: ["el-corazon/backend/**", ".github/workflows/backend-ci.yml"]
 
 defaults:
   run:
-    working-directory: el-corazon-main/backend
+    working-directory: el-corazon/backend
 
 env:
   PYTHON_VERSION: "3.13"
@@ -99,7 +99,7 @@ jobs:
         if: always()
         with:
           name: couverture
-          path: el-corazon-main/backend/coverage.xml
+          path: el-corazon/backend/coverage.xml
 
   contrat:
     name: Contrat d'API
@@ -124,7 +124,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: openapi
-          path: el-corazon-main/backend/openapi.yaml
+          path: el-corazon/backend/openapi.yaml
 
   image:
     name: Construction de l'image
@@ -135,7 +135,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
-          context: el-corazon-main/backend
+          context: el-corazon/backend
           target: runtime
           push: false
           cache-from: type=gha

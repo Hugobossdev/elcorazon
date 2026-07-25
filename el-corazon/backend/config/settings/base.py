@@ -130,6 +130,23 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"  # tables techniques unique
 
 AUTH_USER_MODEL = "accounts.User"
 
+# Sans cette liste, `validate_password()` ne valide **rien** : Django n'applique
+# aucune politique par défaut, et « 12345678 » passe. Un test l'a attrapé.
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        # Refuse un mot de passe trop proche de l'e-mail ou du nom : c'est la
+        # première chose qu'essaie un attaquant qui connaît sa cible.
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+        "OPTIONS": {"user_attributes": ("email", "full_name", "phone")},
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 10},
+    },
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
 # --------------------------------------------------------------- cache et files
 
 REDIS_URL: str = config("REDIS_URL", default="redis://localhost:6379/0")

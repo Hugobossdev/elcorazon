@@ -117,6 +117,14 @@ ignore = [
 # et `REQUIRED_FIELDS` sont bien annotés `ClassVar`.
 "apps/*/models.py" = ["RUF012"]
 
+# Même raisonnement pour DRF : `class Meta` d'un sérialiseur (`fields`,
+# `read_only_fields`) et la configuration de vue (`permission_classes`,
+# `throttle_classes`) sont de la déclaration, jamais mutée à l'exécution. Les
+# annoter `ClassVar` les ferait en plus diverger des stubs DRF, qui les
+# déclarent en attributs d'instance — mypy refuserait la redéfinition.
+"apps/*/serializers.py" = ["RUF012"]
+"apps/*/views.py" = ["RUF012"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["config", "common", "apps"]
 
