@@ -1,17 +1,17 @@
 """Réglages de test.
 
-Deux profils, sélectionnés par les variables d'environnement :
+La base de test est **PostgreSQL/PostGIS**, servi par `docker compose up db`
+en local et par un service GitHub Actions en CI. Il n'y a pas de repli SQLite :
+le schéma emploie des types propres à PostgreSQL (`ArrayField`, `geography`,
+contraintes d'exclusion), et une base de test d'un autre moteur ne pourrait pas
+les porter. Un vert obtenu sur un schéma dégradé ne prouverait rien.
 
-* **CI et Docker** — PostgreSQL/PostGIS et Redis réels.  C'est le profil de
-  référence : la suite complète, y compris le géospatial et le temps réel.
-* **Poste sans Docker** — SQLite, cache mémoire, *channel layer* en mémoire,
-  Celery synchrone.  N'exécute que le sous-ensemble non marqué `postgis` ou
-  `redis` :
+    docker compose up -d db redis
+    pytest
 
-      pytest -m "not postgis and not redis"
-
-Le second profil est un **confort de développement**, jamais une cible de
-livraison : rien ne doit être déclaré vert sur sa seule foi.
+Les services externes (cache, channel layer, files, stockage objet) sont
+remplacés par des équivalents en mémoire : ils n'apportent rien à la
+vérification du métier et rendraient la suite lente et instable.
 """
 
 from __future__ import annotations
@@ -21,22 +21,19 @@ import os
 # Valeurs par défaut posées avant l'import de `base`, qui lit l'environnement.
 os.environ.setdefault("DJANGO_SECRET_KEY", "test-only-not-a-secret")
 os.environ.setdefault("DJANGO_DEBUG", "False")
-os.environ.setdefault("GIS_ENABLED", "False")
+os.environ.setdefault("GIS_ENABLED", "True")
+# `docker compose` expose PostgreSQL sur 5433 pour ne pas heurter une instance
+# déjà installée sur le poste. La CI, elle, utilise 5432.
+os.environ.setdefault("POSTGRES_HOST", "localhost")
+os.environ.setdefault("POSTGRES_PORT", "5433")
+os.environ.setdefault("POSTGRES_DB", "elcorazon")
+os.environ.setdefault("POSTGRES_USER", "elcorazon")
+os.environ.setdefault("POSTGRES_PASSWORD", "elcorazon")
 
 from .base import *  # noqa: F403
-from .base import BASE_DIR, GIS_ENABLED, REST_FRAMEWORK
+from .base import BASE_DIR, REST_FRAMEWORK
 
 TESTING = True
-
-# --------------------------------------------------------------- base de données
-
-if not GIS_ENABLED:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": ":memory:",
-        }
-    }
 
 # --------------------------------------------------------------- sans service externe
 

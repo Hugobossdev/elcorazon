@@ -44,10 +44,10 @@ THIRD_PARTY_APPS = [
 # une app ne dépend que de celles qui la précèdent.
 LOCAL_APPS: list[str] = [
     # Chemin critique — construit en premier
-    # "apps.accounts",
-    # "apps.geography",
-    # "apps.restaurants",
-    # "apps.profiles",
+    "apps.accounts",
+    "apps.geography",
+    "apps.restaurants",
+    "apps.profiles",
     # "apps.catalog",
     # "apps.carts",
     # "apps.orders",
@@ -128,6 +128,8 @@ DATABASES = {
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"  # tables techniques uniquement
 
+AUTH_USER_MODEL = "accounts.User"
+
 # --------------------------------------------------------------- cache et files
 
 REDIS_URL: str = config("REDIS_URL", default="redis://localhost:6379/0")
@@ -191,6 +193,23 @@ SPECTACULAR_SETTINGS = {
 
 # --------------------------------------------------------------- JWT (ADR-004)
 
+
+def _read_key(path_var: str, inline_var: str) -> str:
+    """Lit une clé depuis un fichier monté, sinon depuis l'environnement.
+
+    Le fichier est la voie recommandée : une clé PEM est multiligne, ce que ni
+    `env_file` de Docker Compose ni la plupart des gestionnaires de
+    configuration ne savent porter sans échappement fragile. C'est aussi la
+    forme qu'attendent les `Secret` Kubernetes montés en volume.
+
+    La variable en clair reste acceptée pour les déploiements simples.
+    """
+    path = config(path_var, default="")
+    if path:
+        return Path(path).read_text(encoding="utf-8")
+    return config(inline_var, default="").replace("\\n", "\n")
+
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
@@ -198,8 +217,8 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
     "ALGORITHM": "RS256",
-    "SIGNING_KEY": config("JWT_SIGNING_KEY", default=""),
-    "VERIFYING_KEY": config("JWT_VERIFYING_KEY", default=""),
+    "SIGNING_KEY": _read_key("JWT_PRIVATE_KEY_PATH", "JWT_SIGNING_KEY"),
+    "VERIFYING_KEY": _read_key("JWT_PUBLIC_KEY_PATH", "JWT_VERIFYING_KEY"),
     "AUTH_HEADER_TYPES": ("Bearer",),
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "sub",

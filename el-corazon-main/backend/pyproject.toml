@@ -27,6 +27,10 @@ dependencies = [
     "django-storages[s3]==1.*",
     "python-decouple==3.*",
     "structlog==25.*",
+    # Requis par ImageField : Django valide le contenu de l'image à
+    # l'enregistrement, ce qui évite qu'un fichier arbitraire renommé en .jpg
+    # atterrisse dans le stockage objet.
+    "Pillow==12.*",
 ]
 
 [project.optional-dependencies]
@@ -89,15 +93,25 @@ ignore = [
     # sur la convention.
     "N818",
 
-    # La documentation et les commentaires sont en français et emploient des
-    # caractères typographiques (×, —, …). Ce ne sont pas des ambiguïtés à
-    # corriger : ce sont les bons caractères.
+    # Le code, la documentation et les libellés affichés sont en français et
+    # emploient des caractères typographiques (×, —, –, …). Ce ne sont pas des
+    # ambiguïtés à corriger : ce sont les bons caractères. RUF001 couvre les
+    # chaînes, dont les libellés vus par l'utilisateur.
+    "RUF001",
     "RUF002",
     "RUF003",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106"]  # mots de passe en dur : ce sont des fixtures
+
+# RUF012 réclame `ClassVar` sur les attributs de classe mutables. C'est juste en
+# général, et faux sur `class Meta` de Django : le framework y attend des listes
+# nues (`ordering`, `indexes`, `constraints`) et les annoter n'apporte aucune
+# sécurité — Meta n'est jamais instanciée. L'ignorer ici évite d'ajouter du bruit
+# à chaque modèle. Ailleurs dans le code, la règle reste active : `User.objects`
+# et `REQUIRED_FIELDS` sont bien annotés `ClassVar`.
+"apps/*/models.py" = ["RUF012"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["config", "common", "apps"]

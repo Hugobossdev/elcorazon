@@ -23,21 +23,29 @@ docker compose up
 PostgreSQL est exposé sur **5433** et non 5432, pour ne pas entrer en conflit
 avec une instance déjà installée sur le poste.
 
-### Sans Docker (poste de développement dégradé)
+### Tests
 
-Le poste du projet n'a ni Docker, ni PostGIS, ni Redis. Le sous-ensemble de la
-suite qui n'en dépend pas reste exécutable :
+La suite s'exécute **dans l'image**, parce que GeoDjango s'appuie sur GDAL et
+GEOS — des bibliothèques système, pas des paquets Python, absentes d'un poste
+Windows nu :
+
+```bash
+docker compose up -d db redis
+docker compose run --rm api pytest
+```
+
+Les tests purement algorithmiques (montants, machine à états, identifiants) ne
+touchent ni la base ni le réseau et tournent aussi dans un simple virtualenv :
 
 ```bash
 python -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev]"     # Linux/macOS : .venv/bin/python
-.venv/Scripts/python -m pytest tests -m "not postgis and not redis"
+.venv/Scripts/python -m pytest tests/common
 ```
 
-> Ce mode est un **confort de développement**, jamais une cible de livraison.
-> Le géospatial et le temps réel ne sont vérifiés qu'en CI, qui dispose de
-> PostGIS et de Redis. Rien ne doit être déclaré vert sur la seule foi d'une
-> exécution locale.
+> Il n'existe **pas** de repli SQLite. Le schéma emploie des types propres à
+> PostgreSQL — `ArrayField`, `geography`, index GiST — qu'un autre moteur ne
+> peut pas porter. Un vert obtenu sur un schéma dégradé ne prouverait rien.
 
 ## Structure
 

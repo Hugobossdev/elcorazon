@@ -337,11 +337,11 @@ C'est ce graphe qui rend une extraction future en service autonome possible : `t
 | `minio` | `minio/minio` | 9000 / 9001 |
 | `nginx` | `nginx:alpine` | 80 |
 
-> **Contrainte du poste courant** : Docker n'est pas installé, et le PostgreSQL 17 local n'a pas
-> PostGIS. Conformément à l'arbitrage retenu, Docker Compose est l'environnement de référence ; en
-> local sans lui, seuls sont exécutables les tests ne dépendant ni de PostGIS ni de Redis (logique
-> de domaine, machines à états, sérialiseurs, permissions). Le géospatial et le temps réel sont
-> validés en CI GitHub Actions, qui dispose des deux. Détaillé en Phase 8.
+> **Note d'exécution** : Docker Desktop et Compose sont installés sur le poste depuis le
+> 25/07/2026 ; PostGIS et Redis tournent en conteneur. La suite de tests s'exécute **dans l'image**
+> (`docker compose run --rm api pytest`), parce que GeoDjango dépend de GDAL et GEOS, qui sont des
+> bibliothèques système et non des paquets Python. Il n'existe pas de repli SQLite : le schéma
+> emploie `ArrayField`, `geography` et des index GiST qu'un autre moteur ne porterait pas.
 
 ### Production
 

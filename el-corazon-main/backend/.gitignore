@@ -25,3 +25,6 @@ media/
 *.pem
 *.key
 !deploy/**/*.example
+
+# Clés locales : générées par développeur, jamais partagées
+secrets/

@@ -13,10 +13,13 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# `gdal-bin` plutôt qu'un `libgdalNN` explicite : le numéro de SONAME change à
+# chaque version de Debian, et l'épingler casse la construction au premier
+# changement d'image de base. Le méta-paquet tire la bonne version de libgdal
+# et de libproj.
 RUN apt-get update && apt-get install --no-install-recommends -y \
-        libgdal34 \
+        gdal-bin \
         libgeos-c1v5 \
-        libproj25 \
         libpq5 \
         curl \
     && rm -rf /var/lib/apt/lists/*
@@ -64,3 +67,16 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
 # Rôle par défaut : l'API. Les autres sont choisis par `command:` dans compose
 # ou par l'`args` du déploiement Kubernetes.
 CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000"]
+
+# ---------------------------------------------------------------- développement
+# Étage supplémentaire portant l'outillage de test et de qualité. C'est la cible
+# utilisée par docker compose en local.
+#
+# `runtime` reste la cible livrée : pytest, ruff et mypy n'ont rien à faire dans
+# une image de production — ils l'alourdissent et élargissent inutilement sa
+# surface d'attaque.
+FROM runtime AS dev
+
+USER root
+RUN /opt/venv/bin/pip install -e ".[dev]"
+USER corazon

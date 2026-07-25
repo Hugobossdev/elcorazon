@@ -14,9 +14,11 @@ from typing import Any
 
 # Attributs internes de LogRecord : tout le reste est une donnée métier ajoutée
 # par l'appelant via `extra=`, et mérite de figurer dans le journal.
-_RESERVED = frozenset(
-    vars(logging.LogRecord("", 0, "", 0, "", None, None)) | {"message", "asctime", "taskName"}
-)
+_RESERVED = frozenset(vars(logging.LogRecord("", 0, "", 0, "", None, None))) | {
+    "message",
+    "asctime",
+    "taskName",
+}
 
 
 class JSONFormatter(logging.Formatter):
