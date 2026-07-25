@@ -34,6 +34,14 @@ docker compose up -d db redis
 docker compose run --rm api pytest
 ```
 
+La création de la base de test rejoue toutes les migrations, ce qui domine la
+durée d'une exécution. En boucle de développement :
+
+```bash
+docker compose run --rm api pytest --reuse-db     # réutilise la base existante
+docker compose run --rm api pytest --create-db    # après une nouvelle migration
+```
+
 Les tests purement algorithmiques (montants, machine à états, identifiants) ne
 touchent ni la base ni le réseau et tournent aussi dans un simple virtualenv :
 

@@ -48,12 +48,12 @@ LOCAL_APPS: list[str] = [
     "apps.geography",
     "apps.restaurants",
     "apps.profiles",
-    # "apps.catalog",
-    # "apps.carts",
-    # "apps.orders",
-    # "apps.payments",
-    # "apps.delivery",
-    # "apps.tracking",
+    "apps.catalog",
+    "apps.carts",
+    "apps.orders",
+    "apps.payments",
+    "apps.delivery",
+    "apps.tracking",
     # "apps.notifications",
     #
     # Second temps

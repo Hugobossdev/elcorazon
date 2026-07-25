@@ -1,13 +1,19 @@
 """Configuration commune des tests.
 
-Le socle (`common/`) est volontairement dépourvu de dépendance à Django : ses
-tests s'exécutent sans base de données, ce qui permet de les faire tourner sur
-un poste dépourvu de Docker, PostGIS et Redis.
+La suite s'exécute contre PostgreSQL/PostGIS réel, dans l'image Docker — les
+contraintes `CHECK` et les index GiST ne se vérifient pas autrement.
+
+Le socle (`common/`) fait exception : il est dépourvu de dépendance à Django et
+ses tests tournent dans un simple virtualenv, ce qui les rend utilisables comme
+boucle de retour rapide.
 """
 
 from __future__ import annotations
 
 import pytest
+
+# Les fixtures du domaine sont partagées par toutes les suites.
+from tests.fixtures import *  # noqa: F403
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
