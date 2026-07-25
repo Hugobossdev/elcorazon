@@ -1,0 +1,127 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["config", "common", "apps"]
+
+[project]
+name = "elcorazon-backend"
+version = "2.0.0"
+description = "El Corazón — backend Django de la plateforme de commande et de livraison"
+requires-python = ">=3.13"
+
+dependencies = [
+    "Django==5.2.*",
+    "djangorestframework==3.17.*",
+    "djangorestframework-simplejwt[crypto]==5.*",
+    "django-filter==25.*",
+    "drf-spectacular==0.30.*",
+    "psycopg[binary]==3.3.*",
+    "channels[daphne]==4.3.*",
+    "channels-redis==4.*",
+    "celery==5.6.*",
+    "redis==6.*",
+    "django-redis==6.*",
+    "django-cors-headers==4.*",
+    "django-storages[s3]==1.*",
+    "python-decouple==3.*",
+    "structlog==25.*",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.*",
+    "pytest-django==4.*",
+    "pytest-cov==7.*",
+    "factory-boy==3.*",
+    "freezegun==1.*",
+    "ruff==0.14.*",
+    "mypy==1.*",
+    "django-stubs[compatible-mypy]==5.*",
+    "djangorestframework-stubs==3.*",
+]
+
+# ---------------------------------------------------------------- pytest
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config -ra"
+markers = [
+    # La CI dispose de PostGIS et de Redis ; un poste de développement sans
+    # Docker n'en a pas. Ces marqueurs permettent d'exécuter localement le
+    # sous-ensemble qui n'en dépend pas :  pytest -m "not postgis and not redis"
+    "postgis: nécessite PostgreSQL avec l'extension PostGIS",
+    "redis: nécessite un serveur Redis",
+    "contract: vérifie le contrat d'API exposé aux clients",
+    "architecture: vérifie une règle d'architecture (dépendances, couches)",
+]
+
+# ---------------------------------------------------------------- ruff
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "DJ",        # flake8-django
+    "S",         # bandit
+    "RUF",
+]
+ignore = [
+    "S101",  # assert : légitime dans les tests et les invariants internes
+
+    # Les exceptions métier portent un nom issu du vocabulaire du domaine, pas
+    # un suffixe technique : `IllegalTransition`, `CurrencyMismatch`,
+    # `InsufficientStock`. Sur un site d'appel, `except InsufficientStock` se
+    # lit mieux que `except InsufficientStockError`, et le domaine prime ici
+    # sur la convention.
+    "N818",
+
+    # La documentation et les commentaires sont en français et emploient des
+    # caractères typographiques (×, —, …). Ce ne sont pas des ambiguïtés à
+    # corriger : ce sont les bons caractères.
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]  # mots de passe en dur : ce sont des fixtures
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "common", "apps"]
+
+# ---------------------------------------------------------------- mypy
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+exclude = ["migrations/"]
+
+[[tool.mypy.overrides]]
+module = ["*.migrations.*"]
+ignore_errors = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"
+
+# ---------------------------------------------------------------- coverage
+
+[tool.coverage.run]
+source = ["common", "apps"]
+omit = ["*/migrations/*", "*/tests/*", "*/apps.py"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]

@@ -1,0 +1,27 @@
+# Environnement
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Django
+staticfiles/
+media/
+.pytest-media/
+*.log
+
+# Secrets — aucune clé ne doit jamais entrer dans le dépôt
+*.pem
+*.key
+!deploy/**/*.example
