@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Country',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('iso_code', models.CharField(help_text='Code ISO 3166-1 alpha-2, par exemple TG.', max_length=2, unique=True)),
@@ -38,7 +38,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='City',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('name', models.CharField(max_length=100)),
@@ -55,7 +55,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='DeliveryZone',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('name', models.CharField(max_length=100)),

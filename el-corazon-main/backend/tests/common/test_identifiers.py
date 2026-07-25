@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from common.identifiers import _uuid7_fallback, uuid7
+from common.identifiers import _implementation, _uuid7_fallback, uuid7
 
 
 @pytest.fixture(params=["fallback", "actif"])
@@ -83,6 +83,21 @@ class TestBascule:
     def test_la_primitive_standard_est_preferee_si_disponible(self) -> None:
         """Documente la bascule décrite dans l'ADR-007."""
         if hasattr(uuid, "uuid7"):
-            assert uuid7 is uuid.uuid7
+            assert _implementation is uuid.uuid7
         else:
-            assert uuid7 is _uuid7_fallback
+            assert _implementation is _uuid7_fallback
+
+    def test_le_chemin_serialise_ne_depend_pas_de_l_interpreteur(self) -> None:
+        """Régression : la migration générée doit être identique partout.
+
+        `uuid7` sert de `default=` à la clé primaire de tous les modèles, et
+        Django sérialise un `default=` par son chemin d'import.  Quand `uuid7`
+        n'était qu'un alias, ce chemin valait `uuid.uuid7` sous Python 3.14 et
+        `common.identifiers._uuid7_fallback` sous 3.13 : deux postes produisaient
+        deux migrations contradictoires sur les mêmes modèles.
+
+        L'assertion porte donc sur `__module__` et `__qualname__`, qui sont
+        exactement ce que lit le sérialiseur de Django.
+        """
+        assert uuid7.__module__ == "common.identifiers"
+        assert uuid7.__qualname__ == "uuid7"

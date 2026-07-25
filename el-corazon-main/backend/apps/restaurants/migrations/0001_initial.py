@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Restaurant',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('name', models.CharField(max_length=120)),
@@ -42,7 +42,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='OpeningHours',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('weekday', models.SmallIntegerField(choices=[(0, 'Lundi'), (1, 'Mardi'), (2, 'Mercredi'), (3, 'Jeudi'), (4, 'Vendredi'), (5, 'Samedi'), (6, 'Dimanche')])),
                 ('opens_at', models.TimeField()),
                 ('closes_at', models.TimeField()),

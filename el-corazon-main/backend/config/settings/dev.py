@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from config.geolibs import discover
+
 from .base import *  # noqa: F403
 from .base import INSTALLED_APPS, MIDDLEWARE, REST_FRAMEWORK
+
+# Sur un poste Windows sans OSGeo4W, désigne les DLL GDAL/GEOS embarquées dans
+# l'environnement virtuel.  Ne fait rien ailleurs — voir config/geolibs.py.
+globals().update(discover())
 
 DEBUG = True
 ALLOWED_HOSTS = ["*"]

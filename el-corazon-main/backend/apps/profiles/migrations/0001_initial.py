@@ -22,7 +22,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='CustomerPreference',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('dietary_restrictions', django.contrib.postgres.fields.ArrayField(base_field=models.CharField(max_length=32), blank=True, default=list, help_text='Ex. vegetarian, vegan, halal, gluten_free.', size=None)),
@@ -40,7 +40,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Address',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('label', models.CharField(help_text='Nom donné par le client, ex. « Maison ».', max_length=50)),

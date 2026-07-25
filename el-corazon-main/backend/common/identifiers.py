@@ -42,7 +42,25 @@ def _uuid7_fallback() -> uuid.UUID:
 
 
 # `uuid.uuid7` est natif depuis Python 3.14. Les images Docker sont en 3.13
-# (ADR-001 : maturité des liaisons GDAL/GEOS), d'où la bascule.  Dès que les
-# images passeront en 3.14, la version standard sera utilisée sans changement
-# d'appelant.
-uuid7 = getattr(uuid, "uuid7", _uuid7_fallback)
+# (ADR-001 : maturité des liaisons GDAL/GEOS), d'où la bascule.
+_implementation = getattr(uuid, "uuid7", _uuid7_fallback)
+
+
+def uuid7() -> uuid.UUID:
+    """UUIDv7 — primitive standard si l'interpréteur la fournit, sinon locale.
+
+    L'indirection n'est pas gratuite, et c'est voulu : `uuid7` doit être une
+    fonction **de ce module**, au nom stable.
+
+    Django sérialise un `default=` par son chemin d'import.  Avec un simple
+    alias `uuid7 = getattr(uuid, "uuid7", _uuid7_fallback)`, ce chemin devenait
+    `uuid.uuid7` sous 3.14 et `common.identifiers._uuid7_fallback` sous 3.13 :
+    la migration générée dépendait alors de l'interpréteur qui l'avait produite.
+    Chaque poste réclamait une migration que l'autre défaisait, et
+    `makemigrations --check` échouait en intégration continue dès que sa version
+    de Python différait de celle du développeur.
+
+    Ici le chemin sérialisé est toujours `common.identifiers.uuid7`, quelle que
+    soit l'implémentation retenue derrière.
+    """
+    return _implementation()

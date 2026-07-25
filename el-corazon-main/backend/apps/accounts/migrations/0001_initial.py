@@ -20,7 +20,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Role',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('name', models.CharField(max_length=64, unique=True)),
@@ -38,7 +38,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('password', models.CharField(max_length=128, verbose_name='password')),
                 ('last_login', models.DateTimeField(blank=True, null=True, verbose_name='last login')),
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('email', models.EmailField(max_length=254, unique=True)),
@@ -60,7 +60,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='Device',
             fields=[
-                ('id', models.UUIDField(default=common.identifiers._uuid7_fallback, editable=False, primary_key=True, serialize=False)),
+                ('id', models.UUIDField(default=common.identifiers.uuid7, editable=False, primary_key=True, serialize=False)),
                 ('created_at', models.DateTimeField(auto_now_add=True, db_index=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('token', models.CharField(max_length=512, unique=True)),

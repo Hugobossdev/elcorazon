@@ -44,6 +44,10 @@ dev = [
     "mypy==1.*",
     "django-stubs[compatible-mypy]==5.*",
     "djangorestframework-stubs==3.*",
+    # Fournit les DLL GDAL et GEOS aux postes Windows, qui n'ont pas de
+    # gestionnaire de paquets pour les installer (voir config/geolibs.py).
+    # Inutile sous Linux et en conteneur, où elles viennent du système.
+    "pyogrio==0.13.*; sys_platform == 'win32'",
 ]
 
 # ---------------------------------------------------------------- pytest
