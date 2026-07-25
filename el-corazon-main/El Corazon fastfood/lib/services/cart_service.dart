@@ -8,7 +8,6 @@ import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/services/database_service.dart';
-import 'package:elcora_fast/services/api/cart_api.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
@@ -94,13 +93,7 @@ class CartService extends ChangeNotifier {
   Future<void> clearForLogout() async {
     if (_userId != null) {
       try {
-        // Source primaire : API Laravel ; repli automatique sur Supabase.
-        try {
-          await CartApi().clear();
-        } catch (e) {
-          debugPrint('⚠️ API vidage panier indisponible, repli Supabase: $e');
-          await _databaseService.clearUserCart(_userId!);
-        }
+        await _databaseService.clearUserCart(_userId!);
       } catch (e) {
         debugPrint('CartService: erreur lors du nettoyage distant - $e');
       }
@@ -601,15 +594,7 @@ class CartService extends ChangeNotifier {
 
     _isHydrating = true;
     try {
-      // Source primaire : API Laravel ; repli automatique sur Supabase.
-      // (Les deux lisent la même table Postgres → cohérent.)
-      Map<String, dynamic> snapshot;
-      try {
-        snapshot = await CartApi().getCartSnapshot();
-      } catch (e) {
-        debugPrint('⚠️ API panier indisponible, repli Supabase: $e');
-        snapshot = await _databaseService.fetchUserCart(_userId!);
-      }
+      final snapshot = await _databaseService.fetchUserCart(_userId!);
       final remoteItems = snapshot['items'] as List<CartItem>;
 
       if (remoteItems.isEmpty) {

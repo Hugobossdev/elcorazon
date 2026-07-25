@@ -11,10 +11,6 @@ import 'package:elcora_fast/services/notification_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcora_fast/services/database_service.dart';
-import 'package:elcora_fast/supabase/supabase_config.dart';
-import 'package:elcora_fast/services/api/api_client.dart';
-import 'package:elcora_fast/services/api/auth_api.dart';
-import 'package:elcora_fast/services/api/order_api.dart';
 import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/services/error_handler_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
@@ -305,16 +301,6 @@ class AppService extends ChangeNotifier {
       if (currentAuthUser != null) {
         await _loadUserProfile(currentAuthUser.id);
         await _loadUserOrders();
-
-        // Pont Phase B : garantir un jeton Sanctum si la session Supabase existe
-        // déjà mais qu'aucun jeton API n'est stocké (best-effort).
-        if (!await ApiClient().hasToken) {
-          final supaToken =
-              SupabaseConfig.client.auth.currentSession?.accessToken;
-          if (supaToken != null) {
-            unawaited(AuthApi().exchangeSupabaseToken(supaToken));
-          }
-        }
       }
     } catch (e) {
       debugPrint('⚠️ Erreur lors du chargement de la session: $e');
@@ -351,12 +337,6 @@ class AppService extends ChangeNotifier {
         userRole: _currentUser!.role,
       );
 
-      // Pont Phase B : obtenir un jeton Sanctum pour l'API Laravel (best-effort).
-      final supaToken = response!.session?.accessToken;
-      if (supaToken != null) {
-        unawaited(AuthApi().exchangeSupabaseToken(supaToken));
-      }
-
       await _databaseService.trackEvent(
         eventType: 'user_login',
         eventData: {'role': _currentUser!.role.toString()},
@@ -390,13 +370,6 @@ class AppService extends ChangeNotifier {
     if (response?.user != null) {
       try {
         await _loadUserProfile(response!.user!.id);
-
-        // Pont Phase B : jeton Sanctum pour l'API Laravel (best-effort).
-        final supaToken = response!.session?.accessToken;
-        if (supaToken != null) {
-          unawaited(AuthApi().exchangeSupabaseToken(supaToken));
-        }
-
         await _databaseService.trackEvent(
           eventType: 'user_register',
           eventData: {'role': 'client'},
@@ -416,8 +389,6 @@ class AppService extends ChangeNotifier {
     try {
       // Sign out from Supabase
       await _databaseService.signOut();
-      // Purge le jeton Sanctum de l'API Laravel (Phase B).
-      await ApiClient().clearToken();
 
       _currentUser = null;
       _cartItems.clear();
@@ -750,38 +721,6 @@ class AppService extends ChangeNotifier {
       // Add payment transaction ID to order data
       orderData['payment_transaction_id'] = paymentTransactionId ?? '';
       orderData['payment_status'] = 'completed';
-
-      // Phase B : persistance via l'API Laravel (le serveur calcule les frais et
-      // recalcule les montants ; il crée la commande, les articles et enregistre
-      // le code promo en une transaction). Repli sur Supabase en cas d'échec.
-      if (await ApiClient().hasToken) {
-        try {
-          final serverOrder = await OrderApi().createOrder(
-            items: cartItems.whereType<CartItem>().map((c) {
-              final mid = _isValidUUID(c.menuItemId) ? c.menuItemId : c.id;
-              return OrderItemInput(
-                menuItemId: mid,
-                quantity: c.quantity,
-                customizations: c.customizations is Map
-                    ? Map<String, dynamic>.from(c.customizations as Map)
-                    : null,
-              );
-            }).toList(),
-            deliveryAddress: addressString,
-            paymentMethod: _paymentMethodToDbString(paymentMethod),
-            deliveryLatitude: addressForValidation.latitude,
-            deliveryLongitude: addressForValidation.longitude,
-            deliveryNotes: notes,
-            promoCode: promoCode,
-          );
-          _orders.insert(0, serverOrder);
-          notifyListeners();
-          debugPrint('✅ Commande créée via API: ${serverOrder.id}');
-          return serverOrder.id;
-        } catch (e) {
-          debugPrint('⚠️ Création via API échouée, repli Supabase: $e');
-        }
-      }
 
       // Save order to database (ou hors ligne si pas de connexion)
       try {
@@ -1182,15 +1121,8 @@ class AppService extends ChangeNotifier {
     if (_currentUser == null) return;
 
     try {
-      // Source primaire : API Laravel ; repli automatique sur Supabase.
-      try {
-        _orders = await OrderApi().getMyOrdersList(perPage: 50);
-      } catch (e) {
-        debugPrint('⚠️ API commandes indisponible, repli Supabase: $e');
-        final ordersData =
-            await _databaseService.getUserOrders(_currentUser!.id);
-        _orders = ordersData.map((data) => Order.fromMap(data)).toList();
-      }
+      final ordersData = await _databaseService.getUserOrders(_currentUser!.id);
+      _orders = ordersData.map((data) => Order.fromMap(data)).toList();
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading user orders: $e');
