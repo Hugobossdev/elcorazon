@@ -19,7 +19,7 @@ from apps.accounts.models import User
 from apps.orders.models import Order, PaymentMethod
 from apps.orders.services import OrderService
 from apps.orders.states import ORDER_MACHINE, OrderStatus
-from apps.payments.gateway import CheckoutInstruction, gateway
+from apps.payments.gateway import CheckoutInstruction, Notification, gateway_for
 from apps.payments.models import (
     PAYMENT_MACHINE,
     PaymentProvider,
@@ -103,7 +103,7 @@ class PaymentService:
         # La référence vient du prestataire, mais celui-ci a besoin de
         # l'identifiant de la transaction : la clé primaire est un UUIDv7
         # généré côté Python, donc connue avant l'insertion.
-        instruction = gateway().open_checkout(pending)
+        instruction = gateway_for(provider).open_checkout(pending)
         pending.provider_reference = instruction.provider_reference
         pending.save()
 
@@ -126,7 +126,9 @@ class PaymentService:
     # ------------------------------------------------------------- webhook
 
     @staticmethod
-    def handle_webhook(*, provider: str, payload: dict[str, Any]) -> WebhookOutcome:
+    def handle_webhook(
+        *, provider: str, notification: Notification, payload: dict[str, Any]
+    ) -> WebhookOutcome:
         """Applique une notification de prestataire.
 
         **P1** — l'idempotence est portée par l'unicité de `(provider,
@@ -136,29 +138,32 @@ class PaymentService:
 
         Un rejeu répond **succès**. Renvoyer une erreur ferait retenter le
         prestataire indéfiniment sur un événement pourtant bien traité.
+
+        `payload` est conservé brut à côté de la notification normalisée : le
+        jour où un champ manque, c'est lui qu'on relira, pas ce qu'on a bien
+        voulu en extraire.
         """
-        event_id = str(payload.get("event_id", "")).strip()
-        if not event_id:
+        if not notification.event_id.strip(":"):
             raise BusinessRuleViolation("Notification sans identifiant d'événement.")
 
         try:
             with transaction.atomic():
                 event = WebhookEvent.objects.create(
                     provider=provider,
-                    event_id=event_id,
+                    event_id=notification.event_id,
                     payload=payload,
                     signature_verified=True,
                 )
         except IntegrityError:
             return WebhookOutcome(accepted=True, detail="Événement déjà traité.")
 
-        return PaymentService._apply(event, provider=provider, payload=payload)
+        return PaymentService._apply(event, provider=provider, notification=notification)
 
     @staticmethod
     @transaction.atomic
-    def _apply(event: WebhookEvent, *, provider: str, payload: dict[str, Any]) -> WebhookOutcome:
-        reference = str(payload.get("provider_reference", "")).strip()
-        target = str(payload.get("status", "")).strip()
+    def _apply(event: WebhookEvent, *, provider: str, notification: Notification) -> WebhookOutcome:
+        reference = notification.provider_reference
+        target = notification.status
 
         txn = (
             Transaction.objects.select_for_update()
@@ -181,9 +186,18 @@ class PaymentService:
             PaymentService._close(event)
             return WebhookOutcome(True, "Statut déjà atteint.", txn)
 
-        PAYMENT_MACHINE.validate(txn.status, target)
+        if not PAYMENT_MACHINE.can(txn.status, target):
+            # Une notification tardive — « échoué » après un encaissement — ne
+            # doit ni passer, ni faire retenter. Un 409 rendu au prestataire le
+            # ferait revenir indéfiniment sur une transition qui ne sera jamais
+            # légale. L'invariant tient quand même : la transaction ne bouge
+            # pas, et l'anomalie est tracée pour être vue.
+            event.processing_error = f"Transition refusée : {txn.status} → {target}."
+            PaymentService._close(event)
+            return WebhookOutcome(True, event.processing_error, txn)
+
         if target == PaymentStatus.FAILED:
-            txn.failure_reason = str(payload.get("reason", ""))
+            txn.failure_reason = notification.reason
             txn.save(update_fields=["failure_reason"])
 
         PaymentService._move(txn, target)
@@ -197,7 +211,7 @@ class PaymentService:
     @staticmethod
     def _close(event: WebhookEvent) -> None:
         event.processed_at = timezone.now()
-        event.save(update_fields=["processed_at"])
+        event.save(update_fields=["processed_at", "processing_error"])
 
     @staticmethod
     def _confirm_order(order: Order) -> None:
@@ -222,7 +236,18 @@ class RefundService:
     def refund(
         *, order: Order, transaction_id: str, amount: Money, reason: str, actor: User
     ) -> Refund:
-        """Rembourse tout ou partie d'une commande.
+        """Enregistre un remboursement — **sans le verser**.
+
+        PayDunya n'expose pas d'API de remboursement : le virement se fait
+        depuis leur tableau de bord. Cette méthode écrit donc l'**intention**,
+        avec son plafond et sa trace, et laisse le mouvement d'argent à un
+        geste humain. Le remboursement reste en `pending` jusqu'à ce que
+        quelqu'un le confirme.
+
+        C'est à dire à l'exploitation avant la mise en service : sans cela,
+        quelqu'un cliquera « rembourser », verra une ligne apparaître, et
+        croira que le client a été remboursé.
+
 
         **P3** — le plafond est le total réellement encaissé, **moins ce qui a
         déjà été remboursé**. C'est la seconde moitié qui manquait : plafonner

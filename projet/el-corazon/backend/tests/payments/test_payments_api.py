@@ -225,7 +225,15 @@ class TestWebhook:
         self, client: APIClient, order: Order, initiated: Transaction
     ) -> None:
         """P1 — la transition `completed → failed` n'existe pas dans la
-        machine ; un rejeu tardif ne peut donc pas défaire un encaissement."""
+        machine ; un rejeu tardif ne peut donc pas défaire un encaissement.
+
+        La notification est **acceptée et tracée**, pas refusée : un 409 rendu
+        au prestataire le ferait revenir indéfiniment sur une transition qui ne
+        sera jamais légale. L'invariant tient par la transaction qui ne bouge
+        pas, pas par le code de statut qu'on renvoie.
+        """
+        from apps.payments.models import WebhookEvent
+
         post_webhook(
             client,
             {
@@ -243,9 +251,12 @@ class TestWebhook:
             },
         )
 
-        assert tardif.status_code == status.HTTP_409_CONFLICT
+        assert tardif.status_code == status.HTTP_200_OK
         initiated.refresh_from_db()
         assert initiated.status == PaymentStatus.COMPLETED
+
+        trace = WebhookEvent.objects.get(event_id="evt-2")
+        assert "Transition refusée" in trace.processing_error
 
     def test_un_echec_est_enregistre_avec_son_motif(
         self, client: APIClient, order: Order, initiated: Transaction

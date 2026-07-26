@@ -10,6 +10,7 @@ peut pas être rejouée sur un autre corps.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from django.db.models import QuerySet
@@ -26,7 +27,7 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from apps.accounts.models import UserType
 from apps.orders.models import Order
-from apps.payments.gateway import verify_signature
+from apps.payments.gateway import GatewayError, gateway_for
 from apps.payments.models import PaymentProvider, Transaction
 from apps.payments.serializers import (
     CheckoutSerializer,
@@ -43,6 +44,8 @@ from common.throttling import PaymentInitiationThrottle
 __all__ = ["InitiatePaymentView", "RefundView", "TransactionViewSet", "WebhookView"]
 
 SIGNATURE_HEADER = "X-Signature"
+
+logger = logging.getLogger(__name__)
 
 
 class TransactionViewSet(ReadOnlyModelViewSet[Transaction]):
@@ -126,24 +129,49 @@ class WebhookView(APIView):
         if provider not in PaymentProvider.values:
             raise ValidationError({"provider": f"Prestataire inconnu : {provider}."})
 
-        # Signature d'abord, sur le corps **brut**. Rien n'est enregistré tant
-        # qu'elle n'est pas vérifiée, sans quoi n'importe qui remplirait la
-        # table des événements en postant du JSON.
-        # Le refus sort en 403 et non en 401 : la route ne déclare aucun
-        # authentificateur DRF — la signature *est* le justificatif — donc
-        # aucun schéma n'est proposé en défi.
-        if not verify_signature(
-            raw_body=request.body, signature=request.headers.get(SIGNATURE_HEADER, "")
-        ):
-            raise AuthenticationFailed("Signature invalide.")
+        connecteur = gateway_for(provider)
+        recu = _corps(request)
 
-        serializer = WebhookSerializer(data=json.loads(request.body or b"{}"))
-        serializer.is_valid(raise_exception=True)
+        # Authentification d'abord. Rien n'est enregistré tant qu'elle n'a pas
+        # abouti, sans quoi n'importe qui remplirait la table des événements en
+        # postant du JSON. Le schéma appartient au connecteur : PayDunya joint
+        # une empreinte de sa clé maîtresse là où le bac à sable signe le corps.
+        #
+        # Le refus sort en 403 et non en 401 : la route ne déclare aucun
+        # authentificateur DRF — le justificatif *est* dans le corps ou
+        # l'en-tête — donc aucun schéma n'est proposé en défi.
+        if not connecteur.authenticate(raw_body=request.body, headers=request.headers, data=recu):
+            raise AuthenticationFailed("Notification non authentifiée.")
+
+        try:
+            notification = connecteur.parse(recu)
+        except GatewayError as exc:
+            # Notification authentique mais illisible : on l'accepte pour ne
+            # pas la faire retenter, et on la trace. Le prestataire n'y peut
+            # rien, et nous non plus dans l'instant.
+            logger.warning("webhook.illisible", extra={"provider": provider, "detail": str(exc)})
+            return Response({"accepted": True, "detail": str(exc)})
 
         outcome = PaymentService.handle_webhook(
-            provider=provider, payload=serializer.validated_data
+            provider=provider, notification=notification, payload=recu
         )
         return Response({"accepted": outcome.accepted, "detail": outcome.detail})
+
+
+def _corps(request: Request) -> dict[str, Any]:
+    """Corps de la notification, JSON ou formulaire.
+
+    PayDunya poste un formulaire imbriqué, le bac à sable du JSON. Choisir
+    selon le type de contenu plutôt que d'imposer le JSON évite d'écrire un
+    connecteur qui ne pourrait pas être appelé par son propre prestataire.
+    """
+    if request.content_type and "json" in request.content_type:
+        try:
+            parsed: dict[str, Any] = json.loads(request.body or b"{}")
+        except ValueError:
+            return {}
+        return parsed
+    return dict(request.data.items())
 
 
 class RefundView(APIView):

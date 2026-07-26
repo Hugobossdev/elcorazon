@@ -343,9 +343,27 @@ IDEMPOTENCY_RETENTION_HOURS: int = config("IDEMPOTENCY_RETENTION_HOURS", default
 # aux tests ; le connecteur FCM se branche par cette variable.
 PUSH_BACKEND: str = config("PUSH_BACKEND", default="apps.notifications.push.ConsolePushBackend")
 
-# Prestataire d'encaissement, résolu à l'appel (`apps.payments.gateway`). Le
-# changer est une variable d'environnement, pas un déploiement de code.
-PAYMENT_GATEWAY: str = config("PAYMENT_GATEWAY", default="apps.payments.gateway.SandboxGateway")
+# Connecteur **par prestataire**, résolu à l'appel (`apps.payments.gateway`).
+# Les espèces et le portefeuille n'appellent personne : le bac à sable leur
+# convient et leur conviendra toujours. Seul `paydunya` s'adresse à un service
+# externe, et le brancher est une variable d'environnement, pas un déploiement.
+PAYMENT_GATEWAYS: dict[str, str] = {
+    "paydunya": config("PAYDUNYA_GATEWAY", default="apps.payments.gateway.SandboxGateway"),
+    "cash": "apps.payments.gateway.SandboxGateway",
+    "wallet": "apps.payments.gateway.SandboxGateway",
+}
+
+# PayDunya. `test` vise le bac à sable du prestataire, `live` encaisse pour de
+# bon : c'est la seule variable dont une erreur se paie en argent réel.
+PAYDUNYA_MODE: str = config("PAYDUNYA_MODE", default="test")
+PAYDUNYA_MASTER_KEY: str = config("PAYDUNYA_MASTER_KEY", default="")
+PAYDUNYA_PRIVATE_KEY: str = config("PAYDUNYA_PRIVATE_KEY", default="")
+PAYDUNYA_TOKEN: str = config("PAYDUNYA_TOKEN", default="")
+PAYDUNYA_CALLBACK_URL: str = config("PAYDUNYA_CALLBACK_URL", default="")
+# Délai court et explicite : la création de facture est dans le cycle de
+# requête du client, qui attend devant son écran. Au-delà, un refus franc vaut
+# mieux qu'une page bloquée.
+PAYDUNYA_TIMEOUT_SECONDS: int = config("PAYDUNYA_TIMEOUT_SECONDS", default=10, cast=int)
 SANDBOX_CHECKOUT_BASE_URL: str = config(
     "SANDBOX_CHECKOUT_BASE_URL", default="https://sandbox.elcorazon.app/checkout"
 )

@@ -26,6 +26,11 @@ dependencies = [
     "django-cors-headers==4.*",
     "django-storages[s3]==1.*",
     "python-decouple==3.*",
+    # Client HTTP du connecteur PayDunya. `httpx` plutôt que `requests` pour son
+    # transport simulable : le connecteur se teste entièrement hors réseau, ce
+    # qui évite une suite lente, instable, et rouge les jours où le prestataire
+    # l'est.
+    "httpx==0.28.*",
     "structlog==25.*",
     # Requis par ImageField : Django valide le contenu de l'image à
     # l'enregistrement, ce qui évite qu'un fichier arbitraire renommé en .jpg

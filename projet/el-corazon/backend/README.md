@@ -100,6 +100,30 @@ droit de faire* (`orders.refund`), le rattachement à un établissement
 rattachement ne voit rien : un oubli de configuration produit une panne
 visible, jamais un accès trop large et silencieux.
 
+## Encaissement
+
+Chaque prestataire a son connecteur, derrière un port unique
+(`apps/payments/gateway.py`). Le port porte trois choses : ouvrir une demande
+de paiement, **authentifier** les notifications et les **lire** — les deux
+dernières parce qu'elles diffèrent d'un prestataire à l'autre. Le bac à sable
+signe le corps en HMAC-SHA256 ; PayDunya joint l'empreinte SHA-512 de sa clé
+maîtresse.
+
+Ce qui **décide** reste en dehors : gardes C5, idempotence P1, transitions,
+plafond P3. Tout cela se vérifie sans compte marchand, et le connecteur PayDunya
+se teste hors réseau par transport simulé.
+
+**Avant la mise en service**, il faut créer une facture réelle en mode `test` et
+comparer la réponse reçue à ce que lit `PayDunyaGateway._read_checkout`, ainsi
+qu'une notification réelle à ce que lit `parse`. Les noms de champs suivent le
+contrat documenté, mais n'ont pas pu être confrontés à l'API depuis ce dépôt.
+
+**Le remboursement n'est pas automatisé.** PayDunya n'expose pas d'API de
+remboursement : `RefundService` écrit l'intention, son plafond et sa trace, et
+le virement se fait depuis leur tableau de bord. Le remboursement reste en
+`pending` jusqu'à confirmation humaine — à dire à l'exploitation, sinon
+quelqu'un cliquera « rembourser » et croira que c'est fait.
+
 ## Limitation de débit
 
 Elle s'applique **partout** : `anon` et `user` sont le défaut du projet, et une
