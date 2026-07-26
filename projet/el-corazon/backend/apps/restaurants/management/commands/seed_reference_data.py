@@ -1,4 +1,4 @@
-"""Jeu de données géographiques initial.
+"""Jeu de données de référence initial.
 
 El Corazón opère aujourd'hui un seul établissement, à Lomé. Cette commande pose
 le pays, la ville, la zone et le restaurant correspondants — c'est-à-dire la
@@ -6,6 +6,11 @@ hiérarchie complète de l'ADR-006, remplie avec les données réelles du march�
 
 Idempotente : rejouable sans dupliquer, ce qui la rend utilisable aussi bien à
 la première installation qu'à chaque déploiement.
+
+Elle vit dans `restaurants` et non dans `geography` bien qu'elle commence par
+la géographie : elle crée aussi l'établissement, et `geography` n'a pas le
+droit de connaître `restaurants` — c'est l'inverse. La placer là-bas créait un
+cycle dans le graphe de l'ADR-002, ce qu'un test d'architecture a signalé.
 """
 
 from __future__ import annotations

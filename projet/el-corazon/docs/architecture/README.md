@@ -53,7 +53,7 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
   - [x] 5a — WebSocket : suivi de commande, file du livreur, rattrapage par séquence
   - [x] 5b — Notifications, push par Celery, événements de domaine
 - [ ] Phase 6 — Flutter Clean Architecture
-- [ ] Phase 7 — Tests et qualité
+- [x] Phase 7 — Tests et qualité (graphe vérifié, contrat vérifié, plancher de couverture)
 
 Ordre de construction retenu : **chemin critique d'abord** — identité, catalogue, panier, commandes,
 paiements, livraison, suivi. Fidélité, gamification, social, support et analytics ensuite.

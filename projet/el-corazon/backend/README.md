@@ -135,6 +135,19 @@ mypy common config apps
 pytest --cov
 ```
 
+Deux familles de tests ne vérifient pas du métier mais des **règles** :
+
+```bash
+pytest -m architecture   # graphe de dépendances, couches, surface publique
+pytest -m contract       # forme des réponses face au schéma OpenAPI
+```
+
+La première rend exécutable ce que l'ADR-002 annonçait comme « vérifié en CI » :
+une dépendance hors du graphe, un cycle entre apps ou une route ouverte sans
+figurer dans la liste déclarée font échouer la construction. La seconde ferme
+le piège nº 3 de la Phase 1 — un champ déclaré non nul qui sort absent fait
+planter les clients Dart, qui appellent `DateTime.parse` sans garde.
+
 Ces quatre commandes sont celles qu'exécute la CI
 ([`.github/workflows/backend-ci.yml`](../../.github/workflows/backend-ci.yml)).
 

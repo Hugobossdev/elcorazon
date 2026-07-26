@@ -198,3 +198,10 @@ omit = ["*/migrations/*", "*/tests/*", "*/apps.py"]
 
 [tool.coverage.report]
 exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+
+# Plancher bloquant. Posé sous la couverture réelle (95 %) et non à son niveau :
+# un seuil collé à la mesure du jour transforme chaque branche nouvelle en
+# échec de construction, et la première réaction est de baisser le seuil — ce
+# qui le vide de son sens. Trois points d'écart laissent passer le bruit et
+# arrêtent une vraie régression.
+fail_under = 92
