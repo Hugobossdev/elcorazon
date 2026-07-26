@@ -189,13 +189,51 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "common.exceptions.problem_detail_handler",
+    # Limitation appliquée **partout** par défaut. Ne la déclarer que sur
+    # quelques vues laissait sans quota les plus coûteuses — création de
+    # commande, initiation de paiement — c'est-à-dire celles dont l'abus se
+    # paie en argent et en verrous de base.
+    #
+    # Une vue qui déclare `throttle_classes` remplace ce défaut : c'est ainsi
+    # que l'authentification et le webhook gardent leurs quotas propres.
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
     "DEFAULT_THROTTLE_RATES": {
+        # Socle : lecture de catalogue, consultation d'historique.
         "anon": "60/min",
         "user": "120/min",
-        "auth_ip": "20/min",  # T1 — force brute par adresse
-        "auth_identifier": "5/min",  # T1 — force brute par identifiant tenté
+        # T1 — force brute, par adresse puis par identifiant tenté.
+        "auth_ip": "20/min",
+        "auth_identifier": "5/min",
+        # Le prestataire de paiement, qui peut légitimement grouper ses envois.
         "webhook": "60/min",
+        # Opérations coûteuses ou abusables. Les quotas sont volontairement bas :
+        # aucun usage humain n'en approche, et ce sont ceux dont l'abus mobilise
+        # des verrous, appelle un prestataire ou salit des données.
+        "order_create": "10/min",
+        "payment_initiate": "10/min",
+        "cart_write": "60/min",
+        "review_write": "5/min",
+        # Le suivi fait exception, et à la hausse : un livreur émet toutes les
+        # dix secondes, et rattrape en rafale au retour du réseau après un
+        # tunnel. Un quota serré couperait le suivi au moment précis où il
+        # redevient utile.
+        "tracking_ping": "240/min",
     },
+    # Nombre de proxys entre le client et l'application.
+    #
+    # **Réglage de sécurité, pas d'optimisation.** Sans lui, DRF prend la chaîne
+    # `X-Forwarded-For` entière pour identifier l'appelant. Or Nginx *ajoute* à
+    # cette chaîne au lieu de la remplacer : un client qui envoie son propre
+    # en-tête obtient une identité différente à chaque requête, et le limiteur
+    # par IP — donc la moitié de T1 — se contourne en variant une chaîne de
+    # caractères.
+    #
+    # Avec la valeur juste, DRF prend l'adresse que le dernier proxy a lui-même
+    # inscrite, celle que le client ne peut pas forger.
+    "NUM_PROXIES": config("NUM_PROXIES", default=1, cast=int),
     "UNAUTHENTICATED_USER": None,
 }
 

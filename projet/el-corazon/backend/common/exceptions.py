@@ -91,6 +91,7 @@ def _problem(
     status_code: int,
     detail: str | None = None,
     errors: Any = None,
+    headers: dict[str, str] | None = None,
     **extra: Any,
 ) -> Response:
     body: dict[str, Any] = {
@@ -104,7 +105,17 @@ def _problem(
     if errors is not None:
         body["errors"] = errors
     body.update(extra)
-    return Response(body, status=status_code, content_type="application/problem+json")
+
+    response = Response(body, status=status_code, content_type="application/problem+json")
+    # Les en-têtes que DRF avait posés sur sa propre réponse doivent survivre à
+    # la reconstruction. `Retry-After` en particulier : sans lui, un client
+    # limité ne sait pas combien de temps attendre, et la seule stratégie qui
+    # lui reste est de réessayer tout de suite — c'est-à-dire d'aggraver
+    # exactement ce que la limitation cherche à contenir.
+    for name, value in (headers or {}).items():
+        response[name] = value
+
+    return response
 
 
 def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
@@ -171,4 +182,7 @@ def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response 
         status_code=response.status_code,
         detail=str(message) if message else None,
         errors=errors if errors and "detail" not in errors else None,
+        # DRF pose `Retry-After` sur un 429 et `WWW-Authenticate` sur un 401 ;
+        # reconstruire la réponse sans les reprendre les ferait disparaître.
+        headers=dict(response.headers),
     )

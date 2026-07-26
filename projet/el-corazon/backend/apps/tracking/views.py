@@ -31,6 +31,7 @@ from apps.tracking.serializers import (
 )
 from apps.tracking.services import TrackingService
 from common.permissions import IsCourier, authenticated_user
+from common.throttling import TrackingPingThrottle
 
 __all__ = ["OrderTrackingView", "PingView"]
 
@@ -39,6 +40,7 @@ class PingView(APIView):
     """`POST /tracking/assignments/{id}/pings/` — dépôt d'une position."""
 
     permission_classes = [IsCourier]
+    throttle_classes = [TrackingPingThrottle]
 
     @extend_schema(
         request=PingWriteSerializer,

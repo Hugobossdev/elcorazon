@@ -23,6 +23,7 @@ from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
+from rest_framework.throttling import BaseThrottle
 from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import UserType
@@ -39,6 +40,7 @@ from apps.orders.serializers import (
 from apps.orders.services import OrderService
 from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
 from common.permissions import HasPermission, authenticated_user
+from common.throttling import OrderCreationThrottle
 
 __all__ = ["OrderViewSet"]
 
@@ -53,6 +55,18 @@ class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
 
     def get_serializer_class(self) -> type[BaseSerializer[Order]]:
         return OrderDetailSerializer if self.action == "retrieve" else OrderSerializer
+
+    def get_throttles(self) -> list[BaseThrottle]:
+        """Quota resserré sur la seule création.
+
+        Consulter son historique est bon marché ; passer commande verrouille,
+        relit le catalogue, interroge PostGIS et écrit une dizaine de lignes.
+        Appliquer le même quota aux deux reviendrait à choisir entre gêner la
+        lecture et laisser l'écriture ouverte.
+        """
+        if self.action == "create":
+            return [OrderCreationThrottle()]
+        return super().get_throttles()
 
     def get_queryset(self) -> QuerySet[Order]:
         user = authenticated_user(self.request)

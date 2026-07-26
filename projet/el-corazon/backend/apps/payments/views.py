@@ -38,6 +38,7 @@ from apps.payments.serializers import (
 from apps.payments.services import PaymentService, RefundService
 from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
 from common.permissions import HasPermission, IsCustomer, authenticated_user
+from common.throttling import PaymentInitiationThrottle
 
 __all__ = ["InitiatePaymentView", "RefundView", "TransactionViewSet", "WebhookView"]
 
@@ -70,6 +71,7 @@ class InitiatePaymentView(APIView):
     """`POST /payments/{order}/initiate/` — ouvre une demande de paiement."""
 
     permission_classes = [IsCustomer]
+    throttle_classes = [PaymentInitiationThrottle]
 
     @extend_schema(request=None, responses={201: CheckoutSerializer}, tags=["payments"])
     def post(self, request: Request, order_id: str) -> Response:

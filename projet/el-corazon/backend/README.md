@@ -100,6 +100,27 @@ droit de faire* (`orders.refund`), le rattachement à un établissement
 rattachement ne voit rien : un oubli de configuration produit une panne
 visible, jamais un accès trop large et silencieux.
 
+## Limitation de débit
+
+Elle s'applique **partout** : `anon` et `user` sont le défaut du projet, et une
+vue qui déclare `throttle_classes` remplace ce défaut par un quota nommé.
+
+| Quota | Défaut | Pourquoi |
+|---|---|---|
+| `anon` / `user` | 60 / 120 par minute | Socle : lecture de catalogue, historique |
+| `auth_ip` / `auth_identifier` | 20 / 5 par minute | T1 — force brute, par adresse puis par identifiant |
+| `order_create` | 10 par minute | Verrous, relecture catalogue, PostGIS |
+| `payment_initiate` | 10 par minute | Crée une transaction, appelle le prestataire |
+| `cart_write` | 60 par minute | Gestes répétés et légitimes |
+| `review_write` | 5 par minute | Anti-remplissage |
+| `tracking_ping` | 240 par minute | Rafales de rattrapage à la sortie d'un tunnel |
+| `webhook` | 60 par minute | Le prestataire peut grouper ses envois |
+
+**`NUM_PROXIES` n'est pas un réglage d'optimisation.** Nginx *ajoute* à
+`X-Forwarded-For` au lieu de le remplacer : sans cette valeur, DRF prend la
+chaîne entière, un client qui envoie son propre en-tête obtient une identité
+neuve à chaque requête, et le limiteur par adresse IP ne compte plus rien.
+
 ## Back-office
 
 `/admin/` — outil d'**exploitation**, pas seconde API. Il sert à valider un

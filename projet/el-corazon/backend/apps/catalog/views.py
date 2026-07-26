@@ -19,7 +19,7 @@ from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
-from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+from rest_framework.throttling import AnonRateThrottle, BaseThrottle, UserRateThrottle
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
 from apps.catalog.models import Category, MenuItem, Option, OptionGroup, Review
@@ -32,6 +32,7 @@ from apps.catalog.serializers import (
 )
 from apps.catalog.services import ReviewService
 from common.permissions import IsCustomer, authenticated_user
+from common.throttling import ReviewWriteThrottle
 
 __all__ = ["CategoryViewSet", "MenuItemViewSet", "ReviewViewSet"]
 
@@ -123,6 +124,16 @@ class ReviewViewSet(ListModelMixin, CreateModelMixin, GenericViewSet[Review]):
 
     def get_serializer_class(self) -> type[BaseSerializer[Review]]:
         return ReviewWriteSerializer if self.action == "create" else ReviewSerializer
+
+    def get_throttles(self) -> list[BaseThrottle]:
+        """Les avis se lisent librement, s'écrivent avec parcimonie.
+
+        Un avis par article et par utilisateur est déjà la règle (S5) : le
+        quota ne gêne personne et arrête le remplissage automatisé.
+        """
+        if self.request.method in ("GET", "HEAD", "OPTIONS"):
+            return super().get_throttles()
+        return [ReviewWriteThrottle()]
 
     @extend_schema(
         request=ReviewWriteSerializer, responses={201: ReviewSerializer}, tags=["catalog"]

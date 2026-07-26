@@ -28,6 +28,7 @@ from apps.carts.serializers import (
 from apps.carts.services import CartService, price_cart
 from apps.restaurants.models import Restaurant
 from common.permissions import IsCustomer, authenticated_user
+from common.throttling import CartWriteThrottle
 
 __all__ = ["CartViewSet"]
 
@@ -50,6 +51,7 @@ class CartViewSet(GenericViewSet[Cart]):
 
     permission_classes = [IsCustomer]
     serializer_class = CartSerializer
+    throttle_classes = [CartWriteThrottle]
     # Déclaré pour le générateur de schéma seulement : `get_queryset` exige un
     # utilisateur, que la génération hors requête n'a pas.
     queryset = Cart.objects.none()
