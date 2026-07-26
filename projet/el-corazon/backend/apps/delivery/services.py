@@ -22,6 +22,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.delivery.models import Assignment, CourierProfile
+from apps.delivery.signals import assignment_offered
 from apps.delivery.states import (
     DELIVERY_MACHINE,
     ORDER_STATUS_PROJECTION,
@@ -235,6 +236,7 @@ class AssignmentService:
                 },
             )
         )
+        assignment_offered.send(sender=Assignment, assignment=assignment)
         return assignment
 
     @staticmethod

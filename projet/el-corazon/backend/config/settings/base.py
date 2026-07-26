@@ -54,7 +54,7 @@ LOCAL_APPS: list[str] = [
     "apps.payments",
     "apps.delivery",
     "apps.tracking",
-    # "apps.notifications",
+    "apps.notifications",
     #
     # Second temps
     # "apps.inventory", "apps.promotions", "apps.loyalty",
@@ -294,6 +294,16 @@ COURIER_FEE_SHARE_PERCENT: int = config("COURIER_FEE_SHARE_PERCENT", default=80,
 # de lignes par jour pour une valeur analytique faible.
 TRACKING_MIN_WRITE_SECONDS: int = config("TRACKING_MIN_WRITE_SECONDS", default=30, cast=int)
 TRACKING_MIN_WRITE_METERS: int = config("TRACKING_MIN_WRITE_METERS", default=100, cast=int)
+
+# Rétentions. Politique de conservation plutôt que constantes de code : elles
+# se négocient et changent sans redéploiement.
+TRACKING_RETENTION_DAYS: int = config("TRACKING_RETENTION_DAYS", default=30, cast=int)
+IDEMPOTENCY_RETENTION_HOURS: int = config("IDEMPOTENCY_RETENTION_HOURS", default=72, cast=int)
+
+# Service de notification push, résolu à l'appel (`apps.notifications.push`).
+# `ConsolePushBackend` n'appelle personne et convient au développement comme
+# aux tests ; le connecteur FCM se branche par cette variable.
+PUSH_BACKEND: str = config("PUSH_BACKEND", default="apps.notifications.push.ConsolePushBackend")
 
 # Prestataire d'encaissement, résolu à l'appel (`apps.payments.gateway`). Le
 # changer est une variable d'environnement, pas un déploiement de code.

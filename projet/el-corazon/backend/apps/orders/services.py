@@ -27,6 +27,7 @@ from apps.catalog.services import record_purchase
 from apps.geography.models import DeliveryZone
 from apps.geography.services import DeliveryQuote, quote_delivery
 from apps.orders.models import Order, OrderLine, OrderStatusEvent
+from apps.orders.signals import order_status_changed
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from apps.profiles.models import Address
 from apps.restaurants.models import Restaurant
@@ -271,6 +272,14 @@ class OrderService:
                     "reason": reason,
                 },
             )
+        )
+
+        # L'événement de domaine part d'ici. `orders` ne connaît aucun de ses
+        # abonnés — c'est le second mécanisme de l'ADR-002, et la seule façon
+        # pour `notifications` de réagir sans que le graphe de dépendances
+        # devienne cyclique.
+        order_status_changed.send(
+            sender=Order, order=locked, previous=previous, target=target, reason=reason
         )
 
         return locked

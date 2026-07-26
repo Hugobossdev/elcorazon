@@ -26,15 +26,31 @@ app.autodiscover_tasks()
 #
 # Planifications prévues, par ordre d'arrivée :
 #
-#   apps.tracking.tasks.purge_stale_locations      toutes les heures
-#       Le suivi n'a de valeur qu'en direct.  Sans purge, `delivery_locations`
-#       croît d'environ 1,7 M de lignes par jour à 200 livreurs actifs.
-#
-#   apps.orders.tasks.purge_idempotency_keys       toutes les heures
-#       ADR-009 : les clés consommées ne servent plus au-delà de la fenêtre de
-#       retry d'un client mobile.
-#
 #   apps.loyalty.tasks.renew_subscriptions         toutes les heures
 #   apps.loyalty.tasks.expire_points               quotidienne
 #
-app.conf.beat_schedule = {}
+# Les trois entrées ci-dessous pointent vers des tâches **qui existent** : une
+# entrée orpheline est envoyée à chaque tour par beat et rejetée par le worker,
+# ce qui produit une alerte permanente à laquelle l'équipe finit par ne plus
+# prêter attention.
+app.conf.beat_schedule = {
+    "purge-stale-locations": {
+        # Le suivi n'a de valeur qu'en direct. Sans purge, la table des
+        # positions croît d'environ 1,7 M de lignes par jour à 200 livreurs.
+        "task": "apps.tracking.tasks.purge_stale_locations",
+        "schedule": 3600.0,
+    },
+    "purge-idempotency-keys": {
+        # ADR-009 : les clés consommées ne servent plus au-delà de la fenêtre
+        # de retry d'un client mobile.
+        "task": "apps.orders.tasks.purge_idempotency_keys",
+        "schedule": 3600.0,
+    },
+    "purge-unregistered-devices": {
+        # Un appareil que le service push ne déclare jamais injoignable mais
+        # qui ne se manifeste plus : téléphone perdu, application désinstallée
+        # sans notification. Quotidien, la fenêtre étant de six mois.
+        "task": "apps.notifications.tasks.purge_unregistered_devices",
+        "schedule": 86400.0,
+    },
+}

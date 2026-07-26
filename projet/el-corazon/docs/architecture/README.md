@@ -49,9 +49,9 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
   - [x] 4b — Découverte et catalogue (`/geography/`, `/restaurants/`, `/catalog/`)
   - [x] 4c — Profil, panier, commandes, paiements (`/profiles/`, `/carts/`, `/orders/`, `/payments/`)
   - [x] 4d — Livraison, suivi et périmètre du personnel (`/delivery/`, `/tracking/`)
-- [ ] Phase 5 — Temps réel
+- [x] Phase 5 — Temps réel
   - [x] 5a — WebSocket : suivi de commande, file du livreur, rattrapage par séquence
-  - [ ] 5b — Notifications push FCM par Celery
+  - [x] 5b — Notifications, push par Celery, événements de domaine
 - [ ] Phase 6 — Flutter Clean Architecture
 - [ ] Phase 7 — Tests et qualité
 
