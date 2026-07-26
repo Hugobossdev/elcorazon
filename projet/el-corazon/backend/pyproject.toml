@@ -135,6 +135,11 @@ ignore = [
 "apps/*/serializers.py" = ["RUF012"]
 "apps/*/views.py" = ["RUF012"]
 
+# Et pour l'admin : `prepopulated_fields`, `fieldsets`, `list_display` sont lus
+# une fois au chargement et jamais mutés. Django les attend en structures nues.
+"apps/*/admin.py" = ["RUF012"]
+"common/admin.py" = ["RUF012"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["config", "common", "apps"]
 
@@ -186,6 +191,15 @@ warn_return_any = false
 [[tool.mypy.overrides]]
 module = ["apps.*.tasks"]
 disallow_untyped_decorators = false
+
+# L'admin, enfin : les stubs de django-stubs rendent `ModelAdmin` et
+# `TabularInline` génériques, mais Django ne les rend pas indiçables à
+# l'exécution — `ModelAdmin[Order]` en classe de base lève un `TypeError` au
+# démarrage. On ne peut donc pas satisfaire `disallow_any_generics` ici sans
+# casser le serveur. Le reste du module, corps des actions compris, est vérifié.
+[[tool.mypy.overrides]]
+module = ["apps.*.admin", "common.admin"]
+disallow_any_generics = false
 
 [tool.django-stubs]
 django_settings_module = "config.settings.test"

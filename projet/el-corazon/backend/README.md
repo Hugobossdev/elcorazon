@@ -100,6 +100,32 @@ droit de faire* (`orders.refund`), le rattachement à un établissement
 rattachement ne voit rien : un oubli de configuration produit une panne
 visible, jamais un accès trop large et silencieux.
 
+## Back-office
+
+`/admin/` — outil d'**exploitation**, pas seconde API. Il sert à valider un
+dossier livreur, retrouver une transaction, corriger un repère d'adresse.
+
+Trois règles y sont tenues par le code, parce qu'un back-office est le chemin
+le plus court pour contourner ses propres garde-fous :
+
+- **les statuts ne sont pas des champs.** Une liste déroulante sur `status`
+  suffirait à écrire « livrée » sur une commande jamais partie — sans machine à
+  états, sans journal, sans créditer le livreur. Ils se changent par des
+  actions, qui appellent les mêmes services que l'API et sont refusées de la
+  même façon ;
+- **les montants ne s'éditent pas.** Ils sont recomposés serveur (C2) : un
+  total saisi à la main serait un total faux qui a l'air juste ;
+- **les écritures comptables ne se suppriment pas.** Commandes, lignes,
+  transactions, remboursements et journaux d'événements sont conservés.
+
+Les paiements sont intégralement en lecture seule : le webhook signé est la
+seule source de vérité de l'encaissement, et un formulaire qui écrirait
+`completed` rouvrirait ici la faille que P2 ferme partout ailleurs.
+
+```bash
+docker compose run --rm api python -m django createsuperuser
+```
+
 ## WebSocket
 
 | Route | Qui |

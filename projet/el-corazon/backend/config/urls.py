@@ -13,6 +13,14 @@ from django.http import HttpRequest, JsonResponse
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+# Le back-office s'annonce pour ce qu'il est. Un titre par défaut « Django
+# administration » sur un écran qui pilote une flotte et des encaissements
+# laisse croire à un outil de développement qu'on peut manipuler sans
+# conséquence.
+admin.site.site_header = "El Corazón — exploitation"
+admin.site.site_title = "El Corazón"
+admin.site.index_title = "Back-office"
+
 
 def healthcheck(_request: HttpRequest) -> JsonResponse:
     """Sonde de vivacité, sans accès base.
