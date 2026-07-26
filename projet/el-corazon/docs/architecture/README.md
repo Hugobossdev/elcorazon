@@ -56,4 +56,4 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
 - [x] Phase 7 — Tests et qualité (graphe vérifié, contrat vérifié, plancher de couverture)
 
 Ordre de construction retenu : **chemin critique d'abord** — identité, catalogue, panier, commandes,
-paiements, livraison, suivi. Fidélité, gamification, social, support et analytics ensuite.
+paiements, livraison, suivi. Promotions faites ; fidélité, gamification, social, support et analytics ensuite.

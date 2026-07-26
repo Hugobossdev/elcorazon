@@ -100,6 +100,25 @@ droit de faire* (`orders.refund`), le rattachement à un établissement
 rattachement ne voit rien : un oubli de configuration produit une panne
 visible, jamais un accès trop large et silencieux.
 
+## Codes promotionnels
+
+Les cinq conditions de F4 — période, montant minimum, plafond, quota global,
+quota par personne — vivent **en données** : l'exploitation crée « −500 F, dix
+premiers clients, ce week-end » depuis le back-office, sans développement.
+
+Deux temps distincts, et c'est ce qui rend le mécanisme sûr :
+
+- `POST /api/v1/orders/preview/` **évalue sans réserver**. Le client voit le
+  détail — sous-total, frais, remise, total — avant de s'engager, et découvre
+  un code refusé là plutôt qu'en appuyant sur « commander » ;
+- la création de commande **consomme, sous verrou**. Le quota y est revérifié :
+  entre le devis et la validation, quelqu'un d'autre a pu prendre le dernier
+  coupon.
+
+Le client envoie **un code**, jamais un montant — c'est C1 transposé. Et une
+commande annulée **rend** le code : il avait été décompté pour un repas jamais
+reçu.
+
 ## Encaissement
 
 Chaque prestataire a son connecteur, derrière un port unique

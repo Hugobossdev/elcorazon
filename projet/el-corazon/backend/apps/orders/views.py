@@ -34,12 +34,14 @@ from apps.orders.serializers import (
     CancelSerializer,
     OrderCreateSerializer,
     OrderDetailSerializer,
+    OrderPreviewSerializer,
+    OrderQuoteSerializer,
     OrderSerializer,
     StatusTransitionSerializer,
 )
 from apps.orders.services import OrderService
 from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
-from common.permissions import HasPermission, authenticated_user
+from common.permissions import HasPermission, IsCustomer, authenticated_user
 from common.throttling import OrderCreationThrottle
 
 __all__ = ["OrderViewSet"]
@@ -146,6 +148,23 @@ class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
             body=body,
         )
         return Response(stored.body, status=stored.status)
+
+    @extend_schema(
+        request=OrderPreviewSerializer, responses={200: OrderQuoteSerializer}, tags=["orders"]
+    )
+    @action(detail=False, methods=["post"], permission_classes=[IsCustomer])
+    def preview(self, request: Request) -> Response:
+        """Combien coûterait ma commande, avec ce code ?
+
+        Le client voit le détail avant de s'engager, et découvre un code refusé
+        **là** plutôt qu'au moment où il appuie sur « commander ». Rien n'est
+        réservé : le quota ne se décompte qu'à la création.
+        """
+        serializer = OrderPreviewSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        devis = OrderService.preview(user=authenticated_user(request), **serializer.validated_data)
+        return Response(OrderQuoteSerializer(devis).data)
 
     @extend_schema(
         request=CancelSerializer, responses={200: OrderDetailSerializer}, tags=["orders"]

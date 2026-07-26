@@ -30,6 +30,7 @@ from apps.orders.models import Order, OrderLine, OrderStatusEvent
 from apps.orders.signals import order_status_changed
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from apps.profiles.models import Address
+from apps.promotions.services import PromotionService
 from apps.restaurants.models import Restaurant
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
@@ -75,6 +76,7 @@ class OrderService:
         address: Address,
         payment_method: str,
         instructions: str = "",
+        promo_code: str = "",
     ) -> Order:
         """Transforme un panier en commande.
 
@@ -113,8 +115,21 @@ class OrderService:
         quote = OrderService._quote_for(restaurant, address, priced.subtotal)
 
         # C2 — le total est recomposé ici, à partir de valeurs dont aucune n'a
-        # traversé le réseau depuis le client.
+        # traversé le réseau depuis le client. Le code promo ne fait pas
+        # exception : le client envoie une chaîne, le serveur décide ce qu'elle
+        # vaut (F4).
+        promotion = None
         discount = Money.zero(priced.currency)
+        if promo_code.strip():
+            devis = PromotionService.quote(
+                code=promo_code,
+                user=user,
+                restaurant=restaurant,
+                subtotal=priced.subtotal,
+                delivery_fee=quote.fee,
+            )
+            promotion, discount = devis.promotion, devis.discount
+
         total = priced.subtotal + quote.fee - discount
 
         # `subtotal`, `delivery_fee`, `discount` et `total` sont des
@@ -136,6 +151,9 @@ class OrderService:
             discount=discount,
             total=total,
             payment_method=payment_method,
+            # Copie figée du code, comme le reste : la promotion peut être
+            # retirée du back-office sans rendre la commande illisible.
+            promo_code=promotion.code if promotion else "",
             estimated_delivery_at=timezone.now()
             + dt.timedelta(
                 minutes=restaurant.default_preparation_minutes + quote.estimated_minutes
@@ -167,8 +185,67 @@ class OrderService:
             for priced_line in priced.lines
         )
 
+        if promotion is not None:
+            # Consommé **après** la création : le quota ne se décompte que si
+            # la commande existe. L'ordre inverse laisserait un code entamé par
+            # une commande refusée plus loin — panier devenu incommandable,
+            # adresse hors zone.
+            PromotionService.redeem(
+                promotion=promotion, user=user, order_id=order.pk, discount=discount
+            )
+
         CartService.clear(cart)
         return order
+
+    @staticmethod
+    def preview(
+        *,
+        user: User,
+        restaurant: Restaurant,
+        address: Address | None = None,
+        promo_code: str = "",
+    ) -> dict[str, object]:
+        """Décompose un total sans rien écrire.
+
+        Même chemin de calcul que `create_from_cart` — mêmes prix relus du
+        catalogue, même barème de zone, même évaluation du code. Deux calculs
+        distincts donneraient deux totaux, dont l'un serait faux, et c'est
+        exactement ce qui s'était produit sur les frais de livraison de
+        l'implémentation précédente.
+
+        Rien n'est réservé : le quota d'un code ne se décompte qu'à la
+        commande, sans quoi on épuiserait un code en demandant des devis.
+        """
+        priced = price_cart(CartService.load(CartService.cart_for(user, restaurant)))
+
+        if address is not None:
+            frais = OrderService._quote_for(restaurant, address, priced.subtotal).fee
+        else:
+            # Sans adresse, le barème de l'établissement donne un ordre de
+            # grandeur. L'écart avec le montant final est borné : dans le cas
+            # courant, les deux zones sont la même.
+            frais = restaurant.zone.base_fee
+
+        promotion = None
+        discount = Money.zero(priced.currency)
+        if promo_code.strip() and priced.lines:
+            devis = PromotionService.quote(
+                code=promo_code,
+                user=user,
+                restaurant=restaurant,
+                subtotal=priced.subtotal,
+                delivery_fee=frais,
+            )
+            promotion, discount = devis.promotion, devis.discount
+
+        return {
+            "subtotal": priced.subtotal,
+            "delivery_fee": frais,
+            "discount": discount,
+            "total": priced.subtotal + frais - discount,
+            "promotion": promotion,
+            "is_orderable": priced.is_orderable,
+        }
 
     @staticmethod
     def _quote_for(restaurant: Restaurant, address: Address, subtotal: Money) -> DeliveryQuote:
@@ -256,6 +333,10 @@ class OrderService:
 
         if target == OrderStatus.DELIVERED:
             OrderService._record_purchases(locked)
+        elif target == OrderStatus.CANCELLED:
+            # Le client ne doit pas perdre son code parce que le restaurant a
+            # annulé : il a été décompté pour un repas qu'il n'a jamais reçu.
+            PromotionService.release(order_id=locked.pk)
 
         # La diffusion part **après le commit** et non pendant : annoncer
         # « commande confirmée » sur une transaction qui échoue ensuite laisse

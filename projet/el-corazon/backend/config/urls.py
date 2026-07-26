@@ -45,7 +45,7 @@ api_v1 = [
     path("tracking/", include("apps.tracking.urls")),
     path("notifications/", include("apps.notifications.urls")),
     # Renseigné au fil des phases — voir docs/architecture/README.md
-    # path("promotions/", include("apps.promotions.urls")),
+    # path("loyalty/", include("apps.loyalty.urls")),
 ]
 
 urlpatterns = [

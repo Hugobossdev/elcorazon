@@ -55,9 +55,10 @@ LOCAL_APPS: list[str] = [
     "apps.delivery",
     "apps.tracking",
     "apps.notifications",
+    "apps.promotions",
     #
     # Second temps
-    # "apps.inventory", "apps.promotions", "apps.loyalty",
+    # "apps.inventory", "apps.loyalty",
     # "apps.gamification", "apps.social", "apps.support", "apps.analytics",
 ]
 
