@@ -33,8 +33,10 @@ api_v1 = [
     path("carts/", include("apps.carts.urls")),
     path("orders/", include("apps.orders.urls")),
     path("payments/", include("apps.payments.urls")),
+    path("delivery/", include("apps.delivery.urls")),
+    path("tracking/", include("apps.tracking.urls")),
     # Renseigné au fil des phases — voir docs/architecture/README.md
-    # path("delivery/", include("apps.delivery.urls")),
+    # path("notifications/", include("apps.notifications.urls")),
 ]
 
 urlpatterns = [

@@ -85,9 +85,23 @@ voir un prix avant de s'inscrire.
 | `/api/v1/catalog/categories\|items` | GET | public |
 | `/api/v1/catalog/reviews/` | GET | public |
 | `/api/v1/catalog/reviews/` | POST | client authentifié |
+| `/api/v1/payments/webhook/{provider}/` | POST | **signature HMAC**, pas de jeton |
 
-Tout le reste exige un jeton. Le contrat complet est dans le schéma OpenAPI,
-généré depuis les sérialiseurs :
+Le webhook est la seule route ouverte en écriture sans compte : un prestataire
+n'en a pas. Son justificatif est la signature HMAC-SHA256 du corps brut,
+vérifiée avant toute écriture — plus fort qu'un jeton porteur, qu'il suffirait
+d'intercepter pour rejouer sur un autre corps.
+
+Tout le reste exige un jeton.
+
+**Le personnel a deux clés, pas une.** La permission nommée dit *ce qu'on a le
+droit de faire* (`orders.refund`), le rattachement à un établissement
+(`restaurants.StaffMembership`) dit **sur quoi**. Un membre du personnel sans
+rattachement ne voit rien : un oubli de configuration produit une panne
+visible, jamais un accès trop large et silencieux.
+
+Le contrat complet est dans le schéma OpenAPI, généré depuis les
+sérialiseurs :
 
 ```bash
 docker compose run --rm api python -m django spectacular --fail-on-warn

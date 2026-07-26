@@ -283,6 +283,18 @@ USE_TZ = True
 
 DEFAULT_CURRENCY = config("DEFAULT_CURRENCY", default="XOF")
 
+# Part des frais de livraison reversée au livreur, en pourcentage. Le solde est
+# la commission de la plateforme. En réglage plutôt qu'en dur : un point de
+# commission ne doit pas demander un déploiement.
+COURIER_FEE_SHARE_PERCENT: int = config("COURIER_FEE_SHARE_PERCENT", default=80, cast=int)
+
+# Échantillonnage de l'écriture des positions. La diffusion temps réel, elle,
+# est intégrale : c'est elle qui fait l'expérience de suivi, pas la persistance.
+# À 10 s par livreur et 200 livreurs actifs, tout écrire produirait 1,7 million
+# de lignes par jour pour une valeur analytique faible.
+TRACKING_MIN_WRITE_SECONDS: int = config("TRACKING_MIN_WRITE_SECONDS", default=30, cast=int)
+TRACKING_MIN_WRITE_METERS: int = config("TRACKING_MIN_WRITE_METERS", default=100, cast=int)
+
 # Prestataire d'encaissement, résolu à l'appel (`apps.payments.gateway`). Le
 # changer est une variable d'environnement, pas un déploiement de code.
 PAYMENT_GATEWAY: str = config("PAYMENT_GATEWAY", default="apps.payments.gateway.SandboxGateway")
