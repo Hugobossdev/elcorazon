@@ -45,6 +45,10 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
 - [x] Phase 3 — Modèle de données du chemin critique (10 apps, 185 tests)
 - [x] Phase 8 — Socle DevOps (Docker, Compose, Nginx, CI)
 - [ ] Phase 4 — API REST v1
+  - [x] 4a — Authentification (`/auth/`)
+  - [x] 4b — Découverte et catalogue (`/geography/`, `/restaurants/`, `/catalog/`)
+  - [ ] 4c — Panier, commandes, paiements
+  - [ ] 4d — Livraison et back-office
 - [ ] Phase 5 — Temps réel
 - [ ] Phase 6 — Flutter Clean Architecture
 - [ ] Phase 7 — Tests et qualité

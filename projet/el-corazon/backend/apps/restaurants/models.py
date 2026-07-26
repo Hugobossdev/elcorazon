@@ -9,6 +9,7 @@ l'ouverture d'un second établissement indolore.
 from __future__ import annotations
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 from django.contrib.gis.db import models as gis
 from django.db import models
@@ -60,6 +61,40 @@ class Restaurant(UUIDModel, TimeStampedModel):
     def currency(self) -> str:
         """Devise héritée du pays — jamais choisie au niveau du restaurant."""
         return self.zone.city.country.currency
+
+    @property
+    def timezone(self) -> str:
+        """Fuseau hérité du pays, comme la devise."""
+        return self.zone.city.country.timezone
+
+    def is_open_at(self, moment: dt.datetime) -> bool:
+        """L'établissement est-il dans une plage d'ouverture à cet instant ?
+
+        **Horaires seulement.** `is_active` et `accepts_orders` ne sont pas
+        consultés ici : un restaurant ouvert qui a suspendu la prise de
+        commande reste ouvert, et confondre les trois rendrait l'API incapable
+        de dire au client *pourquoi* il ne peut pas commander.
+
+        L'instant est converti dans le fuseau du pays avant comparaison. Sans
+        cette conversion, un serveur en UTC fermerait un restaurant de Lomé une
+        heure trop tôt en heure d'été européenne — le genre de décalage qu'on
+        ne découvre qu'en production, un dimanche soir.
+        """
+        local = moment.astimezone(ZoneInfo(self.timezone))
+        now, weekday = local.time(), local.weekday()
+        yesterday = (weekday - 1) % 7
+
+        for slot in self.opening_hours.all():
+            if slot.weekday == weekday and slot.opens_at <= now:
+                if slot.crosses_midnight or now < slot.closes_at:
+                    return True
+            # Une plage ouverte hier et à cheval sur minuit couvre encore le
+            # petit matin d'aujourd'hui : c'est le créneau de nuit du week-end,
+            # pas un cas de bord théorique.
+            if slot.weekday == yesterday and slot.crosses_midnight and now < slot.closes_at:
+                return True
+
+        return False
 
 
 class Weekday(models.IntegerChoices):

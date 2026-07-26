@@ -22,7 +22,7 @@ from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
 from common.models import SoftDeleteModel, TimeStampedModel, UUIDModel
 
-__all__ = ["Category", "MenuItem", "Option", "OptionGroup", "Review"]
+__all__ = ["Category", "MenuItem", "Option", "OptionGroup", "Review", "VerifiedPurchase"]
 
 
 class Category(UUIDModel, TimeStampedModel):
@@ -174,6 +174,41 @@ class Option(UUIDModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+class VerifiedPurchase(UUIDModel):
+    """Trace « cet utilisateur a bien reçu cet article ».
+
+    C'est la source de `Review.is_verified_purchase` (S1). Elle existe parce
+    que le graphe de dépendances de l'ADR-002 est acyclique : `orders` connaît
+    `catalog`, jamais l'inverse. Le catalogue ne peut donc pas interroger les
+    commandes pour savoir qui a acheté quoi — c'est `orders` qui l'en informe,
+    à la livraison, via `record_purchase()`.
+
+    La table est plus qu'un contournement de dépendance : elle survit à la
+    purge des vieilles commandes et à toute évolution du schéma de `orders`,
+    dont la logique d'avis devient indépendante.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="verified_purchases")
+    menu_item = models.ForeignKey(
+        MenuItem, on_delete=models.CASCADE, related_name="verified_purchases"
+    )
+    last_purchased_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "achat vérifié"
+        verbose_name_plural = "achats vérifiés"
+        constraints = [
+            # Un client qui commande dix fois le même burger n'ajoute pas dix
+            # lignes : seule la dernière date compte.
+            models.UniqueConstraint(
+                fields=["user", "menu_item"], name="one_verified_purchase_per_item_and_user"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.email} — {self.menu_item.name}"
 
 
 class Review(UUIDModel, TimeStampedModel):

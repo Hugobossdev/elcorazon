@@ -15,7 +15,10 @@ s'ajoutent sans rien casser.
 
 from __future__ import annotations
 
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from django.contrib.gis.db import models as gis
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
@@ -23,7 +26,22 @@ from common.fields import MoneyField
 from common.models import TimeStampedModel, UUIDModel
 from common.money import CURRENCY_EXPONENTS
 
-__all__ = ["City", "Country", "DeliveryZone"]
+__all__ = ["City", "Country", "DeliveryZone", "validate_timezone"]
+
+
+def validate_timezone(value: str) -> None:
+    """Refuse un fuseau que la bibliothèque standard ne connaît pas.
+
+    Le fuseau du pays sert à décider si un restaurant est ouvert. Une faute de
+    frappe (`Africa/Lomé`) ne se verrait donc qu'au moment de rendre une liste
+    de restaurants — en 500, à la première requête d'un client. Validé à la
+    saisie, le même défaut se voit dans le back-office, là où on peut le
+    corriger.
+    """
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValidationError(f"Fuseau horaire inconnu : {value!r}.") from exc
 
 
 class Country(UUIDModel, TimeStampedModel):
@@ -44,7 +62,7 @@ class Country(UUIDModel, TimeStampedModel):
         help_text="ISO 4217. Figée sur chaque commande au moment de sa création.",
     )
     phone_prefix = models.CharField(max_length=5, help_text="Par exemple +228.")
-    timezone = models.CharField(max_length=64, default="UTC")
+    timezone = models.CharField(max_length=64, default="UTC", validators=[validate_timezone])
     default_language = models.CharField(max_length=5, default="fr")
     is_active = models.BooleanField(default=True)
 

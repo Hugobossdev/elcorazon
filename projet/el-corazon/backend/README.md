@@ -70,6 +70,29 @@ tests/        suite de tests
 deploy/       Nginx
 ```
 
+## Points d'entrée ouverts
+
+Le refus étant le défaut (`IsAuthenticated`), voici la liste — auditable — de ce
+qui se lit **sans compte** : un visiteur doit pouvoir savoir si on le livre et
+voir un prix avant de s'inscrire.
+
+| Route | Verbe | Accès |
+|---|---|---|
+| `/api/v1/auth/register\|login\|token/refresh` | POST | public, limité en débit |
+| `/api/v1/geography/countries\|cities` | GET | public |
+| `/api/v1/geography/zones/resolve/?lat=&lon=` | GET | public |
+| `/api/v1/restaurants/` (`?lat=&lon=` trie par proximité) | GET | public |
+| `/api/v1/catalog/categories\|items` | GET | public |
+| `/api/v1/catalog/reviews/` | GET | public |
+| `/api/v1/catalog/reviews/` | POST | client authentifié |
+
+Tout le reste exige un jeton. Le contrat complet est dans le schéma OpenAPI,
+généré depuis les sérialiseurs :
+
+```bash
+docker compose run --rm api python -m django spectacular --fail-on-warn
+```
+
 ## Qualité
 
 ```bash

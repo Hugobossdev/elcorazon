@@ -26,8 +26,11 @@ def healthcheck(_request: HttpRequest) -> JsonResponse:
 
 api_v1 = [
     path("auth/", include("apps.accounts.urls")),
+    path("geography/", include("apps.geography.urls")),
+    path("restaurants/", include("apps.restaurants.urls")),
+    path("catalog/", include("apps.catalog.urls")),
     # Renseigné au fil des phases — voir docs/architecture/README.md
-    # path("catalog/", include("apps.catalog.urls")),
+    # path("carts/", include("apps.carts.urls")),
     # path("orders/", include("apps.orders.urls")),
 ]
 
