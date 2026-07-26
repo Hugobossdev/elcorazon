@@ -31,9 +31,16 @@ def client() -> APIClient:
 
 
 @pytest.fixture
-def as_customer(client: APIClient, customer: User) -> APIClient:
-    client.force_authenticate(customer)
-    return client
+def as_customer(customer: User) -> APIClient:
+    """Client HTTP **distinct** de la fixture `client`.
+
+    Les réutiliser ferait qu'un `force_authenticate` plus loin dans le test
+    changerait aussi l'identité de celui-ci — deux acteurs qui n'en font qu'un,
+    et un test qui ne vérifie plus ce qu'il annonce.
+    """
+    separate = APIClient()
+    separate.force_authenticate(customer)
+    return separate
 
 
 def payload(menu_item: MenuItem, **overrides: object) -> dict[str, object]:

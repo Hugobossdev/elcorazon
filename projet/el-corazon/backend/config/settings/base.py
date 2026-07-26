@@ -206,6 +206,17 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "SCHEMA_PATH_PREFIX": "/api/v1",
+    # Quatre modèles portent un champ `status`, chacun avec son énumération.
+    # Sans ces noms, le générateur les baptise `Status5c8Enum` — un identifiant
+    # qui change dès qu'un choix est ajouté, donc un client généré qui casse
+    # sans raison visible.
+    "ENUM_NAME_OVERRIDES": {
+        "OrderStatusEnum": "apps.orders.states.OrderStatus.choices",
+        "PaymentStatusEnum": "apps.payments.models.PaymentStatus.choices",
+        "PaymentMethodEnum": "apps.orders.models.PaymentMethod.choices",
+        "PaymentProviderEnum": "apps.payments.models.PaymentProvider.choices",
+        "UserTypeEnum": "apps.accounts.models.UserType.choices",
+    },
 }
 
 # --------------------------------------------------------------- JWT (ADR-004)
@@ -271,6 +282,19 @@ USE_TZ = True
 # --------------------------------------------------------------- métier
 
 DEFAULT_CURRENCY = config("DEFAULT_CURRENCY", default="XOF")
+
+# Prestataire d'encaissement, résolu à l'appel (`apps.payments.gateway`). Le
+# changer est une variable d'environnement, pas un déploiement de code.
+PAYMENT_GATEWAY: str = config("PAYMENT_GATEWAY", default="apps.payments.gateway.SandboxGateway")
+SANDBOX_CHECKOUT_BASE_URL: str = config(
+    "SANDBOX_CHECKOUT_BASE_URL", default="https://sandbox.elcorazon.app/checkout"
+)
+
+# Secret partagé avec le prestataire, servant à signer ses notifications. Sans
+# valeur, aucune signature ne peut être valide — le webhook refuse tout, ce qui
+# est le bon défaut : une configuration oubliée ferme la porte au lieu de
+# l'ouvrir.
+PAYMENT_WEBHOOK_SECRET: str = config("PAYMENT_WEBHOOK_SECRET", default="")
 
 # --------------------------------------------------------------- journalisation
 

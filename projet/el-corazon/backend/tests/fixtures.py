@@ -18,6 +18,7 @@ from apps.delivery.models import CourierProfile, VehicleType
 from apps.delivery.states import VerificationStatus
 from apps.geography.models import City, Country, DeliveryZone
 from apps.orders.models import Order, PaymentMethod
+from apps.profiles.models import Address
 from apps.restaurants.models import Restaurant
 from common.money import Money
 
@@ -91,6 +92,25 @@ def courier(courier_user: User, restaurant: Restaurant) -> CourierProfile:
         vehicle_type=VehicleType.MOTORCYCLE,
         verification_status=VerificationStatus.APPROVED,
         is_online=True,
+    )
+
+
+@pytest.fixture
+def address(customer: User, city: City) -> Address:
+    """Adresse dans la zone du restaurant, à environ 1,1 km de celui-ci.
+
+    La distance est réelle et non nulle : une adresse posée sur le restaurant
+    ferait passer tous les tests de frais kilométriques sans rien vérifier.
+    """
+    return Address.objects.create(
+        user=customer,
+        label="Maison",
+        line1="Rue du Commerce",
+        landmark="En face de la pharmacie Bel Air",
+        city=city,
+        location=Point(1.2355, 6.1319, srid=4326),
+        recipient_phone="+22890111111",
+        is_default=True,
     )
 
 

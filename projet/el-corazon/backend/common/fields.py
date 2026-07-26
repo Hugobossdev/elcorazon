@@ -7,7 +7,7 @@ expose comme un unique objet `Money`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -17,7 +17,7 @@ from common.money import CURRENCY_EXPONENTS, Money
 __all__ = ["MoneyField"]
 
 
-class MoneyField:
+class MoneyField[Amount: (Money, Money | None)]:
     """Descripteur de montant : deux colonnes, un objet.
 
     À déclarer dans le corps du modèle :
@@ -29,12 +29,43 @@ class MoneyField:
     les colonnes `<nom>_minor` (BIGINT) et `<nom>_currency` (CHAR(3)), et le
     descripteur les recompose. L'alternative — un `DecimalField` seul — perd la
     devise, ce qui rend le multi-pays impossible et l'historique ambigu.
+
+    Le paramètre de type porte la nullité : `MoneyField()` se lit `Money`,
+    `MoneyField(null=True)` se lit `Money | None`. Sans cette distinction, le
+    vérificateur de types laisserait passer une addition sur un seuil de franco
+    non renseigné — un `TypeError` en production, au moment précis où l'on
+    calcule ce que le client doit payer.
     """
+
+    @overload
+    def __init__(
+        self: MoneyField[Money],
+        *,
+        null: Literal[False] = False,
+        default_currency: str | None = None,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self: MoneyField[Money | None],
+        *,
+        null: Literal[True],
+        default_currency: str | None = None,
+    ) -> None: ...
 
     def __init__(self, *, null: bool = False, default_currency: str | None = None) -> None:
         self.null = null
         self.default_currency = default_currency
         self.name: str = ""
+
+    if TYPE_CHECKING:
+        # `contribute_to_class` remplace l'attribut de classe par une vraie
+        # `property` : à l'exécution, ces méthodes ne sont jamais appelées.
+        # Elles n'existent que pour dire au vérificateur ce que l'attribut rend
+        # une fois le modèle construit.
+        def __get__(self, instance: object, owner: type[object] | None = None) -> Amount: ...
+
+        def __set__(self, instance: object, value: Amount) -> None: ...
 
     def contribute_to_class(self, cls: type[models.Model], name: str, **_: Any) -> None:
         self.name = name

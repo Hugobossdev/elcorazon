@@ -29,9 +29,12 @@ api_v1 = [
     path("geography/", include("apps.geography.urls")),
     path("restaurants/", include("apps.restaurants.urls")),
     path("catalog/", include("apps.catalog.urls")),
+    path("profiles/", include("apps.profiles.urls")),
+    path("carts/", include("apps.carts.urls")),
+    path("orders/", include("apps.orders.urls")),
+    path("payments/", include("apps.payments.urls")),
     # Renseigné au fil des phases — voir docs/architecture/README.md
-    # path("carts/", include("apps.carts.urls")),
-    # path("orders/", include("apps.orders.urls")),
+    # path("delivery/", include("apps.delivery.urls")),
 ]
 
 urlpatterns = [
