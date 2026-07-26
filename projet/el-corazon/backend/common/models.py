@@ -7,7 +7,7 @@ un test d'architecture le signale.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, TypeVar
 
 from django.db import models
 from django.utils import timezone
@@ -16,7 +16,9 @@ from common.identifiers import uuid7
 from common.state_machine import StateMachine
 
 __all__ = [
+    "SoftDeleteManager",
     "SoftDeleteModel",
+    "SoftDeleteQuerySet",
     "TimeStampedModel",
     "UUIDModel",
     "state_check_constraint",
@@ -40,13 +42,23 @@ class TimeStampedModel(models.Model):
         abstract = True
 
 
-class SoftDeleteQuerySet(models.QuerySet["SoftDeleteModel"]):
-    def alive(self) -> SoftDeleteQuerySet:
+_Model = TypeVar("_Model", bound=models.Model)
+
+
+class SoftDeleteQuerySet(models.QuerySet[_Model]):
+    """QuerySet générique : `MenuItem.objects.alive()` reste un
+    `QuerySet[MenuItem]`, et non un `QuerySet[SoftDeleteModel]` sur lequel
+    aucun champ concret ne serait résolvable."""
+
+    def alive(self) -> SoftDeleteQuerySet[_Model]:
         return self.filter(deleted_at__isnull=True)
 
-    def delete(self) -> tuple[int, dict[str, int]]:  # type: ignore[override]
+    def delete(self) -> tuple[int, dict[str, int]]:
         count = self.update(deleted_at=timezone.now())
         return count, {}
+
+
+SoftDeleteManager = models.Manager.from_queryset(SoftDeleteQuerySet)
 
 
 class SoftDeleteModel(models.Model):
@@ -63,12 +75,12 @@ class SoftDeleteModel(models.Model):
 
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
-    objects: ClassVar[SoftDeleteQuerySet] = SoftDeleteQuerySet.as_manager()  # type: ignore[assignment]
+    objects = SoftDeleteManager()
 
     class Meta:
         abstract = True
 
-    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:  # type: ignore[override]
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         self.deleted_at = timezone.now()
         self.save(update_fields=["deleted_at"])
         return 1, {}

@@ -93,7 +93,7 @@ class Money:
         d'arrondir en silence — un arrondi implicite sur un prix catalogue est
         une perte de recette que personne ne remarque.
         """
-        if isinstance(amount, float):  # type: ignore[unreachable]
+        if isinstance(amount, float):
             raise TypeError("from_major refuse les flottants ; passer une chaîne ou un Decimal.")
         value = Decimal(amount)
         scaled = value.scaleb(exponent_of(currency))
@@ -149,7 +149,7 @@ class Money:
         Utilisé pour les remises et les commissions.  L'arrondi est explicite
         et unique, ce qui rend le calcul reproductible côté facturation.
         """
-        if isinstance(percent, float):  # type: ignore[unreachable]
+        if isinstance(percent, float):
             raise TypeError("percentage refuse les flottants.")
         raw = Decimal(self.amount_minor) * Decimal(percent) / Decimal(100)
         return Money(int(raw.quantize(Decimal(1), rounding=ROUND_HALF_UP)), self.currency)

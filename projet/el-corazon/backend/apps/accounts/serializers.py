@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 
-class UserSerializer(serializers.ModelSerializer):
+class UserSerializer(serializers.ModelSerializer[User]):
     """Représentation publique d'un compte.
 
     Forme **unique** : `/auth/register`, `/auth/login` et `/auth/me` renvoient
@@ -61,13 +61,13 @@ class UserSerializer(serializers.ModelSerializer):
         return sorted(obj.permission_codes())
 
 
-class TokenPairSerializer(serializers.Serializer):
+class TokenPairSerializer(serializers.Serializer[Any]):
     access = serializers.CharField(read_only=True)
     refresh = serializers.CharField(read_only=True)
     user = UserSerializer(read_only=True)
 
 
-class RegisterSerializer(serializers.Serializer):
+class RegisterSerializer(serializers.Serializer[Any]):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8, trim_whitespace=False)
     full_name = serializers.CharField(max_length=150)
@@ -89,7 +89,7 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
 
-class LoginSerializer(serializers.Serializer):
+class LoginSerializer(serializers.Serializer[Any]):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, trim_whitespace=False)
 
@@ -97,7 +97,7 @@ class LoginSerializer(serializers.Serializer):
         return value.strip().lower()
 
 
-class ChangePasswordSerializer(serializers.Serializer):
+class ChangePasswordSerializer(serializers.Serializer[Any]):
     current_password = serializers.CharField(write_only=True, trim_whitespace=False)
     new_password = serializers.CharField(write_only=True, min_length=8, trim_whitespace=False)
 
@@ -109,11 +109,11 @@ class ChangePasswordSerializer(serializers.Serializer):
         return attrs
 
 
-class RefreshSerializer(serializers.Serializer):
+class RefreshSerializer(serializers.Serializer[Any]):
     refresh = serializers.CharField()
 
 
-class DeviceSerializer(serializers.ModelSerializer):
+class DeviceSerializer(serializers.ModelSerializer[Device]):
     platform = serializers.ChoiceField(choices=DevicePlatform.choices)
 
     # `Device.token` est unique en base, ce dont `ModelSerializer` déduit

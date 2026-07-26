@@ -140,6 +140,25 @@ exclude = ["migrations/"]
 module = ["*.migrations.*"]
 ignore_errors = true
 
+# Dépendances sans annotations ni `py.typed`. Les déclarer ici plutôt que de
+# semer des `# type: ignore` sur chaque import : la liste des bibliothèques non
+# typées reste lisible d'un coup d'œil, et le jour où l'une d'elles publie ses
+# annotations, il suffit de retirer une ligne.
+[[tool.mypy.overrides]]
+module = [
+    "celery",
+    "celery.*",
+    "channels",
+    "channels.*",
+    "decouple",
+    "decouple.*",
+    "django_filters",
+    "django_filters.*",
+    "pyogrio",
+    "pyogrio.*",
+]
+ignore_missing_imports = true
+
 [tool.django-stubs]
 django_settings_module = "config.settings.test"
 

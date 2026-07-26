@@ -32,6 +32,7 @@ from apps.accounts.serializers import (
 from apps.accounts.services import AuthService, TokenPair
 from apps.accounts.throttling import AuthIdentifierThrottle, AuthIPThrottle
 from common.exceptions import BusinessRuleViolation
+from common.permissions import authenticated_user
 
 __all__ = [
     "ChangePasswordView",
@@ -104,7 +105,10 @@ class RefreshView(TokenRefreshView):
     consommé est détecté.
     """
 
-    permission_classes = [AllowAny]
+    # `TokenViewBase` déclare l'attribut comme un tuple vide, ce dont le
+    # vérificateur de types déduit un type figé. La liste est bien ce
+    # qu'attend DRF à l'exécution.
+    permission_classes = [AllowAny]  # type: ignore[assignment]
     throttle_classes = [AuthIPThrottle]
 
 
@@ -130,7 +134,7 @@ class MeView(APIView):
 
     @extend_schema(responses={200: UserSerializer}, tags=["auth"])
     def get(self, request: Request) -> Response:
-        return Response(UserSerializer(request.user).data)
+        return Response(UserSerializer(authenticated_user(request)).data)
 
 
 class ChangePasswordView(APIView):
@@ -145,13 +149,15 @@ class ChangePasswordView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            tokens = AuthService.change_password(user=request.user, **serializer.validated_data)
+            tokens = AuthService.change_password(
+                user=authenticated_user(request), **serializer.validated_data
+            )
         except ValueError as exc:
             raise BusinessRuleViolation(str(exc)) from exc
 
         # T2 — toutes les sessions sont révoquées, y compris la courante. Le
         # client doit remplacer ses jetons par ceux-ci.
-        return _token_response(request.user, tokens)
+        return _token_response(authenticated_user(request), tokens)
 
 
 class DeviceView(APIView):
@@ -165,7 +171,7 @@ class DeviceView(APIView):
         serializer.is_valid(raise_exception=True)
 
         device = AuthService.register_device(
-            user=request.user,
+            user=authenticated_user(request),
             token=serializer.validated_data["token"],
             platform=serializer.validated_data["platform"],
         )
@@ -175,5 +181,5 @@ class DeviceView(APIView):
     def delete(self, request: Request) -> Response:
         # Le retrait est scopé à l'utilisateur : personne ne peut désabonner
         # l'appareil d'autrui en devinant son jeton.
-        request.user.devices.filter(token=request.data.get("token", "")).delete()
+        authenticated_user(request).devices.filter(token=request.data.get("token", "")).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

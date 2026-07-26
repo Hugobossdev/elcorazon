@@ -106,7 +106,10 @@ class AuthService:
         revoked = 0
         for token in OutstandingToken.objects.filter(user=user):
             try:
-                RefreshToken(token.token).blacklist()
+                # Le stub de simple-jwt annonce `Token | None` là où la
+                # bibliothèque accepte la chaîne encodée — c'est même son usage
+                # principal. L'annotation est fausse, pas l'appel.
+                RefreshToken(token.token).blacklist()  # type: ignore[arg-type]
                 revoked += 1
             except Exception:
                 # Jeton déjà expiré ou déjà en liste noire : le résultat
@@ -122,7 +125,7 @@ class AuthService:
     @staticmethod
     def logout(*, refresh_token: str) -> None:
         """Révoque la session courante."""
-        RefreshToken(refresh_token).blacklist()
+        RefreshToken(refresh_token).blacklist()  # type: ignore[arg-type]
 
     @staticmethod
     def register_device(*, user: User, token: str, platform: str) -> Device:

@@ -15,11 +15,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from rest_framework.exceptions import NotAuthenticated
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.request import Request
 from rest_framework.views import APIView
 
-from apps.accounts.models import UserType
+from apps.accounts.models import User, UserType
 
 __all__ = [
     "HasPermission",
@@ -28,30 +29,68 @@ __all__ = [
     "IsOwner",
     "IsStaff",
     "ReadOnly",
+    "active_user",
+    "authenticated_user",
 ]
+
+
+def active_user(request: Request) -> User | None:
+    """L'utilisateur de la requête, s'il est authentifié et actif — sinon `None`.
+
+    Renvoyer `None` plutôt qu'un `AnonymousUser` n'est pas une préférence de
+    style : `AnonymousUser` n'a ni `user_type` ni `has_permission`, et tout
+    code qui l'oublie plante à l'exécution sur une requête non authentifiée —
+    c'est-à-dire sur la requête d'un attaquant. Avec `None`, le vérificateur de
+    types refuse l'oubli avant la livraison.
+    """
+    user = getattr(request, "user", None)
+    if isinstance(user, User) and user.is_authenticated and user.is_active:
+        return user
+    return None
+
+
+def authenticated_user(request: Request) -> User:
+    """Le même, dans une vue déjà protégée par une permission.
+
+    La permission a déjà écarté l'anonyme ; ce que la vue doit encore faire,
+    c'est le **prouver** au vérificateur de types, sans quoi chaque usage de
+    `request.user` traîne un `AnonymousUser` impossible. La levée n'est donc
+    pas une garde défensive mais le filet qui attrape une vue publiée par
+    inadvertance sans `permission_classes`.
+    """
+    user = active_user(request)
+    if user is None:  # pragma: no cover - la permission de la vue l'a déjà exclu
+        raise NotAuthenticated
+    return user
 
 
 class _AuthenticatedBase(BasePermission):
     """Facteur commun : un utilisateur non authentifié n'a jamais rien."""
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        user = getattr(request, "user", None)
-        return bool(user and user.is_authenticated and user.is_active)
+        return active_user(request) is not None
 
 
-class IsCustomer(_AuthenticatedBase):
+class _UserTypePermission(_AuthenticatedBase):
+    """Exige un type de compte, déclaré par la sous-classe."""
+
+    user_type: UserType
+
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return super().has_permission(request, view) and request.user.user_type == UserType.CUSTOMER
+        user = active_user(request)
+        return user is not None and user.user_type == self.user_type
 
 
-class IsCourier(_AuthenticatedBase):
-    def has_permission(self, request: Request, view: APIView) -> bool:
-        return super().has_permission(request, view) and request.user.user_type == UserType.COURIER
+class IsCustomer(_UserTypePermission):
+    user_type = UserType.CUSTOMER
 
 
-class IsStaff(_AuthenticatedBase):
-    def has_permission(self, request: Request, view: APIView) -> bool:
-        return super().has_permission(request, view) and request.user.user_type == UserType.STAFF
+class IsCourier(_UserTypePermission):
+    user_type = UserType.COURIER
+
+
+class IsStaff(_UserTypePermission):
+    user_type = UserType.STAFF
 
 
 class HasPermission(_AuthenticatedBase):
@@ -74,11 +113,12 @@ class HasPermission(_AuthenticatedBase):
         return type(f"HasPermission_{code.replace('.', '_')}", (cls,), {"code": code})
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        if not super().has_permission(request, view):
+        user = active_user(request)
+        if user is None:
             return False
         if not self.code:  # pragma: no cover - erreur de programmation
             raise ValueError("HasPermission doit être paramétrée par .of('domaine.action').")
-        return request.user.has_permission(self.code)
+        return user.has_permission(self.code)
 
 
 class IsOwner(_AuthenticatedBase):
@@ -100,11 +140,11 @@ class IsOwner(_AuthenticatedBase):
             owner = getattr(owner, part, None)
             if owner is None:
                 return False
-        return owner == request.user
+        return bool(owner == active_user(request))
 
 
 class ReadOnly(BasePermission):
     """À combiner : `[IsStaff | ReadOnly]` ouvre la lecture, réserve l'écriture."""
 
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return request.method in SAFE_METHODS
+        return bool(request.method in SAFE_METHODS)

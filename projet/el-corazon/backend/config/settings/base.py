@@ -224,7 +224,7 @@ def _read_key(path_var: str, inline_var: str) -> str:
     path = config(path_var, default="")
     if path:
         return Path(path).read_text(encoding="utf-8")
-    return config(inline_var, default="").replace("\\n", "\n")
+    return str(config(inline_var, default="")).replace("\\n", "\n")
 
 
 SIMPLE_JWT = {
