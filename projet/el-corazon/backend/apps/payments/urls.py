@@ -17,6 +17,10 @@ urlpatterns = [
     # sont pas des détails de la collection des transactions.
     path("webhook/<str:provider>/", views.WebhookView.as_view(), name="webhook"),
     path("<uuid:order_id>/initiate/", views.InitiatePaymentView.as_view(), name="initiate"),
+    path("<uuid:order_id>/split/", views.SplitPaymentView.as_view(), name="split"),
+    # Le jeton d'une part, pour un convive sans compte. Pas d'identifiant de
+    # commande dans l'URL : le lien ne donne accès qu'à la part.
+    path("shares/<str:token>/", views.ShareView.as_view(), name="share"),
     path("<uuid:order_id>/refund/", views.RefundView.as_view(), name="refund"),
     path("", include(router.urls)),
 ]

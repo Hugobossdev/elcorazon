@@ -84,6 +84,15 @@ class PaymentService:
                 current_status=locked.status,
             )
 
+        if hasattr(locked, "split_payment"):
+            # Payer le tout solderait la commande en laissant des parts
+            # ouvertes : les autres participants paieraient une commande déjà
+            # réglée, ou ne paieraient jamais.
+            raise BusinessRuleViolation(
+                "Cette commande est partagée : chaque participant règle sa part.",
+                split=str(locked.split_payment.pk),
+            )
+
         outstanding = locked.total - settled_total(locked)
         if not outstanding.is_positive:
             raise BusinessRuleViolation(
@@ -203,6 +212,13 @@ class PaymentService:
         PaymentService._move(txn, target)
 
         if target == PaymentStatus.COMPLETED:
+            # La part se solde **parce que** sa transaction s'est soldée (P2).
+            # Importé ici et non en tête : `split` a besoin de ce module pour
+            # ouvrir une demande de paiement, et l'import croisé au chargement
+            # ferait échouer le démarrage.
+            from apps.payments.split import SplitService
+
+            SplitService.on_transaction_settled(txn)
             PaymentService._confirm_order(txn.order)
 
         PaymentService._close(event)

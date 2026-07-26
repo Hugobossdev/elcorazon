@@ -28,20 +28,32 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 from apps.accounts.models import UserType
 from apps.orders.models import Order
 from apps.payments.gateway import GatewayError, gateway_for
-from apps.payments.models import PaymentProvider, Transaction
+from apps.payments.models import PaymentProvider, SplitPayment, SplitShare, Transaction
 from apps.payments.serializers import (
     CheckoutSerializer,
     RefundRequestSerializer,
     RefundSerializer,
+    ShareCheckoutSerializer,
+    SplitCreateSerializer,
+    SplitPaymentSerializer,
+    SplitShareSerializer,
     TransactionSerializer,
     WebhookSerializer,
 )
 from apps.payments.services import PaymentService, RefundService
+from apps.payments.split import ParticipantInput, SplitService
 from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
 from common.permissions import HasPermission, IsCustomer, authenticated_user
 from common.throttling import PaymentInitiationThrottle
 
-__all__ = ["InitiatePaymentView", "RefundView", "TransactionViewSet", "WebhookView"]
+__all__ = [
+    "InitiatePaymentView",
+    "RefundView",
+    "ShareView",
+    "SplitPaymentView",
+    "TransactionViewSet",
+    "WebhookView",
+]
 
 SIGNATURE_HEADER = "X-Signature"
 
@@ -172,6 +184,95 @@ def _corps(request: Request) -> dict[str, Any]:
             return {}
         return parsed
     return dict(request.data.items())
+
+
+class SplitPaymentView(APIView):
+    """`/payments/{order}/split/` — ouvrir et consulter un partage."""
+
+    permission_classes = [IsCustomer]
+
+    @extend_schema(responses={200: SplitPaymentSerializer}, tags=["payments"])
+    def get(self, request: Request, order_id: str) -> Response:
+        order = get_object_or_404(Order, pk=order_id, customer=authenticated_user(request))
+        split = get_object_or_404(SplitPayment, order=order)
+        return Response(SplitPaymentSerializer(split).data)
+
+    @extend_schema(
+        request=SplitCreateSerializer, responses={201: SplitPaymentSerializer}, tags=["payments"]
+    )
+    def post(self, request: Request, order_id: str) -> Response:
+        user = authenticated_user(request)
+        order = get_object_or_404(Order, pk=order_id, customer=user)
+
+        serializer = SplitCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        split = SplitService.create(
+            order=order,
+            initiator=user,
+            participants=[
+                ParticipantInput(
+                    display_name=p["display_name"],
+                    user=p.get("user"),
+                    phone=p.get("phone", ""),
+                    amount=p.get("amount"),
+                )
+                for p in serializer.validated_data["participants"]
+            ],
+        )
+        return Response(SplitPaymentSerializer(split).data, status=status.HTTP_201_CREATED)
+
+
+class ShareView(APIView):
+    """`/payments/shares/{token}/` — la part, vue par son destinataire.
+
+    **Sans authentification**, et c'est le cœur de la fonctionnalité : la
+    moitié des convives d'un repas partagé n'ont pas de compte, et exiger une
+    inscription pour payer sa part ferait échouer la fonctionnalité sur son cas
+    le plus courant.
+
+    Le justificatif est le jeton du lien, aléatoire et long. Il ne donne accès
+    qu'à cette part — son montant, son statut, de quoi payer — jamais à la
+    commande ni aux autres participants.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "share_access"
+
+    @extend_schema(responses={200: SplitShareSerializer}, tags=["payments"])
+    def get(self, request: Request, token: str) -> Response:
+        return Response(SplitShareSerializer(self._share(token)).data)
+
+    @extend_schema(request=None, responses={201: ShareCheckoutSerializer}, tags=["payments"])
+    def post(self, request: Request, token: str) -> Response:
+        """Ouvre le règlement de cette part.
+
+        Ne solde rien : la part suivra sa transaction, qui suivra la
+        notification signée du prestataire (P2).
+        """
+        share = self._share(token)
+        payeur = authenticated_user(request) if request.user is not None else None
+
+        _, instruction = SplitService.pay_share(share=share, payer=payeur)
+        share.refresh_from_db()
+
+        return Response(
+            ShareCheckoutSerializer(
+                {
+                    "share": share,
+                    "checkout_url": instruction.checkout_url,
+                    "instructions": instruction.instructions,
+                }
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def _share(token: str) -> SplitShare:
+        return get_object_or_404(
+            SplitShare.objects.select_related("split__order"), share_token=token
+        )
 
 
 class RefundView(APIView):

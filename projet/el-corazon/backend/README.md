@@ -86,6 +86,7 @@ voir un prix avant de s'inscrire.
 | `/api/v1/catalog/reviews/` | GET | public |
 | `/api/v1/catalog/reviews/` | POST | client authentifié |
 | `/api/v1/payments/webhook/{provider}/` | POST | **signature HMAC**, pas de jeton |
+| `/api/v1/payments/shares/{token}/` | GET, POST | **jeton du lien**, pas de compte |
 
 Le webhook est la seule route ouverte en écriture sans compte : un prestataire
 n'en a pas. Son justificatif est la signature HMAC-SHA256 du corps brut,
@@ -99,6 +100,29 @@ droit de faire* (`orders.refund`), le rattachement à un établissement
 (`restaurants.StaffMembership`) dit **sur quoi**. Un membre du personnel sans
 rattachement ne voit rien : un oubli de configuration produit une panne
 visible, jamais un accès trop large et silencieux.
+
+## Paiement partagé
+
+La faille la plus grave de l'implémentation précédente était là : n'importe quel
+participant pouvait se déclarer payé, ce qui basculait la commande entière en
+`completed` — un repas gratuit. Le correctif d'alors avait restreint l'action
+aux administrateurs, sans construire le vrai flux.
+
+La réponse n'est pas une vérification de plus, c'est une **structure** : une
+part n'est réputée réglée que si elle porte une transaction encaissée, et la
+contrainte est en base (`settled_share_requires_transaction`). Il n'existe aucun
+chemin — API, back-office, script — pour marquer une part payée sans
+encaissement réel. Une part **suit** sa transaction ; elle ne décide de rien.
+
+Le total se divise par `Money.allocate`, qui ne perd pas une unité mineure :
+4 000 F en trois donne 1 334, 1 333 et 1 333.
+
+`GET|POST /api/v1/payments/shares/{token}/` s'ouvre **sans compte** — la moitié
+des convives d'un repas partagé n'en ont pas, et exiger une inscription ferait
+échouer la fonctionnalité sur son cas le plus courant. Le jeton est aléatoire et
+non dérivé de la part : les UUIDv7 étant ordonnés dans le temps, un lien qui
+circule sur une messagerie ne peut pas s'appuyer dessus. Il ne donne accès qu'à
+la part — ni à la commande, ni aux autres participants.
 
 ## Codes promotionnels
 

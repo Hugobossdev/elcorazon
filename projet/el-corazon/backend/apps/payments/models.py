@@ -19,6 +19,8 @@ Autres invariants :
 
 from __future__ import annotations
 
+import secrets
+
 from django.db import models
 
 from apps.accounts.models import User
@@ -36,7 +38,18 @@ __all__ = [
     "SplitShare",
     "Transaction",
     "WebhookEvent",
+    "new_share_token",
 ]
+
+
+def new_share_token() -> str:
+    """Jeton d'accès d'une part de paiement partagé.
+
+    Aléatoire et non dérivé de la part : un lien envoyé sur une messagerie doit
+    rester inexploitable pour qui ne l'a pas reçu, y compris s'il connaît la
+    commande.
+    """
+    return secrets.token_urlsafe(32)
 
 
 class PaymentStatus(models.TextChoices):
@@ -196,6 +209,14 @@ class SplitShare(UUIDModel, TimeStampedModel):
     )
     display_name = models.CharField(max_length=150)
     phone = models.CharField(max_length=16, blank=True)
+
+    # Jeton d'accès de la part, pour le participant **sans compte**.
+    #
+    # La clé primaire ne convient pas : les UUIDv7 sont ordonnés dans le temps
+    # (ADR-007), donc partiellement devinables. Or ce lien circule sur WhatsApp
+    # et donne à voir la référence de commande, le restaurant, le montant et le
+    # nom des autres participants. Un jeton aléatoire ne se devine pas.
+    share_token = models.CharField(max_length=64, unique=True, default=new_share_token)
 
     amount = MoneyField()
     status = models.CharField(

@@ -222,6 +222,10 @@ REST_FRAMEWORK = {
         # tunnel. Un quota serré couperait le suivi au moment précis où il
         # redevient utile.
         "tracking_ping": "240/min",
+        # Le lien d'une part circule sur une messagerie et s'ouvre sans compte :
+        # c'est la seule route non authentifiée qui lise des données de
+        # commande. Le quota borne l'essai de jetons au hasard.
+        "share_access": "30/min",
     },
     # Nombre de proxys entre le client et l'application.
     #

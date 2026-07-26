@@ -58,6 +58,13 @@ ROUTES_PUBLIQUES: set[str] = {
     "v1:catalog:item-detail",
     # Le prestataire de paiement n'a pas de compte : il signe son corps.
     "v1:payments:webhook",
+    # La part d'un paiement partagé, ouverte par le lien reçu sur une
+    # messagerie. La moitié des convives d'un repas partagé n'ont pas de
+    # compte, et exiger une inscription pour payer sa part ferait échouer la
+    # fonctionnalité sur son cas le plus courant. Le justificatif est le jeton
+    # aléatoire de l'URL, et il ne donne accès qu'à cette part — ni à la
+    # commande, ni aux autres participants.
+    "v1:payments:share",
     # Le schéma OpenAPI. Il décrit des routes que les applications appellent de
     # toute façon ; le fermer protégerait une liste d'URL, pas des données. Le
     # restreindre reste un réglage `SERVE_PERMISSIONS` d'une ligne.
