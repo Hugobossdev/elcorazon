@@ -24,6 +24,7 @@ from apps.carts.services import CartService
 from apps.catalog.models import MenuItem, VerifiedPurchase
 from apps.orders.models import Order, PaymentMethod
 from apps.orders.states import OrderStatus
+from apps.orders.views import CREATE_ENDPOINT
 from apps.profiles.models import Address
 from apps.restaurants.models import Restaurant, StaffMembership
 from common.money import Money
@@ -296,6 +297,82 @@ class TestIdempotence:
 
         assert response.status_code == status.HTTP_201_CREATED
         assert Order.objects.count() == 2
+
+
+class TestIdempotenceConcurrente:
+    """Le cas que la première rédaction laissait passer.
+
+    Le rejeu séquentiel — le client retente après coupure — était couvert. Le
+    rejeu **concurrent** ne l'était pas : deux requêtes en vol créaient chacune
+    une commande, et la perdante abandonnait la sienne en base.
+    """
+
+    def test_une_cle_deja_prise_ne_cree_pas_de_seconde_commande(
+        self,
+        as_customer: APIClient,
+        restaurant: Restaurant,
+        address: Address,
+        garni: None,
+        customer: User,
+    ) -> None:
+        from apps.orders.idempotency import reserve
+
+        # Simule la requête concurrente : elle détient la clé et n'a pas fini.
+        assert reserve(user=customer, endpoint=CREATE_ENDPOINT, key="cle-en-vol") is None
+
+        response = commander(as_customer, restaurant, address, key="cle-en-vol")
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data["code"] == "request_in_progress"
+        assert Order.objects.count() == 0
+
+    def test_la_cle_est_prise_avant_toute_ecriture(
+        self,
+        as_customer: APIClient,
+        restaurant: Restaurant,
+        address: Address,
+        garni: None,
+        customer: User,
+    ) -> None:
+        """L'ordre est ce qui corrige le défaut : réserver d'abord, écrire
+        ensuite. Après une commande réussie, la clé porte sa réponse."""
+        from apps.orders.models import IdempotencyKey
+
+        commander(as_customer, restaurant, address, key="cle-terminee")
+
+        cle = IdempotencyKey.objects.get(key="cle-terminee")
+        assert cle.completed_at is not None
+        assert cle.response_status == status.HTTP_201_CREATED
+        assert cle.order_id is not None
+
+    def test_un_echec_libere_la_cle(
+        self, as_customer: APIClient, restaurant: Restaurant, address: Address, customer: User
+    ) -> None:
+        """Panier vide : la clé n'a rien produit. La garder bloquerait le
+        client qui corrige son panier et réessaie avec la même clé."""
+        from apps.orders.models import IdempotencyKey
+
+        refus = commander(as_customer, restaurant, address, key="cle-liberee")
+
+        assert refus.status_code == status.HTTP_409_CONFLICT
+        assert not IdempotencyKey.objects.filter(key="cle-liberee").exists()
+
+    def test_apres_liberation_la_meme_cle_est_reutilisable(
+        self,
+        as_customer: APIClient,
+        restaurant: Restaurant,
+        address: Address,
+        customer: User,
+        menu_item: MenuItem,
+    ) -> None:
+        commander(as_customer, restaurant, address, key="cle-reprise")
+
+        cart = CartService.cart_for(customer, restaurant)
+        CartService.add_line(cart=cart, menu_item=menu_item, quantity=1, options=[])
+        seconde = commander(as_customer, restaurant, address, key="cle-reprise")
+
+        assert seconde.status_code == status.HTTP_201_CREATED
+        assert Order.objects.count() == 1
 
 
 class TestCloisonnement:

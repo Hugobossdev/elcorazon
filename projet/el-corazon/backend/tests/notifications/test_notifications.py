@@ -25,7 +25,7 @@ from apps.accounts.models import Device, DevicePlatform, User
 from apps.delivery.models import Assignment, CourierProfile
 from apps.delivery.services import AssignmentService
 from apps.notifications.models import Notification, NotificationKind
-from apps.notifications.push import PushMessage, PushResult
+from apps.notifications.push import PushDeliveryIncomplete, PushMessage, PushResult
 from apps.notifications.services import notify
 from apps.notifications.tasks import purge_unregistered_devices, send_push
 from apps.orders.models import Order
@@ -45,17 +45,21 @@ class RecordingBackend:
 
     sent: ClassVar[list[tuple[list[str], PushMessage]]] = []
     unregistered: tuple[str, ...] = ()
+    failing: tuple[str, ...] = ()
 
     def send(self, tokens: list[str], message: PushMessage) -> PushResult:
         RecordingBackend.sent.append((tokens, message))
-        vivants = tuple(t for t in tokens if t not in RecordingBackend.unregistered)
-        return PushResult(delivered=vivants, unregistered=RecordingBackend.unregistered)
+        morts = tuple(t for t in tokens if t in RecordingBackend.unregistered)
+        rates = tuple(t for t in tokens if t in RecordingBackend.failing)
+        vivants = tuple(t for t in tokens if t not in morts and t not in rates)
+        return PushResult(delivered=vivants, unregistered=morts, failed=rates)
 
 
 @pytest.fixture
 def recorder(settings: object) -> type[RecordingBackend]:
     RecordingBackend.sent = []
     RecordingBackend.unregistered = ()
+    RecordingBackend.failing = ()
     settings.PUSH_BACKEND = "tests.notifications.test_notifications.RecordingBackend"  # type: ignore[attr-defined]
     return RecordingBackend
 
@@ -208,6 +212,92 @@ class TestEnvoiPush:
             "amount": "4000",
             "retries": "0",
         }
+
+
+class TestRepriseSurEchecPassager:
+    """L'autre moitié de la distinction transitoire / définitif.
+
+    Le décorateur annonçait `max_retries` et un report exponentiel, et rien
+    n'appelait jamais `retry` : la configuration était décorative, et un push
+    perdu pour cause de quota l'était définitivement.
+    """
+
+    def test_un_echec_passager_demande_une_reprise(
+        self, customer: User, device: Device, recorder: type[RecordingBackend]
+    ) -> None:
+        recorder.failing = (device.token,)
+        notification = notify(
+            user=customer, kind=NotificationKind.ORDER_STATUS, title="Livrée", body="."
+        )
+        assert notification is not None
+
+        # Appelée directement, la tâche ne peut pas se replanifier : Celery
+        # relève alors l'exception passée à `retry`, ce qui prouve que la
+        # reprise a bien été demandée.
+        with pytest.raises(PushDeliveryIncomplete):
+            send_push(str(notification.pk))
+
+        assert Device.objects.count() == 1, "un échec passager ne supprime pas l'appareil"
+
+    def test_la_reprise_ne_porte_que_sur_les_jetons_en_echec(
+        self, customer: User, device: Device, recorder: type[RecordingBackend]
+    ) -> None:
+        """Reprendre toute la liste ferait vibrer deux fois le téléphone de
+        ceux qui avaient reçu."""
+        second = Device.objects.create(
+            user=customer, token="jeton-appareil-2", platform=DevicePlatform.IOS
+        )
+        recorder.failing = (second.token,)
+        notification = notify(
+            user=customer, kind=NotificationKind.ORDER_STATUS, title="Livrée", body="."
+        )
+        assert notification is not None
+
+        with pytest.raises(PushDeliveryIncomplete) as leve:
+            send_push(str(notification.pk))
+
+        assert leve.value.tokens == (second.token,)
+
+        # La reprise elle-même : seul le jeton en échec est réadressé.
+        recorder.failing = ()
+        send_push(str(notification.pk), [second.token])
+
+        assert recorder.sent[-1][0] == [second.token]
+
+    def test_un_jeton_purge_entre_temps_n_est_pas_readresse(
+        self, customer: User, device: Device, recorder: type[RecordingBackend]
+    ) -> None:
+        """Réessayer sur un appareil supprimé rejouerait la boucle qu'on
+        cherche justement à casser."""
+        notification = notify(
+            user=customer, kind=NotificationKind.ORDER_STATUS, title="Livrée", body="."
+        )
+        assert notification is not None
+        Device.objects.filter(pk=device.pk).delete()
+
+        assert send_push(str(notification.pk), [device.token]) == {
+            "delivered": 0,
+            "purged": 0,
+            "failed": 0,
+        }
+        assert recorder.sent == []
+
+    def test_un_appareil_mort_et_un_vivant_sont_traites_separement(
+        self, customer: User, device: Device, recorder: type[RecordingBackend]
+    ) -> None:
+        vivant = Device.objects.create(
+            user=customer, token="jeton-appareil-3", platform=DevicePlatform.IOS
+        )
+        recorder.unregistered = (device.token,)
+        notification = notify(
+            user=customer, kind=NotificationKind.ORDER_STATUS, title="Livrée", body="."
+        )
+        assert notification is not None
+
+        resultat = send_push(str(notification.pk))
+
+        assert resultat == {"delivered": 1, "purged": 1, "failed": 0}
+        assert Device.objects.get().pk == vivant.pk
 
 
 class TestPurgePlanifiee:

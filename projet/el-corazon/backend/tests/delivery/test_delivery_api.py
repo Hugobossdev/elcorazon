@@ -332,6 +332,33 @@ class TestAcceptation:
         # 80 % des 500 F de frais de livraison de la commande de test.
         assert response.data["courier_fee"] == {"amount": "400", "currency": XOF}
 
+    def test_une_livraison_offerte_au_client_reste_payee_au_livreur(
+        self, as_courier: APIClient, offered: Assignment, ready_order: Order
+    ) -> None:
+        """Le défaut corrigé : la commission se calculait sur ce que le client
+        avait payé. Sous franco, ce montant vaut zéro — et le livreur roulait
+        gratuitement pour une remise qu'il n'avait pas décidée."""
+        Order.objects.filter(pk=ready_order.pk).update(
+            delivery_fee_minor=0, delivery_fee_gross_minor=500, delivery_fee_gross_currency=XOF
+        )
+
+        response = as_courier.post(reverse("v1:delivery:assignment-accept", args=[offered.pk]))
+
+        assert response.data["courier_fee"] == {"amount": "400", "currency": XOF}
+
+    def test_une_commande_anterieure_au_champ_retombe_sur_le_montant_facture(
+        self, as_courier: APIClient, offered: Assignment, ready_order: Order
+    ) -> None:
+        """Les commandes créées avant `delivery_fee_gross` n'ont que le montant
+        facturé : c'était alors la seule valeur connue."""
+        Order.objects.filter(pk=ready_order.pk).update(
+            delivery_fee_gross_minor=None, delivery_fee_gross_currency=None
+        )
+
+        response = as_courier.post(reverse("v1:delivery:assignment-accept", args=[offered.pk]))
+
+        assert response.data["courier_fee"] == {"amount": "400", "currency": XOF}
+
     def test_deux_livreurs_ne_prennent_pas_la_meme_course(
         self, client: APIClient, offered: Assignment, restaurant: Restaurant
     ) -> None:

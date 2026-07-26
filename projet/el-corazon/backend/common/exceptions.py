@@ -23,6 +23,7 @@ __all__ = [
     "ConcurrentModification",
     "InsufficientBalance",
     "InsufficientStock",
+    "RequestInFlight",
     "problem_detail_handler",
 ]
 
@@ -68,6 +69,19 @@ class ConcurrentModification(BusinessRuleViolation):
 
     code = "concurrent_modification"
     title = "Ressource modifiée entre-temps"
+
+
+class RequestInFlight(BusinessRuleViolation):
+    """Une requête portant la même clé d'idempotence est en cours.
+
+    Distincte d'un rejeu : là, la première requête n'a pas encore terminé, donc
+    il n'y a aucune réponse à rendre. Inventer un succès risquerait d'annoncer
+    une commande qui échouera ; répondre 409 dit au client d'attendre un
+    instant, ce qu'un mobile sait faire.
+    """
+
+    code = "request_in_progress"
+    title = "Requête déjà en cours"
 
 
 def _problem(

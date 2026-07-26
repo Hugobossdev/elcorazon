@@ -49,15 +49,23 @@ OFFERABLE_FROM = frozenset({OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderS
 
 
 def courier_fee_for(order: Order) -> Money:
-    """Part des frais de livraison revenant au livreur.
+    """Part revenant au livreur, calculée sur la **valeur** de la course.
 
-    Un pourcentage explicite et configurable plutôt qu'un montant recopié : la
-    plateforme retient une commission, et l'écrire en dur ici obligerait à un
-    déploiement pour la changer d'un point. La part est **figée sur la course à
-    l'acceptation** — le barème peut évoluer, ce qui est dû pour cette course
-    ne bouge plus.
+    Sur `delivery_fee_gross` et non sur `delivery_fee` : le second est ce que
+    le client a payé, et il tombe à zéro dès que le franco s'applique. Fonder
+    la commission dessus ferait rouler le livreur gratuitement chaque fois
+    qu'un panier dépasse le seuil — une remise commerciale offerte au client
+    aux frais de quelqu'un qui n'a rien décidé.
+
+    Un pourcentage configurable plutôt qu'un montant recopié : un point de
+    commission ne doit pas demander un déploiement. La part est **figée sur la
+    course à l'acceptation** — le barème peut évoluer, ce qui est dû pour cette
+    course ne bouge plus.
     """
-    return order.delivery_fee.percentage(settings.COURIER_FEE_SHARE_PERCENT)
+    # Les commandes antérieures à `delivery_fee_gross` n'ont que le montant
+    # facturé ; c'était alors la seule valeur connue.
+    valeur = order.delivery_fee_gross or order.delivery_fee
+    return valeur.percentage(settings.COURIER_FEE_SHARE_PERCENT)
 
 
 class CourierService:

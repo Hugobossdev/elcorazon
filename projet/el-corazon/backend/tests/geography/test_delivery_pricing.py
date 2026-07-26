@@ -53,6 +53,23 @@ class TestFranco:
         assert quote.is_free is True
         assert quote.fee == Money(0, XOF)
 
+    def test_la_course_garde_sa_valeur_meme_offerte(self, zone: DeliveryZone) -> None:
+        """Le franco est une remise faite au client, pas une baisse du coût de
+        la course. Confondre les deux ferait rouler le livreur gratuitement
+        chaque fois qu'un panier dépasse le seuil."""
+        zone.free_delivery_threshold = Money(10_000, XOF)
+        zone.save()
+
+        quote = quote_delivery(zone=zone, distance_m=3_500, subtotal=Money(10_000, XOF))
+
+        assert quote.fee == Money(0, XOF)
+        assert quote.gross_fee == Money(850, XOF)
+
+    def test_hors_franco_les_deux_montants_coincident(self, zone: DeliveryZone) -> None:
+        quote = quote_delivery(zone=zone, distance_m=3_500, subtotal=Money(5_000, XOF))
+
+        assert quote.fee == quote.gross_fee == Money(850, XOF)
+
     def test_juste_en_dessous_du_seuil_elle_est_due(self, zone: DeliveryZone) -> None:
         zone.free_delivery_threshold = Money(10_000, XOF)
         zone.save()

@@ -11,12 +11,18 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from celery import shared_task
+from celery import Task, shared_task
+from celery.exceptions import MaxRetriesExceededError
 from django.utils import timezone
 
 from apps.accounts.models import Device
 from apps.notifications.models import Notification
-from apps.notifications.push import PushMessage, backend, payload_for
+from apps.notifications.push import (
+    PushDeliveryIncomplete,
+    PushMessage,
+    backend,
+    payload_for,
+)
 
 __all__ = ["purge_unregistered_devices", "send_push"]
 
@@ -32,26 +38,42 @@ logger = logging.getLogger(__name__)
     retry_backoff=True,
     retry_jitter=True,
 )
-def send_push(self: object, notification_id: str) -> dict[str, int]:
-    """Envoie une notification à tous les appareils de son destinataire.
+def send_push(self: Task, notification_id: str, tokens: list[str] | None = None) -> dict[str, int]:
+    """Envoie une notification aux appareils de son destinataire.
 
-    Les jetons **définitivement** injoignables sont supprimés dans la foulée.
-    C'est la moitié qui manquait à l'implémentation précédente : elle retentait
-    trois fois un appareil désinstallé, à chaque notification, indéfiniment.
+    Deux issues d'échec, traitées différemment — c'est tout l'enjeu :
+
+    * **définitif** — le service déclare l'appareil injoignable : le jeton est
+      supprimé. C'est ce qui manquait à l'implémentation précédente, qui
+      retentait trois fois un appareil désinstallé, à chaque notification,
+      indéfiniment ;
+    * **passager** — quota, délai dépassé, panne : une reprise est demandée,
+      **portant sur les seuls jetons concernés**. Reprendre toute la liste
+      ferait vibrer deux fois le téléphone de ceux qui avaient reçu.
+
+    `tokens` n'est renseigné qu'à la reprise : au premier appel, la tâche
+    s'adresse à tous les appareils du destinataire.
     """
     notification = Notification.objects.select_related("user").filter(pk=notification_id).first()
     if notification is None:
         # La notification a été supprimée entre la programmation et l'exécution
         # — un compte effacé, par exemple. Ce n'est pas une erreur à retenter.
         logger.info("push.notification_absente", extra={"notification": notification_id})
-        return {"delivered": 0, "purged": 0, "failed": 0}
+        return _rien()
 
-    tokens = list(Device.objects.filter(user=notification.user).values_list("token", flat=True))
-    if not tokens:
-        return {"delivered": 0, "purged": 0, "failed": 0}
+    joignables = Device.objects.filter(user=notification.user)
+    if tokens is not None:
+        # Les jetons d'une reprise sont refiltrés : l'un d'eux a pu être purgé
+        # entre-temps, et réessayer sur un appareil supprimé rejouerait la
+        # boucle qu'on cherche justement à casser.
+        joignables = joignables.filter(token__in=tokens)
+
+    cibles = list(joignables.values_list("token", flat=True))
+    if not cibles:
+        return _rien()
 
     result = backend().send(
-        tokens,
+        cibles,
         PushMessage(
             title=notification.title,
             body=notification.body,
@@ -63,11 +85,38 @@ def send_push(self: object, notification_id: str) -> dict[str, int]:
     if result.unregistered:
         purged, _ = Device.objects.filter(token__in=result.unregistered).delete()
 
+    if result.failed:
+        _demander_reprise(self, notification_id, result.failed)
+
     return {
         "delivered": len(result.delivered),
         "purged": purged,
         "failed": len(result.failed),
     }
+
+
+def _rien() -> dict[str, int]:
+    return {"delivered": 0, "purged": 0, "failed": 0}
+
+
+def _demander_reprise(task: Task, notification_id: str, tokens: tuple[str, ...]) -> None:
+    """Reprogramme la tâche sur les seuls jetons en échec passager.
+
+    `retry` lève : c'est son mécanisme, et l'exception ne doit surtout pas être
+    interceptée ici. Seul l'épuisement des tentatives l'est — abandonner une
+    notification après quatre essais est un incident à tracer, pas une tâche à
+    laisser échouer bruyamment toutes les heures.
+    """
+    try:
+        task.retry(
+            args=(notification_id, list(tokens)),
+            exc=PushDeliveryIncomplete(tokens),
+        )
+    except MaxRetriesExceededError:
+        logger.warning(
+            "push.abandon",
+            extra={"notification": notification_id, "tokens": len(tokens)},
+        )
 
 
 @shared_task

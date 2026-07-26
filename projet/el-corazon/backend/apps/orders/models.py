@@ -71,6 +71,14 @@ class Order(UUIDModel, TimeStampedModel):
     # --- Montants (C2) ----------------------------------------------------
     subtotal = MoneyField()
     delivery_fee = MoneyField()
+    # Ce que la course **vaut**, avant toute remise commerciale — le franco,
+    # notamment. `delivery_fee` est ce que le client paie ; les deux diffèrent
+    # dès qu'on offre la livraison, et confondre les deux ferait travailler le
+    # livreur gratuitement, sa commission étant un pourcentage de cette valeur.
+    #
+    # Nullable pour les commandes antérieures à ce champ : leur commission
+    # retombe sur `delivery_fee`, qui était alors la seule valeur connue.
+    delivery_fee_gross = MoneyField(null=True)
     discount = MoneyField()
     total = MoneyField()
 
@@ -215,6 +223,13 @@ class IdempotencyKey(UUIDModel):
     response_status = models.PositiveSmallIntegerField()
     response_body = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    # Nul tant que la requête n'a pas produit sa réponse. C'est **ce champ** qui
+    # fait autorité sur l'achèvement : la clé est réservée avant toute écriture
+    # métier, si bien qu'elle existe un instant sans réponse à rejouer. Une
+    # requête concurrente qui la trouve dans cet état doit attendre, pas
+    # recevoir un corps vide.
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "clé d'idempotence"

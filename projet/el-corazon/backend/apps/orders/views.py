@@ -27,7 +27,7 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.accounts.models import UserType
 from apps.carts.services import CartService
-from apps.orders.idempotency import recall, remember
+from apps.orders.idempotency import complete, release, reserve
 from apps.orders.models import Order
 from apps.orders.serializers import (
     CancelSerializer,
@@ -100,19 +100,30 @@ class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
             raise ValidationError({IDEMPOTENCY_HEADER: "En-tête obligatoire sur cette route."})
 
         user = authenticated_user(request)
-        already = recall(user=user, endpoint=CREATE_ENDPOINT, key=key)
-        if already is not None:
-            return Response(already.body, status=already.status)
 
-        serializer = OrderCreateSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
+        # La clé est prise **avant** toute écriture. Créer la commande d'abord
+        # laisserait deux requêtes simultanées en créer chacune une, et la
+        # perdante abandonnerait la sienne en base — orpheline et impayée.
+        deja = reserve(user=user, endpoint=CREATE_ENDPOINT, key=key)
+        if deja is not None:
+            return Response(deja.body, status=deja.status)
 
-        restaurant = serializer.validated_data.pop("restaurant")
-        cart = CartService.cart_for(user, restaurant)
-        order = OrderService.create_from_cart(user=user, cart=cart, **serializer.validated_data)
+        try:
+            serializer = OrderCreateSerializer(data=request.data, context={"request": request})
+            serializer.is_valid(raise_exception=True)
+
+            restaurant = serializer.validated_data.pop("restaurant")
+            cart = CartService.cart_for(user, restaurant)
+            order = OrderService.create_from_cart(user=user, cart=cart, **serializer.validated_data)
+        except Exception:
+            # Panier vide, adresse hors zone, validation refusée : la clé n'a
+            # rien produit, elle doit redevenir libre. La garder bloquerait le
+            # client qui corrige son panier et réessaie avec la même clé.
+            release(user=user, endpoint=CREATE_ENDPOINT, key=key)
+            raise
 
         body = OrderDetailSerializer(order).data
-        stored = remember(
+        stored = complete(
             user=user,
             endpoint=CREATE_ENDPOINT,
             key=key,

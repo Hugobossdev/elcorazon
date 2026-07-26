@@ -22,9 +22,17 @@ __all__ = ["DeliveryQuote", "quote_delivery"]
 
 @dataclass(frozen=True, slots=True)
 class DeliveryQuote:
+    """Devis d'une course.
+
+    `fee` est ce qu'on facture, `gross_fee` ce que la course vaut. Les deux
+    diffèrent quand le franco s'applique — et il faut les deux, parce que
+    l'offrir au client ne veut pas dire que le livreur travaille gratuitement.
+    """
+
     zone: DeliveryZone
     distance_km: Decimal
     fee: Money
+    gross_fee: Money
     is_free: bool
     estimated_minutes: int
 
@@ -61,20 +69,23 @@ def quote_delivery(*, zone: DeliveryZone, distance_m: float, subtotal: Money) ->
             min_order_amount=str(zone.min_order_amount.amount_minor),
         )
 
+    # `percentage` est la seule multiplication par un décimal que `Money`
+    # expose, et son arrondi est explicite : × 3,50 km s'écrit × 350 %.
+    # Multiplier par un flottant introduirait l'imprécision que tout le reste
+    # de la chaîne s'attache à exclure.
+    gross = zone.base_fee + zone.fee_per_km.percentage(distance_km * 100)
+
+    # Le franco est une remise commerciale faite au client. Elle ne change pas
+    # ce que la course coûte, et c'est pourquoi `gross_fee` est calculé dans
+    # tous les cas : la commission du livreur s'appuie dessus, sans quoi il
+    # roulerait gratuitement chaque fois qu'un panier dépasse le seuil.
     free = zone.free_delivery_threshold is not None and subtotal >= zone.free_delivery_threshold
-    if free:
-        fee = Money.zero(subtotal.currency)
-    else:
-        # `percentage` est la seule multiplication par un décimal que `Money`
-        # expose, et son arrondi est explicite : × 3,50 km s'écrit × 350 %.
-        # Multiplier par un flottant introduirait l'imprécision que tout le
-        # reste de la chaîne s'attache à exclure.
-        fee = zone.base_fee + zone.fee_per_km.percentage(distance_km * 100)
 
     return DeliveryQuote(
         zone=zone,
         distance_km=distance_km,
-        fee=fee,
+        fee=Money.zero(subtotal.currency) if free else gross,
+        gross_fee=gross,
         is_free=free,
         estimated_minutes=zone.estimated_delivery_minutes,
     )

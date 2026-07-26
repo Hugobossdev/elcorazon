@@ -132,6 +132,7 @@ class OrderService:
             recipient_phone=recipient_phone,
             subtotal=priced.subtotal,
             delivery_fee=quote.fee,
+            delivery_fee_gross=quote.gross_fee,
             discount=discount,
             total=total,
             payment_method=payment_method,

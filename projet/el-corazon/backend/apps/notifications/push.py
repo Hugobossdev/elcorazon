@@ -25,7 +25,29 @@ from typing import Any, Protocol
 from django.conf import settings
 from django.utils.module_loading import import_string
 
-__all__ = ["ConsolePushBackend", "PushBackend", "PushMessage", "PushResult", "backend"]
+__all__ = [
+    "ConsolePushBackend",
+    "PushBackend",
+    "PushDeliveryIncomplete",
+    "PushMessage",
+    "PushResult",
+    "backend",
+]
+
+
+class PushDeliveryIncomplete(Exception):
+    """Une partie des jetons n'a pas été servie, pour une raison passagère.
+
+    Porte les jetons concernés, et **eux seuls** : c'est ce qui permet à la
+    reprise de ne pas re-notifier ceux qui ont déjà reçu. Une reprise à
+    l'aveugle sur toute la liste ferait vibrer deux fois le téléphone de
+    quelqu'un dont l'envoi avait fonctionné.
+    """
+
+    def __init__(self, tokens: tuple[str, ...]) -> None:
+        self.tokens = tokens
+        super().__init__(f"{len(tokens)} appareil(s) non servi(s), reprise demandée.")
+
 
 logger = logging.getLogger(__name__)
 

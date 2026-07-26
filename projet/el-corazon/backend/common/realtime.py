@@ -78,8 +78,19 @@ def _counter_key(group: str) -> str:
     return f"realtime:{group}:seq"
 
 
-def _backlog_key(group: str) -> str:
-    return f"realtime:{group}:backlog"
+def _event_key(group: str, seq: int) -> str:
+    """Une clé **par événement**, et non une liste sous une clé unique.
+
+    Une liste se relit puis se réécrit, et deux publications concurrentes sur
+    le même groupe s'écrasent : la seconde repart de la liste que la première
+    n'a pas encore enregistrée, et un événement disparaît du journal. Le client
+    verrait alors un trou de numérotation qu'aucun rejeu ne peut combler.
+
+    Une clé par numéro supprime le problème plutôt que de le rendre improbable :
+    les écritures ne se touchent pas. Le numéro venant d'un incrément atomique,
+    deux publications ne peuvent pas viser la même clé.
+    """
+    return f"realtime:{group}:event:{seq}"
 
 
 def publish(group: str, event_type: str, payload: dict[str, Any]) -> Event:
@@ -98,7 +109,7 @@ def publish(group: str, event_type: str, payload: dict[str, Any]) -> Event:
     seq = _next_seq(group)
     event = Event(seq=seq, type=event_type, payload=payload)
 
-    _append_to_backlog(group, event)
+    cache.set(_event_key(group, seq), asdict(event), timeout=BACKLOG_TTL_SECONDS)
 
     layer = get_channel_layer()
     if layer is not None:
@@ -137,21 +148,30 @@ def _next_seq(group: str) -> int:
     return value
 
 
-def _append_to_backlog(group: str, event: Event) -> None:
-    key = _backlog_key(group)
-    backlog: list[dict[str, Any]] = cache.get(key, [])
-    backlog.append(asdict(event))
-    cache.set(key, backlog[-BACKLOG_SIZE:], timeout=BACKLOG_TTL_SECONDS)
-
-
 def replay(group: str, since: int) -> list[Event]:
     """Événements postérieurs à `since`, dans l'ordre.
 
+    La fenêtre est bornée par `BACKLOG_SIZE` même si le client demande depuis
+    le début : au-delà, il a été absent assez longtemps pour que recharger
+    l'état par HTTP soit plus simple et plus juste que rejouer une heure
+    d'historique.
+
     Renvoie une liste vide si le client est à jour, et **aussi** si son retard
-    dépasse le journal. Le second cas n'est pas silencieux pour autant : le
+    dépasse la fenêtre. Le second cas n'est pas silencieux pour autant : le
     consommateur compare le premier numéro rendu à celui demandé et signale au
     client qu'il doit recharger, plutôt que de le laisser croire qu'il n'a rien
     manqué.
     """
-    stored: list[dict[str, Any]] = cache.get(_backlog_key(group), [])
-    return [Event(**item) for item in stored if item["seq"] > since]
+    dernier: int = cache.get(_counter_key(group), 0)
+    premier = max(since + 1, dernier - BACKLOG_SIZE + 1, 1)
+    if premier > dernier:
+        return []
+
+    # Un seul aller-retour vers le cache pour toute la fenêtre : la lire
+    # numéro par numéro ferait cinquante allers-retours Redis à chaque
+    # reconnexion, c'est-à-dire au pire moment — quand le réseau vient
+    # justement de se rétablir.
+    attendues = [_event_key(group, seq) for seq in range(premier, dernier + 1)]
+    trouvees: dict[str, dict[str, Any]] = cache.get_many(attendues)
+
+    return [Event(**trouvees[cle]) for cle in attendues if cle in trouvees]
