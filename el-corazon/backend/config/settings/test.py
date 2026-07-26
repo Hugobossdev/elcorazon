@@ -17,6 +17,7 @@ vérification du métier et rendraient la suite lente et instable.
 from __future__ import annotations
 
 import os
+from typing import cast
 
 # Valeurs par défaut posées avant l'import de `base`, qui lit l'environnement.
 os.environ.setdefault("DJANGO_SECRET_KEY", "test-only-not-a-secret")
@@ -70,7 +71,24 @@ PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 # La limitation de débit est désactivée par défaut : sinon le 6ᵉ test qui
 # s'authentifie reçoit un 429.  Les tests qui vérifient *le limiteur lui-même*
 # la réactivent explicitement (T1).
-REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_RATES": {}}
+#
+# Neutraliser ne veut pas dire vider : sur un scope absent du dictionnaire, DRF
+# ne « laisse pas passer », il lève `ImproperlyConfigured` à l'instanciation du
+# limiteur — donc à la première requête, et sur toutes les routes concernées.
+# C'est bien la clé présente et valant `None` qui désactive (`allow_request`
+# rend la main immédiatement quand `rate is None`).
+#
+# Les scopes sont dérivés de `base` plutôt que réécrits : un scope ajouté
+# là-bas est neutralisé ici sans intervention, et ne peut donc pas faire
+# tomber la suite entière longtemps après coup.
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,
+    # `REST_FRAMEWORK` est un `dict[str, object]` : le cast rend au sous-
+    # dictionnaire son type le temps d'en reprendre les clés.
+    "DEFAULT_THROTTLE_RATES": dict.fromkeys(
+        cast("dict[str, str]", REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]), None
+    ),
+}
 
 # --------------------------------------------------------------- JWT
 

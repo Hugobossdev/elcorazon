@@ -116,6 +116,16 @@ class RefreshSerializer(serializers.Serializer):
 class DeviceSerializer(serializers.ModelSerializer):
     platform = serializers.ChoiceField(choices=DevicePlatform.choices)
 
+    # `Device.token` est unique en base, ce dont `ModelSerializer` déduit
+    # automatiquement un `UniqueValidator`. Il rejette alors en 400 tout jeton
+    # déjà enregistré — or c'est le cas **nominal** : ré-enregistrer un appareil
+    # au lancement de l'application, ou le réattribuer quand son propriétaire
+    # change de compte. La validation héritée contredisait donc l'upsert que
+    # `AuthService.register_device` fait exprès, et la requête n'atteignait
+    # jamais le service. On la retire ; l'unicité reste tenue par la contrainte
+    # de base, qui est le bon endroit pour elle.
+    token = serializers.CharField(max_length=512, validators=[])
+
     class Meta:
         model = Device
         fields = ["id", "token", "platform", "last_used_at", "created_at"]
