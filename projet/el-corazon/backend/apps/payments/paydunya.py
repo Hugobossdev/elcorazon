@@ -8,15 +8,22 @@ d'intégrer quatre opérateurs.
 par PayDunya, mais n'ont pas pu être confrontés à l'API réelle depuis ce poste :
 aucun compte marchand n'y est configuré. Avant la mise en service, il faut
 faire une facture en mode `test` et **comparer la réponse reçue** à
-`_reference_de`, ainsi qu'une notification réelle à `parse`. Les deux points à
-vérifier en priorité sont l'emplacement de l'URL de paiement dans la réponse et
-la forme exacte du corps de l'IPN, qui est un formulaire imbriqué et non du
-JSON.
+`_read_checkout`, ainsi qu'une notification réelle à `parse` et `_confirm`. Les
+points à vérifier en priorité sont l'emplacement de l'URL de paiement dans la
+réponse de création, la forme exacte du corps de l'IPN — un formulaire imbriqué
+et non du JSON — et celle de la réponse de `checkout-invoice/confirm`.
 
-Tout ce qui décide reste en dehors de ce module : les gardes C5, l'idempotence
-P1 et les transitions vivent dans `services.py`, et sont vérifiées sans
-qu'aucun appel réseau ait lieu. Ici, on traduit — dans un sens puis dans
-l'autre.
+Les gardes C5, l'idempotence P1 et les transitions restent en dehors de ce
+module et vivent dans `services.py`. **Ce qui décide du statut, en revanche,
+n'est plus la notification posée** : PayDunya n'y joint qu'une empreinte
+constante de sa clé maîtresse (voir `authenticate`), qui ne prouve rien de
+spécifique à une facture donnée et peut être rejouée sur un statut forgé.
+`parse` reprend donc le jeton de la notification pour interroger PayDunya en
+retour (`_confirm`) et fonde le statut appliqué sur **cette** réponse, jamais
+sur ce que le corps posté prétend. C'est le seul appel réseau du module côté
+entrant, et il est délibéré : sans lui, quiconque a vu passer l'empreinte une
+fois — y compris sur son propre paiement légitime — pouvait encaisser
+n'importe quelle commande.
 """
 
 from __future__ import annotations
@@ -157,14 +164,20 @@ class PayDunyaGateway:
     def authenticate(
         self, *, raw_body: bytes, headers: Mapping[str, str], data: Mapping[str, Any]
     ) -> bool:
-        """Authentifie une notification PayDunya.
+        """Premier filtre, pas une authentification à elle seule.
 
-        Le schéma diffère de celui du bac à sable : PayDunya ne signe pas le
-        corps, il joint l'empreinte SHA-512 de la clé maîtresse. C'est plus
-        faible — l'empreinte est identique d'une notification à l'autre, donc
-        rejouable par qui l'a interceptée une fois — mais c'est le contrat du
-        prestataire, et la parade est ailleurs : l'idempotence sur `event_id`
-        fait qu'un rejeu ne produit rien (P1).
+        PayDunya ne signe pas le corps : il joint l'empreinte SHA-512 de la clé
+        maîtresse, **identique sur toute notification légitime**. Ce n'est pas
+        seulement rejouable — P1 (idempotence sur `event_id`) fermerait le
+        rejeu à l'identique — c'est *fabricable* : qui l'a vue passer une fois
+        peut forger un événement inédit (nouveau statut, nouveau jeton) qui
+        porte la même empreinte. L'idempotence ne protège pas contre ça.
+
+        Ce filtre écarte donc seulement ce qui n'a même pas l'empreinte
+        attendue — un scan, un client mal configuré. La décision qui compte —
+        quel est le **vrai** statut de cette facture — ne se prend jamais sur
+        la foi de ce test : elle est reprise auprès de PayDunya lui-même dans
+        `parse` (`_confirm`), qui est la seule source de vérité.
 
         `compare_digest` pour la même raison qu'ailleurs : une comparaison
         naïve fuit par son temps d'exécution.
@@ -181,6 +194,17 @@ class PayDunyaGateway:
     def parse(self, data: Mapping[str, Any]) -> Notification:
         """Extrait ce qui nous intéresse d'une notification PayDunya.
 
+        Le corps posté n'est **jamais** la source du statut appliqué — c'est
+        le cœur du correctif. `authenticate` vient de le dire : l'empreinte
+        jointe ne prouve rien de spécifique à cette facture, donc rien dans ce
+        corps n'est probant sur `completed`/`failed`/`cancelled`. Seul le
+        **jeton** en est tiré, pour savoir *de quelle facture* PayDunya
+        prétend parler ; le statut, lui, est relu directement chez PayDunya
+        (`_confirm`), qui seul sait ce qui s'est réellement passé sur ce
+        jeton. Un corps forgé peut bien réclamer « payé » : la confirmation
+        active répondra ce que PayDunya sait vraiment, jamais ce que le
+        corps affirme.
+
         Le corps est un formulaire **imbriqué** — `data[invoice][token]` — que
         Django présente soit comme un dictionnaire de dictionnaires, soit à
         plat selon l'encodage reçu. Les deux formes sont acceptées : refuser la
@@ -194,7 +218,12 @@ class PayDunyaGateway:
             or self._nested(section, "custom_data", "transaction")
             or ""
         ).strip()
-        brut = str(section.get("status", "")).strip().lower()
+        if not token:
+            raise GatewayError("Notification sans jeton de facture.")
+
+        confirmee = self._confirm(token)
+
+        brut = str(confirmee.get("status", "")).strip().lower()
 
         status = STATUS_MAP.get(brut)
         if status is None:
@@ -204,7 +233,7 @@ class PayDunyaGateway:
         if brut == "cancelled":
             motif = "Paiement abandonné par le client sur la page PayDunya."
         elif brut == "failed":
-            motif = str(section.get("response_text", "Échec signalé par PayDunya."))
+            motif = str(confirmee.get("response_text", "Échec signalé par PayDunya."))
 
         return Notification(
             # Référence **et** statut : PayDunya notifie plusieurs fois la même
@@ -215,6 +244,39 @@ class PayDunyaGateway:
             status=status,
             reason=motif,
         )
+
+    def _confirm(self, token: str) -> Mapping[str, Any]:
+        """Interroge PayDunya pour le statut réel d'une facture.
+
+        C'est l'appel qui ferme la faille de `authenticate` : la notification
+        posée dit « voici le token, et une empreinte qui ne prouve rien sur son
+        statut » ; cet appel demande directement à PayDunya, avec nos propres
+        clés marchand, ce qu'il en est *réellement*. Un corps forgé peut
+        prétendre à un statut qu'il n'a pas — il ne peut pas faire répondre
+        PayDunya à sa place.
+
+        **Avertissement**, comme pour `_read_checkout` : la forme exacte de
+        cette réponse suit le contrat documenté par PayDunya, non confrontée à
+        l'API réelle depuis ce poste. À vérifier avant la mise en service avec
+        une facture réelle en mode `test`.
+        """
+        try:
+            with httpx.Client(timeout=settings.PAYDUNYA_TIMEOUT_SECONDS) as client:
+                response = client.get(
+                    f"{self._base_url}/checkout-invoice/confirm/{token}",
+                    headers=self._headers,
+                )
+            body: dict[str, Any] = response.json()
+        except httpx.HTTPError as exc:
+            raise GatewayError(f"Confirmation PayDunya impossible : {exc}") from exc
+        except ValueError as exc:
+            raise GatewayError("Réponse de confirmation PayDunya illisible.") from exc
+
+        if str(body.get("response_code")) != SUCCESS_CODE:
+            raise GatewayError(
+                f"PayDunya n'a pas confirmé la facture : {body.get('response_text', 'sans motif')}"
+            )
+        return body
 
     @staticmethod
     def _section(data: Mapping[str, Any]) -> Mapping[str, Any]:
