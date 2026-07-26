@@ -25,7 +25,7 @@ from apps.catalog.models import MenuItem, VerifiedPurchase
 from apps.orders.models import Order, PaymentMethod
 from apps.orders.states import OrderStatus
 from apps.profiles.models import Address
-from apps.restaurants.models import Restaurant
+from apps.restaurants.models import Restaurant, StaffMembership
 from common.money import Money
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
@@ -61,6 +61,9 @@ def staff(restaurant: Restaurant) -> User:
         name="Manager test", permissions=["orders.update_status", "orders.cancel", "orders.refund"]
     )
     member.roles.add(role)
+    # La permission dit ce qu'on sait faire, le rattachement dit sur quoi : un
+    # membre du personnel sans établissement ne voit aucune commande.
+    StaffMembership.objects.create(user=member, restaurant=restaurant)
     return member
 
 

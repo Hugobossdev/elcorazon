@@ -37,6 +37,7 @@ from apps.orders.serializers import (
     StatusTransitionSerializer,
 )
 from apps.orders.services import OrderService
+from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
 from common.permissions import HasPermission, authenticated_user
 
 __all__ = ["OrderViewSet"]
@@ -57,11 +58,14 @@ class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
         user = authenticated_user(self.request)
         queryset = Order.objects.select_related("restaurant").order_by("-placed_at")
 
-        if user.user_type == UserType.STAFF:
-            # Le personnel voit tout : le périmètre par établissement viendra
-            # avec le rattachement du personnel à un restaurant (phase 4d).
-            pass
-        else:
+        if user.user_type == UserType.COURIER:
+            # Le livreur voit les commandes qu'on lui a confiées, et rien
+            # d'autre : ni l'historique du client, ni les courses de ses
+            # collègues.
+            queryset = queryset.filter(assignments__courier__user=user).distinct()
+        elif user.user_type == UserType.STAFF and not is_unscoped(user):
+            queryset = queryset.filter(restaurant_id__in=staff_restaurant_ids(user))
+        elif user.user_type != UserType.STAFF:
             queryset = queryset.filter(customer=user)
 
         if self.action == "retrieve":

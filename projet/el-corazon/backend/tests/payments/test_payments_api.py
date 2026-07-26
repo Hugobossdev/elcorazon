@@ -25,6 +25,7 @@ from apps.orders.models import Order, PaymentMethod
 from apps.orders.states import OrderStatus
 from apps.payments.models import PaymentProvider, PaymentStatus, Refund, Transaction
 from apps.payments.services import PaymentService
+from apps.restaurants.models import Restaurant, StaffMembership
 from common.money import Money
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
@@ -56,11 +57,14 @@ def as_customer(customer: User) -> APIClient:
 
 
 @pytest.fixture
-def as_staff() -> APIClient:
+def as_staff(restaurant: Restaurant) -> APIClient:
     member = User.objects.create_user(
         "caisse@elcorazon.test", "motdepasse", full_name="Kofi Caisse", user_type=UserType.STAFF
     )
     member.roles.add(Role.objects.create(name="Caisse", permissions=["orders.refund"]))
+    # Sans rattachement, la permission `orders.refund` ne porterait sur aucune
+    # commande — c'est le troisième étage de l'ADR-005.
+    StaffMembership.objects.create(user=member, restaurant=restaurant)
     separate = APIClient()
     separate.force_authenticate(member)
     return separate

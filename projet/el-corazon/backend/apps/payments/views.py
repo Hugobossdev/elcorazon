@@ -36,6 +36,7 @@ from apps.payments.serializers import (
     WebhookSerializer,
 )
 from apps.payments.services import PaymentService, RefundService
+from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
 from common.permissions import HasPermission, IsCustomer, authenticated_user
 
 __all__ = ["InitiatePaymentView", "RefundView", "TransactionViewSet", "WebhookView"]
@@ -54,7 +55,11 @@ class TransactionViewSet(ReadOnlyModelViewSet[Transaction]):
         user = authenticated_user(self.request)
         queryset = Transaction.objects.select_related("order").order_by("-created_at")
         if user.user_type == UserType.STAFF:
-            return queryset
+            if is_unscoped(user):
+                return queryset
+            # Même périmètre que les commandes : un encaissement appartient à
+            # l'établissement qui l'a réalisé.
+            return queryset.filter(order__restaurant_id__in=staff_restaurant_ids(user))
         # Le client voit les transactions de **ses** commandes, y compris
         # celles qu'un tiers a réglées pour lui — pas seulement celles dont il
         # est le payeur.
@@ -148,7 +153,14 @@ class RefundView(APIView):
         request=RefundRequestSerializer, responses={201: RefundSerializer}, tags=["payments"]
     )
     def post(self, request: Request, order_id: str) -> Response:
-        order = get_object_or_404(Order, pk=order_id)
+        actor = authenticated_user(request)
+        # La permission `orders.refund` dit qu'on sait rembourser ; le
+        # rattachement dit sur quelles commandes. Sans ce filtre, un opérateur
+        # de Kara rembourserait une commande de Lomé — avec l'argent de Lomé.
+        scope = Order.objects.all()
+        if not is_unscoped(actor):
+            scope = scope.filter(restaurant_id__in=staff_restaurant_ids(actor))
+        order = get_object_or_404(scope, pk=order_id)
 
         serializer = RefundRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -158,6 +170,6 @@ class RefundView(APIView):
             transaction_id=str(serializer.validated_data["transaction"]),
             amount=serializer.validated_data["amount"],
             reason=serializer.validated_data["reason"],
-            actor=authenticated_user(request),
+            actor=actor,
         )
         return Response(RefundSerializer(refund).data, status=status.HTTP_201_CREATED)

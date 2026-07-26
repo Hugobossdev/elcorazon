@@ -14,10 +14,11 @@ from zoneinfo import ZoneInfo
 from django.contrib.gis.db import models as gis
 from django.db import models
 
+from apps.accounts.models import User
 from apps.geography.models import DeliveryZone
 from common.models import TimeStampedModel, UUIDModel
 
-__all__ = ["OpeningHours", "Restaurant", "Weekday"]
+__all__ = ["OpeningHours", "Restaurant", "StaffMembership", "Weekday"]
 
 
 class Restaurant(UUIDModel, TimeStampedModel):
@@ -95,6 +96,48 @@ class Restaurant(UUIDModel, TimeStampedModel):
                 return True
 
         return False
+
+
+class StaffMembership(UUIDModel, TimeStampedModel):
+    """Rattachement d'un membre du personnel à un établissement.
+
+    Sans cette table, « le personnel » est une population indistincte : un
+    opérateur du restaurant de Kara voit — et fait avancer — les commandes de
+    Lomé. La permission dit *ce qu'on a le droit de faire* (ADR-005) ; ce
+    rattachement dit **sur quoi**. Confondre les deux revient à donner à chaque
+    embauche l'accès à toute l'enseigne.
+
+    La table est distincte de `Role` parce que les deux varient
+    indépendamment : un même gérant peut couvrir deux établissements sans
+    changer de rôle, et deux gérants du même établissement peuvent avoir des
+    permissions différentes.
+
+    Elle vit dans `restaurants` et non dans `accounts` : c'est l'établissement
+    qui a du personnel, et `accounts` est le socle dont tout le reste dépend —
+    lui faire connaître les restaurants inverserait le sens du graphe.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="staff_memberships")
+    restaurant = models.ForeignKey(
+        Restaurant, on_delete=models.CASCADE, related_name="staff_memberships"
+    )
+    is_manager = models.BooleanField(
+        default=False,
+        help_text="Informatif : les droits viennent des permissions, pas de ce drapeau.",
+    )
+
+    class Meta:
+        verbose_name = "rattachement du personnel"
+        verbose_name_plural = "rattachements du personnel"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "restaurant"], name="one_membership_per_user_and_restaurant"
+            )
+        ]
+        indexes = [models.Index(fields=["user"]), models.Index(fields=["restaurant"])]
+
+    def __str__(self) -> str:
+        return f"{self.user.full_name} — {self.restaurant.name}"
 
 
 class Weekday(models.IntegerChoices):
