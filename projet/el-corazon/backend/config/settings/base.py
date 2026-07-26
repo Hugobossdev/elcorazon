@@ -343,6 +343,15 @@ IDEMPOTENCY_RETENTION_HOURS: int = config("IDEMPOTENCY_RETENTION_HOURS", default
 # aux tests ; le connecteur FCM se branche par cette variable.
 PUSH_BACKEND: str = config("PUSH_BACKEND", default="apps.notifications.push.ConsolePushBackend")
 
+# Firebase Cloud Messaging. Le fichier de compte de service est **monté**, comme
+# les clés JWT : c'est un JSON multiligne, que ni `env_file` ni la plupart des
+# gestionnaires de configuration ne savent porter sans échappement fragile.
+FCM_CREDENTIALS_PATH: str = config("FCM_CREDENTIALS_PATH", default="")
+FCM_PROJECT_ID: str = config("FCM_PROJECT_ID", default="")
+# L'envoi est unitaire — l'API v1 n'a pas de diffusion groupée. Un délai court
+# évite qu'un appareil injoignable retarde tous les suivants.
+FCM_TIMEOUT_SECONDS: int = config("FCM_TIMEOUT_SECONDS", default=10, cast=int)
+
 # Connecteur **par prestataire**, résolu à l'appel (`apps.payments.gateway`).
 # Les espèces et le portefeuille n'appellent personne : le bac à sable leur
 # convient et leur conviendra toujours. Seul `paydunya` s'adresse à un service

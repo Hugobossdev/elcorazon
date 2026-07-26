@@ -124,6 +124,28 @@ le virement se fait depuis leur tableau de bord. Le remboursement reste en
 `pending` jusqu'à confirmation humaine — à dire à l'exploitation, sinon
 quelqu'un cliquera « rembourser » et croira que c'est fait.
 
+## Notifications push
+
+`ConsolePushBackend` par défaut ; `FirebaseCloudMessagingBackend` se branche par
+`PUSH_BACKEND`. Trois choses distinguent FCM d'un simple POST :
+
+- **l'authentification est un jeton OAuth**, pas une clé d'API — la clé serveur
+  a été retirée par Google. `google-auth` signe l'assertion et rafraîchit le
+  jeton ;
+- **l'envoi est unitaire** : l'API v1 n'a pas de diffusion groupée, donc une
+  requête par appareil. C'est pourquoi tout cela vit dans une tâche Celery et
+  jamais dans le cycle de requête ;
+- **la réponse d'erreur porte la décision.** `UNREGISTERED`,
+  `INVALID_ARGUMENT` et `SENDER_ID_MISMATCH` font supprimer le jeton ; tout le
+  reste — quota, indisponibilité, réseau — déclenche une reprise. Le statut HTTP
+  ne décide pas seul : un 400 peut signaler un jeton mort comme une charge utile
+  mal formée, et purger sur le second effacerait des appareils sains.
+
+**Avant la mise en service**, envoyer une notification à un appareil de test et
+comparer la réponse d'erreur reçue à `ERREURS_DEFINITIVES` : c'est cette
+classification qui compte, et elle n'a pas pu être confrontée au service réel
+depuis ce dépôt.
+
 ## Limitation de débit
 
 Elle s'applique **partout** : `anon` et `user` sont le défaut du projet, et une

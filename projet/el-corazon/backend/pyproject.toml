@@ -31,6 +31,10 @@ dependencies = [
     # qui évite une suite lente, instable, et rouge les jours où le prestataire
     # l'est.
     "httpx==0.28.*",
+    # Jetons OAuth du connecteur FCM. L'API v1 n'accepte plus la clé serveur :
+    # il faut signer une assertion avec un compte de service et rafraîchir le
+    # jeton obtenu. C'est exactement le genre de code qu'on n'écrit pas soi-même.
+    "google-auth==2.*",
     "structlog==25.*",
     # Requis par ImageField : Django valide le contenu de l'image à
     # l'enregistrement, ce qui évite qu'un fichier arbitraire renommé en .jpg
