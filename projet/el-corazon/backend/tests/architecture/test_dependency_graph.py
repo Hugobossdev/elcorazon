@@ -58,6 +58,10 @@ ALLOWED: dict[str, set[str]] = {
     "delivery": {"accounts", "geography", "orders", "restaurants"},
     "tracking": {"accounts", "delivery", "orders", "restaurants"},
     "notifications": {"accounts", "delivery", "orders"},
+    # Comme `notifications` : l'abonné connaît l'émetteur, jamais l'inverse
+    # (voir `test_orders_ne_connait_aucun_de_ses_abonnes`). `loyalty` réagit à
+    # la livraison par signal et frappe ses codes via `promotions`.
+    "loyalty": {"accounts", "orders", "promotions", "restaurants"},
 }
 
 

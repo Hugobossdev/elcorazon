@@ -44,7 +44,8 @@ class PromotionAdmin(admin.ModelAdmin):
         "is_active",
     )
     list_filter = ("kind", "is_active", "restaurant")
-    search_fields = ("code", "description")
+    search_fields = ("code", "description", "owner__email")
+    autocomplete_fields = ("owner",)
     list_select_related = ("restaurant",)
     inlines = (RedemptionInline,)
     readonly_fields = ("used_count", "created_at", "updated_at")
@@ -52,7 +53,7 @@ class PromotionAdmin(admin.ModelAdmin):
     amount_display = money_display("amount", "Montant")
 
     fieldsets = (
-        ("Code", {"fields": ("code", "description", "is_active", "restaurant")}),
+        ("Code", {"fields": ("code", "description", "is_active", "restaurant", "owner")}),
         (
             "Barème",
             {

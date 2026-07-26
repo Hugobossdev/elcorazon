@@ -84,6 +84,16 @@ class Promotion(UUIDModel, TimeStampedModel):
         Restaurant, on_delete=models.CASCADE, null=True, blank=True, related_name="promotions"
     )
 
+    # Titulaire d'un code **nominatif**. Nul pour une campagne ouverte à tous.
+    #
+    # Un code frappé par un échange de points n'appartient qu'à celui qui l'a
+    # payé : sans ce champ, `usage_limit_per_user=1` empêcherait seulement de
+    # l'utiliser deux fois, pas de l'utiliser par quelqu'un d'autre — et un
+    # code court finit par circuler.
+    owner = models.ForeignKey(
+        User, on_delete=models.CASCADE, null=True, blank=True, related_name="promotions"
+    )
+
     is_active = models.BooleanField(default=True)
 
     class Meta:

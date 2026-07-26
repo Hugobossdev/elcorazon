@@ -27,7 +27,8 @@ app.autodiscover_tasks()
 # Planifications prévues, par ordre d'arrivée :
 #
 #   apps.loyalty.tasks.renew_subscriptions         toutes les heures
-#   apps.loyalty.tasks.expire_points               quotidienne
+#       Les abonnements attendent une cible de paiement qui ne soit pas une
+#       commande : `Transaction.order` est aujourd'hui obligatoire.
 #
 # Les trois entrées ci-dessous pointent vers des tâches **qui existent** : une
 # entrée orpheline est envoyée à chaque tour par beat et rejetée par le worker,
@@ -45,6 +46,12 @@ app.conf.beat_schedule = {
         # de retry d'un client mobile.
         "task": "apps.orders.tasks.purge_idempotency_keys",
         "schedule": 3600.0,
+    },
+    "expire-points": {
+        # Les points s'éteignent après une période sans mouvement. Quotidien :
+        # la fenêtre se compte en mois, une passe par jour suffit largement.
+        "task": "apps.loyalty.tasks.expire_points",
+        "schedule": 86400.0,
     },
     "purge-unregistered-devices": {
         # Un appareil que le service push ne déclare jamais injoignable mais

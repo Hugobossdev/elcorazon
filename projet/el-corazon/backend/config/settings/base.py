@@ -56,9 +56,10 @@ LOCAL_APPS: list[str] = [
     "apps.tracking",
     "apps.notifications",
     "apps.promotions",
+    "apps.loyalty",
     #
     # Second temps
-    # "apps.inventory", "apps.loyalty",
+    # "apps.inventory",
     # "apps.gamification", "apps.social", "apps.support", "apps.analytics",
 ]
 
@@ -347,6 +348,14 @@ IDEMPOTENCY_RETENTION_HOURS: int = config("IDEMPOTENCY_RETENTION_HOURS", default
 # `ConsolePushBackend` n'appelle personne et convient au développement comme
 # aux tests ; le connecteur FCM se branche par cette variable.
 PUSH_BACKEND: str = config("PUSH_BACKEND", default="apps.notifications.push.ConsolePushBackend")
+
+# Fidélité. Un diviseur en unité mineure plutôt qu'un taux : à 100, une commande
+# de 4 000 F rapporte 40 points, exactement. Un taux flottant donnerait
+# 39,999… et une troncature qui dépend de l'arrondi de la machine.
+LOYALTY_MINOR_UNITS_PER_POINT: int = config("LOYALTY_MINOR_UNITS_PER_POINT", default=100, cast=int)
+# Les points s'éteignent après cette durée **sans mouvement**. Politique
+# commerciale, donc réglage : elle se négocie et change sans redéploiement.
+LOYALTY_EXPIRY_MONTHS: int = config("LOYALTY_EXPIRY_MONTHS", default=12, cast=int)
 
 # Firebase Cloud Messaging. Le fichier de compte de service est **monté**, comme
 # les clés JWT : c'est un JSON multiligne, que ni `env_file` ni la plupart des

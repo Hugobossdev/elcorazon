@@ -82,6 +82,11 @@ class PromotionService:
                 ends_at=promotion.ends_at.isoformat(),
             )
 
+        if promotion.owner_id is not None and promotion.owner_id != user.pk:
+            # Code nominatif présenté par quelqu'un d'autre. Refusé sans dire
+            # à qui il appartient — le message serait un annuaire.
+            raise PromotionRefused("Ce code n'existe pas.")
+
         if promotion.restaurant_id is not None and promotion.restaurant_id != restaurant.pk:
             # Un code d'établissement sur un autre établissement : refusé sans
             # dire lequel, pour ne pas transformer la saisie en annuaire.
