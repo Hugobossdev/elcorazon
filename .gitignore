@@ -1,0 +1,17 @@
+# La racine de ce dépôt est le Bureau Windows. Tout fichier qu'on y dépose —
+# un PDF, un raccourci, un tableur — devient donc candidat au suivi, et un
+# `git add -A` réflexe suffit à l'embarquer ; le premier `push` le publie.
+#
+# La règle est inversée pour cette raison : rien n'est suivi par défaut, et
+# seuls les chemins du projet sont réintroduits explicitement. Ajouter un
+# nouveau composant au dépôt demande une ligne ici — c'est le but, la décision
+# devient consciente au lieu d'être subie.
+#
+# Ceci ne dépiste rien : les fichiers déjà suivis le restent. Seuls les
+# fichiers non suivis sont concernés.
+
+/*
+
+!/.gitignore
+!/.github/
+!/el-corazon/
