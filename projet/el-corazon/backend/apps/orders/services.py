@@ -32,6 +32,7 @@ from apps.profiles.models import Address
 from apps.restaurants.models import Restaurant
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
+from common.realtime import order_group, publish
 
 __all__ = ["OrderService", "next_reference"]
 
@@ -253,6 +254,24 @@ class OrderService:
 
         if target == OrderStatus.DELIVERED:
             OrderService._record_purchases(locked)
+
+        # La diffusion part **après le commit** et non pendant : annoncer
+        # « commande confirmée » sur une transaction qui échoue ensuite laisse
+        # le client devant un écran qui ment, et aucun événement ultérieur ne
+        # vient le corriger.
+        transaction.on_commit(
+            lambda: publish(
+                order_group(locked.pk),
+                "order.status",
+                {
+                    "order": str(locked.pk),
+                    "reference": locked.reference,
+                    "from_status": previous,
+                    "status": target,
+                    "reason": reason,
+                },
+            )
+        )
 
         return locked
 

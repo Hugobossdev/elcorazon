@@ -34,6 +34,7 @@ from apps.orders.services import OrderService
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
+from common.realtime import courier_group, order_group, publish
 
 __all__ = ["AssignmentService", "CourierService", "courier_fee_for"]
 
@@ -215,7 +216,26 @@ class AssignmentService:
                 assignment_status=active.status,
             )
 
-        return Assignment.objects.create(order=locked, courier=courier)
+        assignment = Assignment.objects.create(order=locked, courier=courier)
+
+        # C'est le flux où rater un événement coûte le plus cher : une course
+        # non vue est un repas qui refroidit. La notification push la doublera,
+        # parce qu'un livreur n'a pas son application au premier plan en
+        # roulant (ADR-008).
+        transaction.on_commit(
+            lambda: publish(
+                courier_group(courier.pk),
+                "delivery.offered",
+                {
+                    "assignment": str(assignment.pk),
+                    "order": str(locked.pk),
+                    "reference": locked.reference,
+                    "restaurant": locked.restaurant.name,
+                    "delivery_address_line": locked.delivery_address_line,
+                },
+            )
+        )
+        return assignment
 
     @staticmethod
     def _active_for(order: Order) -> Assignment | None:
@@ -333,6 +353,23 @@ class AssignmentService:
             touched.append("decline_reason")
 
         locked.save(update_fields=[*touched, "updated_at"])
+
+        # L'étape de course est diffusée pour elle-même, en plus du statut de
+        # commande que la projection émettra peut-être : « votre livreur a
+        # récupéré la commande » et « commande récupérée » sont le même instant
+        # mais pas la même information — l'une nomme le livreur, l'autre pas.
+        transaction.on_commit(
+            lambda: publish(
+                order_group(locked.order_id),
+                "delivery.status",
+                {
+                    "assignment": str(locked.pk),
+                    "order": str(locked.order_id),
+                    "status": target,
+                    "courier": locked.courier.user.full_name,
+                },
+            )
+        )
 
         AssignmentService._project(locked, target, actor=actor, reason=reason)
 

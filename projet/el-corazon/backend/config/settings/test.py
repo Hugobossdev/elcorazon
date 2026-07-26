@@ -51,6 +51,12 @@ globals().update(discover())
 
 TESTING = True
 
+# `AllowedHostsOriginValidator` protège les WebSocket : sans hôte autorisé, il
+# ferme **toute** connexion, y compris celle d'un test. Le défaut est le bon —
+# une configuration oubliée refuse au lieu d'ouvrir — mais la suite doit
+# déclarer son hôte comme le ferait un déploiement.
+ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
+
 # --------------------------------------------------------------- sans service externe
 
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}

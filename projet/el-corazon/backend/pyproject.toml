@@ -38,6 +38,11 @@ dev = [
     "pytest==8.*",
     "pytest-django==4.*",
     "pytest-cov==7.*",
+    # Requis par `channels.testing.WebsocketCommunicator`, qui est une API
+    # asynchrone : sans boucle d'événements fournie au test, aucun socket ne
+    # peut être ouvert, donc aucune règle d'autorisation à la connexion ne
+    # peut être vérifiée.
+    "pytest-asyncio==1.*",
     "factory-boy==3.*",
     "freezegun==1.*",
     "ruff==0.14.*",
@@ -57,6 +62,11 @@ DJANGO_SETTINGS_MODULE = "config.settings.test"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config -ra"
+# Les tests WebSocket sont asynchrones et le déclarent par `@pytest.mark.asyncio`.
+# Mode explicite plutôt qu'`auto` : un test synchrone accidentellement traité
+# comme une coroutine passerait sans rien exécuter — vert et vide.
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
 markers = [
     # La CI dispose de PostGIS et de Redis ; un poste de développement sans
     # Docker n'en a pas. Ces marqueurs permettent d'exécuter localement le
@@ -158,6 +168,17 @@ module = [
     "pyogrio.*",
 ]
 ignore_missing_imports = true
+
+# Les consommateurs WebSocket héritent et se décorent avec Channels, qui ne
+# publie pas d'annotations : la classe de base et `database_sync_to_async` sont
+# vus comme `Any`, ce que le mode strict refuse par principe. L'assouplissement
+# est **limité à ces modules** — le reste du code, y compris la logique métier
+# qu'ils appellent, reste vérifié strictement.
+[[tool.mypy.overrides]]
+module = ["common.consumers", "apps.*.consumers"]
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
+warn_return_any = false
 
 [tool.django-stubs]
 django_settings_module = "config.settings.test"

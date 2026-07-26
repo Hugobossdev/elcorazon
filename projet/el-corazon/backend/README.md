@@ -100,6 +100,25 @@ droit de faire* (`orders.refund`), le rattachement à un établissement
 rattachement ne voit rien : un oubli de configuration produit une panne
 visible, jamais un accès trop large et silencieux.
 
+## WebSocket
+
+| Route | Qui |
+|---|---|
+| `ws/orders/{id}/tracking/` | le client de la commande, son livreur assigné, le personnel de l'établissement |
+| `ws/couriers/me/` | le livreur, sur sa propre file — aucun identifiant dans l'URL |
+
+Le jeton se présente en en-tête `Authorization: Bearer …`, ou à défaut en
+`?token=` pour les navigateurs, qui ne savent pas poser d'en-tête sur un
+WebSocket. **L'autorisation est vérifiée avant l'acceptation** : un socket
+refusé est fermé avec un code de la plage 4000 (`4401` jeton, `4403` droit,
+`4409` geste interdit sur un socket pourtant ouvert), jamais laissé ouvert en
+lecture seule.
+
+Chaque message porte un `seq` croissant par groupe. À la reconnexion, le client
+redemande la suite avec `?since=<seq>` ; s'il a été absent plus longtemps que
+le journal, il reçoit un `realtime.gap` qui lui dit de recharger par HTTP
+plutôt que de croire qu'il n'a rien manqué.
+
 Le contrat complet est dans le schéma OpenAPI, généré depuis les
 sérialiseurs :
 
