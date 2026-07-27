@@ -13,6 +13,7 @@ commit `56e0bec`).
 | [01 — Analyse fonctionnelle](01-analyse-fonctionnelle.md) | Acteurs, parcours, **20 invariants métier**, besoins d'API et de temps réel, périmètre v2 |
 | [02 — Architecture générale](02-architecture-generale.md) | Composants, flux, découpage en applications, couches, déploiement |
 | [03 — Modèle de données](03-modele-de-donnees.md) | Schéma PostgreSQL/PostGIS, invariants portés par la structure |
+| [04 — Migration Flutter](04-migration-flutter.md) | Plan de la Phase 6 : rupture nette avec Supabase, module Dart partagé, ordre de migration par domaine et par app |
 
 ## Décisions (ADR)
 
@@ -52,7 +53,8 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
 - [x] Phase 5 — Temps réel
   - [x] 5a — WebSocket : suivi de commande, file du livreur, rattrapage par séquence
   - [x] 5b — Notifications, push par Celery, événements de domaine
-- [ ] Phase 6 — Flutter Clean Architecture
+- [ ] Phase 6 — Flutter Clean Architecture ([plan détaillé](04-migration-flutter.md), rupture nette
+  avec Supabase — pas de coexistence transitoire)
 - [x] Phase 7 — Tests et qualité (graphe vérifié, contrat vérifié, plancher de couverture)
 - [x] Fidélité par points (F1-F5) — solde, journal, catalogue de récompenses, expiration par
   inactivité, échange contre un code promotionnel nominatif
