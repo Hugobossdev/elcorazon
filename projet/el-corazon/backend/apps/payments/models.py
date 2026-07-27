@@ -92,7 +92,12 @@ class Transaction(UUIDModel, TimeStampedModel):
     réussie, ou une part par participant d'un paiement partagé.
     """
 
-    order = models.ForeignKey(Order, on_delete=models.PROTECT, related_name="transactions")
+    # Nul pour un encaissement qui ne règle pas de commande — un abonnement
+    # aujourd'hui. `payments` ne connaît pas ces domaines : c'est à eux de
+    # relier leur propre objet à la transaction, jamais l'inverse (ADR-002).
+    order = models.ForeignKey(
+        Order, on_delete=models.PROTECT, null=True, blank=True, related_name="transactions"
+    )
     provider = models.CharField(max_length=16, choices=PaymentProvider.choices)
 
     # Référence côté prestataire. Unique : c'est la clé qui rend le

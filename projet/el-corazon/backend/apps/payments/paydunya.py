@@ -105,19 +105,27 @@ class PayDunyaGateway:
         `custom_data` transporte notre identifiant de transaction. Il revient
         tel quel dans la notification, ce qui donne un second chemin de
         rapprochement si le jeton de facture venait à manquer.
+
+        `order` est absent pour un encaissement qui n'en règle pas — un
+        abonnement. La facture décrit alors la transaction elle-même plutôt
+        qu'une commande qui n'existe pas.
         """
         order = transaction.order
+        description = (
+            f"Commande {order.reference} — {order.restaurant.name}" if order else "El Corazón"
+        )
+        store_name = order.restaurant.name if order else "El Corazón"
+        custom_data = {"transaction": str(transaction.pk)}
+        if order:
+            custom_data |= {"order": str(order.pk), "reference": order.reference}
+
         payload = {
             "invoice": {
                 "total_amount": transaction.amount.amount_minor,
-                "description": f"Commande {order.reference} — {order.restaurant.name}",
+                "description": description,
             },
-            "store": {"name": order.restaurant.name},
-            "custom_data": {
-                "transaction": str(transaction.pk),
-                "order": str(order.pk),
-                "reference": order.reference,
-            },
+            "store": {"name": store_name},
+            "custom_data": custom_data,
             "actions": {"callback_url": settings.PAYDUNYA_CALLBACK_URL},
         }
 

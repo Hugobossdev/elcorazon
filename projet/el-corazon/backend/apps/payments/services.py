@@ -28,6 +28,7 @@ from apps.payments.models import (
     Transaction,
     WebhookEvent,
 )
+from apps.payments.signals import payment_transaction_settled
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
 
@@ -123,6 +124,38 @@ class PaymentService:
         return pending, instruction
 
     @staticmethod
+    @transaction.atomic
+    def initiate_external(
+        *, provider: str, amount: Money, payer: User, payer_phone: str = ""
+    ) -> tuple[Transaction, CheckoutInstruction]:
+        """Ouvre une demande de paiement qui ne règle pas de commande.
+
+        Même chemin que `initiate` — une transaction en attente, une demande
+        ouverte chez le prestataire, `pending → processing` — sans les gardes
+        propres à une commande (annulation, partage, solde restant), qui n'ont
+        pas de sens ici. `order` reste vide : c'est à l'appelant de relier sa
+        propre entité à la transaction, jamais l'inverse (ADR-002).
+        """
+        if not amount.is_positive:
+            raise BusinessRuleViolation("Le montant à encaisser doit être strictement positif.")
+
+        pending = Transaction(  # type: ignore[misc]
+            order=None,
+            provider=provider,
+            provider_reference="",
+            amount=amount,
+            payer=payer,
+            payer_phone=payer_phone,
+            status=PaymentStatus.PENDING,
+        )
+        instruction = gateway_for(provider).open_checkout(pending)
+        pending.provider_reference = instruction.provider_reference
+        pending.save()
+
+        PaymentService._move(pending, PaymentStatus.PROCESSING)
+        return pending, instruction
+
+    @staticmethod
     def _move(txn: Transaction, target: str) -> None:
         PAYMENT_MACHINE.validate(txn.status, target)
         txn.status = target
@@ -212,14 +245,20 @@ class PaymentService:
         PaymentService._move(txn, target)
 
         if target == PaymentStatus.COMPLETED:
-            # La part se solde **parce que** sa transaction s'est soldée (P2).
-            # Importé ici et non en tête : `split` a besoin de ce module pour
-            # ouvrir une demande de paiement, et l'import croisé au chargement
-            # ferait échouer le démarrage.
-            from apps.payments.split import SplitService
+            if txn.order is not None:
+                # La part se solde **parce que** sa transaction s'est soldée
+                # (P2). Importé ici et non en tête : `split` a besoin de ce
+                # module pour ouvrir une demande de paiement, et l'import
+                # croisé au chargement ferait échouer le démarrage.
+                from apps.payments.split import SplitService
 
-            SplitService.on_transaction_settled(txn)
-            PaymentService._confirm_order(txn.order)
+                SplitService.on_transaction_settled(txn)
+                PaymentService._confirm_order(txn.order)
+
+            # Émis pour toute transaction, y compris celles qui ne règlent pas
+            # de commande — un abonnement aujourd'hui. `payments` n'a pas
+            # besoin de savoir qui écoute ; voir `apps.payments.signals`.
+            payment_transaction_settled.send(sender=Transaction, transaction=txn)
 
         PaymentService._close(event)
         return WebhookOutcome(True, f"Transaction passée en {target}.", txn)
