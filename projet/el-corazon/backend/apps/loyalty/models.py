@@ -27,6 +27,7 @@ from apps.accounts.models import User
 from apps.orders.models import Order
 from apps.restaurants.models import Restaurant
 from common.models import TimeStampedModel, UUIDModel
+from common.money import Money
 
 __all__ = ["EntryKind", "PointsAccount", "PointsEntry", "Reward", "RewardKind", "RewardRedemption"]
 
@@ -167,6 +168,19 @@ class Reward(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.points_cost} points)"
+
+    @property
+    def discount(self) -> Money:
+        """La remise obtenue, recomposée en `Money`.
+
+        Une propriété plutôt que le `MoneyField` de `common.fields` : ce dernier
+        matérialise un `BigIntegerField`, là où le montant doit ici être
+        **positif** — la contrainte `reward_discount_is_set` s'appuie sur
+        `discount_minor__gt=0`. Les deux colonnes sont donc déclarées à la main,
+        et recomposées ici pour que la sérialisation reste celle de l'ADR-007
+        partout, sans exception locale.
+        """
+        return Money(self.discount_minor, self.discount_currency)
 
 
 class RewardRedemption(UUIDModel):

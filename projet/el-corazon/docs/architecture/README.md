@@ -54,6 +54,17 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
   - [x] 5b — Notifications, push par Celery, événements de domaine
 - [ ] Phase 6 — Flutter Clean Architecture
 - [x] Phase 7 — Tests et qualité (graphe vérifié, contrat vérifié, plancher de couverture)
+- [x] Fidélité par points (F1-F5) — solde, journal, catalogue de récompenses, expiration par
+  inactivité, échange contre un code promotionnel nominatif
+- [x] Gamification (G1) — succès, badges, défis, débloqués par la livraison d'une commande,
+  crédités une seule fois même si l'événement est rejoué
+- [x] Social (S2-S4) — groupes à capacité vérifiée sous verrou, publications dont la visibilité
+  se filtre à chaque accès, partage de commande restreint à son propriétaire
+- [x] Support — tickets et fil de messages, réclamations et demandes de retour, toutes
+  cloisonnées par propriétaire ; le montant d'un retour est plafonné au total payé
+- [x] Analytics — journal d'événements immuable, rapports de chiffre d'affaires, produits et
+  performance livreur agrégés à la demande depuis les commandes, jamais dupliqués
 
 Ordre de construction retenu : **chemin critique d'abord** — identité, catalogue, panier, commandes,
-paiements, livraison, suivi. Promotions faites ; fidélité, gamification, social, support et analytics ensuite.
+paiements, livraison, suivi. Promotions, fidélité, gamification, social, support et analytics faits.
+Il ne reste que la Phase 6 (Flutter).

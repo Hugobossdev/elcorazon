@@ -57,10 +57,13 @@ LOCAL_APPS: list[str] = [
     "apps.notifications",
     "apps.promotions",
     "apps.loyalty",
+    "apps.gamification",
+    "apps.social",
+    "apps.support",
+    "apps.analytics",
     #
     # Second temps
     # "apps.inventory",
-    # "apps.gamification", "apps.social", "apps.support", "apps.analytics",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -218,6 +221,7 @@ REST_FRAMEWORK = {
         "payment_initiate": "10/min",
         "cart_write": "60/min",
         "review_write": "5/min",
+        "reward_redeem": "5/min",
         # Le suivi fait exception, et à la hausse : un livreur émet toutes les
         # dix secondes, et rattrape en rafale au retour du réseau après un
         # tunnel. Un quota serré couperait le suivi au moment précis où il
@@ -250,16 +254,22 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
     "SCHEMA_PATH_PREFIX": "/api/v1",
-    # Quatre modèles portent un champ `status`, chacun avec son énumération.
-    # Sans ces noms, le générateur les baptise `Status5c8Enum` — un identifiant
-    # qui change dès qu'un choix est ajouté, donc un client généré qui casse
-    # sans raison visible.
+    # Plusieurs modèles portent un champ `status` ou `kind`, chacun avec son
+    # énumération. Sans ces noms, le générateur les baptise `Status5c8Enum` —
+    # un identifiant qui change dès qu'un choix est ajouté, donc un client
+    # généré qui casse sans raison visible. Les trois `kind` du social et du
+    # support sont déclarés sur des `Serializer` nus (pas de `ModelSerializer`
+    # dont le générateur tirerait un nom qualifié) : sans ces entrées, ils
+    # collisionnent tous sous le même nom générique.
     "ENUM_NAME_OVERRIDES": {
         "OrderStatusEnum": "apps.orders.states.OrderStatus.choices",
         "PaymentStatusEnum": "apps.payments.models.PaymentStatus.choices",
         "PaymentMethodEnum": "apps.orders.models.PaymentMethod.choices",
         "PaymentProviderEnum": "apps.payments.models.PaymentProvider.choices",
         "UserTypeEnum": "apps.accounts.models.UserType.choices",
+        "GroupKindEnum": "apps.social.models.GroupKind.choices",
+        "PostKindEnum": "apps.social.models.PostKind.choices",
+        "ComplaintKindEnum": "apps.support.models.ComplaintKind.choices",
     },
 }
 

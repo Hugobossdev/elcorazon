@@ -44,8 +44,12 @@ api_v1 = [
     path("delivery/", include("apps.delivery.urls")),
     path("tracking/", include("apps.tracking.urls")),
     path("notifications/", include("apps.notifications.urls")),
+    path("loyalty/", include("apps.loyalty.urls")),
+    path("gamification/", include("apps.gamification.urls")),
+    path("social/", include("apps.social.urls")),
+    path("support/", include("apps.support.urls")),
+    path("analytics/", include("apps.analytics.urls")),
     # Renseigné au fil des phases — voir docs/architecture/README.md
-    # path("loyalty/", include("apps.loyalty.urls")),
 ]
 
 urlpatterns = [

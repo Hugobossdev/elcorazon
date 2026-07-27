@@ -62,6 +62,19 @@ ALLOWED: dict[str, set[str]] = {
     # (voir `test_orders_ne_connait_aucun_de_ses_abonnes`). `loyalty` réagit à
     # la livraison par signal et frappe ses codes via `promotions`.
     "loyalty": {"accounts", "orders", "promotions", "restaurants"},
+    # Comme `loyalty` : réagit à la livraison par signal, et lit (sans y
+    # écrire) le solde de fidélité pour ses badges.
+    "gamification": {"accounts", "orders", "loyalty"},
+    # Un partage de commande (S3) désigne une commande existante ; le reste du
+    # domaine (groupes, publications, likes) ne dépend de personne d'autre.
+    "social": {"accounts", "orders"},
+    # Une réclamation ou une demande de retour désigne une commande existante ;
+    # aucune écriture dans l'autre sens.
+    "support": {"accounts", "orders"},
+    # Écoute `orders` par signal, comme `loyalty` et `gamification` ; ses
+    # rapports agrègent directement les commandes, leurs lignes et les
+    # courses — la source de vérité, plutôt qu'une table dupliquée.
+    "analytics": {"accounts", "orders", "delivery"},
 }
 
 

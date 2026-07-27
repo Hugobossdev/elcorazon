@@ -23,6 +23,7 @@ __all__ = [
     "OrderCreationThrottle",
     "PaymentInitiationThrottle",
     "ReviewWriteThrottle",
+    "RewardRedemptionThrottle",
     "TrackingPingThrottle",
 ]
 
@@ -47,6 +48,20 @@ class PaymentInitiationThrottle(UserRateThrottle):
     """
 
     scope = "payment_initiate"
+
+
+class RewardRedemptionThrottle(UserRateThrottle):
+    """Échange de points contre une récompense.
+
+    Chaque appel prend un verrou sur le compte, écrit au journal et **frappe un
+    code promotionnel**. Sans quota, un client qui tape sur le bouton dépense
+    tout son solde en une rafale de codes qu'il n'a pas voulus : le débit est
+    atomique (F1) et le solde ne devient jamais négatif, mais rien là-dedans ne
+    dit qu'un second échange était voulu. Le quota est ce qui distingue le geste
+    répété de la boucle.
+    """
+
+    scope = "reward_redeem"
 
 
 class CartWriteThrottle(UserRateThrottle):

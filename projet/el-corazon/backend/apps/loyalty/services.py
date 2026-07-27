@@ -182,6 +182,30 @@ class LoyaltyService:
             description=description,
         )
 
+    # ------------------------------------------------------------ ajustement
+
+    @staticmethod
+    @transaction.atomic
+    def adjust(*, user: User, points: int, description: str) -> PointsEntry:
+        """Crédite un ajustement hors commande — succès débloqué, geste commercial.
+
+        Passe par `_move`, comme `earn` : même mise à jour du solde, même ligne
+        de journal, dans la même transaction. Un second chemin qui recopierait
+        cette logique pour la gamification finirait par en diverger.
+
+        `points` doit être strictement positif : un ajustement négatif
+        reprendrait des points déjà dépensés en récompense sans que le client
+        ait rien fait de mal. Un retrait disciplinaire reste un geste du
+        back-office, pas un point d'entrée partagé.
+        """
+        if points <= 0:
+            raise BusinessRuleViolation("Un ajustement crédité doit être strictement positif.")
+
+        account = PointsAccount.objects.select_for_update().get_or_create(user=user)[0]
+        return LoyaltyService._move(
+            account=account, delta=points, kind=EntryKind.ADJUSTED, description=description
+        )
+
     # ----------------------------------------------------------- expiration
 
     @staticmethod
