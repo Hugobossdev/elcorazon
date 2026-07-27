@@ -34,7 +34,7 @@ from apps.promotions.services import PromotionService
 from apps.restaurants.models import Restaurant
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
-from common.realtime import order_group, publish
+from common.realtime import order_group, publish, restaurant_group
 
 __all__ = ["OrderService", "next_reference"]
 
@@ -342,19 +342,21 @@ class OrderService:
         # « commande confirmée » sur une transaction qui échoue ensuite laisse
         # le client devant un écran qui ment, et aucun événement ultérieur ne
         # vient le corriger.
-        transaction.on_commit(
-            lambda: publish(
-                order_group(locked.pk),
-                "order.status",
-                {
-                    "order": str(locked.pk),
-                    "reference": locked.reference,
-                    "from_status": previous,
-                    "status": target,
-                    "reason": reason,
-                },
-            )
-        )
+        def _diffuser() -> None:
+            payload = {
+                "order": str(locked.pk),
+                "reference": locked.reference,
+                "from_status": previous,
+                "status": target,
+                "reason": reason,
+            }
+            publish(order_group(locked.pk), "order.status", payload)
+            # Même événement, second public : le tableau de bord du personnel
+            # (ADR-008) apprend qu'une commande de son établissement vient de
+            # changer d'état, sans avoir à interroger l'API en boucle.
+            publish(restaurant_group(locked.restaurant_id), "order.status", payload)
+
+        transaction.on_commit(_diffuser)
 
         # L'événement de domaine part d'ici. `orders` ne connaît aucun de ses
         # abonnés — c'est le second mécanisme de l'ADR-002, et la seule façon

@@ -14,12 +14,12 @@ from __future__ import annotations
 from django.urls import URLPattern, URLResolver, path
 
 from apps.delivery.consumers import CourierFeedConsumer
-from apps.tracking.consumers import OrderTrackingConsumer
+from apps.restaurants.consumers import RestaurantDashboardConsumer
+from apps.tracking.consumers import OrderChatConsumer, OrderTrackingConsumer
 
 websocket_urlpatterns: list[URLPattern | URLResolver] = [
     path("ws/orders/<uuid:order_id>/tracking/", OrderTrackingConsumer.as_asgi()),
+    path("ws/orders/<uuid:order_id>/chat/", OrderChatConsumer.as_asgi()),
     path("ws/couriers/me/", CourierFeedConsumer.as_asgi()),
-    # Renseigné plus tard :
-    #   ws/orders/<uuid:order_id>/chat/       chat client ↔ livreur
-    #   ws/restaurants/<uuid:id>/dashboard/   tableau de bord du personnel
+    path("ws/restaurants/<uuid:restaurant_id>/dashboard/", RestaurantDashboardConsumer.as_asgi()),
 ]

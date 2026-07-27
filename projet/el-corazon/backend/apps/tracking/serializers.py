@@ -15,7 +15,12 @@ from rest_framework import serializers
 from apps.tracking.models import LocationPing
 from common.serializers import LocationField
 
-__all__ = ["LocationPingSerializer", "PingWriteSerializer", "TrackingSerializer"]
+__all__ = [
+    "ChatMessageSerializer",
+    "LocationPingSerializer",
+    "PingWriteSerializer",
+    "TrackingSerializer",
+]
 
 
 class LocationPingSerializer(serializers.ModelSerializer[LocationPing]):
@@ -51,6 +56,19 @@ class PingWriteSerializer(serializers.Serializer[Any]):
     heading_deg = serializers.FloatField(
         required=False, allow_null=True, default=None, min_value=0, max_value=359.999
     )
+
+
+class ChatMessageSerializer(serializers.Serializer[Any]):
+    """Message échangé sur `ws/orders/{order_id}/chat/`.
+
+    Le chat n'est pas persisté (Phase 1 §5) : ce sérialiseur valide la forme
+    du message avant relais, il ne porte ni modèle ni écriture en base.
+    L'émetteur n'est **pas** un champ du corps — comme pour le suivi de
+    position, il vient de la connexion authentifiée, jamais d'une valeur
+    fournie par le client.
+    """
+
+    text = serializers.CharField(max_length=2000, allow_blank=False, trim_whitespace=True)
 
 
 class TrackingSerializer(serializers.Serializer[Any]):

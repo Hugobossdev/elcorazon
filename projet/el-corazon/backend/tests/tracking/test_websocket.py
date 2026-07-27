@@ -404,3 +404,168 @@ class TestFileDuLivreur:
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
+
+
+class TestChat:
+    """`ws/orders/{id}/chat/` — relais client ↔ livreur, ADR-008.
+
+    Même périmètre que le suivi, moins le personnel : ADR-008 ne cite que le
+    client et le livreur pour ce groupe.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sans_jeton_le_socket_est_ferme(self, tracked_order: Order) -> None:
+        communicator = await connect(f"/ws/orders/{tracked_order.pk}/chat/")
+
+        connected, code = await communicator.connect()
+
+        assert connected is False
+        assert code == CLOSE_UNAUTHENTICATED
+
+    @pytest.mark.asyncio
+    async def test_le_client_est_accepte(self, tracked_order: Order, customer: User) -> None:
+        communicator = await connect(
+            f"/ws/orders/{tracked_order.pk}/chat/",
+            token=await database_sync_to_async(token_for)(customer),
+        )
+
+        connected, _ = await communicator.connect()
+
+        assert connected is True
+        await communicator.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_le_livreur_assigne_est_accepte(
+        self, course: Assignment, courier_user: User
+    ) -> None:
+        communicator = await connect(
+            f"/ws/orders/{course.order_id}/chat/",
+            token=await database_sync_to_async(token_for)(courier_user),
+        )
+
+        connected, _ = await communicator.connect()
+
+        assert connected is True
+        await communicator.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_le_personnel_n_a_pas_acces_au_chat(
+        self, tracked_order: Order, restaurant: Restaurant
+    ) -> None:
+        """ADR-008 ne cite que le client et le livreur pour ce groupe — pas le
+        personnel, contrairement au suivi de position."""
+
+        @database_sync_to_async
+        def personnel() -> User:
+            user = User.objects.create_user(
+                "staff-chat@elcorazon.test",
+                "motdepasse",
+                full_name="Staff",
+                user_type=UserType.STAFF,
+            )
+            user.roles.add(Role.objects.create(name="Lecture", permissions=["orders.read"]))
+            StaffMembership.objects.create(user=user, restaurant=restaurant)
+            return user
+
+        user = await personnel()
+        communicator = await connect(
+            f"/ws/orders/{tracked_order.pk}/chat/",
+            token=await database_sync_to_async(token_for)(user),
+        )
+
+        connected, code = await communicator.connect()
+
+        assert connected is False
+        assert code == CLOSE_FORBIDDEN
+
+    @pytest.mark.asyncio
+    async def test_un_autre_client_est_refuse(self, tracked_order: Order) -> None:
+        intrus = await database_sync_to_async(User.objects.create_user)(
+            "intrus-chat@elcorazon.test", "motdepasse", full_name="Intrus"
+        )
+        communicator = await connect(
+            f"/ws/orders/{tracked_order.pk}/chat/",
+            token=await database_sync_to_async(token_for)(intrus),
+        )
+
+        connected, code = await communicator.connect()
+
+        assert connected is False
+        assert code == CLOSE_FORBIDDEN
+
+    @pytest.mark.asyncio
+    async def test_une_commande_livree_n_ouvre_plus_de_chat(
+        self, tracked_order: Order, customer: User
+    ) -> None:
+        await database_sync_to_async(
+            lambda: Order.objects.filter(pk=tracked_order.pk).update(status=OrderStatus.DELIVERED)
+        )()
+
+        communicator = await connect(
+            f"/ws/orders/{tracked_order.pk}/chat/",
+            token=await database_sync_to_async(token_for)(customer),
+        )
+
+        connected, code = await communicator.connect()
+
+        assert connected is False
+        assert code == CLOSE_FORBIDDEN
+
+    @pytest.mark.asyncio
+    async def test_le_client_et_le_livreur_se_parlent(
+        self, course: Assignment, courier_user: User, customer: User
+    ) -> None:
+        client = await connect(
+            f"/ws/orders/{course.order_id}/chat/",
+            token=await database_sync_to_async(token_for)(customer),
+        )
+        livreur = await connect(
+            f"/ws/orders/{course.order_id}/chat/",
+            token=await database_sync_to_async(token_for)(courier_user),
+        )
+        await client.connect()
+        await livreur.connect()
+
+        # La diffusion touche tout le groupe, l'émetteur compris — comme pour
+        # le suivi de position. Chacun reçoit donc aussi l'écho de son propre
+        # message ; c'est ce qui permet à l'application d'afficher le message
+        # envoyé sans jamais désynchroniser deux appareils du même compte.
+        await client.send_json_to({"text": "J'arrive dans 5 minutes ?"})
+        echo_client = await client.receive_json_from(timeout=5)
+        recu = await livreur.receive_json_from(timeout=5)
+
+        assert echo_client == recu
+        assert recu["type"] == "chat.message"
+        assert recu["sender"] == "customer"
+        assert recu["text"] == "J'arrive dans 5 minutes ?"
+
+        await livreur.send_json_to({"text": "Oui, j'arrive."})
+        await livreur.receive_json_from(timeout=5)  # écho du livreur
+        recu2 = await client.receive_json_from(timeout=5)
+
+        assert recu2["type"] == "chat.message"
+        assert recu2["sender"] == "courier"
+        assert recu2["text"] == "Oui, j'arrive."
+
+        await client.disconnect()
+        await livreur.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_un_message_invalide_ne_ferme_pas_le_socket(
+        self, course: Assignment, customer: User
+    ) -> None:
+        """Répondre par une erreur, contrairement au suivi de position : ici,
+        les deux parties ont le droit d'écrire, un message mal formé n'est
+        donc pas le signe de quelqu'un qui outrepasse son rôle."""
+        client = await connect(
+            f"/ws/orders/{course.order_id}/chat/",
+            token=await database_sync_to_async(token_for)(customer),
+        )
+        await client.connect()
+
+        await client.send_json_to({"text": ""})
+        recu = await client.receive_json_from(timeout=5)
+
+        assert recu["type"] == "error"
+
+        await client.disconnect()

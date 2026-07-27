@@ -29,6 +29,7 @@ __all__ = [
     "BACKLOG_TTL_SECONDS",
     "Event",
     "courier_group",
+    "order_chat_group",
     "order_group",
     "publish",
     "replay",
@@ -62,6 +63,11 @@ class Event:
 def order_group(order_id: object) -> str:
     """Suivi d'une commande : son client, son livreur, le personnel."""
     return f"order.{order_id}.tracking"
+
+
+def order_chat_group(order_id: object) -> str:
+    """Chat d'une commande : son client et son livreur, personne d'autre (ADR-008)."""
+    return f"order.{order_id}.chat"
 
 
 def courier_group(courier_id: object) -> str:
