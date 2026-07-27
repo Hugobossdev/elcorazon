@@ -64,7 +64,11 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
   cloisonnées par propriétaire ; le montant d'un retour est plafonné au total payé
 - [x] Analytics — journal d'événements immuable, rapports de chiffre d'affaires, produits et
   performance livreur agrégés à la demande depuis les commandes, jamais dupliqués
+- [x] Abonnements (P4) — catalogue de plans tarifés serveur, le règlement initial et le
+  renouvellement suivent le chemin normal d'un encaissement (`payments`, P1/P2), jamais une
+  confirmation côté client
 
 Ordre de construction retenu : **chemin critique d'abord** — identité, catalogue, panier, commandes,
-paiements, livraison, suivi. Promotions, fidélité, gamification, social, support et analytics faits.
+paiements, livraison, suivi. Promotions, fidélité, gamification, social, support, analytics et
+abonnements faits.
 Il ne reste que la Phase 6 (Flutter).

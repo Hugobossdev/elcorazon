@@ -60,8 +60,11 @@ ALLOWED: dict[str, set[str]] = {
     "notifications": {"accounts", "delivery", "orders"},
     # Comme `notifications` : l'abonné connaît l'émetteur, jamais l'inverse
     # (voir `test_orders_ne_connait_aucun_de_ses_abonnes`). `loyalty` réagit à
-    # la livraison par signal et frappe ses codes via `promotions`.
-    "loyalty": {"accounts", "orders", "promotions", "restaurants"},
+    # la livraison par signal et frappe ses codes via `promotions`. `payments`
+    # s'y ajoute pour les abonnements (P4) : le règlement, initial ou de
+    # renouvellement, suit le chemin normal d'un encaissement — jamais un
+    # second chemin qui le dupliquerait.
+    "loyalty": {"accounts", "orders", "promotions", "restaurants", "payments"},
     # Comme `loyalty` : réagit à la livraison par signal, et lit (sans y
     # écrire) le solde de fidélité pour ses badges.
     "gamification": {"accounts", "orders", "loyalty"},

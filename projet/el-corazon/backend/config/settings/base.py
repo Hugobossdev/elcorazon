@@ -270,6 +270,7 @@ SPECTACULAR_SETTINGS = {
         "GroupKindEnum": "apps.social.models.GroupKind.choices",
         "PostKindEnum": "apps.social.models.PostKind.choices",
         "ComplaintKindEnum": "apps.support.models.ComplaintKind.choices",
+        "SubscriptionStatusEnum": "apps.loyalty.models.SubscriptionStatus.choices",
     },
 }
 
@@ -366,6 +367,13 @@ LOYALTY_MINOR_UNITS_PER_POINT: int = config("LOYALTY_MINOR_UNITS_PER_POINT", def
 # Les points s'éteignent après cette durée **sans mouvement**. Politique
 # commerciale, donc réglage : elle se négocie et change sans redéploiement.
 LOYALTY_EXPIRY_MONTHS: int = config("LOYALTY_EXPIRY_MONTHS", default=12, cast=int)
+# Délai après l'échéance d'un abonnement pendant lequel un renouvellement est
+# encore tenté avant de passer l'abonnement en expiré — le temps qu'un moyen
+# de paiement refusé soit corrigé sans perdre l'abonnement pour un incident
+# d'un jour.
+SUBSCRIPTION_RENEWAL_GRACE_DAYS: int = config(
+    "SUBSCRIPTION_RENEWAL_GRACE_DAYS", default=3, cast=int
+)
 
 # Firebase Cloud Messaging. Le fichier de compte de service est **monté**, comme
 # les clés JWT : c'est un JSON multiligne, que ni `env_file` ni la plupart des

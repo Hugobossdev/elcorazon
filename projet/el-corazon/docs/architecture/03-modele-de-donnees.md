@@ -162,13 +162,13 @@ n'est pas réellement tenu.
 
 ## 3. Ce qui vient ensuite
 
+`notifications`, `promotions`, `loyalty` (points, récompenses **et** abonnements — P4), `gamification`,
+`social`, `support` et `analytics` sont construits — voir l'avancement dans `README.md`. Il ne reste
+que :
+
 | App | Entités | Points d'attention |
 |---|---|---|
-| `inventory` | `StockItem`, `StockMovement` | Décrément lié au cycle de commande — absent de l'existant |
-| `notifications` | `Notification`, `Preference` | Canal transactionnel jamais coupé par les préférences marketing |
-| `promotions` | `Promotion`, `PromotionUsage` | Quota global **et** par utilisateur (F4) |
-| `loyalty` | `PointsLedger`, `Reward`, `Redemption`, `Subscription` | Journal immuable (F5) ; débit conditionnel atomique (F1) ; catalogue de plans tarifés serveur (P4) |
-| `gamification`, `social`, `support`, `analytics` | — | Second temps, après la mise en service du chemin critique |
+| `inventory` | `StockItem`, `StockMovement` | Décrément lié au cycle de commande — absent de l'existant. Reporté après la mise en service du socle (`config/settings/base.py`, « Second temps ») |
 
 ---
 

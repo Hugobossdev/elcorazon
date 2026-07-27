@@ -22,18 +22,8 @@ app.autodiscover_tasks()
 # Le calendrier est rempli **au fur et à mesure que les tâches existent** : une
 # entrée pointant vers une tâche non enregistrée est envoyée à chaque tour par
 # beat et rejetée par le worker, ce qui produit une alerte permanente à laquelle
-# l'équipe finit par ne plus prêter attention.
-#
-# Planifications prévues, par ordre d'arrivée :
-#
-#   apps.loyalty.tasks.renew_subscriptions         toutes les heures
-#       Les abonnements attendent une cible de paiement qui ne soit pas une
-#       commande : `Transaction.order` est aujourd'hui obligatoire.
-#
-# Les trois entrées ci-dessous pointent vers des tâches **qui existent** : une
-# entrée orpheline est envoyée à chaque tour par beat et rejetée par le worker,
-# ce qui produit une alerte permanente à laquelle l'équipe finit par ne plus
-# prêter attention.
+# l'équipe finit par ne plus prêter attention. Chaque entrée ci-dessous pointe
+# vers une tâche qui existe réellement.
 app.conf.beat_schedule = {
     "purge-stale-locations": {
         # Le suivi n'a de valeur qu'en direct. Sans purge, la table des
@@ -59,5 +49,13 @@ app.conf.beat_schedule = {
         # sans notification. Quotidien, la fenêtre étant de six mois.
         "task": "apps.notifications.tasks.purge_unregistered_devices",
         "schedule": 86400.0,
+    },
+    "renew-subscriptions": {
+        # Horaire, face à des périodes comptées en jours et un délai de grâce
+        # compté en jours lui aussi : une passe par jour laisserait un
+        # abonnement facturable rester en attente près de 24 h avant d'être
+        # même tenté.
+        "task": "apps.loyalty.tasks.renew_subscriptions",
+        "schedule": 3600.0,
     },
 }

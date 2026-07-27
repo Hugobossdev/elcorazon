@@ -13,6 +13,8 @@ router = DefaultRouter()
 router.register("rewards", views.RewardViewSet, basename="reward")
 router.register("entries", views.PointsEntryViewSet, basename="entry")
 router.register("redemptions", views.RewardRedemptionViewSet, basename="redemption")
+router.register("plans", views.SubscriptionPlanViewSet, basename="subscription-plan")
+router.register("subscriptions", views.SubscriptionViewSet, basename="subscription")
 
 # Le solde est une ressource **singleton** — celui du porteur du jeton — donc une
 # vue et non un routeur : `/account/` sans identifiant. Un `ViewSet` imposerait

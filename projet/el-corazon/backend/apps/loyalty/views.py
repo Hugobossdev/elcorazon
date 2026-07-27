@@ -26,15 +26,27 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
-from apps.loyalty.models import PointsAccount, PointsEntry, Reward, RewardRedemption
+from apps.loyalty.models import (
+    PointsAccount,
+    PointsEntry,
+    Reward,
+    RewardRedemption,
+    Subscription,
+    SubscriptionPlan,
+)
 from apps.loyalty.serializers import (
     PointsAccountSerializer,
     PointsEntrySerializer,
     RedemptionResultSerializer,
     RewardRedemptionSerializer,
     RewardSerializer,
+    SubscribeRequestSerializer,
+    SubscriptionPlanSerializer,
+    SubscriptionResultSerializer,
+    SubscriptionSerializer,
 )
 from apps.loyalty.services import LoyaltyService
+from apps.loyalty.subscriptions import SubscriptionService
 from common.permissions import IsCustomer, authenticated_user
 from common.throttling import RewardRedemptionThrottle
 
@@ -43,6 +55,8 @@ __all__ = [
     "PointsEntryViewSet",
     "RewardRedemptionViewSet",
     "RewardViewSet",
+    "SubscriptionPlanViewSet",
+    "SubscriptionViewSet",
 ]
 
 
@@ -155,3 +169,74 @@ class RewardRedemptionViewSet(ReadOnlyModelViewSet[RewardRedemption]):
         return RewardRedemption.objects.filter(
             user=authenticated_user(self.request)
         ).select_related("reward", "reward__restaurant")
+
+
+class SubscriptionPlanViewSet(ReadOnlyModelViewSet[SubscriptionPlan]):
+    """`GET /loyalty/plans/` — le catalogue tarifé (P4).
+
+    Suspendu et non seulement inactif : un plan retiré du catalogue reste lu
+    par les abonnements en cours (`SubscriptionSerializer` l'imbrique), mais
+    n'apparaît plus ici — la même règle que pour `RewardViewSet`.
+    """
+
+    serializer_class = SubscriptionPlanSerializer
+    queryset = SubscriptionPlan.objects.none()  # pour le générateur de schéma
+    permission_classes = [IsCustomer]
+
+    def get_queryset(self) -> QuerySet[SubscriptionPlan]:
+        return SubscriptionPlan.objects.filter(is_active=True)
+
+
+class SubscriptionViewSet(ReadOnlyModelViewSet[Subscription]):
+    """`GET /loyalty/subscriptions/` — les abonnements du client, passés et courant.
+
+    `subscribe` et `cancel` délèguent entièrement à `SubscriptionService` : ni
+    l'un ni l'autre ne décide d'un prix, d'une période ou d'un statut — le
+    service les tient (P4, ADR-010).
+    """
+
+    serializer_class = SubscriptionSerializer
+    queryset = Subscription.objects.none()  # pour le générateur de schéma
+    permission_classes = [IsCustomer]
+
+    def get_queryset(self) -> QuerySet[Subscription]:
+        return Subscription.objects.filter(user=authenticated_user(self.request)).select_related(
+            "plan"
+        )
+
+    @extend_schema(
+        request=SubscribeRequestSerializer,
+        responses={201: SubscriptionResultSerializer},
+        tags=["loyalty"],
+    )
+    @action(detail=False, methods=["post"])
+    def subscribe(self, request: Request) -> Response:
+        """Ouvre un abonnement au plan désigné.
+
+        Refusé si le client en a déjà un ouvert — `pending` ou `active` —
+        par `one_open_subscription_per_user` (409, pas 400 : la requête est
+        bien formée, c'est l'état qui l'interdit).
+        """
+        payload = SubscribeRequestSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        subscription, instruction = SubscriptionService.subscribe(
+            user=authenticated_user(request), plan=payload.validated_data["plan"]
+        )
+        return Response(
+            SubscriptionResultSerializer(
+                {
+                    "subscription": subscription,
+                    "checkout_url": instruction.checkout_url,
+                    "instructions": instruction.instructions,
+                }
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(request=None, responses={200: SubscriptionSerializer}, tags=["loyalty"])
+    @action(detail=True, methods=["post"])
+    def cancel(self, request: Request, pk: str) -> Response:
+        """Résilie cet abonnement — sans effet sur l'échéance déjà payée."""
+        subscription = SubscriptionService.cancel(subscription=self.get_object())
+        return Response(SubscriptionSerializer(subscription).data)

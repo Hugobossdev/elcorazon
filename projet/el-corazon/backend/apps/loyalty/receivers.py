@@ -13,11 +13,14 @@ from typing import Any
 from django.dispatch import receiver
 
 from apps.loyalty.services import LoyaltyService
+from apps.loyalty.subscriptions import SubscriptionService
 from apps.orders.models import Order
 from apps.orders.signals import order_status_changed
 from apps.orders.states import OrderStatus
+from apps.payments.models import Transaction
+from apps.payments.signals import payment_transaction_settled
 
-__all__ = ["on_order_delivered"]
+__all__ = ["on_order_delivered", "on_payment_settled"]
 
 
 @receiver(order_status_changed, sender=Order, dispatch_uid="loyalty.order_delivered")
@@ -35,3 +38,16 @@ def on_order_delivered(sender: type[Order], *, order: Order, target: str, **kwar
         return
 
     LoyaltyService.earn(user=order.customer, order=order)
+
+
+@receiver(payment_transaction_settled, sender=Transaction, dispatch_uid="loyalty.payment_settled")
+def on_payment_settled(
+    sender: type[Transaction], *, transaction: Transaction, **kwargs: Any
+) -> None:
+    """Active ou prolonge l'abonnement réglé par cette transaction.
+
+    Sans effet si la transaction ne règle pas d'abonnement — c'est le cas de
+    la plupart, et `SubscriptionService.on_payment_settled` le vérifie avant
+    d'écrire quoi que ce soit.
+    """
+    SubscriptionService.on_payment_settled(transaction)

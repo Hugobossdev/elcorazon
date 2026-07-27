@@ -25,11 +25,26 @@ from django.db import models
 
 from apps.accounts.models import User
 from apps.orders.models import Order
+from apps.payments.models import Transaction
 from apps.restaurants.models import Restaurant
-from common.models import TimeStampedModel, UUIDModel
+from common.fields import MoneyField
+from common.models import TimeStampedModel, UUIDModel, state_check_constraint
 from common.money import Money
+from common.state_machine import StateMachine
 
-__all__ = ["EntryKind", "PointsAccount", "PointsEntry", "Reward", "RewardKind", "RewardRedemption"]
+__all__ = [
+    "SUBSCRIPTION_MACHINE",
+    "EntryKind",
+    "PointsAccount",
+    "PointsEntry",
+    "Reward",
+    "RewardKind",
+    "RewardRedemption",
+    "Subscription",
+    "SubscriptionPayment",
+    "SubscriptionPlan",
+    "SubscriptionStatus",
+]
 
 
 class PointsAccount(UUIDModel, TimeStampedModel):
@@ -214,3 +229,124 @@ class RewardRedemption(UUIDModel):
 
     def __str__(self) -> str:
         return f"{self.user.email} — {self.reward.name}"
+
+
+class SubscriptionStatus(models.TextChoices):
+    PENDING = "pending", "En attente du premier paiement"
+    ACTIVE = "active", "Active"
+    CANCELLED = "cancelled", "Résiliée"
+    EXPIRED = "expired", "Expirée"
+
+
+SUBSCRIPTION_TRANSITIONS: dict[str, set[str]] = {
+    SubscriptionStatus.PENDING: {SubscriptionStatus.ACTIVE, SubscriptionStatus.CANCELLED},
+    SubscriptionStatus.ACTIVE: {SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED},
+    SubscriptionStatus.CANCELLED: set(),
+    SubscriptionStatus.EXPIRED: set(),
+}
+
+# Le renouvellement ne transite pas par la machine : il reconduit le même état
+# `active` en repoussant `current_period_end`, ce qu'un graphe acyclique ne
+# peut pas représenter comme une transition (ce serait un cycle sur un seul
+# état). Seuls l'activation, la résiliation et l'expiration changent l'état.
+SUBSCRIPTION_MACHINE = StateMachine(SUBSCRIPTION_TRANSITIONS, name="abonnement")
+
+
+class SubscriptionPlan(UUIDModel, TimeStampedModel):
+    """Plan tarifé — catalogue serveur (P4).
+
+    Le prix vient d'ici, jamais du client : l'implémentation précédente
+    acceptait `monthly_price` dans la requête d'inscription, ce qui permettait
+    de s'abonner au tarif de son choix. Souscrire ne prend donc qu'un
+    identifiant de plan ; le montant facturé est relu depuis `price`.
+    """
+
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    price = MoneyField()
+    billing_period_days = models.PositiveSmallIntegerField(default=30)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "plan d'abonnement"
+        ordering = ["price_minor"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(price_minor__gt=0), name="plan_price_positive"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(billing_period_days__gt=0), name="plan_period_positive"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.price})"
+
+
+class Subscription(UUIDModel, TimeStampedModel):
+    """Abonnement d'un client à un plan.
+
+    Un seul abonnement **ouvert** (`pending` ou `active`) à la fois par
+    client — la contrainte ci-dessous le porte en base, pas seulement le
+    service : reprendre un abonnement pendant qu'un autre attend son premier
+    paiement produirait deux facturations concurrentes pour la même personne.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="subscriptions")
+    plan = models.ForeignKey(
+        SubscriptionPlan, on_delete=models.PROTECT, related_name="subscriptions"
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=SubscriptionStatus.choices,
+        default=SubscriptionStatus.PENDING,
+        db_index=True,
+    )
+    auto_renew = models.BooleanField(default=True)
+    current_period_start = models.DateTimeField(null=True, blank=True)
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "abonnement"
+        ordering = ["-created_at"]
+        constraints = [
+            state_check_constraint(SUBSCRIPTION_MACHINE, "status", "subscription_status_in_enum"),
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(
+                    status__in=[SubscriptionStatus.PENDING, SubscriptionStatus.ACTIVE]
+                ),
+                name="one_open_subscription_per_user",
+            ),
+        ]
+        indexes = [models.Index(fields=["status", "current_period_end"])]
+
+    def __str__(self) -> str:
+        return f"{self.user.email} — {self.plan.name} ({self.get_status_display()})"
+
+
+class SubscriptionPayment(UUIDModel, TimeStampedModel):
+    """Lien entre un abonnement et la transaction qui règle une échéance.
+
+    Vit dans `loyalty` et non dans `payments` : le graphe de dépendances
+    n'autorise la flèche que dans un sens (`loyalty` → `payments`), et
+    `payments` ne doit rien savoir des abonnements pour rester réutilisable
+    par le prochain domaine qui encaissera hors commande.
+    """
+
+    subscription = models.ForeignKey(
+        Subscription, on_delete=models.PROTECT, related_name="payments"
+    )
+    transaction = models.OneToOneField(
+        Transaction, on_delete=models.PROTECT, related_name="subscription_payment"
+    )
+    period_start = models.DateTimeField()
+    period_end = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "paiement d'abonnement"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.subscription} — {self.transaction.provider_reference}"

@@ -22,10 +22,26 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from apps.loyalty.models import PointsAccount, PointsEntry, Reward, RewardRedemption
+from apps.loyalty.models import (
+    PointsAccount,
+    PointsEntry,
+    Reward,
+    RewardRedemption,
+    Subscription,
+    SubscriptionPayment,
+    SubscriptionPlan,
+)
 from common.admin import ReadOnlyAdmin, money_display
 
-__all__ = ["PointsAccountAdmin", "PointsEntryAdmin", "RewardAdmin", "RewardRedemptionAdmin"]
+__all__ = [
+    "PointsAccountAdmin",
+    "PointsEntryAdmin",
+    "RewardAdmin",
+    "RewardRedemptionAdmin",
+    "SubscriptionAdmin",
+    "SubscriptionPaymentAdmin",
+    "SubscriptionPlanAdmin",
+]
 
 
 class PointsEntryInline(admin.TabularInline):
@@ -121,4 +137,58 @@ class RewardRedemptionAdmin(ReadOnlyAdmin):
     list_filter = ("reward", "created_at")
     search_fields = ("user__email", "promotion_code", "reward__name")
     list_select_related = ("user", "reward")
+    date_hierarchy = "created_at"
+
+
+@admin.register(SubscriptionPlan)
+class SubscriptionPlanAdmin(admin.ModelAdmin):
+    """Catalogue des plans — le seul écran des abonnements qui s'édite (P4)."""
+
+    list_display = ("name", "prix", "billing_period_days", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name", "description")
+    list_editable = ("is_active",)
+
+    prix = money_display("price", "Prix")
+
+
+class SubscriptionPaymentInline(admin.TabularInline):
+    """Les échéances réglées, sous l'abonnement — pour retrouver quel encaissement l'a activé."""
+
+    model = SubscriptionPayment
+    extra = 0
+    can_delete = False
+    fields = ("created_at", "transaction", "period_start", "period_end")
+    readonly_fields = fields
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request: object, obj: Subscription | None = None) -> bool:
+        return False
+
+
+@admin.register(Subscription)
+class SubscriptionAdmin(ReadOnlyAdmin):
+    """Un abonnement s'ouvre, se résilie ou se renouvelle par le service — jamais ici (ADR-010)."""
+
+    list_display = (
+        "user",
+        "plan",
+        "status",
+        "auto_renew",
+        "current_period_end",
+    )
+    list_filter = ("status", "auto_renew", "plan")
+    search_fields = ("user__email", "user__full_name")
+    list_select_related = ("user", "plan")
+    date_hierarchy = "created_at"
+    inlines = (SubscriptionPaymentInline,)
+
+
+@admin.register(SubscriptionPayment)
+class SubscriptionPaymentAdmin(ReadOnlyAdmin):
+    """Le journal des échéances, à plat — retrouver un règlement sans passer par l'abonnement."""
+
+    list_display = ("created_at", "subscription", "transaction", "period_start", "period_end")
+    search_fields = ("subscription__user__email", "transaction__provider_reference")
+    list_select_related = ("subscription__user", "transaction")
     date_hierarchy = "created_at"

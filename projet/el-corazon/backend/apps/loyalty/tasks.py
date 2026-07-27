@@ -10,8 +10,9 @@ from django.utils import timezone
 
 from apps.loyalty.models import PointsAccount
 from apps.loyalty.services import LoyaltyService
+from apps.loyalty.subscriptions import SubscriptionService
 
-__all__ = ["expire_points"]
+__all__ = ["expire_points", "renew_subscriptions"]
 
 
 @shared_task
@@ -39,3 +40,16 @@ def expire_points(months: int | None = None) -> int:
             eteints += 1
 
     return eteints
+
+
+@shared_task
+def renew_subscriptions() -> int:
+    """Facture les abonnements échus, expire ceux hors délai de grâce.
+
+    Horaire plutôt qu'ordonnancé par échéance (comme `expire_points`) : le
+    volume ne justifie pas encore un ordonnanceur dédié, et une passe horaire
+    suffit largement face à des périodes comptées en jours. Ouvre la demande
+    de paiement ; l'activation attend, comme toujours, la notification du
+    prestataire — jamais cette tâche elle-même.
+    """
+    return SubscriptionService.renew_due()

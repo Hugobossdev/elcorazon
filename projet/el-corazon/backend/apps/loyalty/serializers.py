@@ -19,7 +19,14 @@ from typing import Any
 
 from rest_framework import serializers
 
-from apps.loyalty.models import PointsAccount, PointsEntry, Reward, RewardRedemption
+from apps.loyalty.models import (
+    PointsAccount,
+    PointsEntry,
+    Reward,
+    RewardRedemption,
+    Subscription,
+    SubscriptionPlan,
+)
 from apps.promotions.serializers import PromotionSerializer
 from common.serializers import MoneyField
 
@@ -29,6 +36,10 @@ __all__ = [
     "RedemptionResultSerializer",
     "RewardRedemptionSerializer",
     "RewardSerializer",
+    "SubscribeRequestSerializer",
+    "SubscriptionPlanSerializer",
+    "SubscriptionResultSerializer",
+    "SubscriptionSerializer",
 ]
 
 
@@ -121,3 +132,54 @@ class RedemptionResultSerializer(serializers.Serializer[Any]):
     redemption = RewardRedemptionSerializer(read_only=True)
     promotion = PromotionSerializer(read_only=True)
     balance = serializers.IntegerField(read_only=True)
+
+
+class SubscriptionPlanSerializer(serializers.ModelSerializer[SubscriptionPlan]):
+    """Un plan du catalogue — P4 : c'est d'ici, et de nulle part ailleurs, que vient le prix."""
+
+    price = MoneyField(read_only=True)
+
+    class Meta:
+        model = SubscriptionPlan
+        fields = ["id", "name", "description", "price", "billing_period_days"]
+        read_only_fields = fields
+
+
+class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
+    """Un abonnement — le sien, jamais celui d'un autre (filtre de requête, ADR-005)."""
+
+    plan = SubscriptionPlanSerializer(read_only=True)
+
+    class Meta:
+        model = Subscription
+        fields = [
+            "id",
+            "plan",
+            "status",
+            "auto_renew",
+            "current_period_start",
+            "current_period_end",
+            "cancelled_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class SubscribeRequestSerializer(serializers.Serializer[Any]):
+    """Le seul champ qu'une souscription accepte : lequel des plans.
+
+    Aucun prix, aucune période : les accepter du client rouvrirait exactement
+    P4, la faille que ce module ferme.
+    """
+
+    plan = serializers.PrimaryKeyRelatedField(
+        queryset=SubscriptionPlan.objects.filter(is_active=True)
+    )
+
+
+class SubscriptionResultSerializer(serializers.Serializer[Any]):
+    """Réponse d'une souscription : l'abonnement ouvert et comment le régler."""
+
+    subscription = SubscriptionSerializer(read_only=True)
+    checkout_url = serializers.CharField(read_only=True)
+    instructions = serializers.CharField(read_only=True)
