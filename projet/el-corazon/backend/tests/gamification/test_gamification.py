@@ -329,6 +329,19 @@ class TestRoutes:
         assert response.data["results"][0]["is_unlocked"] is False
         assert response.data["results"][0]["progress"] == 0
 
+    def test_le_catalogue_de_badges_porte_le_progres_du_client(
+        self, as_customer: APIClient, customer: User, order: Order
+    ) -> None:
+        badge = Badge.objects.create(title="Habitué", points_required=30)
+        mark_delivered(order)
+        LoyaltyService.earn(user=customer, order=order)  # 40 points (4 000 F)
+        GamificationService.on_order_delivered(user=customer, order=order)
+
+        response = as_customer.get(reverse("v1:gamification:badge-list"))
+
+        résultat = next(b for b in response.data["results"] if b["title"] == badge.title)
+        assert résultat["is_unlocked"] is True
+
     def test_seuls_les_defis_en_cours_apparaissent(self, as_customer: APIClient) -> None:
         now = timezone.now()
         Challenge.objects.create(

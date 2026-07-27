@@ -192,6 +192,52 @@ class TestRapports:
         assert response.status_code == 200
         assert response.data[0]["orders_count"] == 1
 
+    def test_lire_le_rapport_des_produits_par_l_api(
+        self, as_analyst: APIClient, customer: User, restaurant: Restaurant, menu_item: object
+    ) -> None:
+        from apps.orders.models import OrderLine
+
+        commande = build_order(restaurant, customer, reference="EC000015")
+        OrderLine.objects.create(
+            order=commande,
+            menu_item=menu_item,
+            item_name="Burger Corazón",
+            unit_price=Money(3_500, XOF),
+            quantity=1,
+            line_total=Money(3_500, XOF),
+        )
+        deliver(commande)
+        aujourdhui = commande.delivered_at.date()
+
+        response = as_analyst.get(
+            reverse("v1:analytics:report-top-products"),
+            {"start": aujourdhui.isoformat(), "end": aujourdhui.isoformat()},
+        )
+
+        assert response.status_code == 200
+        assert response.data[0]["item_name"] == "Burger Corazón"
+
+    def test_lire_le_rapport_livreurs_par_l_api(
+        self, as_analyst: APIClient, courier: CourierProfile, restaurant: Restaurant, customer: User
+    ) -> None:
+        commande = build_order(restaurant, customer, reference="EC000016")
+        maintenant = timezone.now()
+        Assignment.objects.create(
+            order=commande,
+            courier=courier,
+            status=DeliveryStatus.DELIVERED,
+            delivered_at=maintenant,
+            courier_fee=Money(600, XOF),
+        )
+
+        response = as_analyst.get(
+            reverse("v1:analytics:report-couriers"),
+            {"start": maintenant.date().isoformat(), "end": maintenant.date().isoformat()},
+        )
+
+        assert response.status_code == 200
+        assert response.data[0]["deliveries"] == 1
+
     def test_un_client_ne_peut_pas_lire_les_rapports(self, as_customer: APIClient) -> None:
         response = as_customer.get(
             reverse("v1:analytics:report-revenue"),

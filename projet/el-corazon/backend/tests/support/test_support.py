@@ -248,3 +248,41 @@ class TestRoutes:
         response = APIClient().get(reverse("v1:support:ticket-list"))
 
         assert response.status_code in (401, 403)
+
+    def test_lister_le_fil_d_un_ticket(self, as_customer: APIClient, customer: User) -> None:
+        ticket = SupportService.open_ticket(user=customer, subject="Sujet", description="...")
+        SupportService.reply(ticket=ticket, author=customer, content="Une précision")
+
+        response = as_customer.get(reverse("v1:support:ticket-messages", args=[ticket.pk]))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [m["content"] for m in response.data["results"]] == ["Une précision"]
+
+    def test_lister_ses_reclamations(self, as_customer: APIClient, order: Order) -> None:
+        SupportService.file_complaint(
+            user=order.customer,
+            order=order,
+            kind=ComplaintKind.QUALITY,
+            subject="Plat froid",
+            description="Froid à réception.",
+        )
+
+        response = as_customer.get(reverse("v1:support:complaint-list"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [c["subject"] for c in response.data["results"]] == ["Plat froid"]
+
+    def test_lister_ses_demandes_de_retour(self, as_customer: APIClient, order: Order) -> None:
+        deliver(order)
+        SupportService.request_return(
+            user=order.customer,
+            order=order,
+            reason="Article manquant",
+            items=["Burger Corazón"],
+            refund_amount=Money(1_000, XOF),
+        )
+
+        response = as_customer.get(reverse("v1:support:return-list"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [r["reason"] for r in response.data["results"]] == ["Article manquant"]

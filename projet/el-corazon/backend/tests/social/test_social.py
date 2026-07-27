@@ -102,6 +102,22 @@ class TestAdhesion:
         group.refresh_from_db()
         assert group.member_count == 1
 
+    def test_rejoindre_apres_avoir_quitte_reactive_l_adhesion(
+        self, group: SocialGroup, courier_user: User
+    ) -> None:
+        """Une adhésion inactive (départ) se réactive au lieu d'en créer une
+        seconde — sinon `one_progress_per_user` n'aurait plus de sens et le
+        départ perdrait toute trace de l'historique du membre."""
+        SocialService.join(user=courier_user, invite_code=group.invite_code)
+        SocialService.leave(user=courier_user, group=group)
+
+        membership = SocialService.join(user=courier_user, invite_code=group.invite_code)
+
+        assert membership.is_active
+        group.refresh_from_db()
+        assert group.member_count == 2
+        assert GroupMembership.objects.filter(group=group, user=courier_user).count() == 1
+
 
 @pytest.mark.django_db(transaction=True)
 class TestCapaciteConcurrente:
@@ -250,6 +266,30 @@ class TestLikesEtCommentaires:
         assert post.likes_count == 0
         assert not PostLike.objects.filter(post=post, user=courier_user).exists()
 
+    @pytest.mark.django_db(transaction=True)
+    def test_deux_j_aimes_concurrents_ne_comptent_qu_une_fois(
+        self, customer: User, courier_user: User
+    ) -> None:
+        """Même course que `TestCapaciteConcurrente`, sur le j'aime plutôt que
+        sur la place : la contrainte d'unicité tranche, et la requête qui la
+        heurte doit lire « déjà aimé », pas planter."""
+        post = SocialService.create_post(author=customer, content="Bonjour")
+
+        def aimer() -> str:
+            try:
+                aime = SocialService.toggle_like(user=courier_user, post=post)
+                return "aimé" if aime else "retiré"
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            resultats = [f.result() for f in [pool.submit(aimer) for _ in range(2)]]
+
+        assert resultats == ["aimé", "aimé"]
+        assert PostLike.objects.filter(post=post, user=courier_user).count() == 1
+        post.refresh_from_db()
+        assert post.likes_count == 1
+
     def test_commenter_incremente_le_compteur(self, customer: User, courier_user: User) -> None:
         post = SocialService.create_post(author=customer, content="Bonjour")
 
@@ -292,3 +332,49 @@ class TestRoutes:
         response = APIClient().get(reverse("v1:social:post-list"))
 
         assert response.status_code in (401, 403)
+
+    def test_lister_ne_montre_que_ses_propres_groupes(
+        self, as_customer: APIClient, group: SocialGroup, restaurant: Restaurant
+    ) -> None:
+        """`SocialGroupViewSet.get_queryset` filtre par adhésion active — un
+        groupe où le client n'est pas membre n'a rien à montrer ici, pas même
+        son existence."""
+        autre_createur = User.objects.create_user(
+            "autre-groupe@elcorazon.test", "motdepasse", full_name="Autre"
+        )
+        SocialService.create_group(
+            creator=autre_createur, name="Pas les miens", kind=GroupKind.FRIENDS, max_members=5
+        )
+
+        response = as_customer.get(reverse("v1:social:group-list"))
+
+        noms = {g["name"] for g in response.data["results"]}
+        assert noms == {"Famille Koffi"}
+
+    def test_quitter_par_la_route(self, as_customer: APIClient, group: SocialGroup) -> None:
+        response = as_customer.post(reverse("v1:social:group-leave", args=[group.pk]))
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert not GroupMembership.objects.get(group=group, user=group.creator).is_active
+
+    def test_lister_les_commentaires_par_la_route(
+        self, as_customer: APIClient, customer: User, courier_user: User
+    ) -> None:
+        post = SocialService.create_post(author=customer, content="Bonjour")
+        SocialService.add_comment(user=courier_user, post=post, content="Superbe photo")
+
+        response = as_customer.get(reverse("v1:social:post-comments", args=[post.pk]))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [c["content"] for c in response.data["results"]] == ["Superbe photo"]
+
+    def test_commenter_par_la_route(self, as_customer: APIClient, customer: User) -> None:
+        post = SocialService.create_post(author=customer, content="Bonjour")
+
+        response = as_customer.post(
+            reverse("v1:social:post-comments", args=[post.pk]), {"content": "Joli !"}
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        post.refresh_from_db()
+        assert post.comments_count == 1
