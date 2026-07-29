@@ -42,7 +42,6 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
   String? _formattedAddress;
   DeliveryFeeBreakdown? _feeBreakdown;
   bool _isLoadingAddress = false;
-  bool _isLoadingFees = false;
   Timer? _debounceTimer;
 
   final Set<Circle> _circles = {};
@@ -193,7 +192,6 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     // Reverse geocode
     setState(() {
       _isLoadingAddress = true;
-      _isLoadingFees = true;
     });
 
     try {
@@ -211,7 +209,6 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
           _formattedAddress = address;
           _feeBreakdown = breakdown;
           _isLoadingAddress = false;
-          _isLoadingFees = false;
         });
 
         _updateMarkers(position);
@@ -221,7 +218,6 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
       if (mounted) {
         setState(() {
           _isLoadingAddress = false;
-          _isLoadingFees = false;
         });
       }
     }

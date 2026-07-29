@@ -47,8 +47,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _isLoading = false;
   bool _isCalculatingDeliveryFee = false;
   Address? _selectedAddress;
-  double? _estimatedDistance;
-  int? _estimatedDeliveryTime;
+  // La distance et le délai estimé ne sont plus recopiés ici : ils vivent sur
+  // `_deliveryBreakdown`, d'où l'écran les lit déjà.
   DeliveryFeeBreakdown? _deliveryBreakdown;
 
   final AddressService _addressService = AddressService();
@@ -136,8 +136,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       if (mounted) {
         setState(() {
           _deliveryBreakdown = breakdown;
-          _estimatedDistance = breakdown.distance;
-          _estimatedDeliveryTime = breakdown.estimatedDeliveryTime;
         });
 
         // Mettre à jour les frais dans le panier

@@ -1335,9 +1335,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
                           ],
                         ),
                         const SizedBox(height: 12),
-                        ...(current.selections.entries ??
-                                <MapEntry<String, List<String>>>[])
-                            .expand((entry) {
+                        ...current.selections.entries.expand((entry) {
                           final translated =
                               customizationService.translateCategory(entry.key);
                           final options = entry.value

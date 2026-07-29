@@ -365,9 +365,8 @@ class CartService extends ChangeNotifier {
         await _deliveryFeeService.initialize();
       }
 
-      // Récupérer le statut VIP - Désactivé temporairement (portefeuille indisponible)
-      // final isVip = WalletService().isVIP;
-      const isVip = false; // Portefeuille désactivé
+      // Le statut VIP n'entre pas dans le calcul : le portefeuille est
+      // désactivé, et la remise correspondante n'a donc aucun appelant.
 
       double fee;
 

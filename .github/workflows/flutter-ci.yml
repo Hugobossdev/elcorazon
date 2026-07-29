@@ -1,0 +1,119 @@
+# Intégration continue des applications Flutter d'El Corazón.
+#
+# Complète `backend-ci.yml`, qui ne couvre que Django : depuis la Phase 6, le
+# respect du contrat d'API vit pour une bonne part côté client (parsing des
+# réponses, en-têtes d'idempotence, ce que le client s'interdit d'envoyer), et
+# rien ne le vérifiait automatiquement.
+#
+# Le vrai filet est le paquet partagé `packages/elcorazon_core` : c'est lui qui
+# porte les tests. Les trois applications ne sont qu'analysées — elles n'ont pas
+# de suite de tests, par choix (voir docs/architecture/04-migration-flutter.md
+# §3.1 : le contrat est testé une fois, dans le paquet, pas trois fois dans les
+# apps qui le consomment).
+
+name: Flutter CI
+
+on:
+  push:
+    paths:
+      - "projet/el-corazon/packages/**"
+      - "projet/el-corazon/El Corazon fastfood/**"
+      - "projet/el-corazon/El corazon dely/**"
+      - "projet/el-corazon/El Corazon admin/**"
+      - ".github/workflows/flutter-ci.yml"
+  pull_request:
+    paths:
+      - "projet/el-corazon/packages/**"
+      - "projet/el-corazon/El Corazon fastfood/**"
+      - "projet/el-corazon/El corazon dely/**"
+      - "projet/el-corazon/El Corazon admin/**"
+      - ".github/workflows/flutter-ci.yml"
+
+env:
+  # Épinglée sur la version avec laquelle la migration a été menée et vérifiée.
+  # Suivre `stable` ferait apparaître, sans qu'on y touche, des lints d'une
+  # version ultérieure du SDK — la CI deviendrait rouge sur un commit qui n'a
+  # rien changé.
+  FLUTTER_VERSION: "3.35.5"
+
+jobs:
+  paquet:
+    name: Paquet partagé (analyse + tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projet/el-corazon/packages/elcorazon_core
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Analyse — aucun écart toléré
+        # Sans `--no-fatal-infos`, contrairement aux applications : le paquet est
+        # du code écrit pour cette architecture, il n'a aucune dette de style à
+        # traîner et doit le rester.
+        run: flutter analyze
+
+      - name: Tests du contrat
+        # Ce que ces tests protègent n'est pas le parsing pour lui-même, mais les
+        # règles que le client ne doit pas rejouer : montants en objet et non en
+        # flottant, dates non nulles quand le schéma les déclare ainsi, et les
+        # champs décidés par le serveur qu'un client n'a pas à envoyer
+        # (`is_public`, `is_verified_purchase`, compteurs, identifiants
+        # d'utilisateur).
+        run: flutter test
+
+  applications:
+    name: ${{ matrix.nom }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Une application en échec ne doit pas masquer l'état des deux autres.
+      fail-fast: false
+      matrix:
+        include:
+          - nom: Client (fastfood)
+            chemin: "projet/el-corazon/El Corazon fastfood"
+          - nom: Livreur (dely)
+            chemin: "projet/el-corazon/El corazon dely"
+          - nom: Back-office (admin)
+            chemin: "projet/el-corazon/El Corazon admin"
+    defaults:
+      run:
+        working-directory: ${{ matrix.chemin }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Fichier .env
+        # Les trois `pubspec.yaml` déclarent `.env` comme asset, et le fichier
+        # est — à raison — hors du dépôt. L'analyseur ne lit pas son contenu, il
+        # vérifie seulement que l'asset existe : sans ce fichier, un
+        # `asset_does_not_exist` ferait échouer le job pour une raison qui n'a
+        # rien à voir avec le code. Le gabarit quand il existe, un fichier vide
+        # sinon (`admin` n'a pas encore de `.env.example`).
+        run: |
+          if [ -f .env.example ]; then cp .env.example .env; else : > .env; fi
+
+      - run: flutter pub get
+
+      - name: Analyse — erreurs et avertissements bloquants
+        # `--no-fatal-infos` est délibéré, et c'est le seul compromis de ce
+        # workflow : les trois applications traînent des « info » de style
+        # (`use_build_context_synchronously`, `deprecated_member_use`,
+        # `curly_braces_in_flow_control_structures`) sur des écrans que la
+        # migration n'a pas encore touchés. Les traiter comme bloquantes
+        # rendrait la CI rouge dès sa création, donc inutile. Erreurs et
+        # avertissements, eux, restent fatals — c'est ce qui compte : les deux
+        # apps migrées en sont à zéro et doivent y rester.
+        run: flutter analyze --no-fatal-infos
