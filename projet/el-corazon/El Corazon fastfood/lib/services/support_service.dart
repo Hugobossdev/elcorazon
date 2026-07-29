@@ -1,132 +1,41 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-class SupportTicket {
-  final String id;
-  final String userId;
-  final String category;
-  final String subject;
-  final String description;
-  final List<String>? attachments;
-  final String status; // 'open', 'in_progress', 'resolved', 'closed'
-  final DateTime createdAt;
-  final DateTime? resolvedAt;
-  final String? resolution;
+import 'package:elcora_fast/repositories/django_support_repository.dart';
 
-  SupportTicket({
-    required this.id,
-    required this.userId,
-    required this.category,
-    required this.subject,
-    required this.description,
-    required this.createdAt, this.attachments,
-    this.status = 'open',
-    this.resolvedAt,
-    this.resolution,
-  });
-
-  factory SupportTicket.fromMap(Map<String, dynamic> map) {
-    return SupportTicket(
-      id: map['id'] as String,
-      userId: map['user_id'] as String,
-      category: map['category'] as String,
-      subject: map['subject'] as String,
-      description: map['description'] as String,
-      attachments: map['attachments'] != null
-          ? List<String>.from(map['attachments'])
-          : null,
-      status: map['status'] as String,
-      createdAt: DateTime.parse(map['created_at']),
-      resolvedAt: map['resolved_at'] != null
-          ? DateTime.parse(map['resolved_at'])
-          : null,
-      resolution: map['resolution'] as String?,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'user_id': userId,
-      'category': category,
-      'subject': subject,
-      'description': description,
-      'attachments': attachments,
-      'status': status,
-    };
-  }
-}
-
-class SupportMessage {
-  final String id;
-  final String ticketId;
-  final String? adminId;
-  final String? userId;
-  final bool isFromAdmin;
-  final String message;
-  final DateTime createdAt;
-
-  SupportMessage({
-    required this.id,
-    required this.ticketId,
-    required this.isFromAdmin, required this.message, required this.createdAt, this.adminId,
-    this.userId,
-  });
-
-  factory SupportMessage.fromMap(Map<String, dynamic> map) {
-    return SupportMessage(
-      id: map['id'] as String,
-      ticketId: map['ticket_id'] as String,
-      adminId: map['admin_id'] as String?,
-      userId: map['user_id'] as String?,
-      isFromAdmin: map['admin_id'] != null,
-      message: map['message'] as String,
-      createdAt: DateTime.parse(map['created_at']),
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'ticket_id': ticketId,
-      if (adminId != null) 'admin_id': adminId,
-      if (userId != null) 'user_id': userId,
-      'message': message,
-    };
-  }
-}
-
+/// Tickets de support, contre le backend Django (Phase 6).
+///
+/// Les modèles `SupportTicket`/`SupportMessage` qui vivaient ici sont
+/// supprimés au profit de ceux de `elcorazon_core` : ils portaient un
+/// `user_id` (et un couple `admin_id`/`user_id` pour distinguer l'auteur d'un
+/// message) qui n'a plus de raison d'être — le serveur cloisonne par le compte
+/// authentifié, et `author.user_type` dit de quel côté du fil parle un
+/// message.
 class SupportService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  final DjangoSupportRepository _repository = DjangoSupportRepository();
 
-  List<SupportTicket> _tickets = [];
-  final Map<String, List<SupportMessage>> _messages = {};
+  List<eccore.SupportTicket> _tickets = [];
+  final Map<String, List<eccore.SupportMessage>> _messages = {};
   bool _isLoading = false;
   String? _error;
 
-  List<SupportTicket> get tickets => List.unmodifiable(_tickets);
+  List<eccore.SupportTicket> get tickets => List.unmodifiable(_tickets);
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  /// Charger les tickets de support d'un utilisateur
-  Future<void> loadTickets(String userId) async {
+  /// Charge les tickets du compte connecté. Plus d'identifiant en paramètre :
+  /// la requête ne désigne plus l'utilisateur, le serveur le déduit du jeton.
+  Future<void> loadTickets() async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _supabase
-          .from('support_tickets')
-          .select()
-          .eq('user_id', userId)
-          .order('created_at', ascending: false);
-
-      _tickets = (response as List)
-          .map((item) => SupportTicket.fromMap(item))
-          .toList();
-
-      debugPrint('✅ Chargé ${_tickets.length} tickets pour $userId');
-    } catch (e) {
-      _error = 'Erreur lors du chargement des tickets: $e';
-      debugPrint('❌ $_error');
+      _tickets = await _repository.getTickets();
+      debugPrint('✅ Chargé ${_tickets.length} tickets de support');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('❌ Chargement des tickets: ${e.code}');
       _tickets = [];
     } finally {
       _isLoading = false;
@@ -134,46 +43,41 @@ class SupportService extends ChangeNotifier {
     }
   }
 
-  /// Charger les messages d'un ticket
+  /// Charge le fil d'un ticket (pagination suivie jusqu'au bout côté
+  /// repository).
   Future<void> loadMessages(String ticketId) async {
     try {
-      final response = await _supabase
-          .from('support_messages')
-          .select()
-          .eq('ticket_id', ticketId)
-          .order('created_at', ascending: true);
-
-      _messages[ticketId] = (response as List)
-          .map((item) => SupportMessage.fromMap(item))
-          .toList();
-
+      _messages[ticketId] = await _repository.getMessages(ticketId);
       notifyListeners();
-    } catch (e) {
-      debugPrint('Erreur lors du chargement des messages: $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('❌ Chargement du fil $ticketId: ${e.code}');
     }
   }
 
-  /// Créer un nouveau ticket
-  Future<bool> createTicket(SupportTicket ticket) async {
+  /// Ouvre un ticket. [category] doit être une valeur de `TicketCategory`
+  /// côté serveur (`order`, `payment`, `account`, `delivery`, `other`) — le
+  /// statut, la résolution et la date de résolution ne s'écrivent pas d'ici.
+  Future<bool> createTicket({
+    required String category,
+    required String subject,
+    required String description,
+  }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _supabase
-          .from('support_tickets')
-          .insert(ticket.toMap())
-          .select()
-          .single();
-
-      final newTicket = SupportTicket.fromMap(response);
-      _tickets.insert(0, newTicket);
-
-      debugPrint('✅ Ticket créé: ${newTicket.id}');
+      final ticket = await _repository.openTicket(
+        category: category,
+        subject: subject,
+        description: description,
+      );
+      _tickets.insert(0, ticket);
+      debugPrint('✅ Ticket créé: ${ticket.id}');
       return true;
-    } catch (e) {
-      _error = 'Erreur lors de la création du ticket: $e';
-      debugPrint('❌ $_error');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('❌ Création du ticket: ${e.code}');
       return false;
     } finally {
       _isLoading = false;
@@ -181,42 +85,23 @@ class SupportService extends ChangeNotifier {
     }
   }
 
-  /// Ajouter un message à un ticket
-  Future<bool> addMessage(SupportMessage message) async {
+  Future<bool> addMessage({required String ticketId, required String content}) async {
     try {
-      final response = await _supabase
-          .from('support_messages')
-          .insert(message.toMap())
-          .select()
-          .single();
-
-      final newMessage = SupportMessage.fromMap(response);
-
-      if (_messages[message.ticketId] == null) {
-        _messages[message.ticketId] = [];
-      }
-      _messages[message.ticketId]!.add(newMessage);
-
+      final message = await _repository.reply(ticketId: ticketId, content: content);
+      (_messages[ticketId] ??= []).add(message);
       notifyListeners();
       return true;
-    } catch (e) {
-      debugPrint('Erreur lors de l\'ajout du message: $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('❌ Envoi du message sur $ticketId: ${e.code}');
       return false;
     }
   }
 
-  /// Obtenir les messages d'un ticket
-  List<SupportMessage> getMessages(String ticketId) {
-    return _messages[ticketId] ?? [];
-  }
+  List<eccore.SupportMessage> getMessages(String ticketId) => _messages[ticketId] ?? [];
 
-  /// Filtrer les tickets par statut
-  List<SupportTicket> getTicketsByStatus(String status) {
-    return _tickets.where((ticket) => ticket.status == status).toList();
-  }
+  List<eccore.SupportTicket> getTicketsByStatus(String status) =>
+      _tickets.where((ticket) => ticket.status == status).toList();
 
-  /// Obtenir les tickets ouverts
-  List<SupportTicket> get openTickets => _tickets
-      .where((t) => t.status == 'open' || t.status == 'in_progress')
-      .toList();
+  List<eccore.SupportTicket> get openTickets =>
+      _tickets.where((t) => t.status == 'open' || t.status == 'in_progress').toList();
 }

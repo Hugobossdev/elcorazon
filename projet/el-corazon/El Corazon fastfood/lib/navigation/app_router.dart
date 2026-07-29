@@ -236,14 +236,7 @@ class AppRouter {
       case payment:
         final args = settings.arguments as Map<String, dynamic>?;
         return MaterialPageRoute(
-          builder: (_) => PaymentScreen(
-            orderId: args?['orderId'] ?? '',
-            amount: args?['amount'] ?? 0.0,
-            paymentMethod: args?['paymentMethod'] ?? PaymentMethod.mobileMoney,
-            customerName: args?['customerName'] ?? '',
-            customerEmail: args?['customerEmail'] ?? '',
-            customerPhone: args?['customerPhone'] ?? '',
-          ),
+          builder: (_) => PaymentScreen(orderId: args?['orderId'] ?? ''),
           settings: settings,
         );
 

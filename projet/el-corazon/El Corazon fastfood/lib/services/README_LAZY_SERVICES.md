@@ -99,7 +99,6 @@ Les services suivants sont configurés en lazy :
 - `AdvancedGamificationService`
 - `OfflineSyncService`
 - `PushNotificationService`
-- `SocialFeaturesService`
 - `SupabaseRealtimeService`
 - `WalletService`
 

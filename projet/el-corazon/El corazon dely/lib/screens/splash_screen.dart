@@ -5,7 +5,14 @@ import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';
 import 'delivery/delivery_navigation_screen.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, this.sessionReady});
+
+  /// Résolu quand `sessionProvider.restoreSession()` (Phase 6) a fini de
+  /// décider si un jeton valide était stocké — voir `main()`. `null` par
+  /// défaut pour que `const SplashScreen()` reste utilisable (l'extension
+  /// `showSplashScreen()` ci-dessous, notamment) ; dans ce cas, l'écran
+  /// n'attend rien de spécial avant d'interroger `AppService`.
+  final Future<void>? sessionReady;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -77,6 +84,13 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<void> _initializeAppService() async {
     try {
+      // Attend que la session Django (Phase 6) soit restaurée — sinon
+      // `AppService.initialize()` lirait un `_currentUser` pas encore à
+      // jour et enverrait un livreur déjà connecté vers l'écran de
+      // connexion.
+      await widget.sessionReady;
+      if (!mounted) return;
+
       final appService = context.read<AppService>();
       if (!appService.isInitialized) {
         await appService.initialize();

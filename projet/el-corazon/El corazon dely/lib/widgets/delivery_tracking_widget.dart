@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/app_service.dart';
 import '../services/realtime_tracking_service.dart';
 import '../models/order.dart';
 import '../theme.dart';
@@ -376,16 +377,38 @@ class _DeliveryTrackingWidgetState extends State<DeliveryTrackingWidget> {
     );
   }
 
-  void _markAsDelivered() {
-    final trackingService = context.read<RealtimeTrackingService>();
-    trackingService.markAsDelivered(widget.order.id);
+  /// Fait avancer la **course** jusqu'à `delivered` (Phase 6) — le livreur
+  /// n'écrit jamais le statut de la commande, celle-ci suit par projection
+  /// serveur.
+  ///
+  /// La confirmation n'est annoncée qu'une fois la transition accordée : la
+  /// machine à états peut la refuser, et l'ancien code affichait « livrée »
+  /// sans avoir rien attendu.
+  Future<void> _markAsDelivered() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final appService = context.read<AppService>();
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Commande marquée comme livrée'),
-        backgroundColor: AppColors.success,
-      ),
-    );
+    try {
+      await appService.updateOrderStatus(widget.order.id, OrderStatus.delivered);
+      if (!mounted) return;
+
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Commande marquée comme livrée'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+      widget.onDeliveryCompleted?.call();
+    } catch (e) {
+      if (!mounted) return;
+
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Livraison refusée : $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
   }
 
   Color _getStatusColor(OrderStatus status) {

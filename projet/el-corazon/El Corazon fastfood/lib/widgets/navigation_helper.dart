@@ -259,24 +259,12 @@ class NavigationHelper {
   static Future<void> navigateToPayment(
     BuildContext context, {
     required String orderId,
-    required double amount,
-    required dynamic paymentMethod,
-    required String customerName,
-    required String customerEmail,
-    required String customerPhone,
   }) async {
     try {
       await NavigationService.pushNamedWithArgs(
         context,
         AppRouter.payment,
-        arguments: {
-          'orderId': orderId,
-          'amount': amount,
-          'paymentMethod': paymentMethod,
-          'customerName': customerName,
-          'customerEmail': customerEmail,
-          'customerPhone': customerPhone,
-        },
+        arguments: {'orderId': orderId},
       );
     } catch (e) {
       if (!context.mounted) return;
@@ -545,23 +533,8 @@ extension NavigationHelperExtension on BuildContext {
       NavigationHelper.navigateToOrderDetails(this, order);
 
   /// Naviguer vers le paiement
-  Future<void> navigateToPayment({
-    required String orderId,
-    required double amount,
-    required dynamic paymentMethod,
-    required String customerName,
-    required String customerEmail,
-    required String customerPhone,
-  }) =>
-      NavigationHelper.navigateToPayment(
-        this,
-        orderId: orderId,
-        amount: amount,
-        paymentMethod: paymentMethod,
-        customerName: customerName,
-        customerEmail: customerEmail,
-        customerPhone: customerPhone,
-      );
+  Future<void> navigateToPayment({required String orderId}) =>
+      NavigationHelper.navigateToPayment(this, orderId: orderId);
 
   /// Naviguer vers les codes promo
   Future<void> navigateToPromoCodes(

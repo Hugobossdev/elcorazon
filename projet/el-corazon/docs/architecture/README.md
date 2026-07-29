@@ -54,7 +54,9 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
   - [x] 5a — WebSocket : suivi de commande, file du livreur, rattrapage par séquence
   - [x] 5b — Notifications, push par Celery, événements de domaine
 - [ ] Phase 6 — Flutter Clean Architecture ([plan détaillé](04-migration-flutter.md), rupture nette
-  avec Supabase — pas de coexistence transitoire)
+  avec Supabase — pas de coexistence transitoire) — en cours : fondations partagées
+  (`packages/elcorazon_core`), `fastfood` migré sauf social et commande groupée, `dely` migré
+  (auth, courses, suivi de position, file des courses), `admin` pas commencé
 - [x] Phase 7 — Tests et qualité (graphe vérifié, contrat vérifié, plancher de couverture)
 - [x] Fidélité par points (F1-F5) — solde, journal, catalogue de récompenses, expiration par
   inactivité, échange contre un code promotionnel nominatif

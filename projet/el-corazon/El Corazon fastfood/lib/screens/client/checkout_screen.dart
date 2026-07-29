@@ -782,112 +782,92 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     });
 
     try {
-      // Use existing order ID or generate new one
-      final orderId = widget.existingOrderId ??
-          DateTime.now().millisecondsSinceEpoch.toString();
+      // V2: checkout = adresse sélectionnée obligatoire (avec lat/lng)
+      Address? addressToUse = _selectedAddress;
 
-      // Navigate to payment screen
-      final paymentSuccess = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (context) => PaymentScreen(
-            orderId: orderId,
-            amount: total,
-            paymentMethod: _selectedPayment,
-            customerName: appService.currentUser?.name ?? 'Client',
-            customerEmail: appService.currentUser?.email ?? '',
-            customerPhone: appService.currentUser?.phone ?? '',
-          ),
-        ),
-      );
+      // S'assurer que l'adresse a des coordonnées
+      if (addressToUse != null &&
+          (addressToUse.latitude == null || addressToUse.longitude == null)) {
+        debugPrint(
+          'CheckoutScreen: Tentative de géocodage avant passage de commande',
+        );
+        addressToUse = await _ensureAddressHasCoordinates(addressToUse);
+      }
 
-      if (paymentSuccess == true && mounted) {
-        // V2: checkout = adresse sélectionnée obligatoire (avec lat/lng)
-        Address? addressToUse = _selectedAddress;
-
-        // S'assurer que l'adresse a des coordonnées
-        if (addressToUse != null &&
-            (addressToUse.latitude == null || addressToUse.longitude == null)) {
-          debugPrint(
-            'CheckoutScreen: Tentative de géocodage avant passage de commande',
-          );
-          addressToUse = await _ensureAddressHasCoordinates(addressToUse);
-        }
-
-        if (addressToUse == null ||
-            addressToUse.latitude == null ||
-            addressToUse.longitude == null) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Adresse de livraison invalide. Veuillez sélectionner une adresse avec coordonnées valides.',
-                ),
-                backgroundColor: Colors.red,
+      if (addressToUse == null ||
+          addressToUse.latitude == null ||
+          addressToUse.longitude == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Adresse de livraison invalide. Veuillez sélectionner une adresse avec coordonnées valides.',
               ),
-            );
-          }
-          throw Exception(
-            'Adresse de livraison invalide. Veuillez sélectionner une adresse.',
+              backgroundColor: Colors.red,
+            ),
           );
         }
+        throw Exception(
+          'Adresse de livraison invalide. Veuillez sélectionner une adresse.',
+        );
+      }
 
-        String finalOrderId;
-        if (widget.existingOrderId != null) {
-          // Finaliser la commande existante
-          finalOrderId = await appService.finalizeExistingOrder(
-            widget.existingOrderId!,
-            addressToUse,
-            _selectedPayment,
-            total,
-            notes: _notesController.text.trim().isNotEmpty
-                ? _notesController.text.trim()
-                : null,
-          );
-        } else {
-          // Créer une nouvelle commande
-          finalOrderId = await appService.placeOrderFromCartService(
-            addressToUse,
-            _selectedPayment,
-            cartService.items,
-            cartService.subtotal,
-            cartService.deliveryFee,
-            cartService.discount,
-            notes: _notesController.text.trim().isNotEmpty
-                ? _notesController.text.trim()
-                : null,
-          );
-        }
+      String finalOrderId;
+      if (widget.existingOrderId != null) {
+        // Commande de groupe : `finalizeExistingOrder` traite son paiement
+        // elle-même (hors scope de la migration Django, inchangée) — pas
+        // d'écran de paiement séparé pour cette branche.
+        finalOrderId = await appService.finalizeExistingOrder(
+          widget.existingOrderId!,
+          addressToUse,
+          _selectedPayment,
+          total,
+          notes: _notesController.text.trim().isNotEmpty
+              ? _notesController.text.trim()
+              : null,
+        );
+      } else {
+        // Créer la commande d'abord (Django, Phase 6) — le paiement s'ouvre
+        // ensuite contre une commande réelle, jamais l'inverse.
+        finalOrderId = await appService.placeOrderFromCartService(
+          addressToUse,
+          _selectedPayment,
+          cartService.items,
+          cartService.subtotal,
+          cartService.deliveryFee,
+          cartService.discount,
+          notes: _notesController.text.trim().isNotEmpty
+              ? _notesController.text.trim()
+              : null,
+        );
 
         if (finalOrderId.isNotEmpty && mounted) {
-          // Vider le panier seulement si c'était une commande depuis le panier
-          if (widget.existingOrderId == null) {
-            cartService.clear();
-          }
-
-          // Naviguer vers l'écran de suivi de commande
-          if (mounted && context.mounted) {
-            await context.navigateToDeliveryTracking(finalOrderId);
-          }
-
-          // Afficher un message de succès
-          if (mounted && context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Commande #$finalOrderId passée avec succès! 🎉'),
-                backgroundColor: Colors.green,
-                duration: const Duration(seconds: 3),
-              ),
-            );
-          }
+          cartService.clear();
+          // Le paiement se règle par webhook signé, jamais par le retour de
+          // cet écran (`apps/payments/services.py`) — la commande existe déjà
+          // quelle que soit l'issue.
+          await Navigator.of(context).push<bool>(
+            MaterialPageRoute(builder: (context) => PaymentScreen(orderId: finalOrderId)),
+          );
         }
-      } else if (mounted && context.mounted) {
-        // Payment was cancelled or failed
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Paiement annulé'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+      }
+
+      if (finalOrderId.isNotEmpty && mounted) {
+        // Naviguer vers l'écran de suivi de commande
+        if (mounted && context.mounted) {
+          await context.navigateToDeliveryTracking(finalOrderId);
+        }
+
+        // Afficher un message de succès
+        if (mounted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Commande #$finalOrderId passée avec succès! 🎉'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted && context.mounted) {

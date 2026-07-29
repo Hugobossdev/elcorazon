@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
 import 'package:elcora_fast/models/notification_model.dart';
 import 'package:elcora_fast/theme.dart';
@@ -37,16 +36,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Future<void> _loadNotifications() async {
-    final appService = Provider.of<AppService>(context, listen: false);
-    final notificationService =
-        Provider.of<NotificationDatabaseService>(context, listen: false);
-
-    final user = appService.currentUser;
-    if (user == null) {
-      return;
-    }
-
-    await notificationService.loadNotifications(user.id);
+    // Plus de garde sur l'utilisateur courant : la requête part avec le jeton
+    // de session et le serveur cloisonne lui-même l'historique.
+    await Provider.of<NotificationDatabaseService>(context, listen: false)
+        .loadNotifications();
   }
 
   Future<void> _refreshNotifications() async {
@@ -75,16 +68,9 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                   ],
                 ),
               ),
-              const PopupMenuItem(
-                value: 'delete_all',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete_sweep),
-                    SizedBox(width: 8),
-                    Text('Tout supprimer'),
-                  ],
-                ),
-              ),
+              // « Tout supprimer » retiré : le contrat n'expose que la lecture
+              // et le marquage. Le serveur décide seul de la durée de vie d'une
+              // notification.
             ],
           ),
         ],
@@ -421,16 +407,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                     ],
                   ),
                 ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete),
-                    SizedBox(width: 8),
-                    Text('Supprimer'),
-                  ],
-                ),
-              ),
             ],
           ),
           onTap: () {
@@ -514,9 +490,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           ),
         );
         break;
-      case 'delete_all':
-        _showDeleteAllDialog(service);
-        break;
     }
   }
 
@@ -532,39 +505,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           service.markAsRead(backendId);
         }
         break;
-      case 'delete':
-        final backendId = notification.backendId;
-        if (backendId != null && _isValidUuid(backendId)) {
-          service.deleteNotification(backendId);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Notification supprimée'),
-              backgroundColor: AppColors.primary,
-            ),
-          );
-        }
-        break;
     }
-  }
-
-  void _showDeleteAllDialog(NotificationDatabaseService service) {
-    context.showEnhancedDialog(
-      title: 'Supprimer toutes les notifications',
-      content:
-          'Êtes-vous sûr de vouloir supprimer toutes les notifications ? Cette action est irréversible.',
-      confirmText: 'Supprimer',
-      cancelText: 'Annuler',
-      isDestructive: true,
-      onConfirm: () {
-        service.deleteAllNotifications();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Toutes les notifications supprimées'),
-            backgroundColor: AppColors.primary,
-          ),
-        );
-      },
-    );
   }
 
   String _getTypeLabel(NotificationType type) {

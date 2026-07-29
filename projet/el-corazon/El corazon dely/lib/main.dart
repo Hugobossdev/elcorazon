@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:elcora_dely/l10n/app_localizations.dart';
+import 'package:elcorazon_core/elcorazon_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'theme.dart';
 import 'services/app_service.dart';
@@ -25,7 +27,6 @@ import 'services/ai_recommendation_service.dart';
 import 'services/cart_service.dart';
 import 'services/offline_sync_service.dart';
 import 'services/social_features_service.dart';
-import 'services/supabase_realtime_service.dart';
 import 'services/voice_command_service.dart';
 import 'services/wallet_service.dart';
 import 'services/error_handler_service.dart';
@@ -63,7 +64,32 @@ void main() async {
     // The app can work in offline mode or with cached data
   }
 
-  runApp(const DeliverApp());
+  // Backend Django v2 (Phase 6) — authentification uniquement pour l'instant,
+  // le reste de l'app (menu, courses, portefeuille...) reste sur Supabase
+  // jusqu'à ce que son propre domaine soit migré à son tour.
+  final tokenStorage = TokenStorage();
+  final apiClient = ApiClient(
+    baseUrl: dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1',
+    tokenStorage: tokenStorage,
+  );
+  final container = ProviderContainer(
+    overrides: [
+      tokenStorageProvider.overrideWithValue(tokenStorage),
+      apiClientProvider.overrideWithValue(apiClient),
+      expectedUserTypeProvider.overrideWithValue(UserAccountType.courier),
+    ],
+  );
+  // Lancée sans bloquer ce `runApp` : `SplashScreen` attend elle-même ce
+  // futur (voir `sessionReady`) avant de décider où naviguer, pendant que
+  // l'animation d'accueil tourne déjà.
+  final sessionReady = container.read(sessionProvider.notifier).restoreSession();
+
+  runApp(
+    UncontrolledProviderScope(
+      container: container,
+      child: DeliverApp(container: container, sessionReady: sessionReady),
+    ),
+  );
 }
 
 /// Initialize only essential services at startup
@@ -105,14 +131,17 @@ Future<void> _initializeCoreServices() async {
 }
 
 class DeliverApp extends StatelessWidget {
-  const DeliverApp({super.key});
+  const DeliverApp({required this.container, required this.sessionReady, super.key});
+
+  final ProviderContainer container;
+  final Future<void> sessionReady;
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
         // Core services
-        ChangeNotifierProvider(create: (_) => AppService()),
+        ChangeNotifierProvider(create: (_) => AppService(container)),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => NotificationService()),
         ChangeNotifierProvider(create: (_) => GamificationService()),
@@ -135,7 +164,6 @@ class DeliverApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => CartService()),
         ChangeNotifierProvider(create: (_) => OfflineSyncService()),
         ChangeNotifierProvider(create: (_) => SocialFeaturesService()),
-        ChangeNotifierProvider(create: (_) => SupabaseRealtimeService()),
         ChangeNotifierProvider(create: (_) => VoiceCommandService()),
         ChangeNotifierProvider(create: (_) => WalletService()),
         ChangeNotifierProvider(create: (_) => ErrorHandlerService()),
@@ -153,7 +181,7 @@ class DeliverApp extends StatelessWidget {
           GlobalCupertinoLocalizations.delegate,
         ],
         supportedLocales: const [Locale('fr'), Locale('en')],
-        home: const SplashScreen(),
+        home: SplashScreen(sessionReady: sessionReady),
         debugShowCheckedModeBanner: false,
         routes: {
           '/delivery-home': (context) => const DeliveryNavigationScreen(),

@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:elcora_fast/models/address.dart';
-import 'package:elcora_fast/services/database_service.dart';
+import 'package:elcora_fast/repositories/django_address_repository.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 
 class AddressService extends ChangeNotifier {
@@ -19,7 +19,7 @@ class AddressService extends ChangeNotifier {
   bool _isInitialized = false;
   String? _userId;
 
-  final DatabaseService _databaseService = DatabaseService();
+  final DjangoAddressRepository _addressRepository = DjangoAddressRepository();
   final Uuid _uuid = const Uuid();
   final GeocodingService _geocodingService = GeocodingService();
 
@@ -139,9 +139,22 @@ class AddressService extends ChangeNotifier {
     if (_userId == null) return;
 
     try {
-      final remoteAddresses =
-          await _databaseService.fetchUserAddresses(_userId!);
-      _addresses = remoteAddresses;
+      final remoteAddresses = await _addressRepository.list(userId: _userId!);
+
+      // `isFavorite` n'existe pas côté Django (hors scope de cette tranche,
+      // reste un concept purement local) — préservé depuis l'état local
+      // existant plutôt que silencieusement réinitialisé à chaque rechargement.
+      final previousFavorites = {
+        for (final address in _addresses)
+          if (address.isFavorite) address.id: true,
+      };
+      _addresses = remoteAddresses
+          .map(
+            (address) => previousFavorites.containsKey(address.id)
+                ? address.copyWith(isFavorite: true)
+                : address,
+          )
+          .toList();
 
       if (_addresses.isNotEmpty) {
         _selectedAddress = defaultAddress ?? _addresses.first;
@@ -272,29 +285,39 @@ class AddressService extends ChangeNotifier {
       final shouldBeDefault = _addresses.isEmpty || isDefault;
       Address newAddress;
 
-      if (_userId != null) {
-        if (shouldBeDefault && _addresses.isNotEmpty) {
-          await _databaseService.unsetDefaultAddresses(_userId!);
+      // `location` est obligatoire côté serveur (`AddressSerializer`) : sans
+      // coordonnées géocodées, l'adresse reste locale même pour un compte
+      // connecté — `migrateMissingCoordinates` la créera côté Django dès que
+      // le géocodage aboutira (voir plus bas, même invariant : une adresse
+      // sans coordonnées n'existe pas encore côté serveur).
+      if (_userId != null && finalLatitude != null && finalLongitude != null) {
+        // Le serveur rétrograde lui-même l'ancien défaut
+        // (`AddressViewSet.perform_create`) — pas besoin de le faire ici.
+        newAddress = await _addressRepository.create(
+          Address(
+            id: '',
+            userId: _userId!,
+            name: name,
+            address: address,
+            city: city,
+            postalCode: postalCode,
+            latitude: finalLatitude,
+            longitude: finalLongitude,
+            type: type,
+            isDefault: shouldBeDefault,
+            isFavorite: isFavorite,
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
+        );
+        if (shouldBeDefault) {
           _addresses =
               _addresses.map((a) => a.copyWith(isDefault: false)).toList();
         }
-
-        newAddress = await _databaseService.createAddress(
-          userId: _userId!,
-          name: name,
-          address: address,
-          city: city,
-          postalCode: postalCode,
-          type: type,
-          isDefault: shouldBeDefault,
-          isFavorite: isFavorite,
-          latitude: finalLatitude,
-          longitude: finalLongitude,
-        );
       } else {
         newAddress = Address(
           id: _uuid.v4(),
-          userId: 'guest',
+          userId: _userId ?? 'guest',
           name: name,
           address: address,
           city: city,
@@ -303,6 +326,7 @@ class AddressService extends ChangeNotifier {
           longitude: finalLongitude,
           type: type,
           isDefault: shouldBeDefault,
+          isFavorite: isFavorite,
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
         );
@@ -408,12 +432,16 @@ class AddressService extends ChangeNotifier {
 
       Address updatedAddress;
 
-      if (_userId != null) {
-        if (isDefault == true) {
-          await _databaseService.unsetDefaultAddresses(_userId!);
-        }
-        updatedAddress = await _databaseService.updateAddress(
-          addressId: addressId,
+      // Une adresse sans coordonnées n'a jamais pu être créée côté Django
+      // (`location` obligatoire) — sa présence sur `currentAddress` est donc
+      // la preuve qu'elle existe déjà côté serveur (même invariant que dans
+      // `addAddress`). Sans coordonnées finales, elle reste locale, comme
+      // avant cette migration.
+      final wasAlreadyRemote =
+          currentAddress.latitude != null && currentAddress.longitude != null;
+
+      if (_userId != null && finalLatitude != null && finalLongitude != null) {
+        final mergedForRemote = currentAddress.copyWith(
           name: name,
           address: address,
           city: city,
@@ -423,6 +451,11 @@ class AddressService extends ChangeNotifier {
           latitude: finalLatitude,
           longitude: finalLongitude,
         );
+        updatedAddress = wasAlreadyRemote
+            ? await _addressRepository.update(currentAddress.id, mergedForRemote)
+            : await _addressRepository.create(mergedForRemote);
+        // Le serveur rétrograde lui-même l'ancien défaut
+        // (`AddressViewSet.perform_update`/`perform_create`).
       } else {
         updatedAddress = currentAddress.copyWith(
           name: name,
@@ -477,8 +510,13 @@ class AddressService extends ChangeNotifier {
       final deletedAddress = _addresses[index];
       _addresses.removeAt(index);
 
-      if (_userId != null) {
-        await _databaseService.deleteAddress(addressId);
+      // N'existe côté Django que si elle a des coordonnées (même invariant
+      // que dans addAddress/updateAddress) — sinon rien à supprimer côté
+      // serveur.
+      if (_userId != null &&
+          deletedAddress.latitude != null &&
+          deletedAddress.longitude != null) {
+        await _addressRepository.delete(addressId);
       }
 
       // Si l'adresse supprimée était sélectionnée, sélectionner une autre

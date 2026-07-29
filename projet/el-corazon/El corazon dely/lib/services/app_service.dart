@@ -1,12 +1,17 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 // Import conditionnel pour File (mobile vs web)
 import 'dart:io' if (dart.library.html) 'dart:html' as io;
+// Alias explicite : `eccore.User` (backend Django) et le `User` local
+// (Supabase, ci-dessous) portent le même nom mais pas la même forme — voir
+// `_fromDjangoUser`, qui traduit le premier vers le second.
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import '../models/user.dart';
 import '../models/menu_item.dart';
 import '../models/order.dart';
 import '../models/message.dart';
+import '../repositories/django_delivery_repository.dart';
 import 'location_service.dart';
 import 'notification_service.dart';
 import 'gamification_service.dart';
@@ -16,9 +21,35 @@ import 'storage_service.dart';
 import 'paydunya_service.dart';
 
 class AppService extends ChangeNotifier {
-  static final AppService _instance = AppService._internal();
-  factory AppService() => _instance;
-  AppService._internal();
+  static AppService? _instance;
+
+  /// Le conteneur Riverpod est celui créé une fois dans `main()` — voir
+  /// `UncontrolledProviderScope`. Un seul appelant (le premier) le fournit
+  /// réellement ; les suivants (le `ChangeNotifierProvider` lui-même, sur un
+  /// éventuel rebuild du widget racine) retrouvent la même instance.
+  factory AppService(ProviderContainer container) {
+    return _instance ??= AppService._internal(container);
+  }
+
+  AppService._internal(this._container) {
+    // Le transport temps réel ne connaît ni les courses ni les repositories :
+    // il faut lui rendre les deux gestes qui en demandent la connaissance
+    // avant que la moindre session ne s'ouvre.
+    _bindTrackingService();
+
+    // `fireImmediately` peuple `_currentUser` dès la construction si une
+    // session a déjà été restaurée avant que ce service n'existe — sinon la
+    // toute première frame verrait un utilisateur nul qui redevient non nul
+    // juste après, sans qu'aucun événement ne l'ait annoncé.
+    _sessionSubscription = _container.listen<AsyncValue<eccore.User?>>(
+      eccore.sessionProvider,
+      (previous, next) => _onSessionChanged(next),
+      fireImmediately: true,
+    );
+  }
+
+  final ProviderContainer _container;
+  late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
 
   User? _currentUser;
   bool _isInitialized = false;
@@ -31,6 +62,22 @@ class AppService extends ChangeNotifier {
   final NotificationService _notificationService = NotificationService();
   final GamificationService _gamificationService = GamificationService();
   final DatabaseService _databaseService = DatabaseService();
+
+  /// Courses du livreur (Phase 6), indexées par identifiant de **commande** :
+  /// c'est ainsi que les écrans les désignent, alors que toutes les actions
+  /// s'adressent à l'affectation. Cette table est le pont entre les deux.
+  final Map<String, Course> _coursesByOrderId = {};
+  DjangoDeliveryRepository? _deliveryRepository;
+  eccore.CourierProfile? _courierProfile;
+  StreamSubscription<eccore.AssignmentOffer>? _courseOffersSubscription;
+
+  /// Construit à la demande : l'`ApiClient` vit dans le conteneur Riverpod créé
+  /// par `main()`, et le lire au constructeur d'`AppService` le figerait avant
+  /// que les surcharges de test aient pu s'appliquer.
+  DjangoDeliveryRepository get _delivery =>
+      _deliveryRepository ??= DjangoDeliveryRepository(
+        apiClient: _container.read(eccore.apiClientProvider),
+      );
 
   // Getters
   User? get currentUser => _currentUser;
@@ -64,24 +111,127 @@ class AppService extends ChangeNotifier {
     return _cartItems.length;
   }
 
+  @override
+  void dispose() {
+    _sessionSubscription.close();
+    unawaited(_courseOffersSubscription?.cancel());
+    super.dispose();
+  }
+
+  /// Pont entre la session Riverpod (backend Django, source de vérité de
+  /// l'identité — Phase 6) et le `_currentUser` local que le reste de cette
+  /// classe lit encore. C'est le seul endroit qui traduit l'un vers l'autre :
+  /// tout le reste d'`AppService` continue de lire `_currentUser` sans savoir
+  /// d'où il vient.
+  void _onSessionChanged(AsyncValue<eccore.User?> next) {
+    final djangoUser = next.value;
+    final wasConnected = _currentUser != null;
+    _currentUser = djangoUser == null ? null : _fromDjangoUser(djangoUser);
+
+    // La file des courses et l'émission de position suivent la session, pas un
+    // écran : un livreur connecté reste joignable et reste suivi même quand il
+    // n'a aucune carte ouverte.
+    if (_currentUser != null && !wasConnected) {
+      unawaited(trackingService.startCourierSession());
+    } else if (_currentUser == null && wasConnected) {
+      _coursesByOrderId.clear();
+      _courierProfile = null;
+      unawaited(trackingService.stopCourierSession());
+    }
+
+    notifyListeners();
+  }
+
+  /// Rend au transport temps réel les deux gestes qui demandent de connaître
+  /// les courses : relire une commande, et déposer un relevé sur l'affectation
+  /// en cours. Lui passer `AppService` entier créerait un cycle entre les deux
+  /// fichiers pour deux appels.
+  void _bindTrackingService() {
+    final tracking = trackingService;
+
+    tracking.bind(
+      readOrder: (orderId) async {
+        final known = _coursesByOrderId[orderId];
+        if (known == null) return null;
+
+        final refreshed = await _delivery.loadCourse(known.assignmentId);
+        _rememberCourse(refreshed);
+        return refreshed.order;
+      },
+      reportPosition: (position) async {
+        final course = activeCourse;
+        if (course == null) return;
+
+        await updateDeliveryLocation(
+          orderId: course.orderId,
+          latitude: position.latitude,
+          longitude: position.longitude,
+          accuracy: position.accuracy,
+          speed: position.speed,
+          heading: position.heading,
+        );
+      },
+    );
+
+    // Une course proposée arrive par la file : la liste se recharge pour que
+    // l'écran la montre avec tout ce qu'il lui faut (montants, articles,
+    // transitions permises), que le message d'alerte ne porte pas.
+    _courseOffersSubscription = tracking.courseOffers.listen((offer) {
+      debugPrint('📨 Course proposée : ${offer.reference} (${offer.restaurant})');
+      unawaited(loadAvailableOrders(forceRefresh: true));
+    });
+  }
+
+  /// Le compte de fidélité, les badges et le statut « en ligne » n'existent
+  /// pas dans `UserSerializer` — ce sont des domaines pas encore migrés
+  /// (fidélité, livraison). Ils gardent leur valeur par défaut tant que ces
+  /// domaines n'ont pas leur tour ; ce n'est pas un oubli.
+  User _fromDjangoUser(eccore.User djangoUser) {
+    return User(
+      id: djangoUser.id,
+      name: djangoUser.fullName,
+      email: djangoUser.email,
+      phone: djangoUser.phone ?? '',
+      role: UserRole.delivery,
+      profileImage: djangoUser.avatar,
+      createdAt: djangoUser.createdAt,
+    );
+  }
+
+  /// Appelée par `SplashScreen` une fois que `sessionProvider` a fini de
+  /// restaurer la session (Phase 6) — `_currentUser` est donc déjà à jour via
+  /// le pont ci-dessus, il n'y a plus à interroger Supabase pour savoir si un
+  /// livreur est connecté.
+  /// Enregistre le jeton FCM déjà obtenu par `NotificationService` auprès de
+  /// `/api/v1/auth/devices/` (Phase 6). Best-effort : un échec ici (réseau,
+  /// jeton pas encore disponible) ne doit pas faire échouer la connexion —
+  /// les notifications restent secondaires à l'authentification elle-même.
+  Future<void> _registerPushDeviceBestEffort() async {
+    final token = _notificationService.fcmToken;
+    if (token == null || token.isEmpty) return;
+
+    try {
+      await _container.read(eccore.authRepositoryProvider).registerDevice(
+        token: token,
+        platform: switch (defaultTargetPlatform) {
+          TargetPlatform.iOS => 'ios',
+          TargetPlatform.android => 'android',
+          _ => 'web',
+        },
+      );
+    } catch (e) {
+      debugPrint('⚠️ Échec de l\'enregistrement du jeton FCM: $e');
+    }
+  }
+
   Future<void> initialize() async {
     try {
       // Load menu items from database
       await _loadMenuItems();
 
-      // Check if user is already logged in
-      final currentAuthUser = _databaseService.currentUser;
-      if (currentAuthUser != null) {
-        await _loadUserProfile(currentAuthUser.id);
-        // Load user orders after profile is loaded
-        await _loadUserOrders();
-
-        // If user is delivery staff, also load available orders
-        if (_currentUser?.role == UserRole.delivery) {
-          await loadAvailableOrders();
-        }
-      } else {
-        // Load all orders for delivery staff to see available orders
+      if (_currentUser != null && _currentUser!.role == UserRole.delivery) {
+        await loadAvailableOrders();
+      } else if (_currentUser == null) {
         await _loadAllOrders();
       }
 
@@ -95,52 +245,11 @@ class AppService extends ChangeNotifier {
   }
 
   // Authentication methods
-  Future<bool> login(String email, String password, UserRole role) async {
-    try {
-      // Authenticate with Supabase
-      final response = await _databaseService.signIn(
-        email: email,
-        password: password,
-      );
-
-      if (response?.user != null) {
-        // Load user profile from database
-        await _loadUserProfile(response!.user!.id);
-
-        // Update online status for delivery staff
-        if (_currentUser?.role == UserRole.delivery) {
-          await _databaseService.updateUserOnlineStatus(
-            response.user!.id,
-            true,
-          );
-        }
-
-        // Initialize tracking service
-        if (_currentUser != null) {
-          await trackingService.initialize(
-            userId: _currentUser!.id,
-            userRole: _currentUser!.role,
-          );
-        }
-
-        // Track login event
-        if (_currentUser != null) {
-          await _databaseService.trackEvent(
-            eventType: 'user_login',
-            eventData: {'role': role.toString()},
-            userId: _currentUser!.id,
-          );
-        }
-
-        notifyListeners();
-        return true;
-      }
-      return false;
-    } catch (e) {
-      debugPrint('Login error: $e');
-      return false;
-    }
-  }
+  //
+  // `login()` (Supabase) a été supprimé avec cette tranche : il n'avait plus
+  // aucun appelant depuis que `loginDriver` passe par `sessionProvider`
+  // (Phase 6, tranche auth), et il ouvrait encore le suivi temps réel sur une
+  // identité que le backend Django ne connaît pas.
 
   Future<bool> register(
     String name,
@@ -183,26 +292,11 @@ class AppService extends ChangeNotifier {
 
   Future<void> logout() async {
     try {
-      // Update online status for delivery staff
-      if (_currentUser?.role == UserRole.delivery) {
-        final currentAuthUser = _databaseService.currentUser;
-        if (currentAuthUser != null) {
-          await _databaseService.updateUserOnlineStatus(
-            currentAuthUser.id,
-            false,
-          );
-        }
-      }
-
-      // Sign out from Supabase
-      await _databaseService.signOut();
-
-      _currentUser = null;
+      // Révoque le jeton de rafraîchissement côté serveur et efface le
+      // stockage sécurisé (Phase 6) ; `_currentUser` repasse à `null` via le
+      // pont d'écoute (`_onSessionChanged`), pas ici directement.
+      await _container.read(eccore.sessionProvider.notifier).logout();
       _cartItems.clear();
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('user_data');
-
       notifyListeners();
     } catch (e) {
       debugPrint('Logout error: $e');
@@ -456,6 +550,12 @@ class AppService extends ChangeNotifier {
   bool _isLoadingOrders = false;
   DateTime? _lastOrdersLoadTime;
 
+  /// Recharge les courses du livreur depuis `/delivery/*` (Phase 6).
+  ///
+  /// Le nom est celui d'avant — quatre écrans l'appellent — mais ce qu'il
+  /// charge a changé de nature : plus un vivier de commandes ouvertes, mais
+  /// **mes** courses (proposées, en cours, et l'historique récent des livrées,
+  /// dont vivent les écrans de gains et de statistiques).
   Future<void> loadAvailableOrders({bool forceRefresh = false}) async {
     // Éviter les appels simultanés
     if (_isLoadingOrders) {
@@ -478,85 +578,71 @@ class AppService extends ChangeNotifier {
     _lastOrdersLoadTime = DateTime.now();
 
     try {
-      // Charger les commandes disponibles
-      final ordersData = await _databaseService.getAvailableOrders().timeout(
-        const Duration(seconds: 15),
+      final courses = await _delivery.loadCourses().timeout(
+        const Duration(seconds: 20),
       );
 
-      final availableOrders = ordersData
-          .map((data) => Order.fromMap(data))
-          .toList();
+      // Remplacement plutôt que fusion : le serveur rend l'état complet des
+      // courses qui me concernent. Une course absente de cette réponse ne
+      // m'est plus proposée (un collègue l'a prise) ou est sortie de
+      // l'historique récent — la garder à l'écran la ferait accepter dans le
+      // vide.
+      _coursesByOrderId
+        ..clear()
+        ..addEntries(courses.map((course) => MapEntry(course.orderId, course)));
+      _syncOrdersFromCourses();
 
-      // Charger aussi les commandes assignées au livreur actuel
-      List<Order> assignedOrders = [];
-      if (_currentUser != null && _currentUser!.role == UserRole.delivery) {
-        try {
-          final assignedData = await _databaseService
-              .getAssignedOrders(_currentUser!.id)
-              .timeout(const Duration(seconds: 10));
-          assignedOrders = assignedData
-              .map((data) => Order.fromMap(data))
-              .toList();
-          debugPrint('✅ Loaded ${assignedOrders.length} assigned orders');
-        } catch (e) {
-          debugPrint('⚠️ Error loading assigned orders: $e');
-          // Continuer même si le chargement des commandes assignées échoue
+      // Le dossier porte l'éligibilité (L1) et les compteurs officiels : il ne
+      // se déduit pas des courses, il se lit.
+      try {
+        _courierProfile = await _delivery.profile();
+        if (_currentUser != null) {
+          _currentUser = _currentUser!.copyWith(isOnline: _courierProfile!.isOnline);
         }
+      } catch (e) {
+        debugPrint('⚠️ Dossier livreur illisible : $e');
       }
-
-      // Fusionner les commandes disponibles et assignées
-      final allOrdersMap = <String, Order>{};
-
-      // Ajouter les commandes disponibles
-      for (final order in availableOrders) {
-        allOrdersMap[order.id] = order;
-      }
-
-      // Ajouter les commandes assignées (elles ont priorité si elles existent dans les deux)
-      for (final order in assignedOrders) {
-        allOrdersMap[order.id] = order;
-      }
-
-      // Créer un Set pour une fusion plus efficace avec les commandes existantes
-      final existingOrderIds = _orders.map((o) => o.id).toSet();
-      final newOrderIds = allOrdersMap.keys.toSet();
-
-      // Mettre à jour les commandes existantes
-      for (int i = 0; i < _orders.length; i++) {
-        if (newOrderIds.contains(_orders[i].id)) {
-          _orders[i] = allOrdersMap[_orders[i].id]!;
-        }
-      }
-
-      // Ajouter les nouvelles commandes
-      for (final order in allOrdersMap.values) {
-        if (!existingOrderIds.contains(order.id)) {
-          _orders.add(order);
-        }
-      }
-
-      // Retirer les commandes qui ne sont plus disponibles ni assignées au livreur
-      _orders.removeWhere(
-        (order) =>
-            !newOrderIds.contains(order.id) &&
-            (order.deliveryPersonId == null ||
-                order.deliveryPersonId != _currentUser?.id),
-      );
-
-      // Trier par date de création (plus récentes en premier)
-      _orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
       notifyListeners();
-      debugPrint('✅ Loaded ${availableOrders.length} available orders');
-      debugPrint('✅ Loaded ${assignedOrders.length} assigned orders');
-      debugPrint('📦 Total orders in memory: ${_orders.length}');
+      debugPrint('✅ ${courses.length} courses chargées');
     } catch (e) {
-      debugPrint('❌ Error loading available orders: $e');
+      debugPrint('❌ Erreur de chargement des courses: $e');
       // Ne pas vider la liste en cas d'erreur, garder les données en cache
       rethrow;
     } finally {
       _isLoadingOrders = false;
     }
+  }
+
+  /// Reflète les courses dans `_orders`, que les écrans généralistes
+  /// (`allOrders`, `activeOrders`) lisent encore.
+  void _syncOrdersFromCourses() {
+    _orders = [
+      for (final course in _coursesByOrderId.values) course.order,
+    ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  /// Enregistre une course rendue par le serveur après une action, et rafraîchit
+  /// ce que les écrans affichent.
+  void _rememberCourse(Course course) {
+    _coursesByOrderId[course.orderId] = course;
+    _syncOrdersFromCourses();
+    notifyListeners();
+  }
+
+  /// La course désignée par une commande, ou une erreur explicite.
+  ///
+  /// Toutes les actions du livreur s'adressent à l'affectation ; ne pas la
+  /// retrouver signifie que l'écran travaille sur une liste périmée, et
+  /// inventer un identifiant serait pire que de le dire.
+  Course _requireCourse(String orderId) {
+    final course = _coursesByOrderId[orderId];
+    if (course == null) {
+      throw StateError(
+        'Aucune course connue pour la commande $orderId — liste à recharger.',
+      );
+    }
+    return course;
   }
 
   // Admin methods
@@ -602,204 +688,160 @@ class AppService extends ChangeNotifier {
       )
       .toList();
 
+  /// Fait avancer la **course** correspondante.
+  ///
+  /// Le livreur n'écrit jamais le statut de la commande : celle-ci suit par
+  /// projection déclarée côté serveur quand la course progresse. Aucune mise à
+  /// jour optimiste non plus — la machine à états peut refuser la transition,
+  /// et afficher une étape que le serveur n'a pas accordée est précisément ce
+  /// qui rendait l'ancien écran incohérent après un refus.
   Future<void> updateOrderStatus(String orderId, OrderStatus newStatus) async {
-    try {
-      // Update local state first for immediate UI feedback (optimistic update)
-      final index = _orders.indexWhere((order) => order.id == orderId);
-      Order? previousOrder;
-      if (index != -1) {
-        previousOrder = _orders[index];
-        _orders[index] = _orders[index].copyWith(status: newStatus);
-        notifyListeners();
-      }
+    final course = _requireCourse(orderId);
+    final target = _toDeliveryTarget(newStatus);
 
-      // Update in database
-      try {
-        await _databaseService
-            .updateOrderStatus(orderId, newStatus.toDbString)
-            .timeout(const Duration(seconds: 10));
-      } catch (e) {
-        // Rollback en cas d'erreur
-        if (previousOrder != null && index != -1 && index < _orders.length) {
-          _orders[index] = previousOrder;
-          notifyListeners();
-        }
-        rethrow;
-      }
-    } catch (e) {
-      debugPrint('❌ Error updating order status: $e');
-      rethrow;
+    if (target == eccore.DeliveryStatus.accepted) {
+      await acceptDelivery(orderId);
+      return;
+    }
+
+    _rememberCourse(await _delivery.advanceTo(course.assignmentId, target));
+  }
+
+  /// Statut affiché → étape de course demandée au serveur.
+  static String _toDeliveryTarget(OrderStatus status) {
+    switch (status) {
+      case OrderStatus.confirmed:
+        return eccore.DeliveryStatus.accepted;
+      case OrderStatus.pickedUp:
+        return eccore.DeliveryStatus.pickedUp;
+      case OrderStatus.onTheWay:
+        return eccore.DeliveryStatus.onTheWay;
+      case OrderStatus.delivered:
+        return eccore.DeliveryStatus.delivered;
+      case OrderStatus.cancelled:
+        return eccore.DeliveryStatus.cancelled;
+      case OrderStatus.pending:
+      case OrderStatus.preparing:
+      case OrderStatus.ready:
+        // Ces trois-là décrivent la cuisine, pas la course : rien ne permet au
+        // livreur de les provoquer, et le serveur les refuserait de toute
+        // façon. Échouer ici plutôt que d'émettre une requête vouée au 409.
+        throw ArgumentError(
+          'Étape « ${status.displayName} » hors du ressort du livreur.',
+        );
     }
   }
 
-  // Delivery methods
-  List<Order> get assignedDeliveries {
-    if (_currentUser?.role != UserRole.delivery || _currentUser == null) {
-      return [];
+  // ------------------------------------------------------------- Livraison
+  //
+  // Le vivier de commandes à se disputer n'existe plus : le personnel propose
+  // une course à un livreur nommé (`AssignmentService.offer`), et celui-ci ne
+  // voit que ce qui lui est adressé. « Disponible » veut donc dire « proposée
+  // à moi », et rien d'autre.
+
+  /// Le dossier du livreur, tel que le serveur le rend. Nul tant que
+  /// [loadAvailableOrders] n'a pas tourné.
+  eccore.CourierProfile? get courierProfile => _courierProfile;
+
+  /// L1 — l'éligibilité est décidée par le serveur : être « en ligne » ne
+  /// suffit pas si le dossier n'est pas validé. Ne jamais la recomposer ici.
+  bool get canAcceptOrders => _courierProfile?.canAcceptOrders ?? false;
+
+  List<Course> get courses => _coursesByOrderId.values.toList();
+
+  Course? courseForOrder(String orderId) => _coursesByOrderId[orderId];
+
+  /// La course que le livreur est en train de faire — celle qu'il a acceptée et
+  /// pas encore terminée. C'est elle, et elle seule, que les relevés de position
+  /// concernent.
+  ///
+  /// Une course simplement *proposée* n'en est pas une : se faire suivre sur une
+  /// course qu'on n'a pas prise n'aurait aucun sens. Le contrat n'en autorise
+  /// qu'une active à la fois (`AssignmentService._active_for`), il n'y a donc
+  /// pas à arbitrer entre plusieurs.
+  Course? get activeCourse {
+    for (final course in _coursesByOrderId.values) {
+      final assignment = course.assignment;
+      if (assignment.isActive &&
+          assignment.status != eccore.DeliveryStatus.offered) {
+        return course;
+      }
     }
-    return _orders
-        .where((o) => o.deliveryPersonId == _currentUser!.id)
-        .toList();
+    return null;
   }
 
+  /// Les courses qu'on me propose et auxquelles je n'ai pas encore répondu.
+  List<Order> get pendingOffers => _ordersWhereCourse(
+    (course) => course.assignment.status == eccore.DeliveryStatus.offered,
+  );
+
+  /// Mes courses : acceptées, en cours, et l'historique récent des livrées.
+  List<Order> get assignedDeliveries => _ordersWhereCourse(
+    (course) => course.assignment.status != eccore.DeliveryStatus.offered,
+  );
+
+  List<Order> _ordersWhereCourse(bool Function(Course) predicate) {
+    if (_currentUser?.role != UserRole.delivery) return [];
+    return [
+      for (final course in _coursesByOrderId.values)
+        if (predicate(course)) course.order,
+    ]..sort((a, b) => b.orderTime.compareTo(a.orderTime));
+  }
+
+  /// Accepte la course proposée pour cette commande.
+  ///
+  /// L2 — l'acceptation est exclusive côté serveur : si un collègue a été plus
+  /// rapide, l'appel échoue par une règle métier, pas par une incohérence. Rien
+  /// n'est donc affiché comme acquis avant la réponse.
   Future<void> acceptDelivery(String orderId) async {
-    if (_currentUser == null) {
-      throw Exception('User must be logged in to accept delivery');
-    }
-
-    // Vérifier si la commande existe et n'est pas déjà assignée
-    final orderIndex = _orders.indexWhere((order) => order.id == orderId);
-    if (orderIndex == -1) {
-      throw Exception('Order not found: $orderId');
-    }
-
-    final order = _orders[orderIndex];
-    if (order.deliveryPersonId != null &&
-        order.deliveryPersonId != _currentUser!.id) {
-      throw Exception('Order already assigned to another driver');
-    }
-
-    Order? previousOrder;
-
-    try {
-      // Optimistic update: Update local state first
-      // According to workflow: accepted → picked_up → on_the_way → delivered
-      previousOrder = order;
-      _orders[orderIndex] = order.copyWith(
-        deliveryPersonId: _currentUser!.id,
-        status: OrderStatus
-            .confirmed, // Use confirmed as accepted (since OrderStatus doesn't have 'accepted')
-      );
-      notifyListeners();
-
-      // Update in database: set status to 'confirmed' (which represents accepted in our workflow)
-      // and update active_deliveries to 'accepted'
-      await _databaseService
-          .updateOrderStatus(
-            orderId,
-            'confirmed', // This represents 'accepted' in the workflow
-            deliveryPersonId: _currentUser!.id,
-          )
-          .timeout(const Duration(seconds: 10));
-
-      // Update active_deliveries to 'accepted' status
-      await _databaseService.updateActiveDeliveryStatus(
-        orderId: orderId,
-        status: 'accepted',
-      );
-
-      debugPrint('✅ Delivery accepted: $orderId');
-    } catch (e) {
-      // Rollback en cas d'erreur
-      if (previousOrder != null && orderIndex < _orders.length) {
-        _orders[orderIndex] = previousOrder;
-        notifyListeners();
-      }
-      debugPrint('❌ Error accepting delivery: $e');
-      rethrow;
-    }
+    final course = _requireCourse(orderId);
+    _rememberCourse(await _delivery.accept(course.assignmentId));
+    debugPrint('✅ Course acceptée pour la commande $orderId');
   }
 
-  /// Marque la commande comme récupérée au restaurant (picked_up)
-  Future<void> markOrderPickedUp(String orderId) async {
-    if (_currentUser == null) {
-      throw Exception('User must be logged in');
-    }
-
-    try {
-      await updateOrderStatus(orderId, OrderStatus.pickedUp);
-      await _databaseService.updateActiveDeliveryStatus(
-        orderId: orderId,
-        status: 'picked_up',
-      );
-      debugPrint('✅ Order marked as picked up: $orderId');
-    } catch (e) {
-      debugPrint('❌ Error marking order as picked up: $e');
-      rethrow;
-    }
+  /// Refuse une course proposée. Distinct d'une annulation : décliner une
+  /// proposition n'incrémente pas le compteur d'annulations du livreur.
+  Future<void> declineDelivery(String orderId, {String reason = ''}) async {
+    final course = _requireCourse(orderId);
+    _rememberCourse(await _delivery.decline(course.assignmentId, reason: reason));
   }
 
-  /// Marque la commande comme en route (on_the_way)
-  Future<void> markOrderOnTheWay(String orderId) async {
-    if (_currentUser == null) {
-      throw Exception('User must be logged in');
-    }
+  /// Marque la course comme récupérée au restaurant (`picked_up`).
+  Future<void> markOrderPickedUp(String orderId) =>
+      updateOrderStatus(orderId, OrderStatus.pickedUp);
 
-    try {
-      await updateOrderStatus(orderId, OrderStatus.onTheWay);
-      await _databaseService.updateActiveDeliveryStatus(
-        orderId: orderId,
-        status: 'on_the_way',
-      );
-      debugPrint('✅ Order marked as on the way: $orderId');
-    } catch (e) {
-      debugPrint('❌ Error marking order as on the way: $e');
-      rethrow;
-    }
-  }
+  /// Marque la course comme partie chez le client (`on_the_way`).
+  Future<void> markOrderOnTheWay(String orderId) =>
+      updateOrderStatus(orderId, OrderStatus.onTheWay);
 
-  /// Marque la commande comme livrée (delivered)
-  Future<void> markOrderDelivered(String orderId) async {
-    if (_currentUser == null) {
-      throw Exception('User must be logged in');
-    }
-
-    try {
-      await updateOrderStatus(orderId, OrderStatus.delivered);
-      await _databaseService.updateActiveDeliveryStatus(
-        orderId: orderId,
-        status: 'delivered',
-      );
-      debugPrint('✅ Order marked as delivered: $orderId');
-    } catch (e) {
-      debugPrint('❌ Error marking order as delivered: $e');
-      rethrow;
-    }
-  }
+  /// Marque la course comme livrée (`delivered`).
+  ///
+  /// C'est le serveur, et lui seul, qui incrémente alors les compteurs et
+  /// crédite la rémunération : la machine étant acyclique, rejouer cette étape
+  /// est refusé au lieu d'être compté deux fois (C3).
+  Future<void> markOrderDelivered(String orderId) =>
+      updateOrderStatus(orderId, OrderStatus.delivered);
 
   // Driver authentication methods
+  ///
+  /// Authentifie contre le backend Django (Phase 6) — plus Supabase. `login`
+  /// refuse déjà, en interne, un compte dont le `user_type` n'est pas
+  /// `courier` (garde de rôle portée par `sessionProvider`, pas ici) ; un tel
+  /// compte est déconnecté avant même que cette méthode ne reçoive une
+  /// exception.
   Future<void> loginDriver(String email, String password) async {
     try {
-      // Authenticate with Supabase
-      final response = await _databaseService.signIn(
+      await _container.read(eccore.sessionProvider.notifier).login(
         email: email,
         password: password,
       );
-
-      if (response?.user != null) {
-        // Load user profile from database
-        try {
-          await _loadUserProfile(response!.user!.id);
-        } catch (e) {
-          // If profile loading fails, sign out and throw
-          await _databaseService.signOut();
-          throw Exception(
-            'Impossible de charger le profil. Contactez le support si le problème persiste. ($e)',
-          );
-        }
-
-        if (_currentUser == null) {
-          // If _loadUserProfile completed but _currentUser is still null (e.g. not found)
-          await _databaseService.signOut();
-          throw Exception(
-            'Profil utilisateur introuvable. Veuillez contacter le support.',
-          );
-        }
-
-        // Update online status for delivery staff
-        if (_currentUser?.role == UserRole.delivery) {
-          await _databaseService.updateUserOnlineStatus(
-            response.user!.id,
-            true,
-          );
-          // Load available orders for delivery staff
-          await loadAvailableOrders();
-        }
-
-        notifyListeners();
-      } else {
-        throw Exception('Échec de la connexion');
-      }
+      // `_currentUser` est déjà à jour ici (le pont d'écoute est synchrone
+      // par rapport au changement d'état) ; les orchestrations Supabase qui
+      // suivaient (statut en ligne, courses disponibles) sont différées au
+      // domaine livraison (pas encore migré) plutôt qu'appelées avec un
+      // identifiant Django qu'aucune ligne Supabase ne connaît.
+      await _registerPushDeviceBestEffort();
+      notifyListeners();
     } catch (e) {
       throw Exception('Erreur de connexion: $e');
     }
@@ -1252,30 +1294,27 @@ class AppService extends ChangeNotifier {
     }
   }
 
-  // Online status methods
+  /// Bascule de disponibilité (`/delivery/me/online/`).
+  ///
+  /// Le serveur rend le dossier à jour ; c'est [canAcceptOrders], pas
+  /// `isOnline`, qui dit si des courses arriveront — un dossier en attente de
+  /// validation reste inéligible même « en ligne » (L1). L'écran doit donc
+  /// relire le dossier après cet appel plutôt que supposer.
   Future<void> updateOnlineStatus(bool isOnline) async {
-    try {
-      final currentAuthUser = _databaseService.currentUser;
-      if (currentAuthUser == null) {
-        throw Exception('Utilisateur non authentifié');
-      }
+    _courierProfile = await _delivery.setOnline(isOnline: isOnline);
 
-      await _databaseService.updateUserOnlineStatus(
-        currentAuthUser.id,
-        isOnline,
-      );
-
-      // Mettre à jour le statut local
-      if (_currentUser != null) {
-        _currentUser = _currentUser!.copyWith(isOnline: isOnline);
-        notifyListeners();
-      }
-    } catch (e) {
-      throw Exception('Erreur lors de la mise à jour du statut: $e');
+    if (_currentUser != null) {
+      _currentUser = _currentUser!.copyWith(isOnline: _courierProfile!.isOnline);
     }
+    notifyListeners();
   }
 
-  // Delivery location methods
+  /// Émet une position sur la course en cours (`/tracking/assignments/{id}/pings/`).
+  ///
+  /// Par HTTP, et non par le WebSocket : `ws/couriers/me/` est une file de
+  /// propositions en lecture seule, rien n'y remonte. Un relevé perdu n'a de
+  /// toute façon aucune valeur — c'est le suivant qui compte — d'où le fait de
+  /// ne rien relancer ici en cas d'échec.
   Future<void> updateDeliveryLocation({
     required String orderId,
     required double latitude,
@@ -1284,37 +1323,22 @@ class AppService extends ChangeNotifier {
     double? speed,
     double? heading,
   }) async {
+    final course = _coursesByOrderId[orderId];
+    if (course == null || !course.assignment.isActive) {
+      // Émettre sur une course terminée reviendrait à continuer de se faire
+      // suivre après la livraison.
+      return;
+    }
+
     try {
-      final currentAuthUser = _databaseService.currentUser;
-      if (currentAuthUser == null) {
-        throw Exception('Utilisateur non authentifié');
-      }
-
-      // S'assurer que le profil utilisateur est chargé pour avoir le bon ID (public.users.id)
-      if (_currentUser == null) {
-        await _loadUserProfile(currentAuthUser.id);
-      }
-
-      if (_currentUser == null) {
-        // Si le profil n'existe pas encore, on ne peut pas mettre à jour la position
-        // car la table delivery_locations attend une clé étrangère vers public.users
-        debugPrint(
-          '⚠️ Profil utilisateur introuvable, impossible de mettre à jour la position',
-        );
-        return;
-      }
-
-      await _databaseService.updateDeliveryLocation(
-        orderId: orderId,
-        deliveryId: _currentUser!.id,
+      await _delivery.sendPing(
+        assignmentId: course.assignmentId,
         latitude: latitude,
         longitude: longitude,
-        accuracy: accuracy,
-        speed: speed,
-        heading: heading,
+        accuracyMeters: accuracy,
+        speedMetersPerSecond: speed,
+        headingDegrees: heading,
       );
-
-      debugPrint('✅ Position mise à jour pour la commande $orderId');
     } catch (e) {
       debugPrint('❌ Erreur mise à jour position: $e');
       // Ne pas throw pour éviter de bloquer le suivi GPS

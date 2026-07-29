@@ -1,13 +1,22 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/user.dart';
+import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/services/supabase_realtime_service.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
-import 'package:elcora_fast/services/socket_service.dart';
 
+/// Suivi de commande — Phase 6 : `orderUpdates`/`deliveryLocationUpdates`
+/// viennent désormais de `ws/orders/{id}/tracking/` (backend Django,
+/// `apps/tracking/consumers.py`) au lieu de Supabase Realtime. Le reste de ce
+/// service (statuts admin, position livreur, notifications, création de
+/// commande, géocodage) sert d'autres écrans/rôles ou est déjà supplanté par
+/// une tranche précédente — inchangé, toujours sur `SupabaseRealtimeService`/
+/// `GeocodingService`.
 class RealtimeTrackingService extends ChangeNotifier {
   static final RealtimeTrackingService _instance =
       RealtimeTrackingService._internal();
@@ -17,102 +26,100 @@ class RealtimeTrackingService extends ChangeNotifier {
   final SupabaseRealtimeService _supabaseService = SupabaseRealtimeService();
   final GeocodingService _geocodingService = GeocodingService();
 
+  eccore.RealtimeChannel? _channel;
+  StreamSubscription<eccore.RealtimeEvent>? _channelSubscription;
+  final _orderUpdatesController = StreamController<Order>.broadcast();
+  final _deliveryLocationUpdatesController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  bool _isConnected = false;
+
   // Position actuelle du livreur
   Position? _currentPosition;
   Position? get currentPosition => _currentPosition;
 
-  // Getters pour les streams (délégués au service Supabase)
-  Stream<Order> get orderUpdates => _supabaseService.orderUpdates;
+  // Suivi de commande (Django, Phase 6)
+  Stream<Order> get orderUpdates => _orderUpdatesController.stream;
   Stream<Map<String, dynamic>> get deliveryLocationUpdates =>
-      _supabaseService.deliveryLocationUpdates;
+      _deliveryLocationUpdatesController.stream;
+
+  // Hors scope de cette tranche — toujours Supabase
   Stream<String> get notifications => _supabaseService.notifications;
-
-  // État de connexion
-  bool get isConnected => _supabaseService.isConnected;
-
-  // Liste des commandes suivies
   Map<String, Order> get trackedOrders => _supabaseService.trackedOrders;
-
-  // Liste des livreurs actifs
   Map<String, Map<String, dynamic>> get activeDeliveries =>
       _supabaseService.activeDeliveries;
 
-  /// Initialise la connexion Supabase Realtime
+  bool get isConnected => _isConnected;
+
+  /// Marque le service prêt à suivre des commandes. Contrairement à
+  /// l'ancienne connexion Supabase (globale), l'état de connexion réel est
+  /// désormais par commande suivie (`trackOrder`), pas ici.
   Future<void> initialize({
     required String userId,
     required UserRole userRole,
   }) async {
-    try {
-      // Initialiser le service Supabase
-      await _supabaseService.initialize(userId: userId, userRole: userRole);
-
-      notifyListeners();
-
-      debugPrint('RealtimeTrackingService: Connexion établie');
-    } catch (e) {
-      debugPrint('RealtimeTrackingService: Erreur de connexion - $e');
-      notifyListeners();
-    }
+    _isConnected = true;
+    notifyListeners();
   }
 
-  /// Suit une commande spécifique
+  String _trackingWsUrl(String orderId) {
+    final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1';
+    final apiUri = Uri.parse(apiBaseUrl);
+    final scheme = apiUri.scheme == 'https' ? 'wss' : 'ws';
+    return Uri(
+      scheme: scheme,
+      host: apiUri.host,
+      port: apiUri.port,
+      path: '/ws/orders/$orderId/tracking/',
+    ).toString();
+  }
+
+  /// Suit une commande spécifique — `ws/orders/{id}/tracking/` (Django).
   Future<void> trackOrder(String orderId) async {
-    // 1. Join Socket.io room for real-time updates (low latency)
-    final socketService = SocketService();
-    if (socketService.isConnected) {
-      socketService.joinRoom('order_$orderId');
+    await _channelSubscription?.cancel();
+    await _channel?.close();
 
-      // Listen for driver location updates via Socket.io
-      socketService.onDriverLocation((data) {
-        if (data != null && data['lat'] != null && data['lng'] != null) {
-          final lat = double.tryParse(data['lat'].toString()) ?? 0.0;
-          final lng = double.tryParse(data['lng'].toString()) ?? 0.0;
+    final channel = eccore.RealtimeChannel(
+      wsUrl: _trackingWsUrl(orderId),
+      tokenStorage: eccore.TokenStorage(),
+    );
+    _channel = channel;
 
-          _currentPosition = Position(
-            latitude: lat,
-            longitude: lng,
-            timestamp: DateTime.now(),
-            accuracy: 0,
-            altitude: 0,
-            heading: 0,
-            speed: 0,
-            speedAccuracy: 0,
-            altitudeAccuracy: 0,
-            headingAccuracy: 0,
-          );
-
-          // Notify UI listeners (e.g. Google Map)
-          notifyListeners();
-
-          debugPrint('📍 Socket.io: Driver location updated: $lat, $lng');
-        }
-      });
-
-      socketService.onOrderUpdate((data) {
-        debugPrint('🔔 Socket.io: Order status update: $data');
-        // Here we could also update the local order status if needed
-      });
-    }
-
-    // 2. Keep Supabase as fallback/persistence layer
-    if (!_supabaseService.isConnected) {
-      debugPrint(
-        'RealtimeTrackingService: Service Supabase non initialisé, impossible de suivre la commande via Supabase',
-      );
-      return;
-    }
-    await _supabaseService.trackOrder(orderId);
+    _channelSubscription = channel.connect().listen((event) async {
+      switch (event.type) {
+        case 'order.status':
+          // Le message ne porte que ce qu'il faut à la diffusion (statut,
+          // raison) — pas la commande entière ; on la relit pour rester
+          // cohérent avec ce que l'écran affiche déjà.
+          final order = await DjangoOrderRepository().getOrderById(orderId);
+          if (order != null) {
+            _orderUpdatesController.add(order);
+          }
+          break;
+        case 'tracking.position':
+          // `speed`/`heading` ne sont pas relayés par ce canal côté serveur
+          // (voir `apps/tracking/consumers.py OrderTrackingConsumer`) — le
+          // livreur les émet, mais la diffusion ne les porte pas.
+          final payload = event.payload;
+          _deliveryLocationUpdatesController.add({
+            'orderId': orderId,
+            'latitude': (payload['lat'] as num).toDouble(),
+            'longitude': (payload['lon'] as num).toDouble(),
+            'timestamp': DateTime.parse(payload['recorded_at'] as String),
+            'speed': null,
+            'heading': null,
+          });
+          break;
+      }
+    });
   }
 
   /// Arrête de suivre une commande
   Future<void> untrackOrder(String orderId) async {
-    if (!_supabaseService.isConnected) {
-      debugPrint(
-        'RealtimeTrackingService: Service non initialisé, impossible d\'arrêter le suivi',
-      );
-      return;
-    }
-    await _supabaseService.untrackOrder(orderId);
+    await _channelSubscription?.cancel();
+    await _channel?.close();
+    _channel = null;
+    _channelSubscription = null;
   }
 
   /// Met à jour le statut d'une commande (pour les admins)
@@ -173,7 +180,9 @@ class RealtimeTrackingService extends ChangeNotifier {
 
   /// Ferme la connexion
   Future<void> disconnect() async {
-    await _supabaseService.disconnect();
+    await _channelSubscription?.cancel();
+    await _channel?.close();
+    _isConnected = false;
 
     notifyListeners();
 
@@ -184,6 +193,8 @@ class RealtimeTrackingService extends ChangeNotifier {
   @override
   void dispose() {
     disconnect();
+    _orderUpdatesController.close();
+    _deliveryLocationUpdatesController.close();
     super.dispose();
   }
 }

@@ -10,7 +10,7 @@ import 'package:elcora_fast/widgets/delivery_status_card.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcora_fast/repositories/supabase_order_repository.dart';
+import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 
 /// Écran amélioré de l'historique des commandes avec filtres et tri
@@ -32,7 +32,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
     _tabController = TabController(length: 2, vsync: this);
 
     // Initialiser le service
-    final orderRepository = SupabaseOrderRepository();
+    final orderRepository = DjangoOrderRepository();
     _orderHistoryService = OrderHistoryService(orderRepository);
 
     // Charger les commandes

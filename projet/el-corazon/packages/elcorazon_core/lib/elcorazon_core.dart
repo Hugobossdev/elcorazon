@@ -1,0 +1,52 @@
+/// Fondations partagées des 3 apps Flutter d'El Corazón (Phase 6, tranche 1) :
+/// client API, authentification et session. Voir
+/// `docs/architecture/04-migration-flutter.md`.
+library;
+
+export 'src/auth/auth_repository.dart';
+export 'src/auth/session.dart';
+export 'src/auth/token_storage.dart';
+export 'src/cart/cart.dart';
+export 'src/cart/cart_repository.dart';
+export 'src/catalog/catalog_repository.dart';
+export 'src/catalog/category.dart';
+export 'src/catalog/menu_item.dart';
+export 'src/catalog/review.dart';
+export 'src/delivery/assignment.dart';
+export 'src/delivery/assignment_offer.dart';
+export 'src/delivery/courier_profile.dart';
+export 'src/delivery/delivery_repository.dart';
+export 'src/geography/city.dart';
+export 'src/geography/geography_repository.dart';
+export 'src/gamification/achievement.dart';
+export 'src/gamification/badge.dart';
+export 'src/gamification/challenge.dart';
+export 'src/gamification/gamification_repository.dart';
+export 'src/loyalty/loyalty_repository.dart';
+export 'src/loyalty/points_account.dart';
+export 'src/loyalty/points_entry.dart';
+export 'src/loyalty/reward.dart';
+export 'src/loyalty/reward_redemption.dart';
+export 'src/models/money.dart';
+export 'src/models/user.dart';
+export 'src/network/api_client.dart';
+export 'src/notifications/app_notification.dart';
+export 'src/notifications/notification_repository.dart';
+export 'src/network/api_exception.dart';
+export 'src/orders/order.dart';
+export 'src/orders/order_repository.dart';
+export 'src/payments/payment_repository.dart';
+export 'src/payments/transaction.dart';
+export 'src/profile/address.dart';
+export 'src/profile/address_repository.dart';
+export 'src/realtime/realtime_channel.dart';
+export 'src/realtime/realtime_event.dart';
+export 'src/social/post.dart';
+export 'src/social/social_group.dart';
+export 'src/social/social_repository.dart';
+export 'src/support/complaint.dart';
+export 'src/support/return_request.dart';
+export 'src/support/support_repository.dart';
+export 'src/support/support_ticket.dart';
+export 'src/tracking/location_ping.dart';
+export 'src/tracking/tracking_repository.dart';

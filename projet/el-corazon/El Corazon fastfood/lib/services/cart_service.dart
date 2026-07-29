@@ -3,11 +3,13 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
+import 'package:elcora_fast/config/app_constants.dart';
+import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/address.dart';
-import 'package:elcora_fast/services/database_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
@@ -31,7 +33,13 @@ class CartService extends ChangeNotifier {
   bool _isHydrating = false;
   bool _isSyncing = false;
 
-  final DatabaseService _databaseService = DatabaseService();
+  /// Future de la dernière synchronisation déclenchée par `_persistChanges`
+  /// (non attendue là-bas) — permet à `ensureSynced` d'attendre celle déjà en
+  /// cours plutôt que d'en réarmer une seconde qui se contenterait de
+  /// ressortir immédiatement (`_isSyncing` déjà vrai).
+  Future<void>? _pendingCartSync;
+
+  final eccore.CartRepository _cartRepository = eccore.CartRepository(apiClient: apiClient);
   final OfflineSyncService _offlineSyncService = OfflineSyncService();
   final DeliveryFeeService _deliveryFeeService = DeliveryFeeService();
 
@@ -93,7 +101,7 @@ class CartService extends ChangeNotifier {
   Future<void> clearForLogout() async {
     if (_userId != null) {
       try {
-        await _databaseService.clearUserCart(_userId!);
+        await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
       } catch (e) {
         debugPrint('CartService: erreur lors du nettoyage distant - $e');
       }
@@ -504,6 +512,16 @@ class CartService extends ChangeNotifier {
   /// Sauvegarde le panier (exposed for compatibilité)
   Future<void> saveToStorage() async => _saveCartToStorage();
 
+  /// Attend que le panier serveur reflète l'état local — `_persistChanges`
+  /// déclenche la synchronisation sans l'attendre (`unawaited`), ce qui
+  /// convient pour un ajout/retrait isolé mais pas avant de créer une
+  /// commande : `OrderService.create_from_cart` (backend) lit le panier
+  /// serveur tel quel au moment de l'appel.
+  Future<void> ensureSynced() async {
+    if (_userId == null) return;
+    await (_pendingCartSync ?? _syncCartToDatabase());
+  }
+
   /// Charge le panier depuis le stockage local
   Future<void> loadFromStorage() async => _loadCartFromStorage();
 
@@ -589,37 +607,45 @@ class CartService extends ChangeNotifier {
     await _prefs!.remove(_isFreeMealAppliedKey);
   }
 
+  /// Traduit une ligne de panier Django vers le modèle local. Le prix et le
+  /// nom sont relus du serveur (invariant C1) ; `customizations` ne porte que
+  /// le texte libre stocké dans `notes` — la structure fine (options
+  /// choisies) n'est pas encore portée par cette tranche, voir
+  /// `_notesFromCustomizations`.
+  CartItem _fromRemoteLine(eccore.CartLine line) {
+    return CartItem(
+      id: line.id,
+      menuItemId: line.menuItemId,
+      name: line.name,
+      price: line.unitPrice.toMajorUnits(),
+      quantity: line.quantity,
+      imageUrl: line.image,
+      customizations: line.notes.isEmpty ? {} : {'note': line.notes},
+    );
+  }
+
   Future<void> _loadCartFromDatabase() async {
     if (_userId == null) return;
 
     _isHydrating = true;
     try {
-      final snapshot = await _databaseService.fetchUserCart(_userId!);
-      final remoteItems = snapshot['items'] as List<CartItem>;
+      final remoteCart = await _cartRepository.getCart(
+        restaurantSlug: AppConstants.restaurantSlug,
+      );
 
-      if (remoteItems.isEmpty) {
+      if (remoteCart.lines.isEmpty) {
         return;
       }
 
       _items
         ..clear()
-        ..addAll(remoteItems);
+        ..addAll(remoteCart.lines.map(_fromRemoteLine));
 
-      _deliveryFee =
-          (snapshot['deliveryFee'] as num?)?.toDouble() ?? _deliveryFee;
-
-      // When loading from DB, we get a single discount field usually.
-      // We will assign it to promoDiscount by default, unless we have better logic.
-      // Ideally DB should store both, but if not:
-      final totalRemoteDiscount =
-          (snapshot['discount'] as num?)?.toDouble() ?? 0.0;
-      _promoDiscount = totalRemoteDiscount;
-      _freeMealDiscount = 0.0; // Reset as we don't know the split from DB yet
-
-      _promoCode = snapshot['promoCode'] as String?;
+      // Frais de livraison, code promo et remises n'existent pas dans le
+      // panier Django (hors scope de cette tranche) — conservés tels quels.
 
       debugPrint(
-        '✅ Panier synchronisé depuis Supabase (${_items.length} articles)',
+        '✅ Panier synchronisé depuis le backend (${_items.length} articles)',
       );
 
       await _saveCartToStorage();
@@ -629,10 +655,38 @@ class CartService extends ChangeNotifier {
       if (!_offlineSyncService.isOnline) {
         debugPrint('📴 Mode hors ligne: utilisation du panier local');
       } else {
-        debugPrint('CartService: erreur lors du chargement Supabase - $e');
+        debugPrint('CartService: erreur lors du chargement distant - $e');
       }
     } finally {
       _isHydrating = false;
+    }
+  }
+
+  /// Condense les personnalisations libres en texte pour la ligne Django
+  /// (`CartLine.notes`) — pas de portage des options structurées dans cette
+  /// tranche. Trié par clé pour être déterministe : deux personnalisations
+  /// équivalentes doivent produire la même note, sans quoi
+  /// `CartService._identical_line` (serveur) les traiterait comme deux
+  /// lignes distinctes à chaque resynchronisation.
+  String _notesFromCustomizations(Map<String, dynamic> customizations) {
+    if (customizations.isEmpty) return '';
+    final sortedKeys = customizations.keys.toList()..sort();
+    return sortedKeys.map((key) => '$key: ${customizations[key]}').join(', ');
+  }
+
+  /// Réécrit intégralement le panier serveur depuis l'état local — même
+  /// stratégie que l'ancien `DatabaseService.upsertUserCart` (delete puis
+  /// insert), nécessaire ici en l'absence de correspondance stable entre
+  /// `CartItem.id` local et l'identifiant de ligne Django.
+  Future<void> _replaceRemoteCart() async {
+    await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
+    for (final item in _items) {
+      await _cartRepository.addLine(
+        restaurantSlug: AppConstants.restaurantSlug,
+        menuItemId: item.menuItemId,
+        quantity: item.quantity,
+        notes: _notesFromCustomizations(item.customizations),
+      );
     }
   }
 
@@ -642,13 +696,7 @@ class CartService extends ChangeNotifier {
     _isSyncing = true;
 
     try {
-      await _databaseService.upsertUserCart(
-        userId: _userId!,
-        items: List<CartItem>.from(_items),
-        deliveryFee: _deliveryFee,
-        discount: discount, // Send total discount
-        promoCode: _promoCode,
-      );
+      await _replaceRemoteCart();
     } catch (e) {
       // Si erreur de connexion, sauvegarder hors ligne
       if (!_offlineSyncService.isOnline) {
@@ -662,7 +710,7 @@ class CartService extends ChangeNotifier {
         );
       } else {
         debugPrint(
-          'CartService: erreur lors de la synchronisation Supabase - $e',
+          'CartService: erreur lors de la synchronisation distante - $e',
         );
       }
     } finally {
@@ -675,45 +723,36 @@ class CartService extends ChangeNotifier {
       unawaited(_saveCartToStorage());
     }
     if (_userId != null && !_isHydrating) {
-      unawaited(_syncCartToDatabase());
+      final sync = _syncCartToDatabase();
+      _pendingCartSync = sync;
+      unawaited(sync);
     }
   }
 
+  /// Réconcilie panier local et panier serveur au premier chargement d'une
+  /// session (`initializeForUser`). Les frais de livraison, remise et code
+  /// promo n'ont pas d'équivalent côté serveur (hors scope de cette tranche)
+  /// et restent donc uniquement pilotés par l'état local, quelle que soit la
+  /// branche empruntée ici.
   Future<void> _syncDatabaseWithLocal({bool overwriteRemote = false}) async {
     if (_userId == null) return;
     if (_isSyncing) return;
 
     try {
       _isSyncing = true;
-      final currentRemote = await _databaseService.fetchUserCart(_userId!);
-      final remoteItems = currentRemote['items'] as List<CartItem>;
+      final remoteCart = await _cartRepository.getCart(
+        restaurantSlug: AppConstants.restaurantSlug,
+      );
+      final remoteItems = remoteCart.lines.map(_fromRemoteLine).toList();
 
       final bool shouldOverwriteRemote = overwriteRemote || remoteItems.isEmpty;
 
-      final remoteDeliveryFee =
-          (currentRemote['deliveryFee'] as num?)?.toDouble();
-      final remoteDiscount = (currentRemote['discount'] as num?)?.toDouble();
-      final remotePromo = currentRemote['promoCode'] as String?;
-
       if (shouldOverwriteRemote) {
-        await _databaseService.upsertUserCart(
-          userId: _userId!,
-          items: List<CartItem>.from(_items),
-          deliveryFee: _deliveryFee,
-          discount: discount,
-          promoCode: _promoCode,
-        );
+        await _replaceRemoteCart();
       } else if (_items.isEmpty) {
         _items
           ..clear()
           ..addAll(remoteItems);
-        _deliveryFee = remoteDeliveryFee ?? _deliveryFee;
-
-        // Handle incoming discount
-        _promoDiscount = remoteDiscount ?? 0.0;
-        _freeMealDiscount = 0.0;
-
-        _promoCode = remotePromo;
         notifyListeners();
         await _saveCartToStorage();
       } else {
@@ -721,26 +760,10 @@ class CartService extends ChangeNotifier {
         _items
           ..clear()
           ..addAll(merged);
-        _deliveryFee = remoteDeliveryFee ?? _deliveryFee;
-
-        // Strategy: prefer local detailed discount if available, else take remote total
-        if (_promoDiscount == 0.0 && _freeMealDiscount == 0.0) {
-          _promoDiscount = remoteDiscount ?? 0.0;
-        }
-
-        if (_promoCode == null || _promoCode!.isEmpty) {
-          _promoCode = remotePromo;
-        }
         notifyListeners();
         await _saveCartToStorage();
 
-        await _databaseService.upsertUserCart(
-          userId: _userId!,
-          items: List<CartItem>.from(_items),
-          deliveryFee: _deliveryFee,
-          discount: discount,
-          promoCode: _promoCode,
-        );
+        await _replaceRemoteCart();
       }
     } catch (e) {
       debugPrint(

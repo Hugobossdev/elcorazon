@@ -1,6 +1,14 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:elcora_fast/firebase_options.dart';
+// `Provider`/`Consumer` existent dans les deux packages : ceux de
+// `package:provider` sont ceux réellement utilisés dans ce fichier
+// (`Provider<SocketService>`, `Consumer<ThemeService>`) — seuls
+// `ProviderContainer`/`UncontrolledProviderScope` viennent de Riverpod ici.
+import 'package:flutter_riverpod/flutter_riverpod.dart' hide Provider, Consumer;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:elcorazon_core/elcorazon_core.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
@@ -43,6 +51,25 @@ import 'package:elcora_fast/widgets/service_initialization_widget.dart';
 import 'package:elcora_fast/widgets/incoming_call_handler.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 
+/// Backend Django v2 (Phase 6) — authentification uniquement pour l'instant,
+/// le reste de l'app (menu, panier, commandes...) reste sur Supabase jusqu'à
+/// ce que son propre domaine soit migré à son tour.
+late final ProviderContainer _providerContainer;
+
+/// Résolu quand `sessionProvider.restoreSession()` a fini de décider si un
+/// jeton valide était stocké — `SplashScreen` l'attend avant d'appeler
+/// `AppService.initialize()`. Global plutôt que passé en paramètre de
+/// constructeur : `AppRouter.generateRoute` construit `SplashScreen` depuis
+/// une fonction statique (`onGenerateRoute`), qui ne peut pas recevoir de
+/// dépendance autrement — cohérent avec les autres singletons du projet
+/// (`AppService()`, `DatabaseService()`).
+late final Future<void> sessionReadyFuture;
+
+/// Accès à l'`ApiClient` construit dans `main()`, pour les composants hors du
+/// graphe Riverpod (`DjangoMenuRepository`, lu depuis `MenuItemCacheService`)
+/// — même convention que `sessionReadyFuture` ci-dessus.
+ApiClient get apiClient => _providerContainer.read(apiClientProvider);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -60,11 +87,40 @@ void main() async {
     // Continue with app launch even if some services fail
   }
 
-  runApp(const ClientApp());
+  final tokenStorage = TokenStorage();
+  final apiClient = ApiClient(
+    baseUrl: dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1',
+    tokenStorage: tokenStorage,
+  );
+  _providerContainer = ProviderContainer(
+    overrides: [
+      tokenStorageProvider.overrideWithValue(tokenStorage),
+      apiClientProvider.overrideWithValue(apiClient),
+      expectedUserTypeProvider.overrideWithValue(UserAccountType.customer),
+    ],
+  );
+  sessionReadyFuture = _providerContainer.read(sessionProvider.notifier).restoreSession();
+
+  runApp(
+    UncontrolledProviderScope(
+      container: _providerContainer,
+      child: ClientApp(container: _providerContainer),
+    ),
+  );
 }
 
 /// Initialize only essential services at startup for optimal performance
 Future<void> _initializeEssentialServices() async {
+  // Firebase (Phase 6) — requis avant tout usage de `FirebaseMessaging`.
+  // Non bloquant : aucun projet Firebase réel n'est encore configuré (voir
+  // `lib/firebase_options.dart`), et l'app doit démarrer sans push.
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    debugPrint('✅ Firebase initialisé');
+  } catch (e) {
+    debugPrint('⚠️ Firebase indisponible, notifications push désactivées: $e');
+  }
+
   // Initialize performance monitoring first
   await PerformanceService().initialize();
 
@@ -102,7 +158,9 @@ void _initializeDatabaseAsync() async {
 }
 
 class ClientApp extends StatelessWidget {
-  const ClientApp({super.key});
+  const ClientApp({required this.container, super.key});
+
+  final ProviderContainer container;
 
   @override
   Widget build(BuildContext context) {
@@ -112,7 +170,7 @@ class ClientApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (_) => ConnectivityService()..initialize(),
         ),
-        ChangeNotifierProvider(create: (_) => AppService()),
+        ChangeNotifierProvider(create: (_) => AppService(container)),
         ChangeNotifierProvider(create: (_) => CartService()),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => NotificationService()),

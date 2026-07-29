@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/models/loyalty_reward.dart';
 import 'package:elcora_fast/models/loyalty_transaction.dart';
+import 'package:elcora_fast/repositories/django_gamification_repository.dart';
+import 'package:elcora_fast/repositories/django_loyalty_repository.dart';
+import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/services/database_service.dart';
 
-/// Centralise la logique de fidélité : calcul des points, gestion des
-/// récompenses, historique des transactions et synchronisation avec Supabase.
+/// Centralise la logique de fidélité (points, récompenses, historique) et de
+/// badges (Django, Phase 6) ; achievements/défis restent simulés côté client
+/// (aucun écran ne les affiche — voir `_loadAchievements`/`_loadChallenges`).
 class GamificationService extends ChangeNotifier {
   static final GamificationService _instance = GamificationService._internal();
 
@@ -15,6 +19,8 @@ class GamificationService extends ChangeNotifier {
   GamificationService._internal();
 
   final DatabaseService _databaseService = DatabaseService();
+  final DjangoLoyaltyRepository _loyaltyRepository = DjangoLoyaltyRepository();
+  final DjangoGamificationRepository _gamificationRepository = DjangoGamificationRepository();
 
   int _currentPoints = 0;
   int _currentLevel = 1;
@@ -104,13 +110,11 @@ class GamificationService extends ChangeNotifier {
     if (userData != null) {
       _currentUserId = userData['id']?.toString();
       _currentAuthUserId = userData['auth_user_id']?.toString() ?? authUserId;
-      _currentPoints = userData['loyalty_points'] as int? ?? _currentPoints;
-      _currentLevel = _calculateLevel(_currentPoints);
-      _levelProgress = _calculateLevelProgress(_currentPoints);
     } else {
       _currentUserId = previousDbId;
       _currentAuthUserId = authUserId ?? previousAuthId;
     }
+    await _refreshLoyaltyBalance();
 
     final hasSameIds =
         previousDbId == _currentUserId && previousAuthId == _currentAuthUserId;
@@ -159,28 +163,39 @@ class GamificationService extends ChangeNotifier {
           _currentUserId = userData['id']?.toString() ?? _currentUserId;
           _currentAuthUserId =
               userData['auth_user_id']?.toString() ?? _currentAuthUserId;
-          _currentPoints = userData['loyalty_points'] as int? ?? _currentPoints;
-          _currentLevel = _calculateLevel(_currentPoints);
-          _levelProgress = _calculateLevelProgress(_currentPoints);
         }
       }
+      await _refreshLoyaltyBalance();
 
-      if (_currentUserId != null) {
-        final dbId = _currentUserId!;
-        final ordersResponse = await _databaseService.supabase
-            .from('orders')
-            .select('id, created_at')
-            .eq('user_id', dbId);
-
-        _totalOrders = ordersResponse.length;
-        _streakDays = _calculateStreakDays(ordersResponse);
-      }
+      // Les commandes vivent désormais dans Django (Phase 6) — le total et la
+      // séquence de commandes restent des métriques de gamification (G1, pas
+      // migré), mais leur source de données doit suivre.
+      final orders = await DjangoOrderRepository().getUserOrders(
+        _currentAuthUserId ?? '',
+      );
+      _totalOrders = orders.length;
+      _streakDays = _calculateStreakDays(
+        orders.map((order) => {'created_at': order.createdAt.toIso8601String()}).toList(),
+      );
     } catch (e) {
       debugPrint('Error loading user stats: $e');
     }
 
     _syncAchievementProgressFromMetrics();
     _evaluateBadges();
+  }
+
+  /// Recharge `_currentPoints` depuis le vrai solde Django
+  /// (`PointsAccount`, hors du modèle `User`) — les points ne sont crédités
+  /// qu'à la livraison d'une commande, jamais par ce client.
+  Future<void> _refreshLoyaltyBalance() async {
+    try {
+      _currentPoints = await _loyaltyRepository.getAccountBalance();
+      _currentLevel = _calculateLevel(_currentPoints);
+      _levelProgress = _calculateLevelProgress(_currentPoints);
+    } catch (e) {
+      debugPrint('Error loading loyalty balance: $e');
+    }
   }
 
   /// Calcule le niveau basé sur les points
@@ -335,14 +350,9 @@ class GamificationService extends ChangeNotifier {
 
   Future<void> _loadRewards() async {
     try {
-      _rewards = await _databaseService.fetchLoyaltyRewards();
-      if (_rewards.isEmpty) {
-        debugPrint('GamificationService: Aucune récompense trouvée dans la base de données');
-        _rewards = [];
-      }
+      _rewards = await _loyaltyRepository.getRewards();
     } catch (e) {
       debugPrint('Error loading rewards: $e');
-      // Ne plus utiliser de données par défaut - retourner une liste vide
       _rewards = [];
     }
   }
@@ -374,29 +384,10 @@ class GamificationService extends ChangeNotifier {
     }
   }
 
-  int _badgeProgressForCriteria(String criteria) => _metricValue(criteria);
-
-  void _evaluateBadges() {
-    if (_currentUserId == null) return;
-
-    for (final badge in _badges) {
-      final criteria = (badge['criteria'] ?? 'points').toString();
-      final target = (badge['target'] as num?)?.toInt() ?? 0;
-      final progress = _badgeProgressForCriteria(criteria);
-      final previous = (badge['progress'] as num?)?.toInt() ?? 0;
-
-      if (progress != previous) {
-        badge['progress'] = progress;
-        unawaited(_persistBadge(badge));
-      }
-
-      if (!(badge['isUnlocked'] == true) && target > 0 && progress >= target) {
-        badge['isUnlocked'] = true;
-        badge['unlockedAt'] = DateTime.now();
-        unawaited(_persistBadge(badge));
-      }
-    }
-  }
+  // Les badges viennent désormais de Django (`isUnlocked`/`unlockedAt` déjà
+  // corrects, calculés serveur depuis les points gagnés à vie) — les
+  // recalculer ici écraserait cet état par une estimation locale obsolète.
+  void _evaluateBadges() {}
 
   Future<void> _persistAchievement(Map<String, dynamic> achievement) async {
     final userId = _currentUserId;
@@ -468,114 +459,21 @@ class GamificationService extends ChangeNotifier {
     }
   }
 
-  Future<void> _persistBadge(Map<String, dynamic> badge) async {
-    final userId = _currentUserId;
-    if (userId == null) return;
-
-    // Ne pas persister les badges par défaut (IDs numériques)
-    // Seulement persister ceux qui viennent de la base de données (UUIDs)
-    final badgeId = badge['id'];
-    if (badgeId == null) return;
-
-    // Vérifier si c'est un UUID valide (format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
-    final idString = badgeId.toString();
-    final isUuid = RegExp(
-            r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
-            caseSensitive: false,)
-        .hasMatch(idString);
-
-    if (!isUuid) {
-      // C'est un ID numérique par défaut, ne pas persister
-      return;
-    }
-
-    try {
-      await _databaseService.upsertUserBadge(
-        userId: userId,
-        badgeId: idString,
-        isUnlocked: badge['isUnlocked'] == true,
-        progress: (badge['progress'] as num?)?.toInt(),
-        unlockedAt: badge['isUnlocked'] == true
-            ? badge['unlockedAt'] as DateTime?
-            : null,
-      );
-    } catch (e) {
-      debugPrint('Error persisting badge: $e');
-    }
-  }
-
   Future<void> _loadTransactions(String userId) async {
     try {
-      _transactions = await _databaseService.fetchLoyaltyTransactions(userId);
-      if (_transactions.isEmpty) {
-        debugPrint('GamificationService: Aucune transaction trouvée dans la base de données');
-        _transactions = [];
-      }
+      _transactions = await _loyaltyRepository.getTransactions();
     } catch (e) {
       debugPrint('Error loading loyalty transactions: $e');
-      // Ne plus utiliser de données par défaut - retourner une liste vide
       _transactions = [];
     }
   }
 
   Future<void> _loadBadges() async {
     try {
-      if (_currentUserId == null) {
-        debugPrint(
-            'GamificationService._loadBadges: Pas d\'utilisateur connecté',);
-        _badges = [];
-        notifyListeners();
-        return;
-      }
-
-      debugPrint(
-          'GamificationService._loadBadges: Chargement des badges pour user $_currentUserId',);
-
-      final response =
-          await _databaseService.fetchBadgesWithProgress(_currentUserId!);
-
-      if (response.isEmpty) {
-        debugPrint(
-            'GamificationService._loadBadges: Aucun badge trouvé dans la base de données',);
-        _badges = [];
-        notifyListeners();
-        return;
-      }
-
-      debugPrint(
-          'GamificationService._loadBadges: ${response.length} badges récupérés depuis la base de données',);
-
-      _badges = response.map((data) {
-        final unlockedAt = data['unlockedAt'];
-        final criteria = data['criteria']?.toString() ?? 'points';
-        final progressFromDb = (data['progress'] as num?)?.toInt() ?? 0;
-        final target = (data['target'] as num?)?.toInt() ?? 0;
-
-        return {
-          'id': data['id']?.toString() ?? '',
-          'title': data['title']?.toString() ?? '',
-          'description': data['description']?.toString() ?? '',
-          'icon': data['icon']?.toString() ?? '🏅',
-          'criteria': criteria,
-          'target': target,
-          'progress': progressFromDb,
-          'isUnlocked': data['isUnlocked'] == true,
-          'unlockedAt': unlockedAt is String
-              ? DateTime.tryParse(unlockedAt)
-              : unlockedAt is DateTime
-                  ? unlockedAt
-                  : null,
-        };
-      }).toList();
-
-      debugPrint(
-          'GamificationService._loadBadges: ${_badges.length} badges chargés avec succès',);
+      _badges = await _gamificationRepository.getBadges();
       notifyListeners();
-    } catch (e, stackTrace) {
-      debugPrint(
-          'GamificationService._loadBadges: Erreur lors du chargement des badges: $e',);
-      debugPrint('Stack trace: $stackTrace');
-      // Ne plus utiliser de données par défaut - retourner une liste vide
+    } catch (e) {
+      debugPrint('GamificationService._loadBadges: erreur - $e');
       _badges = [];
       notifyListeners();
     }
@@ -727,7 +625,9 @@ class GamificationService extends ChangeNotifier {
     }
   }
 
-  // Utiliser des points pour une récompense
+  // Échanger des points contre une récompense — délègue entièrement au
+  // serveur (C1) : ni le solde ni le coût ne sont recalculés ici, seul
+  // Django sait ce qu'il en est après coup.
   Future<bool> redeemReward(LoyaltyReward reward) async {
     if (_pendingRewardIds.contains(reward.id)) {
       return false;
@@ -737,75 +637,20 @@ class GamificationService extends ChangeNotifier {
       return false;
     }
 
-    Map<String, dynamic>? profile;
-
-    final candidates = <String?>[
-      _currentUserId,
-      _currentAuthUserId,
-      _databaseService.currentUser?.id,
-    ];
-
-    for (final candidate in candidates) {
-      if (candidate == null) continue;
-      profile =
-          await _databaseService.ensureUserProfileExists(userId: candidate);
-      if (profile != null) break;
-    }
-
-    final authUserId = profile?['auth_user_id']?.toString() ??
-        _currentAuthUserId ??
-        _databaseService.currentUser?.id;
-    final databaseUserId = profile?['id']?.toString() ?? _currentUserId;
-
-    if (authUserId == null || databaseUserId == null) {
-      return false;
-    }
-
     _pendingRewardIds.add(reward.id);
     notifyListeners();
 
-    final updatedPoints = _currentPoints - reward.cost;
-
-    try {
-      await _databaseService.updateUserLoyaltyPoints(
-        authUserId,
-        updatedPoints,
-      );
-
-      await _databaseService.createLoyaltyTransaction(
-        userId: databaseUserId,
-        type: LoyaltyTransactionType.redeem,
-        points: -reward.cost,
-        description: 'Récompense échangée: ${reward.title}',
-        metadata: {
-          'rewardId': reward.id,
-          'rewardType': reward.type.name,
-          if (reward.value != null) 'value': reward.value,
-        },
-      );
-
-      await _databaseService.recordRewardRedemption(
-        userId: databaseUserId,
-        rewardId: reward.id,
-        cost: reward.cost,
-        metadata: {
-          'title': reward.title,
-          if (reward.value != null) 'value': reward.value,
-        },
-      );
-    } catch (e) {
-      debugPrint('Error redeeming reward: $e');
+    final success = await _loyaltyRepository.redeem(reward.id);
+    if (!success) {
       _pendingRewardIds.remove(reward.id);
       notifyListeners();
       return false;
     }
 
-    _currentPoints = updatedPoints;
-    _currentLevel = _calculateLevel(_currentPoints);
-    _levelProgress = _calculateLevelProgress(_currentPoints);
+    await _refreshLoyaltyBalance();
 
     try {
-      await _loadTransactions(databaseUserId);
+      await _loadTransactions(_currentUserId ?? '');
     } catch (e) {
       debugPrint('Error refreshing transactions after redemption: $e');
     }
@@ -873,15 +718,12 @@ class GamificationService extends ChangeNotifier {
 
   // Événements de gamification
   void onOrderPlaced(double orderValue) {
-    // Points basés sur la valeur de la commande
-    final points = (orderValue / 10).round();
-    unawaited(
-      addPoints(
-        points,
-        'Commande passée',
-        metadata: {'orderValue': orderValue},
-      ),
-    );
+    // Les points de fidélité ne sont plus ajoutés ici : ils sont crédités par
+    // le serveur à la **livraison** de la commande (Django,
+    // `apps/loyalty/receivers.py on_order_delivered`), pas à sa création — les
+    // ajouter ici les compterait en double avec le crédit serveur et
+    // afficherait un solde faux jusqu'au prochain rafraîchissement
+    // (`_refreshLoyaltyBalance`).
 
     // Mettre à jour les statistiques
     _totalOrders++;

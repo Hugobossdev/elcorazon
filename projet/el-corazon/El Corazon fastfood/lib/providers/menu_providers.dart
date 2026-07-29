@@ -1,12 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:elcora_fast/models/menu_item.dart';
+import 'package:elcora_fast/repositories/django_menu_repository.dart';
 import 'package:elcora_fast/repositories/menu_repository.dart';
-import 'package:elcora_fast/repositories/supabase_menu_repository.dart';
 
 /// Provider du repository de menu
 /// Permet d'injecter facilement le repository dans les autres providers
 final menuRepositoryProvider = Provider<MenuRepository>((ref) {
-  return SupabaseMenuRepository();
+  return DjangoMenuRepository();
 });
 
 /// Provider pour charger les menu items

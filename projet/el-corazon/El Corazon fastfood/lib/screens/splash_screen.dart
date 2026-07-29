@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:elcora_fast/main.dart' show sessionReadyFuture;
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/error_handler_service.dart';
 import 'package:elcora_fast/services/performance_service.dart';
@@ -71,6 +72,13 @@ class _SplashScreenState extends State<SplashScreen>
 
     try {
       await performanceService.measureOperation('app_initialization', () async {
+        // Attend que la session Django (Phase 6) soit restaurée — sinon
+        // `AppService.initialize()` lirait un `_currentUser` pas encore à
+        // jour et enverrait un client déjà connecté vers l'écran d'accueil
+        // invité.
+        await sessionReadyFuture;
+        if (!mounted) return;
+
         final appService = context.read<AppService>();
         await appService.initialize();
       });

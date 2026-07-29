@@ -6,7 +6,7 @@ import 'package:elcora_fast/services/push_notification_service.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/order_history_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
-import 'package:elcora_fast/repositories/supabase_order_repository.dart';
+import 'package:elcora_fast/repositories/django_order_repository.dart';
 
 /// Types de notifications intelligentes
 enum SmartNotificationType {
@@ -282,7 +282,7 @@ class SmartNotificationService extends ChangeNotifier {
   /// Obtient l'historique des commandes de l'utilisateur
   Future<List<Order>> _getUserOrderHistory(String userId) async {
     try {
-      final orderRepository = SupabaseOrderRepository();
+      final orderRepository = DjangoOrderRepository();
       final orderHistoryService = OrderHistoryService(orderRepository);
       await orderHistoryService.loadOrders(userId);
       return orderHistoryService.orders;

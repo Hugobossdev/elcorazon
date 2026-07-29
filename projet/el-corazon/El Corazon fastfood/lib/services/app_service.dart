@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+// Alias explicite : `eccore.User` (backend Django) et le `User` local
+// (Supabase, ci-dessous) portent le même nom mais pas la même forme — voir
+// `_fromDjangoUser`, qui traduit le premier vers le second.
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/menu_category.dart';
@@ -17,18 +21,61 @@ import 'package:elcora_fast/services/error_handler_service.dart';
 import 'package:elcora_fast/services/realtime_sync_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
-import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/menu_item_cache_service.dart';
-import 'package:elcora_fast/services/data_validator_service.dart';
+import 'package:elcora_fast/services/notification_database_service.dart';
+import 'package:elcora_fast/services/push_notification_service.dart';
+import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/services/socket_service.dart';
 
 class AppService extends ChangeNotifier {
-  static final AppService _instance = AppService._internal();
-  factory AppService() => _instance;
-  AppService._internal();
+  static AppService? _instance;
+
+  /// Le conteneur Riverpod est celui créé une fois dans `main()` — voir
+  /// `UncontrolledProviderScope`. Seul `main.dart` le fournit réellement
+  /// (`ChangeNotifierProvider(create: (_) => AppService(container))`) ; les
+  /// nombreux autres appels `AppService()` sans argument, déjà présents
+  /// ailleurs dans le code (mêmes conventions que `DatabaseService()`), n'ont
+  /// pas besoin d'être réécrits — ils retrouvent l'instance déjà construite.
+  factory AppService([ProviderContainer? container]) {
+    final existing = _instance;
+    if (existing != null) return existing;
+
+    if (container == null) {
+      throw StateError(
+        'AppService() a été appelé avant sa première construction avec un '
+        'ProviderContainer (voir main.dart).',
+      );
+    }
+    return _instance = AppService._internal(container);
+  }
+
+  AppService._internal(this._container) {
+    // `fireImmediately` peuple `_currentUser` dès la construction si une
+    // session a déjà été restaurée avant que ce service n'existe.
+    _sessionSubscription = _container.listen<AsyncValue<eccore.User?>>(
+      eccore.sessionProvider,
+      (previous, next) => _onSessionChanged(next),
+      fireImmediately: true,
+    );
+
+    // FCM renouvelle le jeton d'appareil de son propre chef : sans
+    // ré-enregistrement, l'appareil cesse de recevoir quoi que ce soit, en
+    // silence. Ne fait rien tant que personne n'est connecté — l'appel
+    // échouerait en 401 et est déjà best-effort.
+    _tokenRefreshSubscription =
+        PushNotificationService().tokenRefreshStream.listen((_) {
+      if (_currentUser != null) {
+        unawaited(_registerPushDeviceBestEffort());
+      }
+    });
+  }
+
+  final ProviderContainer _container;
+  late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
+  late final StreamSubscription<String> _tokenRefreshSubscription;
 
   final Uuid _uuid = const Uuid();
   User? _currentUser;
@@ -111,82 +158,6 @@ class AppService extends ChangeNotifier {
     return uuidRegex.hasMatch(id);
   }
 
-  Future<void> _ensureMenuItemExists(
-    dynamic cartItem,
-    String menuItemId,
-  ) async {
-    try {
-      // Check if menu item already exists
-      final existingItem = await _databaseService.getMenuItemById(menuItemId);
-      if (existingItem != null) {
-        return; // Menu item already exists
-      }
-
-      // Create the menu item if it doesn't exist
-      // Cast cartItem to CartItem to access its properties safely
-      final cartItemObj = cartItem as CartItem;
-      final menuItemData = {
-        'id': menuItemId,
-        'name': cartItemObj.name,
-        'description':
-            cartItemObj.name, // Use name as description if not available
-        'price': cartItemObj.price,
-        'category_id': await _getDefaultCategoryId(),
-        'image_url': cartItemObj.imageUrl ?? '',
-        'is_popular': false,
-        'is_vegetarian': false,
-        'is_vegan': false,
-        'is_available': true,
-        'available_quantity': 100,
-        'ingredients': <String>[],
-        'calories': 0,
-        'preparation_time': 15,
-        'rating': 0.0,
-        'review_count': 0,
-        'sort_order': 0,
-        'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-
-      await _databaseService.createMenuItem(menuItemData);
-      debugPrint('Created menu item: ${cartItemObj.name} with ID: $menuItemId');
-    } catch (e) {
-      debugPrint('Error ensuring menu item exists: $e');
-      // Don't throw the error, just log it
-    }
-  }
-
-  Future<String> _getDefaultCategoryId() async {
-    try {
-      // Try to get the first available category
-      final categories = await _databaseService.getMenuCategories();
-      if (categories.isNotEmpty) {
-        return categories.first['id'] as String;
-      }
-
-      // If no categories exist, create a default one
-      final defaultCategoryId = _uuid.v4();
-      final categoryData = {
-        'id': defaultCategoryId,
-        'name': 'general',
-        'display_name': 'Général',
-        'emoji': '🍽️',
-        'description': 'Catégorie générale',
-        'sort_order': 0,
-        'is_active': true,
-        'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-
-      await _databaseService.createMenuCategory(categoryData);
-      return defaultCategoryId;
-    } catch (e) {
-      debugPrint('Error getting default category: $e');
-      // Return a fallback UUID
-      return _uuid.v4();
-    }
-  }
-
   bool _isInitialized = false;
   List<MenuItem> _menuItems = [];
   List<Order> _orders = [];
@@ -245,6 +216,37 @@ class AppService extends ChangeNotifier {
     return _cartItems.length;
   }
 
+  @override
+  void dispose() {
+    _sessionSubscription.close();
+    unawaited(_tokenRefreshSubscription.cancel());
+    super.dispose();
+  }
+
+  /// Pont entre la session Riverpod (backend Django, source de vérité de
+  /// l'identité — Phase 6) et le `_currentUser` local que le reste de cette
+  /// classe lit encore. C'est le seul endroit qui traduit l'un vers l'autre.
+  void _onSessionChanged(AsyncValue<eccore.User?> next) {
+    final djangoUser = next.value;
+    _currentUser = djangoUser == null ? null : _fromDjangoUser(djangoUser);
+    notifyListeners();
+  }
+
+  /// Les points de fidélité et les badges n'existent pas dans
+  /// `UserSerializer` — domaine pas encore migré. Ils gardent leur valeur par
+  /// défaut tant que la fidélité n'a pas son tour ; ce n'est pas un oubli.
+  User _fromDjangoUser(eccore.User djangoUser) {
+    return User(
+      id: djangoUser.id,
+      name: djangoUser.fullName,
+      email: djangoUser.email,
+      phone: djangoUser.phone ?? '',
+      role: UserRole.client,
+      profileImage: djangoUser.avatar,
+      createdAt: djangoUser.createdAt,
+    );
+  }
+
   Future<void> initialize() async {
     try {
       // Mesurer le temps d'initialisation pour le monitoring
@@ -293,13 +295,11 @@ class AppService extends ChangeNotifier {
     }
   }
 
-  /// Charge la session utilisateur de manière optimisée
+  /// Appelée après que `sessionProvider` a fini de restaurer la session
+  /// (Phase 6) — `_currentUser` est donc déjà à jour via le pont ci-dessus.
   Future<void> _loadUserSession() async {
     try {
-      // Vérifier si l'utilisateur est déjà connecté
-      final currentAuthUser = _databaseService.currentUser;
-      if (currentAuthUser != null) {
-        await _loadUserProfile(currentAuthUser.id);
+      if (_currentUser != null) {
         await _loadUserOrders();
       }
     } catch (e) {
@@ -311,43 +311,51 @@ class AppService extends ChangeNotifier {
     }
   }
 
-  // Authentication methods
+  // Authentication methods — Django (Phase 6), plus Supabase. Signatures
+  // inchangées : les écrans qui appellent login/register n'ont pas eu
+  // besoin de changer, seul l'intérieur bascule de backend.
   Future<bool> login(String email, String password) async {
     try {
-      final response = await _databaseService.signIn(
+      await _container.read(eccore.sessionProvider.notifier).login(
         email: email,
         password: password,
       );
-
-      if (response?.user == null) {
-        throw Exception('Connexion impossible. Veuillez réessayer.');
-      }
-
-      await _loadUserProfile(response!.user!.id);
-
-      if (_currentUser?.role != UserRole.client) {
-        await _databaseService.signOut();
-        throw Exception(
-          'Ce compte n\'est pas autorisé sur l\'application client.',
-        );
-      }
-
-      await trackingService.initialize(
-        userId: _currentUser!.id,
-        userRole: _currentUser!.role,
-      );
-
-      await _databaseService.trackEvent(
-        eventType: 'user_login',
-        eventData: {'role': _currentUser!.role.toString()},
-        userId: _currentUser!.id,
-      );
-
+      // `_currentUser` est déjà à jour ici (le pont d'écoute est synchrone
+      // par rapport au changement d'état) ; la garde de rôle (customer) est
+      // déjà appliquée par `sessionProvider`. Le suivi temps réel et
+      // l'événement analytics qui suivaient dépendaient de l'identifiant
+      // Supabase — différés au domaine correspondant (pas encore migré)
+      // plutôt qu'appelés avec un identifiant Django qu'aucune ligne
+      // Supabase ne connaît.
       notifyListeners();
+      unawaited(_registerPushDeviceBestEffort());
       return true;
     } catch (e) {
       debugPrint('Login error: $e');
       rethrow;
+    }
+  }
+
+  /// Enregistre le jeton FCM obtenu par `PushNotificationService` auprès de
+  /// `/api/v1/auth/devices/` (Phase 6). Best-effort, comme côté `dely` : un
+  /// échec (réseau, jeton pas encore disponible, aucun projet Firebase
+  /// configuré) ne doit pas faire échouer la connexion — les notifications
+  /// sont secondaires à l'authentification elle-même.
+  Future<void> _registerPushDeviceBestEffort() async {
+    final token = PushNotificationService().fcmToken;
+    if (token == null || token.isEmpty) return;
+
+    try {
+      await _container.read(eccore.authRepositoryProvider).registerDevice(
+        token: token,
+        platform: switch (defaultTargetPlatform) {
+          TargetPlatform.iOS => 'ios',
+          TargetPlatform.android => 'android',
+          _ => 'web',
+        },
+      );
+    } catch (e) {
+      debugPrint('⚠️ Échec de l\'enregistrement du jeton FCM: $e');
     }
   }
 
@@ -357,51 +365,45 @@ class AppService extends ChangeNotifier {
     String phone,
     String password,
   ) async {
-    // \ud83d\udee1\ufe0f Les exceptions de s\u00e9curit\u00e9 de signUp() doivent remonter \u00e0 l'UI
-    // (ne plus les avaler silencieusement avec return false)
-    final response = await _databaseService.signUp(
+    // Les exceptions de s\u00e9curit\u00e9 doivent remonter \u00e0 l'UI (ne pas les
+    // avaler silencieusement avec return false) \u2014 inchang\u00e9.
+    await _container.read(eccore.sessionProvider.notifier).register(
       email: email,
       password: password,
-      name: name,
+      fullName: name,
       phone: phone,
-      role: UserRole.client,
     );
-
-    if (response?.user != null) {
-      try {
-        await _loadUserProfile(response!.user!.id);
-        await _databaseService.trackEvent(
-          eventType: 'user_register',
-          eventData: {'role': 'client'},
-          userId: _currentUser!.id,
-        );
-      } catch (e) {
-        debugPrint('Registration post-processing error: $e');
-        // Ne pas \u00e9chouer l'inscription si le tracking ou le chargement du profil \u00e9choue
-      }
-      notifyListeners();
-      return true;
-    }
-    return false;
+    notifyListeners();
+    unawaited(_registerPushDeviceBestEffort());
+    return true;
   }
 
   Future<void> logout() async {
     try {
-      // Sign out from Supabase
-      await _databaseService.signOut();
-
-      _currentUser = null;
+      // Avant la révocation : `/auth/devices/` exige la session qu'on est en
+      // train de fermer. Sans cela, l'appareil resterait rattaché au compte et
+      // continuerait de recevoir ses notifications.
+      await _unregisterPushDeviceBestEffort();
+      await _container.read(eccore.sessionProvider.notifier).logout();
       _cartItems.clear();
       await CartService().clearForLogout();
       unawaited(AddressService().clearSession());
       _gamificationService.reset();
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('user_data');
-
+      NotificationDatabaseService().clearSession();
       notifyListeners();
     } catch (e) {
       debugPrint('Logout error: $e');
+    }
+  }
+
+  Future<void> _unregisterPushDeviceBestEffort() async {
+    final token = PushNotificationService().fcmToken;
+    if (token == null || token.isEmpty) return;
+
+    try {
+      await _container.read(eccore.authRepositoryProvider).unregisterDevice(token);
+    } catch (e) {
+      debugPrint('⚠️ Échec du retrait du jeton FCM: $e');
     }
   }
 
@@ -558,6 +560,16 @@ class AppService extends ChangeNotifier {
   }
 
   // New method to place order with CartService data
+  //
+  // Backend Django (Phase 6, tranche commandes) : la commande naît du
+  // **panier serveur**, jamais d'une liste d'articles envoyée par le client
+  // (C1/C2, `OrderService.create_from_cart`) — `subtotal`/`deliveryFee`/
+  // `discount` restent des paramètres pour compatibilité de signature avec
+  // `checkout_screen.dart`, mais ne sont plus envoyés : le total affiché
+  // avant validation est une estimation client, le total qui compte est
+  // celui que Django renvoie. Le paiement réel (PayDunya via le backend) est
+  // une tranche à venir — quel que soit le moyen choisi, la commande naît
+  // `pending`, aucun paiement n'est déclenché ici (décision produit actée).
   Future<String> placeOrderFromCartService(
     Address? deliveryAddress,
     PaymentMethod paymentMethod,
@@ -569,313 +581,35 @@ class AppService extends ChangeNotifier {
   }) async {
     if (cartItems.isEmpty || _currentUser == null) return '';
 
-    // Valider les données avant l'envoi
-    final validator = DataValidatorService();
-
-    // Convertir les cartItems en CartItem pour la validation
-    final cartItemsForValidation =
-        cartItems.whereType<CartItem>().map((item) => item).toList();
-
-    if (cartItemsForValidation.isEmpty) {
-      throw Exception('Aucun article valide dans le panier');
-    }
-
-    // Si l'adresse n'est pas fournie, créer une adresse temporaire à partir de l'adresse texte
-    // Sinon utiliser l'adresse fournie
-    final addressForValidation = deliveryAddress ??
-        Address(
-          id: 'temp',
-          userId: _currentUser!.id,
-          name: 'Livraison',
-          address: '',
-          city: '',
-          postalCode: '',
-          type: AddressType.other,
-          isDefault: false,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        );
-
-    // Calculer le total avec les frais de livraison et remises
-    final calculatedTotal = subtotal + deliveryFee - discount;
-
-    final validationResult = validator.validateOrder(
-      items: cartItemsForValidation,
-      deliveryAddress: addressForValidation,
-      paymentMethod: _paymentMethodToDbString(paymentMethod),
-      total: calculatedTotal,
-    );
-
-    if (!validationResult.isValid) {
-      final errorMessage = validationResult.errors.join('\n');
-      _errorHandler.logError(
-        'Erreur de validation de commande',
-        code: 'ORDER_VALIDATION_ERROR',
-        details: errorMessage,
+    if (deliveryAddress == null ||
+        deliveryAddress.latitude == null ||
+        deliveryAddress.longitude == null) {
+      throw Exception(
+        'Adresse de livraison invalide : sélectionnez une adresse géocodée avant de commander.',
       );
-      throw Exception(errorMessage);
     }
 
     try {
-      final orderId = _uuid.v4();
-      final total = subtotal + deliveryFee - discount;
-
-      // Récupérer le code promo depuis CartService
       final cartService = CartService();
-      final promoCode = cartService.promoCode;
+      // Le panier serveur doit refléter l'état local au moment exact où
+      // `OrderService.create_from_cart` le lit — `_persistChanges` (dans
+      // CartService) synchronise sans attendre, donc on s'assure ici que la
+      // dernière écriture est bien passée avant de commander.
+      await cartService.ensureSynced();
 
-      // Create order data for database
-      // Nettoyer l'adresse pour supprimer les emojis et caractères non autorisés
-      final addressString =
-          _cleanAddressString(addressForValidation.fullAddress);
-      final orderData = {
-        'id': orderId,
-        'user_id': _currentUser!.id,
-        'status': 'pending',
-        'subtotal': subtotal,
-        'delivery_fee': deliveryFee,
-        'discount': discount,
-        'total': total,
-        'payment_method': _paymentMethodToDbString(paymentMethod),
-        'delivery_address': addressString,
-        'delivery_notes': notes ?? '',
-        'promo_code': promoCode, // Ajouter le code promo à la commande
-        'created_at': DateTime.now().toIso8601String(),
-      };
-
-      // Create local order object first (for offline mode)
-      final order = Order(
-        id: orderId,
-        userId: _currentUser!.id,
-        items: cartItems.where(
-          (item) {
-            final cartItem = item as CartItem;
-            return cartItem.id.isNotEmpty && cartItem.name.isNotEmpty;
-          },
-        ) // Filter out invalid items
-            .map(
-          (item) {
-            final cartItem = item as CartItem;
-            return OrderItem(
-              menuItemId: cartItem.id,
-              menuItemName: cartItem.name,
-              name: cartItem.name,
-              category: 'Food', // Default category
-              menuItemImage: cartItem.imageUrl ?? '',
-              quantity: cartItem.quantity,
-              unitPrice: cartItem.price,
-              totalPrice: cartItem.totalPrice,
-            );
-          },
-        ).toList(),
-        subtotal: subtotal,
-        deliveryFee: deliveryFee,
-        total: total,
+      final remoteOrder = await DjangoOrderRepository().createFromServerCart(
+        address: deliveryAddress,
         paymentMethod: paymentMethod,
-        orderTime: DateTime.now(),
-        createdAt: DateTime.now(),
-        deliveryAddress: addressString,
-        promoCode: cartService.promoCode,
-        discount: discount,
-        deliveryNotes: notes,
+        instructions: notes,
+        promoCode: cartService.promoCode ?? '',
       );
 
-      // Process payment first
-      bool paymentSuccess = false;
-      String? paymentTransactionId;
+      _orders.insert(0, remoteOrder);
 
-      if (paymentMethod == PaymentMethod.mobileMoney) {
-        // Process mobile money payment
-        final paymentResult = await _payDunyaService.processMobileMoneyPayment(
-          orderId: orderId,
-          amount: total,
-          phoneNumber: _currentUser!.phone,
-          operator: 'mtn', // Default to MTN, could be made configurable
-          customerName: _currentUser!.name,
-          customerEmail: _currentUser!.email,
-        );
-
-        paymentSuccess = paymentResult.success;
-        paymentTransactionId = paymentResult.invoiceToken;
-      } else if (paymentMethod == PaymentMethod.creditCard ||
-          paymentMethod == PaymentMethod.debitCard) {
-        // For card payments, we'll simulate success for now
-        // In a real implementation, you'd collect card details from the user
-        paymentSuccess = true;
-        paymentTransactionId = 'TXN_${DateTime.now().millisecondsSinceEpoch}';
-      } else if (paymentMethod == PaymentMethod.wallet) {
-        // Portefeuille électronique désactivé temporairement
-        throw Exception(
-          'Le portefeuille électronique est temporairement indisponible',
-        );
-      } else if (paymentMethod == PaymentMethod.cash) {
-        // Cash payment - always succeeds
-        paymentSuccess = true;
-        paymentTransactionId = 'CASH_${DateTime.now().millisecondsSinceEpoch}';
-      }
-
-      if (!paymentSuccess) {
-        throw Exception('Échec du paiement. Veuillez réessayer.');
-      }
-
-      // Add payment transaction ID to order data
-      orderData['payment_transaction_id'] = paymentTransactionId ?? '';
-      orderData['payment_status'] = 'completed';
-
-      // Save order to database (ou hors ligne si pas de connexion)
-      try {
-        await _databaseService.createOrder(orderData);
-      } catch (e) {
-        // Si erreur de connexion, sauvegarder hors ligne
-        if (!_offlineSyncService.isOnline) {
-          debugPrint(
-            '📴 Mode hors ligne: sauvegarde de la commande localement',
-          );
-          await _offlineSyncService.saveOrderOffline(order);
-          // Retourner l'ID même si hors ligne
-          _orders.insert(0, order);
-          notifyListeners();
-          return orderId;
-        }
-        rethrow;
-      }
-
-      // Create order items
-      final orderItems = <Map<String, dynamic>>[];
-
-      for (final dynamic item in cartItems) {
-        // Vérifier que l'item est un CartItem
-        if (item is! CartItem) {
-          debugPrint(
-            'Warning: Item is not a CartItem, skipping: ${item.runtimeType}',
-          );
-          continue;
-        }
-
-        final cartItem = item;
-
-        // Utiliser le menuItemId du CartItem
-        String menuItemId = cartItem.menuItemId;
-
-        // Check if menu item exists, if not create it
-        if (!_isValidUUID(menuItemId)) {
-          menuItemId = _uuid.v4();
-        }
-
-        // Try to ensure the menu item exists in the database if needed
-        try {
-          // Vérifier si le menu item existe, sinon le créer
-          final existingMenuItem =
-              await _databaseService.getMenuItemById(menuItemId);
-          if (existingMenuItem == null) {
-            debugPrint(
-              'Warning: Menu item $menuItemId does not exist, creating it...',
-            );
-            // Créer le menu item s'il n'existe pas
-            await _ensureMenuItemExists(cartItem, menuItemId);
-          }
-        } catch (e) {
-          debugPrint('Warning: Could not check/create menu item: $e');
-          // Continue with the order anyway
-        }
-
-        orderItems.add({
-          'id': _uuid.v4(),
-          'menu_item_id': menuItemId,
-          'menu_item_name': cartItem.name,
-          'name': cartItem.name,
-          'category': 'Food', // Default category
-          'menu_item_image': cartItem.imageUrl ?? '',
-          'quantity': cartItem.quantity,
-          'unit_price': cartItem.price,
-          'total_price': cartItem.totalPrice,
-          'customizations': cartItem.customizations,
-        });
-      }
-
-      await _databaseService.addOrderItems(orderId, orderItems);
-
-      // Enregistrer l'utilisation du code promo si applicable
-      if (cartService.promoCode != null && discount > 0) {
-        try {
-          // Récupérer le PromoCodeService (singleton)
-          final promoCodeService = PromoCodeService();
-
-          // S'assurer que le service est initialisé
-          if (!promoCodeService.isInitialized) {
-            await promoCodeService.initialize();
-          }
-
-          // Vérifier si un code promo est actuellement appliqué
-          if (promoCodeService.currentPromoCode != null) {
-            await promoCodeService.recordPromoCodeUsage(
-              userId: _currentUser!.id,
-              orderId: orderId,
-              discountAmount: discount,
-            );
-            debugPrint(
-              '✅ Utilisation du code promo enregistrée: ${cartService.promoCode}',
-            );
-          } else {
-            // Si le code promo n'est pas dans le service mais est dans le panier,
-            // essayer de le valider et l'enregistrer
-            final validationResult =
-                await promoCodeService.validateAndApplyPromoCode(
-              code: cartService.promoCode!,
-              orderAmount: subtotal + deliveryFee,
-              userId: _currentUser!.id,
-            );
-
-            if (validationResult.isValid &&
-                validationResult.promoCode != null) {
-              await promoCodeService.recordPromoCodeUsage(
-                userId: _currentUser!.id,
-                orderId: orderId,
-                discountAmount: discount,
-              );
-              debugPrint(
-                '✅ Utilisation du code promo enregistrée après validation: ${cartService.promoCode}',
-              );
-            }
-          }
-        } catch (e) {
-          debugPrint(
-            '⚠️ Erreur lors de l\'enregistrement de l\'utilisation du code promo: $e',
-          );
-          // Ne pas bloquer la commande si l'enregistrement échoue
-        }
-      }
-
-      // Consommer le repas gratuit si applicable
-      // Portefeuille électronique désactivé temporairement
-      // if (cartService.isFreeMealApplied) {
-      //   try {
-      //     final walletService = WalletService();
-      //     await walletService.useFreeMeal();
-      //     debugPrint('✅ Repas gratuit consommé pour la commande $orderId');
-      //   } catch (e) {
-      //     debugPrint('⚠️ Erreur lors de la consommation du repas gratuit: $e');
-      //   }
-      // }
-
-      // Ajouter le code promo à la commande si applicable
-      if (cartService.promoCode != null) {
-        try {
-          await _databaseService.updateOrder(orderId, {
-            'promo_code': cartService.promoCode,
-          });
-        } catch (e) {
-          debugPrint(
-            '⚠️ Erreur lors de l\'ajout du code promo à la commande: $e',
-          );
-        }
-      }
-
-      _orders.insert(0, order);
-
-      // Award loyalty points for clients
+      // Award loyalty points for clients — domaine fidélité pas encore
+      // migré (reste simulé côté client, inchangé par cette tranche).
       if (_currentUser?.role == UserRole.client) {
-        final pointsEarned = (total / 100).round(); // 1 point per 100 CFA
+        final pointsEarned = (remoteOrder.total / 100).round();
         _currentUser = _currentUser!.copyWith(
           loyaltyPoints: _currentUser!.loyaltyPoints + pointsEarned,
         );
@@ -884,7 +618,6 @@ class AppService extends ChangeNotifier {
             'loyalty_points': _currentUser!.loyaltyPoints,
           });
         } catch (e) {
-          // Si erreur de connexion, sauvegarder hors ligne
           if (!_offlineSyncService.isOnline) {
             await _offlineSyncService.saveUserUpdateOffline(
               _currentUser!.id,
@@ -896,38 +629,22 @@ class AppService extends ChangeNotifier {
         }
       }
 
-      // Track order event (seulement si en ligne)
-      if (_offlineSyncService.isOnline) {
-        try {
-          await _databaseService.trackEvent(
-            eventType: 'order_placed',
-            eventData: {
-              'order_id': orderId,
-              'total_amount': total,
-              'item_count': cartItems.length,
-            },
-            userId: _currentUser!.id,
-          );
-        } catch (e) {
-          debugPrint('⚠️ Erreur tracking event: $e');
-        }
-      }
-
-      // Déclencher les notifications et gamification
+      // Déclencher les notifications et gamification (inchangé, simulé
+      // côté client — domaines pas encore migrés).
       await _notificationService.showOrderConfirmationNotification(
-        orderId,
+        remoteOrder.id,
         cartItems.isNotEmpty
             ? cartItems.map((item) => (item as CartItem).name).join(', ')
             : 'Commande',
       );
 
-      _gamificationService.onOrderPlaced(total);
+      _gamificationService.onOrderPlaced(remoteOrder.total);
 
       // Démarrer le suivi de livraison
-      _locationService.startDeliveryTracking(orderId);
+      _locationService.startDeliveryTracking(remoteOrder.id);
 
       notifyListeners();
-      return orderId;
+      return remoteOrder.id;
     } catch (e) {
       debugPrint('Error placing order from cart service: $e');
       return '';
@@ -1097,32 +814,11 @@ class AppService extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadUserProfile(String authUserId) async {
-    try {
-      final userData = await _databaseService.getUserProfile(authUserId);
-      if (userData != null) {
-        _currentUser = User.fromMap(userData);
-        // Load user orders after setting current user
-        await _loadUserOrders();
-        await AddressService().initializeForUser(_currentUser!.id);
-        await CartService().initializeForUser(_currentUser!.id);
-        await _gamificationService.initialize(
-          userId: _currentUser!.id,
-          forceRefresh: true,
-        );
-        notifyListeners();
-      }
-    } catch (e) {
-      debugPrint('Error loading user profile: $e');
-    }
-  }
-
   Future<void> _loadUserOrders() async {
     if (_currentUser == null) return;
 
     try {
-      final ordersData = await _databaseService.getUserOrders(_currentUser!.id);
-      _orders = ordersData.map((data) => Order.fromMap(data)).toList();
+      _orders = await DjangoOrderRepository().getUserOrders(_currentUser!.id);
       notifyListeners();
     } catch (e) {
       debugPrint('Error loading user orders: $e');

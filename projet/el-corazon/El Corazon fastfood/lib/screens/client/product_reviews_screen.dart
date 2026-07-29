@@ -1,12 +1,16 @@
+import 'package:elcorazon_core/elcorazon_core.dart' show Review;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:elcora_fast/services/review_rating_service.dart';
-import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/theme.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
+
+/// Initiale affichée dans l'avatar — `full_name` peut être vide côté serveur.
+String _initial(String fullName) =>
+    fullName.isEmpty ? '?' : fullName[0].toUpperCase();
 
 /// Écran des reviews et ratings d'un produit
 class ProductReviewsScreen extends StatefulWidget {
@@ -220,10 +224,11 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
               DropdownButton<String>(
                 value: _sortBy,
                 underline: const SizedBox(),
+                // « Plus utiles » retiré : le contrat expose `helpful_count`
+                // mais aucun endpoint pour voter — trier sur un compteur que
+                // personne ne peut incrémenter n'afficherait qu'un tri figé.
                 items: const [
                   DropdownMenuItem(value: 'recent', child: Text('Plus récent')),
-                  DropdownMenuItem(
-                      value: 'helpful', child: Text('Plus utiles'),),
                   DropdownMenuItem(value: 'rating', child: Text('Mieux notés')),
                 ],
                 onChanged: (value) {
@@ -243,21 +248,16 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
               }
 
               // Créer une copie modifiable de la liste (service.reviews est non modifiable)
-              var reviews = List<ProductReview>.from(service.reviews);
+              var reviews = List<Review>.from(service.reviews);
 
               // Apply filter
               if (_filterBy != 'all') {
                 final rating = int.parse(_filterBy);
-                reviews =
-                    reviews.where((r) => r.rating.round() == rating).toList();
+                reviews = reviews.where((r) => r.rating == rating).toList();
               }
 
               // Apply sort
               switch (_sortBy) {
-                case 'helpful':
-                  reviews.sort((a, b) =>
-                      (b.isHelpful ? 1 : 0).compareTo(a.isHelpful ? 1 : 0),);
-                  break;
                 case 'rating':
                   reviews.sort((a, b) => b.rating.compareTo(a.rating));
                   break;
@@ -285,7 +285,7 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
     );
   }
 
-  Widget _buildReviewCard(ProductReview review) {
+  Widget _buildReviewCard(Review review) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
@@ -302,7 +302,7 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
                 CircleAvatar(
                   backgroundColor: AppColors.primary,
                   child: Text(
-                    review.userName[0].toUpperCase(),
+                    _initial(review.author.fullName),
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -318,7 +318,7 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
                         children: [
                           Expanded(
                             child: Text(
-                              review.userName,
+                              review.author.fullName,
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
@@ -356,7 +356,7 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
                       ),
                       const SizedBox(height: 4),
                       RatingBarIndicator(
-                        rating: review.rating,
+                        rating: review.rating.toDouble(),
                         itemBuilder: (context, index) => const Icon(
                           Icons.star,
                           color: Colors.amber,
@@ -386,51 +386,16 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
                 height: 1.4,
               ),
             ),
-            if (review.photos != null && review.photos!.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 100,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: review.photos!.length,
-                  itemBuilder: (context, index) {
-                    return Container(
-                      width: 100,
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        image: DecorationImage(
-                          image: NetworkImage(review.photos![index]),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+            // Photos d'avis et bouton « Utile » retirés : ni les unes ni
+            // l'autre n'existent dans le contrat (`ReviewSerializer` n'a pas
+            // de champ photo, et rien n'incrémente `helpful_count`).
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Text(
-                  'Il y a ${DateTime.now().difference(review.createdAt).inDays} jours',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 12,
-                  ),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () {
-                    context.read<ReviewRatingService>().markHelpful(review.id);
-                  },
-                  icon: const Icon(Icons.thumb_up_outlined, size: 16),
-                  label: Text(
-                    review.isHelpful ? 'Utile' : 'Utile',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-              ],
+            Text(
+              'Il y a ${DateTime.now().difference(review.createdAt).inDays} jours',
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 12,
+              ),
             ),
           ],
         ),
@@ -439,19 +404,15 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
   }
 
   Widget _buildReviewFormTab() {
-    return Consumer2<AppService, ReviewRatingService>(
-      builder: (context, appService, reviewService, child) {
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: _ReviewFormDialog(
-            menuItem: widget.menuItem,
-            onSubmit: () async {
-              await _loadReviews();
-              _tabController.animateTo(0);
-            },
-          ),
-        );
-      },
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: _ReviewFormDialog(
+        menuItem: widget.menuItem,
+        onSubmit: () async {
+          await _loadReviews();
+          _tabController.animateTo(0);
+        },
+      ),
     );
   }
 }
@@ -475,39 +436,6 @@ class _ReviewFormDialogState extends State<_ReviewFormDialog> {
   final _titleController = TextEditingController();
   final _commentController = TextEditingController();
   double _rating = 5.0;
-  final List<String> _photos = [];
-  bool _checkingPurchase = true;
-  bool _hasPurchased = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkPurchaseStatus();
-  }
-
-  Future<void> _checkPurchaseStatus() async {
-    final appService = context.read<AppService>();
-    final reviewService = context.read<ReviewRatingService>();
-
-    if (appService.currentUser != null) {
-      final hasPurchased = await reviewService.hasPurchasedProduct(
-        appService.currentUser!.id,
-        widget.menuItem.id,
-      );
-      if (mounted) {
-        setState(() {
-          _hasPurchased = hasPurchased;
-          _checkingPurchase = false;
-        });
-      }
-    } else {
-      if (mounted) {
-        setState(() {
-          _checkingPurchase = false;
-        });
-      }
-    }
-  }
 
   @override
   void dispose() {
@@ -519,40 +447,26 @@ class _ReviewFormDialogState extends State<_ReviewFormDialog> {
   Future<void> _submitReview() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final appService = context.read<AppService>();
     final reviewService = context.read<ReviewRatingService>();
 
-    if (appService.currentUser == null) {
-      context.showErrorMessage('Vous devez être connecté pour noter');
-      return;
-    }
-
-    // Vérifier si l'utilisateur a acheté ce produit
-    final hasPurchased = await reviewService.hasPurchasedProduct(
-      appService.currentUser!.id,
-      widget.menuItem.id,
-    );
-
-    final review = ProductReview(
-      id: '',
+    final success = await reviewService.addReview(
       menuItemId: widget.menuItem.id,
-      userId: appService.currentUser!.id,
-      userName: appService.currentUser!.name,
-      rating: _rating,
+      rating: _rating.round(),
       title: _titleController.text,
       comment: _commentController.text,
-      photos: _photos.isEmpty ? null : _photos,
-      isVerifiedPurchase: hasPurchased,
-      createdAt: DateTime.now(),
     );
 
-    final success = await reviewService.addReview(review);
+    if (!mounted) return;
 
-    if (success && mounted) {
+    if (success) {
       context.showSuccessMessage('Merci pour votre avis !');
       widget.onSubmit();
-    } else if (mounted) {
-      context.showErrorMessage('Erreur lors de l\'ajout de l\'avis');
+    } else {
+      // Porte le motif du serveur : avis déjà déposé (409), quota d'écriture
+      // atteint (429), ou session absente (401).
+      context.showErrorMessage(
+        reviewService.error ?? 'Erreur lors de l\'ajout de l\'avis',
+      );
     }
   }
 
@@ -615,45 +529,32 @@ class _ReviewFormDialogState extends State<_ReviewFormDialog> {
           ),
           const SizedBox(height: 24),
 
-          // Purchase Status Banner
-          if (!_checkingPurchase)
-            Container(
-              margin: const EdgeInsets.only(bottom: 24),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _hasPurchased
-                    ? AppColors.success.withValues(alpha: 0.1)
-                    : Colors.grey.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _hasPurchased
-                      ? AppColors.success.withValues(alpha: 0.5)
-                      : Colors.grey.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _hasPurchased ? Icons.verified : Icons.info_outline,
-                    color: _hasPurchased ? AppColors.success : Colors.grey,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _hasPurchased
-                          ? 'Vous avez acheté ce produit. Votre avis sera marqué comme "Achat vérifié".'
-                          : 'Vous n\'avez pas encore acheté ce produit. Votre avis ne sera pas marqué comme vérifié.',
-                      style: TextStyle(
-                        color: _hasPurchased
-                            ? AppColors.success
-                            : Theme.of(context).textTheme.bodyMedium?.color,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+          // La bannière « achat vérifié » annonçait un verdict que le client
+          // calculait lui-même en interrogeant les commandes. C'est le serveur
+          // qui le décide à la soumission (S1) : on annonce donc la règle, pas
+          // son résultat.
+          Container(
+            margin: const EdgeInsets.only(bottom: 24),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
             ),
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.grey),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Votre avis sera marqué « Achat vérifié » si vous avez déjà '
+                    'reçu ce produit. Un seul avis par produit.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
 
           // Rating
           const Text(

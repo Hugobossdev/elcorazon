@@ -1,12 +1,13 @@
 import 'package:flutter/foundation.dart';
 
 /// Configuration centralisée des clés API pour l'application Deliver
+///
+/// L'URL et la clé Supabase ne vivent plus ici : ce fichier en portait une
+/// copie codée en dur, distincte de celle lue depuis `.env` par
+/// `supabase/supabase_config.dart` (la seule réellement utilisée à
+/// l'initialisation) — deux sources de vérité pour la même valeur, dont
+/// celle-ci n'avait plus aucun appelant.
 class ApiConfig {
-  // Configuration Supabase
-  static const String supabaseUrl = "https://vsdmcqldshttrbilcvle.supabase.co";
-  static const String supabaseAnonKey =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzZG1jcWxkc2h0dHJiaWxjdmxlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUyMTY5MDcsImV4cCI6MjA4MDc5MjkwN30.LW28V62UX0q7omv0zmD_G5DKqiWDoWXfBCM4eQrvXZA';
-
   // Configuration Google Maps
   static const String googleMapsApiKey =
       'AIzaSyCtSGHbgwiNKhblSK7NpU7aVUvuxz-w-tM';
@@ -25,9 +26,7 @@ class ApiConfig {
 
   /// Vérifie si toutes les clés API sont configurées
   static bool get isFullyConfigured {
-    return supabaseUrl.isNotEmpty &&
-        supabaseAnonKey.isNotEmpty &&
-        googleMapsApiKey != 'YOUR_GOOGLE_MAPS_API_KEY' &&
+    return googleMapsApiKey != 'YOUR_GOOGLE_MAPS_API_KEY' &&
         googleMapsApiKey.isNotEmpty &&
         agoraAppId != 'YOUR_AGORA_APP_ID' &&
         payDunyaMasterKey != 'YOUR_PAYDUNYA_MASTER_KEY';

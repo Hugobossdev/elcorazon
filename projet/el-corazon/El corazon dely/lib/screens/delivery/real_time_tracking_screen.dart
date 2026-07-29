@@ -169,17 +169,10 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
           _updateMarkers();
         }
 
-        // Send location to backend
-        try {
-          final appService = Provider.of<AppService>(context, listen: false);
-          await appService.updateDeliveryLocation(
-            orderId: widget.order.id,
-            latitude: _driverLocation!.latitude,
-            longitude: _driverLocation!.longitude,
-          );
-        } catch (e) {
-          debugPrint('Erreur envoi position: $e');
-        }
+        // L'émission vers le backend n'est plus faite ici : `AppService` la
+        // tient pour toute la session (`RealtimeTrackingService`), si bien que
+        // fermer cet écran ne fait plus disparaître le livreur du suivi. Ce
+        // flux-ci ne sert donc plus qu'à la carte et à l'itinéraire.
 
         // Recalculate route if needed (throttle to avoid too many calculations)
         if (mounted) {

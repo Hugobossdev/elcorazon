@@ -1,142 +1,41 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-class Complaint {
-  final String id;
-  final String userId;
-  final String orderId;
-  final String type; // 'quality', 'delivery', 'service', 'other'
-  final String subject;
-  final String description;
-  final List<String>? photos;
-  final String status; // 'pending', 'under_review', 'resolved', 'rejected'
-  final DateTime createdAt;
-  final String? resolution;
+import 'package:elcora_fast/repositories/django_support_repository.dart';
 
-  Complaint({
-    required this.id,
-    required this.userId,
-    required this.orderId,
-    required this.type,
-    required this.subject,
-    required this.description,
-    required this.createdAt, this.photos,
-    this.status = 'pending',
-    this.resolution,
-  });
-
-  factory Complaint.fromMap(Map<String, dynamic> map) {
-    return Complaint(
-      id: map['id'] as String,
-      userId: map['user_id'] as String,
-      orderId: map['order_id'] as String,
-      type: map['type'] as String,
-      subject: map['subject'] as String,
-      description: map['description'] as String,
-      photos: map['photos'] != null ? List<String>.from(map['photos']) : null,
-      status: map['status'] as String,
-      createdAt: DateTime.parse(map['created_at']),
-      resolution: map['resolution'] as String?,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'user_id': userId,
-      'order_id': orderId,
-      'type': type,
-      'subject': subject,
-      'description': description,
-      'photos': photos,
-      'status': status,
-    };
-  }
-}
-
-class ReturnRequest {
-  final String id;
-  final String userId;
-  final String orderId;
-  final String reason;
-  final List<String> items;
-  final double refundAmount;
-  final String status; // 'pending', 'approved', 'rejected', 'refunded'
-  final DateTime createdAt;
-  final DateTime? resolvedAt;
-
-  ReturnRequest({
-    required this.id,
-    required this.userId,
-    required this.orderId,
-    required this.reason,
-    required this.items,
-    required this.refundAmount,
-    required this.createdAt, this.status = 'pending',
-    this.resolvedAt,
-  });
-
-  factory ReturnRequest.fromMap(Map<String, dynamic> map) {
-    return ReturnRequest(
-      id: map['id'] as String,
-      userId: map['user_id'] as String,
-      orderId: map['order_id'] as String,
-      reason: map['reason'] as String,
-      items: List<String>.from(map['items']),
-      refundAmount: (map['refund_amount'] as num).toDouble(),
-      status: map['status'] as String,
-      createdAt: DateTime.parse(map['created_at']),
-      resolvedAt: map['resolved_at'] != null
-          ? DateTime.parse(map['resolved_at'])
-          : null,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'user_id': userId,
-      'order_id': orderId,
-      'reason': reason,
-      'items': items,
-      'refund_amount': refundAmount,
-      'status': status,
-    };
-  }
-}
-
+/// Réclamations et demandes de retour, contre le backend Django (Phase 6).
+///
+/// Deux règles qui étaient hors de portée de l'implémentation Supabase (où le
+/// client insérait la ligne lui-même) sont désormais tenues par le serveur, et
+/// volontairement pas rejouées ici : la commande doit appartenir au client, et
+/// un retour ne peut être demandé que sur une commande **livrée**, pour un
+/// montant qui ne dépasse pas son total (`SupportService.request_return`).
+/// Un refus remonte donc dans [error] avec le motif du serveur, au lieu d'être
+/// deviné à partir d'un état local.
 class ComplaintsReturnsService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
-  
-  List<Complaint> _complaints = [];
-  List<ReturnRequest> _returns = [];
+  final DjangoSupportRepository _repository = DjangoSupportRepository();
+
+  List<eccore.Complaint> _complaints = [];
+  List<eccore.ReturnRequest> _returns = [];
   bool _isLoading = false;
   String? _error;
 
-  List<Complaint> get complaints => List.unmodifiable(_complaints);
-  List<ReturnRequest> get returns => List.unmodifiable(_returns);
+  List<eccore.Complaint> get complaints => List.unmodifiable(_complaints);
+  List<eccore.ReturnRequest> get returns => List.unmodifiable(_returns);
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  /// Charger les réclamations d'un utilisateur
-  Future<void> loadComplaints(String userId) async {
+  Future<void> loadComplaints() async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _supabase
-          .from('complaints')
-          .select()
-          .eq('user_id', userId)
-          .order('created_at', ascending: false);
-
-      _complaints = (response as List)
-          .map((item) => Complaint.fromMap(item))
-          .toList();
-      
-      debugPrint('✅ Chargé ${_complaints.length} réclamations pour $userId');
-    } catch (e) {
-      _error = 'Erreur lors du chargement des réclamations: $e';
-      debugPrint('❌ $_error');
+      _complaints = await _repository.getComplaints();
+      debugPrint('✅ Chargé ${_complaints.length} réclamations');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('❌ Chargement des réclamations: ${e.code}');
       _complaints = [];
     } finally {
       _isLoading = false;
@@ -144,27 +43,17 @@ class ComplaintsReturnsService extends ChangeNotifier {
     }
   }
 
-  /// Charger les retours d'un utilisateur
-  Future<void> loadReturns(String userId) async {
+  Future<void> loadReturns() async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _supabase
-          .from('return_requests')
-          .select()
-          .eq('user_id', userId)
-          .order('created_at', ascending: false);
-
-      _returns = (response as List)
-          .map((item) => ReturnRequest.fromMap(item))
-          .toList();
-      
-      debugPrint('✅ Chargé ${_returns.length} retours pour $userId');
-    } catch (e) {
-      _error = 'Erreur lors du chargement des retours: $e';
-      debugPrint('❌ $_error');
+      _returns = await _repository.getReturns();
+      debugPrint('✅ Chargé ${_returns.length} demandes de retour');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('❌ Chargement des retours: ${e.code}');
       _returns = [];
     } finally {
       _isLoading = false;
@@ -172,27 +61,32 @@ class ComplaintsReturnsService extends ChangeNotifier {
     }
   }
 
-  /// Créer une réclamation
-  Future<bool> createComplaint(Complaint complaint) async {
+  /// [kind] : `quality` | `delivery` | `service` | `other` (`ComplaintKind`).
+  Future<bool> createComplaint({
+    required String orderId,
+    required String kind,
+    required String subject,
+    required String description,
+    List<String> photos = const [],
+  }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _supabase
-          .from('complaints')
-          .insert(complaint.toMap())
-          .select()
-          .single();
-
-      final newComplaint = Complaint.fromMap(response);
-      _complaints.insert(0, newComplaint);
-      
-      debugPrint('✅ Réclamation créée: ${newComplaint.id}');
+      final complaint = await _repository.fileComplaint(
+        orderId: orderId,
+        kind: kind,
+        subject: subject,
+        description: description,
+        photos: photos,
+      );
+      _complaints.insert(0, complaint);
+      debugPrint('✅ Réclamation créée: ${complaint.id}');
       return true;
-    } catch (e) {
-      _error = 'Erreur lors de la création de la réclamation: $e';
-      debugPrint('❌ $_error');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('❌ Création de la réclamation: ${e.code}');
       return false;
     } finally {
       _isLoading = false;
@@ -200,27 +94,33 @@ class ComplaintsReturnsService extends ChangeNotifier {
     }
   }
 
-  /// Créer une demande de retour
-  Future<bool> createReturn(ReturnRequest returnRequest) async {
+  /// [refundAmountMinor] est en **unité mineure** (1500 F CFA -> 1500), comme
+  /// partout ailleurs depuis ADR-007 — plus de `double` qui se promène.
+  Future<bool> createReturn({
+    required String orderId,
+    required String reason,
+    required List<String> items,
+    required int refundAmountMinor,
+    String currency = 'XOF',
+  }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _supabase
-          .from('return_requests')
-          .insert(returnRequest.toMap())
-          .select()
-          .single();
-
-      final newReturn = ReturnRequest.fromMap(response);
-      _returns.insert(0, newReturn);
-      
-      debugPrint('✅ Demande de retour créée: ${newReturn.id}');
+      final demande = await _repository.requestReturn(
+        orderId: orderId,
+        reason: reason,
+        items: items,
+        refundAmountMinor: refundAmountMinor,
+        currency: currency,
+      );
+      _returns.insert(0, demande);
+      debugPrint('✅ Demande de retour créée: ${demande.id}');
       return true;
-    } catch (e) {
-      _error = 'Erreur lors de la création de la demande de retour: $e';
-      debugPrint('❌ $_error');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('❌ Création de la demande de retour: ${e.code}');
       return false;
     } finally {
       _isLoading = false;
@@ -228,13 +128,9 @@ class ComplaintsReturnsService extends ChangeNotifier {
     }
   }
 
-  /// Filtrer par statut
-  List<Complaint> getComplaintsByStatus(String status) {
-    return _complaints.where((c) => c.status == status).toList();
-  }
+  List<eccore.Complaint> getComplaintsByStatus(String status) =>
+      _complaints.where((c) => c.status == status).toList();
 
-  List<ReturnRequest> getReturnsByStatus(String status) {
-    return _returns.where((r) => r.status == status).toList();
-  }
+  List<eccore.ReturnRequest> getReturnsByStatus(String status) =>
+      _returns.where((r) => r.status == status).toList();
 }
-

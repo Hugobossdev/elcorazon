@@ -1,14 +1,32 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:elcora_fast/models/order.dart';
-import 'package:elcora_fast/services/database_service.dart';
 
-/// Service de notifications push avancé pour FastGo
-/// Version compatible sans Firebase
+/// Reçoit les messages quand l'app est fermée ou en arrière-plan. Doit être
+/// une fonction de premier niveau annotée `@pragma('vm:entry-point')` : elle
+/// est exécutée dans un isolat séparé, sans rien de l'état de l'app.
+///
+/// Rien à faire ici : Android affiche lui-même la notification portée par le
+/// bloc `notification` du message, et l'historique se relit depuis
+/// `/api/v1/notifications/` à la réouverture. Ce handler existe pour que le
+/// message ne soit pas perdu et pour la trace.
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  debugPrint('PushNotificationService: message en arrière-plan ${message.messageId}');
+}
+
+/// Notifications de l'app client : locales (programmation, affichage) **et**
+/// push FCM (Phase 6).
+///
+/// La partie push se limite volontairement à trois gestes : obtenir le jeton
+/// d'appareil, le tenir à jour, et afficher au premier plan un message que le
+/// système n'affiche pas de lui-même. C'est le backend qui décide *quoi*
+/// envoyer et *à qui* — cette classe n'a aucune règle d'envoi.
 class PushNotificationService extends ChangeNotifier {
   static final PushNotificationService _instance =
       PushNotificationService._internal();
@@ -17,18 +35,30 @@ class PushNotificationService extends ChangeNotifier {
 
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
-  final DatabaseService _databaseService = DatabaseService();
 
   bool _isInitialized = false;
   String? _userId;
+  String? _fcmToken;
   final StreamController<PushNotification> _notificationController =
       StreamController<PushNotification>.broadcast();
+
+  /// Émet à chaque rotation du jeton d'appareil (FCM le renouvelle de son
+  /// propre chef). `AppService` s'y abonne pour ré-enregistrer le nouveau
+  /// jeton auprès de `/auth/devices/` — sans cela, l'appareil cesse
+  /// silencieusement de recevoir quoi que ce soit.
+  final StreamController<String> _tokenRefreshController =
+      StreamController<String>.broadcast();
 
   // Getters
   bool get isInitialized => _isInitialized;
   String? get userId => _userId;
+
+  /// Jeton d'appareil FCM, `null` tant que Firebase n'est pas initialisé ou
+  /// que la permission n'a pas été accordée.
+  String? get fcmToken => _fcmToken;
   Stream<PushNotification> get notificationStream =>
       _notificationController.stream;
+  Stream<String> get tokenRefreshStream => _tokenRefreshController.stream;
 
   /// Initialise le service de notifications push
   Future<void> initialize({String? userId}) async {
@@ -44,12 +74,94 @@ class PushNotificationService extends ChangeNotifier {
       // Configuration des notifications locales
       await _initializeLocalNotifications();
 
+      // Push FCM — indépendant de ce qui précède : un échec ici (pas de
+      // projet Firebase configuré, permission refusée) laisse les
+      // notifications locales fonctionnelles.
+      await _initializeFirebaseMessaging();
+
       _isInitialized = true;
       notifyListeners();
 
       debugPrint('PushNotificationService: Service initialisé avec succès');
     } catch (e) {
       debugPrint('PushNotificationService: Erreur d\'initialisation - $e');
+    }
+  }
+
+  Future<void> _initializeFirebaseMessaging() async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+
+      // iOS et Android 13+ exigent un consentement explicite ; Android
+      // antérieur le renvoie accordé d'office.
+      final settings = await messaging.requestPermission();
+      if (settings.authorizationStatus == AuthorizationStatus.denied) {
+        debugPrint('PushNotificationService: notifications push refusées');
+        return;
+      }
+
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+      _fcmToken = await messaging.getToken();
+      debugPrint(
+        'PushNotificationService: jeton FCM ${_fcmToken == null ? 'indisponible' : 'obtenu'}',
+      );
+
+      messaging.onTokenRefresh.listen((token) {
+        _fcmToken = token;
+        _tokenRefreshController.add(token);
+      });
+
+      // Au premier plan, le système n'affiche rien de lui-même sur Android :
+      // on rejoue le message dans une notification locale.
+      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleOpenedFromMessage);
+    } catch (e) {
+      // Notamment quand aucun projet Firebase réel n'est configuré (voir
+      // `lib/firebase_options.dart`) : l'app tourne sans push plutôt que de
+      // refuser de démarrer.
+      debugPrint('PushNotificationService: FCM indisponible - $e');
+    }
+  }
+
+  void _handleForegroundMessage(RemoteMessage message) {
+    final notification = message.notification;
+    if (notification == null) return;
+
+    unawaited(
+      _showLocalNotification(
+        title: notification.title ?? 'El Corazón',
+        body: notification.body ?? '',
+        payload: json.encode(message.data),
+        channelId: _channelForKind(message.data['kind']?.toString()),
+      ),
+    );
+  }
+
+  void _handleOpenedFromMessage(RemoteMessage message) {
+    _notificationController.add(
+      PushNotification(
+        // `data` porte de quoi ouvrir le bon écran, pas l'objet métier — il
+        // aura changé d'ici la lecture (contrat des notifications).
+        id: message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        title: message.notification?.title ?? '',
+        body: message.notification?.body ?? '',
+        data: Map<String, dynamic>.from(message.data),
+        type: PushNotification._getNotificationType(message.data),
+        timestamp: message.sentTime ?? DateTime.now(),
+      ),
+    );
+  }
+
+  /// Canal Android d'après `NotificationKind` du serveur.
+  String _channelForKind(String? kind) {
+    switch (kind) {
+      case 'delivery_offer':
+        return 'delivery';
+      case 'marketing':
+        return 'promotions';
+      default:
+        return 'orders';
     }
   }
 
@@ -223,14 +335,6 @@ class PushNotificationService extends ChangeNotifier {
       }),
     );
 
-    // Enregistrer en base de données
-    await _saveNotificationToDatabase(
-      userId: userId,
-      title: '$emoji $title',
-      body: body,
-      type: 'order_status',
-      data: {'orderId': order.id, 'status': status},
-    );
   }
 
   /// Envoie une notification de promotion
@@ -257,14 +361,6 @@ class PushNotificationService extends ChangeNotifier {
       channelId: 'promotions',
     );
 
-    // Enregistrer en base de données
-    await _saveNotificationToDatabase(
-      userId: userId,
-      title: notificationTitle,
-      body: notificationBody,
-      type: 'promotion',
-      data: {'promoCode': promoCode, 'imageUrl': imageUrl},
-    );
   }
 
   /// Envoie une notification d'achievement
@@ -290,18 +386,6 @@ class PushNotificationService extends ChangeNotifier {
       channelId: 'achievements',
     );
 
-    // Enregistrer en base de données
-    await _saveNotificationToDatabase(
-      userId: userId,
-      title: title,
-      body: body,
-      type: 'achievement',
-      data: {
-        'achievementName': achievementName,
-        'points': points,
-        'badgeImageUrl': badgeImageUrl,
-      },
-    );
   }
 
   /// Envoie une notification de livraison
@@ -329,19 +413,6 @@ class PushNotificationService extends ChangeNotifier {
       channelId: 'delivery',
     );
 
-    // Enregistrer en base de données
-    await _saveNotificationToDatabase(
-      userId: userId,
-      title: title,
-      body: body,
-      type: 'delivery',
-      data: {
-        'orderId': orderId,
-        'deliveryPersonName': deliveryPersonName,
-        'estimatedTime': estimatedTime,
-        'deliveryPersonPhone': deliveryPersonPhone,
-      },
-    );
   }
 
   /// Envoie une notification sociale
@@ -364,14 +435,6 @@ class PushNotificationService extends ChangeNotifier {
       channelId: 'social',
     );
 
-    // Enregistrer en base de données
-    await _saveNotificationToDatabase(
-      userId: userId,
-      title: title,
-      body: message,
-      type: 'social',
-      data: {'fromUserId': fromUserId, 'fromUserName': fromUserName},
-    );
   }
 
   /// Planifie une notification
@@ -413,26 +476,10 @@ class PushNotificationService extends ChangeNotifier {
     );
   }
 
-  /// Enregistre une notification en base de données
-  Future<void> _saveNotificationToDatabase({
-    required String userId,
-    required String title,
-    required String body,
-    required String type,
-    Map<String, dynamic>? data,
-  }) async {
-    try {
-      await _databaseService.trackEvent(
-        eventType: 'notification_sent',
-        eventData: {'title': title, 'body': body, 'type': type, 'data': data},
-        userId: userId,
-      );
-    } catch (e) {
-      debugPrint(
-        'PushNotificationService: Erreur sauvegarde notification - $e',
-      );
-    }
-  }
+  // `_saveNotificationToDatabase` supprimé : il traçait chaque notification
+  // locale dans Supabase (`trackEvent`). L'historique lisible après coup vit
+  // désormais dans `/api/v1/notifications/`, alimenté par le serveur —
+  // dupliquer côté client ce qu'il produit ferait deux listes divergentes.
 
   /// Envoie une notification personnalisée (méthode publique)
   Future<void> sendCustomNotification({
@@ -479,6 +526,7 @@ class PushNotificationService extends ChangeNotifier {
   @override
   void dispose() {
     _notificationController.close();
+    _tokenRefreshController.close();
     super.dispose();
   }
 }

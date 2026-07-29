@@ -1,6 +1,6 @@
 # Phase 6 — Migration Flutter vers l'architecture Django v2
 
-**Statut** : à faire · **Date** : 2026-07-27 · **Entrée** : [02 — Architecture générale](02-architecture-generale.md), [ADR-009](adr/009-contrat-d-api.md)
+**Statut** : en cours (`fastfood` migré sauf social/commande groupée ; `dely` migré ; `admin` : rien) · **Date** : 2026-07-29 · **Entrée** : [02 — Architecture générale](02-architecture-generale.md), [ADR-009](adr/009-contrat-d-api.md)
 
 ---
 
@@ -156,59 +156,202 @@ c'est justement l'occasion actée par ADR-009 de lever les trois travers de l'an
       sans signature refusé (403 — confirme que le stockage n'est pas public par défaut,
       `AWS_QUERYSTRING_AUTH=True`), suppression confirmée. Le connecteur S3/MinIO fonctionne tel que
       configuré.
-- [ ] **Confirmer que la CI GitHub passe au vert** (`​.github/workflows/backend-ci.yml`) sur le
-      remote désormais configuré.
+- [x] **CI GitHub confirmée verte** (2026-07-27) : le run déclenché par le remote configuré la
+      veille avait en réalité échoué (`makemigrations --check` — Meta.ordering ajouté sur
+      `Achievement`/`Badge` sans migration générée) ; migration `0002_alter_achievement_options_
+      alter_badge_options` ajoutée, run suivant `success` (`.github/workflows/backend-ci.yml`).
 
 ### 3.1 Fondations Flutter partagées
 
-- [ ] Créer un module Dart partagé entre les 3 apps (package local — ex. `packages/elcorazon_core/`
-      — ou dépôt séparé selon la préférence d'outillage) contenant :
-  - `network/` — client HTTP (`dio`), intercepteur JWT (attache le token, déclenche le refresh
-    rotatif sur 401 — ADR-004), mapping des erreurs `problem+json` vers des exceptions typées par
-    `code`.
-  - `realtime/` — client WebSocket générique pour `ws/orders/<id>/tracking/` et `ws/couriers/me/`,
-    avec reconnexion et rattrapage par numéro de séquence (déjà porté côté serveur par
-    `common/realtime.py`).
-  - `auth/` — stockage sécurisé des jetons, connexion/déconnexion, révocation multi-appareil.
-  - `storage/` — upload et lecture via URL signée MinIO (remplace Supabase Storage).
-  - `models/` — DTO générés ou alignés sur le schéma OpenAPI publié par la CI (`openapi.yaml`).
+- [x] **Package `packages/elcorazon_core/` créé** (2026-07-27), dépendance locale
+      (`path: ../packages/elcorazon_core`) — borné à ce que l'authentification exige, pas plus :
+  - `network/api_client.dart` — `Dio`, intercepteur JWT, **rafraîchissement single-flight** sur 401
+    (un verrou partagé — `Future<String>? _refreshInFlight` — garantit qu'un seul appel à
+    `/auth/token/refresh/` part même si plusieurs requêtes échouent en même temps ; le refresh token
+    est à usage unique côté serveur, rotation + liste noire), mapping `problem+json` → `ApiException`
+    typée par `code`.
+  - `auth/token_storage.dart` — adapté de `El Corazon fastfood/lib/services/secure_token_storage_service.dart`
+    (construit mais jamais branché côté Supabase — récupéré plutôt que réécrit).
+  - `auth/auth_repository.dart` — register/login/refresh/logout/me/changePassword/registerDevice.
+  - `auth/session.dart` — `sessionProvider` (Riverpod `AsyncNotifier<User?>`), porte la garde de rôle
+    par type de compte (`allowedUserType`, vérifiée après `login()` **et** `restoreSession()`).
+  - `models/user.dart` — classe à la main (pas de freezed/json_serializable : aucun des deux n'est
+    utilisé ailleurs dans les 3 apps malgré leur présence en dépendance).
+  - **Étendu domaine par domaine depuis** (2026-07-28/29), un module par domaine migré :
+    `catalog/` (dont `review.dart` — les avis vivent sous `/catalog/reviews/`), `geography/`,
+    `cart/`, `orders/`, `payments/`, `profile/`, `loyalty/`, `gamification/`, `social/`,
+    `support/`, `notifications/`, `realtime/` (client WebSocket générique avec reconnexion,
+    utilisé par le suivi de commande), `delivery/` (affectations, dossier livreur, et
+    `assignment_offer.dart` — la charge utile de `delivery.offered`) et `tracking/` (relevés de
+    position).
+  - **Pas encore construit** : aide upload/lecture signée MinIO (§3.4).
+  - Testé (87 tests, `flutter test` + `flutter analyze` verts) : parsing du contrat de chaque
+    domaine, `TokenStorage`, et surtout la concurrence de rafraîchissement (`ApiClient —
+    rafraîchissement sur 401`, simulée par un faux serveur puisqu'un vrai test de course en
+    conditions réelles n'est pas fiable). Les tests de repository vérifient autant ce que le client
+    **n'envoie pas** (`is_public`, `is_verified_purchase`, compteurs, identifiants d'utilisateur)
+    que ce qu'il lit — c'est là que se joue le respect de C1/S1.
 - [ ] Chaque app ne garde en propre que sa couche `presentation/` et les repositories spécifiques
       à ses écrans (ex. gestion de flotte côté `admin`, navigation GPS côté `dely`).
 
 ### 3.2 Authentification (fondation commune, transverse aux 3 apps)
 
-- [ ] Remplacer Supabase Auth par le flux JWT Django (`/api/v1/auth/`) **simultanément dans les
-      3 apps** — contrairement aux autres domaines, l'identité ne peut pas être migrée app par app
-      sans casser les parcours qui en dépendent partout.
-- [ ] Migrer la gestion de session (accès + refresh rotatif, révocation, déconnexion à distance).
+- [x] **`dely` branché sur Django** (2026-07-27), **`fastfood` branché sur Django** (2026-07-28) —
+      voir §3.3. `admin` suit le même patron, pas encore fait.
+- [x] Décision prise en session : **Riverpod introduit, mais seulement pour la couche auth/session**
+      — le reste de l'état de chaque app (panier, catalogue, tracking...) reste sur
+      Provider/ChangeNotifier jusqu'à ce que son propre domaine soit migré. Les deux cohabitent via
+      `UncontrolledProviderScope` (un `ProviderContainer` créé une fois dans `main()`) plutôt qu'une
+      réécriture complète de la gestion d'état — voir `El corazon dely/lib/main.dart` et
+      `AppService._onSessionChanged` (le pont qui recopie `sessionProvider` dans `_currentUser`).
+- [x] Migrer la gestion de session (accès + refresh rotatif, révocation) — fait pour `dely`.
 - [ ] Aligner le modèle de rôles/permissions client sur ADR-005 (le back-office n'est plus la
       barrière d'autorisation, seulement un confort d'affichage — le serveur refuse de toute façon).
+- ⚠️ **Écart de périmètre découvert en construisant `dely`** : le backend n'a aucun endpoint pour
+      créer un compte livreur (`/auth/register/` ne crée que des `customer` ; `apps/delivery`
+      n'expose les profils livreurs qu'en lecture, `StaffCourierViewSet`). L'inscription en
+      self-service (`registerDriver`, `registerDriverWithDocuments*`) reste dans le code de `dely`,
+      sur Supabase, mais son accès a été retiré de l'écran de connexion — décision prise en session.
+      Il faudra soit un endpoint Django de provisioning (avec ou sans validation staff), soit
+      accepter que l'onboarding livreur reste un geste manuel (Django admin) indéfiniment.
 
 ### 3.3 Migration domaine par domaine
 
 Ordre retenu par app, du risque le plus faible (lecture seule) au plus élevé (argent, temps réel) :
 
 **`fastfood` (client)**
-1. Géographie / restaurants / catalogue (lecture seule)
-2. Panier serveur (`carts`)
-3. Commandes (`orders`) + codes promo (`promotions`, consommés à la création de commande)
-4. Paiements (`payments`, PayDunya via le backend — plus jamais simulé côté client)
-5. Suivi temps réel (WebSocket `ws/orders/<id>/tracking/`)
-6. Fidélité, gamification, social, support (`loyalty`, `gamification`, `social`, `support`)
-7. Notifications push FCM (absentes aujourd'hui dans cette app — à construire, pas seulement à
-   migrer)
+1. [x] Auth — connexion, inscription, déconnexion, restauration de session, garde de rôle
+   `customer` (2026-07-28). Contrairement à `dely`, l'inscription **est** migrée : le backend crée
+   toujours un `customer` par conception, ce qui correspond exactement à cette app. OTP
+   téléphone, Google OAuth et « mot de passe oublié » retirés de l'écran de connexion (aucun des
+   trois n'a d'équivalent côté Django — décision prise en session : email + mot de passe
+   seulement pour l'instant). Même prudence que `dely` : seuls `login`/`register`/`logout`/
+   `_loadUserSession` touchés dans `AppService`, `DatabaseService` intact. Deux fichiers dès lors
+   totalement morts supprimés (`secure_token_storage_service.dart`,
+   `README_SECURE_TOKEN_STORAGE.md` — construits pour Supabase, jamais branchés, remplacés par le
+   `TokenStorage` du package partagé qui en reprenait déjà la base) ; `otp_verification_screen.dart`
+   et la route associée laissés en place mais inatteignables, comme le fait `dely` pour son écran
+   d'inscription.
+2. [x] Géographie / restaurants / catalogue (2026-07-28) — `DjangoMenuRepository` implémente
+   l'interface `MenuRepository` existante et traduit vers les modèles locaux, si bien que les
+   écrans n'ont pas bougé ; `supabase_menu_repository.dart` supprimé. Pas de WebSocket catalogue
+   prévu : `watchMenuItems` garde le polling 30 s de l'implémentation précédente.
+3. [x] Panier serveur (`carts`, 2026-07-28) — `CartService` synchronise contre `/carts/`.
+4. [x] Commandes (`orders`, 2026-07-28) — `DjangoOrderRepository.createFromServerCart()` crée la
+   commande **depuis le panier serveur**, avec `Idempotency-Key` généré par le client ; les deux
+   méthodes de l'interface locale qui n'ont pas d'équivalent au contrat (`createOrder` depuis un
+   `Order` construit côté client, `updateOrderStatus` réservé au personnel) ne sont implémentées
+   que pour satisfaire l'interface. `supabase_order_repository.dart` supprimé. Le code promo est
+   transmis à la création et validé par le serveur ; en revanche `PromoCodeService` reste un
+   catalogue en stockage local (voir l'écart plus bas).
+5. [x] Paiements (`payments`, 2026-07-28) — `eccore.PaymentRepository` et `CheckoutInstruction`
+   dans `payment_screen.dart` ; plus de paiement simulé côté client.
+6. [x] Suivi temps réel (2026-07-28) — `eccore.RealtimeChannel` (reconnexion avec repli
+   exponentiel, une fermeture 4403 ne retente pas) sur `ws/orders/<id>/tracking/`, consommé par
+   `RealtimeTrackingService`.
+7. [x] Fidélité et gamification (2026-07-28), **support et avis produits (2026-07-29)** :
+   - `loyalty` — solde, catalogue de récompenses et journal viennent du serveur ; un point ne
+     s'obtient qu'à la livraison, jamais par un calcul client.
+   - `gamification` — badges Django (`isUnlocked`/`unlockedAt` servis, plus recalculés) ; les
+     achievements et défis restent simulés côté client, faute d'écran qui les affiche.
+   - `support` — tickets, fil de messages, réclamations et retours sur `/support/*`.
+     `support_screen.dart` chargeait sa liste… jamais : l'appel manquait, la liste était donc
+     vide en permanence quel que soit le backend ; corrigé au passage. Catégories alignées sur
+     `TicketCategory` (« Général » n'existe pas côté serveur, remplacé par « Autre »).
+   - **avis produits** — `/catalog/reviews/`. Trois choses que le client faisait disparaissent :
+     calculer la moyenne des notes (elle vit sur l'article), deviner l'achat vérifié (le serveur
+     le décide, S1), et transformer un second avis en modification (`upsert` → le serveur refuse,
+     un avis par article et par personne, S5).
+   - **social — pas migré**, voir l'écart de périmètre plus bas.
+8. [x] Notifications (2026-07-29) — deux moitiés :
+   - **historique** migré sur `/notifications/` (liste paginée, `unread-count` en route dédiée,
+     marquage lu unitaire et global). L'écriture depuis le client disparaît entièrement : plus de
+     `saveNotification` ni de famille `sendWelcomeNotification`/`sendPromotionNotification`, et
+     plus de suppression (le contrat ne l'expose pas — le serveur décide seul de la durée de vie
+     d'une notification). Les entrées correspondantes de l'écran ont été retirées.
+   - **push FCM construit** : `firebase_core`/`firebase_messaging` ajoutés, permission, jeton
+     d'appareil enregistré auprès de `/auth/devices/` après connexion et retiré **avant** la
+     déconnexion (l'endpoint exige la session qu'on ferme), ré-enregistrement sur rotation du
+     jeton (`onTokenRefresh` — sans quoi l'appareil cesse de recevoir en silence), affichage au
+     premier plan et handler d'arrière-plan. ⚠️ `lib/firebase_options.dart` ne contient que des
+     **valeurs de remplissage** : aucun projet Firebase n'existe encore (§3.0). L'initialisation
+     est donc non bloquante — l'app démarre sans push plutôt que de refuser de se lancer. Même
+     état que `dely`. La configuration Android/iOS (`google-services.json`, plugin Gradle,
+     `GoogleService-Info.plist`) reste à faire en même temps que le vrai projet.
+
+⚠️ **Écarts de périmètre côté `fastfood`** (aucun endpoint Django équivalent) :
+- **Commande groupée** — décision prise en session le 2026-07-29 : **reportée**, pas retirée. Le
+  backend modélise les groupes sociaux (`/social/groups/`) et le paiement partagé
+  (`payments/split.py`), mais pas la collecte collaborative d'articles avant confirmation.
+  `group_order_screen.dart` (2867 lignes, abonnements Supabase Realtime sur `orders`/`order_items`)
+  et la partie « commandes de groupe » de `SocialService` restent donc sur Supabase. C'est
+  aujourd'hui le principal obstacle au §3.5 : trancher entre construire une app Django dédiée
+  (panier collaboratif : ouverture, ajout par membre, échéance, confirmation en commande unique)
+  et retirer la fonctionnalité.
+- **Groupes sociaux et publications** — le repository partagé existe et est testé
+  (`elcorazon_core/social/`), mais le seul écran qui consomme les groupes est celui de la commande
+  groupée : le branchement attend la décision ci-dessus.
+- **Notation du livreur** (`DriverRatingService`) — `rating_average`/`rating_count` sont en lecture
+  seule sur le profil livreur, rien ne permet de déposer une note. Reste sur Supabase.
+- **« Avis utile »** — `helpful_count` est servi mais aucun endpoint ne l'incrémente ; le bouton et
+  le tri correspondants ont été retirés.
+- **Photos d'avis** — absentes du contrat, retirées de l'affichage.
+- **Codes promo** — la validation à la création de commande est bien serveur ; en revanche
+  `PromoCodeService` reste un catalogue en stockage local, sans équivalent lu depuis
+  `/promotions/`. `promo_code_service_supabase.dart` (aucun appelant) a été supprimé.
 
 **`dely` (livreur)**
-1. Auth (fait en 3.2)
-2. Affectation et gestion des courses (`delivery`)
-3. Émission de position (WebSocket `ws/couriers/me/`, déjà consommateur côté backend)
-4. Notifications push (déjà en place côté FCM — à raccorder à l'API d'enregistrement d'appareil du
-   backend, remplace l'enregistrement Supabase)
-5. Retirer les clés Supabase/Google Maps codées en dur dans `api_config.dart` au passage (dette déjà
-   identifiée, indépendante de la migration mais à traiter dans le même chantier)
+1. [x] Auth — connexion, déconnexion, restauration de session, garde de rôle `courier` (2026-07-27).
+   Inscription **non migrée** (voir l'écart de périmètre en 3.2) ; `loginDriver`/`logout`/
+   `initialize()` seuls touchés dans `AppService` — `DatabaseService` n'a volontairement pas été
+   modifié (les appels Supabase pour les domaines pas encore migrés, ex. `updateUserOnlineStatus`,
+   restent inertes pour un compte Django tant que le domaine livraison n'a pas son tour, plutôt que
+   de risquer une régression en touchant un fichier de 1000+ lignes hors du périmètre auth).
+   `AppService.login()` (chemin Supabase) a depuis été supprimé (2026-07-29) : il n'avait plus
+   aucun appelant et ouvrait le suivi temps réel sur une identité inconnue du backend.
+2. [x] Affectation et gestion des courses (`delivery`, 2026-07-29) — `DjangoDeliveryRepository`
+   assemble une `Course` (l'affectation Django + la commande qu'elle porte, traduite vers le
+   modèle local) : les écrans continuent de raisonner en commandes alors que **toutes les actions
+   s'adressent à la course**. Deux choses que faisait l'app Supabase disparaissent, et ce sont
+   les deux qui comptent :
+   - **le vivier de commandes à se partager n'existe pas**. Le personnel propose une course à un
+     livreur nommé (`AssignmentService.offer`) ; « disponible » veut désormais dire « proposée à
+     moi ». L'acceptation est exclusive côté serveur (L2), rien n'est donc affiché comme acquis
+     avant la réponse ;
+   - **le client n'écrit jamais le statut de la commande**. Il fait avancer la course, la commande
+     suit par projection serveur (`ORDER_STATUS_PROJECTION`) — c'est une projection écrite à la
+     main côté client qui avait produit C4. Les boutons affichés viennent d'`allowedTransitions`,
+     la machine à états n'est pas rejouée. L'éligibilité se lit sur le dossier
+     (`canAcceptOrders`, L1), elle ne se recompose pas depuis « en ligne ».
+3. [x] Émission de position (2026-07-29) — **par HTTP (`/tracking/assignments/{id}/pings/`), pas
+   par le WebSocket** : `ws/couriers/me/` (`CourierFeedConsumer`) est une file de propositions en
+   **lecture seule**, rien n'y remonte. Ce point du plan était donc faux, et c'est le contrat qui
+   tranche : la file sert à recevoir des courses, les relevés partent en HTTP. Un relevé perdu
+   n'est pas relancé (c'est le suivant qui compte) ; la cadence est de 10 s, celle qu'attend
+   `TrackingPingThrottle`, le serveur écartant lui-même tout relevé à moins de
+   `TRACKING_MIN_WRITE_METERS` du précédent (202, qui n'est pas un échec).
+   Deux corrections de fond au passage :
+   - **l'émission suivait un écran**, `real_time_tracking_screen.dart` : fermer la carte
+     suffisait à disparaître du suivi. Elle vit désormais le temps de la session, portée par
+     `AppService` — la boucle GPS de `RealtimeTrackingService` n'émettait quant à elle
+     strictement rien (un `debugPrint`, jamais d'appel réseau) ;
+   - **la file des courses n'était pas consommée du tout** : un livreur ne découvrait une course
+     qu'au rechargement suivant, alors que c'est le seul flux où rater un message a un coût
+     métier direct (ADR-008). `ws/couriers/me/` est branché, et une proposition déclenche le
+     rechargement de la liste — le message alerte, l'API fait autorité.
+   `supabase_realtime_service.dart` (façade Supabase Realtime, seul appelant de ce service) est
+   supprimé ; `RealtimeTrackingService` ne transporte plus que du Django.
+4. [x] Jeton FCM enregistré via `AuthRepository.registerDevice()` après connexion (2026-07-27) —
+   best-effort, ne bloque pas la connexion en cas d'échec.
+5. [x] Clés Supabase codées en dur retirées de `api_config.dart` (2026-07-27) — la clé Google Maps,
+   elle, reste (toujours utilisée par 3 services non liés à Supabase).
 
 **`admin` (back-office)**
-1. Auth + permissions (fait en 3.2, ADR-005)
+1. Auth + permissions (fait en 3.2, ADR-005) — **pas encore fait**, patron identique à `dely`
+   (`allowedUserType = UserType.staff`).
+   ⚠️ Ne pas couper l'accès à `Supabase.instance.client.auth.admin.createUser(...)`
+   (`admin_auth_service.dart:508`, provisioning de comptes tiers) même une fois le login de l'admin
+   migré — aucun endpoint Django équivalent n'existe.
 2. Gestion établissements / catalogue / personnel (`restaurants`, `catalog`, `accounts` scoping)
 3. Supervision commandes / livraison (lecture des mêmes endpoints que `fastfood`/`dely`, vues
    agrégées)
@@ -231,7 +374,13 @@ le parcours manuellement.
 ### 3.5 Nettoyage Supabase
 
 - [ ] Retirer `supabase_flutter`, `lib/supabase/`, toute clé/URL Supabase des 3 `pubspec.yaml` et
-      fichiers `.env`.
+      fichiers `.env`. ⚠️ Bloqué côté `fastfood` par la commande groupée (§3.3) et par
+      `DatabaseService`, volontairement intact tant que des domaines non migrés s'appuient dessus.
+- [x] Code Supabase devenu mort supprimé au fil des tranches : `supabase_menu_repository.dart`,
+      `supabase_order_repository.dart`, `secure_token_storage_service.dart`,
+      `social_features_service.dart` (672 lignes, aucun appelant),
+      `promo_code_service_supabase.dart` (aucun appelant) et, côté `dely`,
+      `supabase_realtime_service.dart` avec `AppService.login()`.
 - [ ] Retirer le canal Socket.IO résiduel dans `fastfood` (`socket_service.dart` et usages),
       remplacé par le WebSocket Django.
 - [ ] Mettre à jour `CAHIER_DES_CHARGES.md` et `ETAT_FONCTIONNALITES.md` (actuellement rédigés pour
@@ -260,11 +409,18 @@ le parcours manuellement.
 
 ## 4. Suivi
 
-- [ ] 3.0 — Prérequis backend
-- [ ] 3.1 — Fondations Flutter partagées
-- [ ] 3.2 — Authentification commune
-- [ ] 3.3 — Migration `fastfood`
-- [ ] 3.3 — Migration `dely`
+- [ ] 3.0 — Prérequis backend (reste : validation FCM avec un vrai projet Firebase)
+- [x] 3.1 — Fondations Flutter partagées (`packages/elcorazon_core`, un module par domaine migré,
+  87 tests)
+- [ ] 3.2 — Authentification commune (`dely` et `fastfood` faits, `admin` à répliquer)
+- [ ] 3.3 — Migration `fastfood` — auth, catalogue, panier, commandes, paiements, suivi temps réel,
+  fidélité, gamification, support, avis et notifications (historique + push FCM) faits. **Reste :
+  social et commande groupée**, tous deux suspendus à la décision sur la commande groupée (§3.3),
+  et les écarts de périmètre listés au même endroit.
+- [x] 3.3 — Migration `dely` — auth, courses (`delivery`), émission de position et file
+  `ws/couriers/me/`, jeton FCM. **Reste** : l'inscription livreur, faute d'endpoint de
+  provisioning (écart de périmètre §3.2), et les domaines que `dely` partage avec `fastfood` sans
+  écran migré (portefeuille, promotions, social).
 - [ ] 3.3 — Migration `admin`
 - [ ] 3.4 — Flux externes (Agora, stockage)
 - [ ] 3.5 — Nettoyage Supabase

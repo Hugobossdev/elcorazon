@@ -166,6 +166,8 @@ class ConnectivityService extends ChangeNotifier {
         return 'Bluetooth';
       case ConnectivityResult.other:
         return 'Autre';
+      case ConnectivityResult.satellite:
+        return 'Satellite';
       case ConnectivityResult.none:
         return 'Aucune connexion';
     }

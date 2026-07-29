@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/menu_category.dart';
-import 'package:elcora_fast/services/database_service.dart';
+import 'package:elcora_fast/repositories/django_menu_repository.dart';
+import 'package:elcora_fast/repositories/menu_repository.dart';
 
 /// Modèle pour un élément de menu en cache
 class CachedMenuItem {
@@ -41,7 +42,7 @@ class MenuItemCacheService {
   factory MenuItemCacheService() => _instance;
   MenuItemCacheService._internal();
 
-  final DatabaseService _databaseService = DatabaseService();
+  final MenuRepository _menuRepository = DjangoMenuRepository();
 
   // Cache des menu items
   final Map<String, CachedMenuItem> _menuItemsCache = {};
@@ -98,22 +99,9 @@ class MenuItemCacheService {
       }
     }
 
-    // Charger depuis la base de données (avec requête optimisée)
-    debugPrint('🔄 Chargement des menu items depuis la base de données...');
-    final menuData = await _databaseService.getMenuItems(
-      categoryId: categoryId,
-      // Pas de limite pour le cache complet, mais on pourrait ajouter une limite max
-    );
-    
-    // Parser et mettre en cache
-    final items = menuData.map((data) {
-      try {
-        return MenuItem.fromMap(data);
-      } catch (e) {
-        debugPrint('❌ Erreur parsing menu item: $e');
-        return null;
-      }
-    }).whereType<MenuItem>().toList();
+    // Charger depuis le backend (avec requête optimisée)
+    debugPrint('🔄 Chargement des menu items depuis le backend...');
+    final items = await _menuRepository.getMenuItems(categoryId: categoryId);
 
     // Mettre à jour le cache
     _updateMenuItemsCache(items);
@@ -138,18 +126,11 @@ class MenuItemCacheService {
       }
     }
 
-    // Charger depuis la base de données
+    // Charger depuis le backend
     try {
-      final response = await _databaseService.supabase
-          .from('menu_items')
-          .select()
-          .eq('id', id)
-          .maybeSingle();
+      final item = await _menuRepository.getMenuItemById(id);
+      if (item == null) return null;
 
-      if (response == null) return null;
-
-      final item = MenuItem.fromMap(response);
-      
       // Mettre en cache
       _menuItemsCache[id] = CachedMenuItem(
         item: item,
@@ -187,24 +168,14 @@ class MenuItemCacheService {
       }
     }
 
-    // Charger depuis la base de données
-    debugPrint('🔄 Chargement des catégories depuis la base de données...');
-    final categoriesData = await _databaseService.getMenuCategories();
-    
-    // Parser et mettre en cache
-    final categories = categoriesData.map((data) {
-      try {
-        return MenuCategory.fromMap(data);
-      } catch (e) {
-        debugPrint('❌ Erreur parsing category: $e');
-        return null;
-      }
-    }).whereType<MenuCategory>().toList();
+    // Charger depuis le backend
+    debugPrint('🔄 Chargement des catégories depuis le backend...');
+    final categories = await _menuRepository.getMenuCategories();
 
     // Mettre à jour le cache
     _updateCategoriesCache(categories);
-    
-    debugPrint('✅ ${categories.length} catégories chargées depuis la base de données');
+
+    debugPrint('✅ ${categories.length} catégories chargées depuis le backend');
     return categories;
   }
 

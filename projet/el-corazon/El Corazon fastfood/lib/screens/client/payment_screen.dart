@@ -1,40 +1,45 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:elcora_fast/services/paydunya_service.dart';
-// import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
+import 'package:url_launcher/url_launcher.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/order.dart';
+import 'package:elcora_fast/repositories/django_order_repository.dart';
+import 'package:elcora_fast/services/paydunya_service.dart' show PaymentStatus;
 import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcora_fast/config/paydunya_config.dart';
 
-/// Écran de traitement des paiements
+/// Écran de paiement — Phase 6 : ouvre une demande de paiement Django
+/// (`POST /payments/{order}/initiate/`) pour une commande **déjà créée**, et
+/// n'affiche jamais un succès qu'elle n'aurait pas elle-même lu depuis le
+/// serveur — seul un webhook signé du prestataire fait avancer une
+/// transaction (`apps/payments/services.py`). La commande, elle, existe déjà
+/// avant cet écran : le quitter sans paiement confirmé ne l'annule pas.
 class PaymentScreen extends StatefulWidget {
   final String orderId;
-  final double amount;
-  final PaymentMethod paymentMethod;
-  final String customerName;
-  final String customerEmail;
-  final String customerPhone;
 
-  const PaymentScreen({
-    required this.orderId,
-    required this.amount,
-    required this.paymentMethod,
-    required this.customerName,
-    required this.customerEmail,
-    required this.customerPhone,
-    super.key,
-  });
+  const PaymentScreen({required this.orderId, super.key});
 
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  bool _isProcessing = false;
+  static const _pollInterval = Duration(seconds: 3);
+  static const _pollTimeout = Duration(minutes: 2);
+
+  final _paymentRepository = eccore.PaymentRepository(apiClient: apiClient);
+
+  bool _isProcessing = true;
   PaymentStatus _paymentStatus = PaymentStatus.none;
-  String? _transactionId;
+  Order? _order;
+  eccore.CheckoutInstruction? _checkout;
   String? _errorMessage;
+  Timer? _pollTimer;
+  DateTime? _pollDeadline;
+
+  bool get _isCashOnDelivery => _order?.paymentMethod == PaymentMethod.cash;
 
   @override
   void initState() {
@@ -42,99 +47,48 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _initializePayment();
   }
 
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _initializePayment() async {
+    _pollTimer?.cancel();
     setState(() {
       _isProcessing = true;
       _paymentStatus = PaymentStatus.pending;
+      _errorMessage = null;
     });
 
     try {
-      final payDunyaService =
-          Provider.of<PayDunyaService>(context, listen: false);
-
-      // Initialize PayDunya if not already done
-      if (!payDunyaService.isInitialized) {
-        await payDunyaService.initialize(
-          masterKey: PayDunyaConfig.masterKey,
-          privateKey: PayDunyaConfig.privateKey,
-          token: PayDunyaConfig.token,
-        );
-      }
-
-      PaymentResult result;
-
-      switch (widget.paymentMethod) {
-        case PaymentMethod.mobileMoney:
-          // Déterminer l'opérateur mobile money basé sur le numéro de téléphone
-          final operator = _detectMobileMoneyOperator(widget.customerPhone);
-          result = await payDunyaService.processMobileMoneyPayment(
-            orderId: widget.orderId,
-            amount: widget.amount,
-            phoneNumber: widget.customerPhone,
-            operator: operator,
-            customerName: widget.customerName,
-            customerEmail: widget.customerEmail,
-          );
-          break;
-        case PaymentMethod.creditCard:
-        case PaymentMethod.debitCard:
-          result = await payDunyaService.processCardPayment(
-            orderId: widget.orderId,
-            amount: widget.amount,
-            cardNumber: '4111111111111111', // Test card number
-            cardHolderName: widget.customerName,
-            expiryMonth: '12',
-            expiryYear: '2025',
-            cvv: '123',
-            customerName: widget.customerName,
-            customerEmail: widget.customerEmail,
-          );
-          break;
-        case PaymentMethod.wallet:
-          // Portefeuille électronique désactivé temporairement
-          result = PaymentResult(
-            success: false,
-            orderId: widget.orderId,
-            error: 'Le portefeuille électronique est temporairement indisponible',
-          );
-          break;
-        case PaymentMethod.cash:
-          // Cash payment - simulate success
-          await Future.delayed(const Duration(seconds: 2));
-          result = PaymentResult(
-            success: true,
-            orderId: widget.orderId,
-            invoiceToken: 'CASH_${DateTime.now().millisecondsSinceEpoch}',
-          );
-          break;
-      }
-
-      setState(() {
-        _isProcessing = false;
-        _paymentStatus =
-            result.success ? PaymentStatus.completed : PaymentStatus.error;
-        _transactionId = result.invoiceToken;
-        _errorMessage = result.error;
-      });
-
-      if (result.success) {
-        // Navigate back to order tracking after successful payment
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted && context.mounted) {
-            Navigator.of(context).pop(true); // Return success
-          }
+      final order = await DjangoOrderRepository().getOrderById(widget.orderId);
+      if (order == null) {
+        setState(() {
+          _isProcessing = false;
+          _paymentStatus = PaymentStatus.error;
+          _errorMessage = 'Commande introuvable.';
         });
-      } else {
-        // Afficher un message d'erreur si le paiement a échoué
-        if (mounted && context.mounted && result.error != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Échec du paiement: ${result.error}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+        return;
       }
+      _order = order;
+
+      final checkout = await _paymentRepository.initiate(widget.orderId);
+      _checkout = checkout;
+
+      if (order.paymentMethod == PaymentMethod.cash) {
+        // Réglé physiquement à la livraison — la transaction est ouverte
+        // (traçabilité comptable) mais rien à attendre ici.
+        setState(() {
+          _isProcessing = false;
+          _paymentStatus = PaymentStatus.completed;
+        });
+        return;
+      }
+
+      setState(() => _isProcessing = false);
+      _pollDeadline = DateTime.now().add(_pollTimeout);
+      _pollTimer = Timer.periodic(_pollInterval, (_) => _pollTransaction());
     } catch (e) {
       setState(() {
         _isProcessing = false;
@@ -144,22 +98,55 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
-  /// Détecte l'opérateur mobile money basé sur le numéro de téléphone
-  String _detectMobileMoneyOperator(String phoneNumber) {
-    // Enlever les espaces et caractères spéciaux
-    final cleaned = phoneNumber.replaceAll(RegExp(r'[\s\-\(\)]'), '');
+  Future<void> _pollTransaction() async {
+    final checkout = _checkout;
+    if (checkout == null) return;
 
-    // Détection basée sur les préfixes courants en Côte d'Ivoire
-    if (cleaned.startsWith('07') || cleaned.startsWith('05')) {
-      return 'mtn'; // MTN Mobile Money
-    } else if (cleaned.startsWith('09') || cleaned.startsWith('01')) {
-      return 'orange'; // Orange Money
-    } else if (cleaned.startsWith('01') || cleaned.startsWith('05')) {
-      return 'moov'; // Moov Money
+    if (DateTime.now().isAfter(_pollDeadline!)) {
+      _pollTimer?.cancel();
+      return; // Reste en `pending` — l'utilisateur peut continuer manuellement.
     }
 
-    // Par défaut, utiliser MTN
-    return 'mtn';
+    try {
+      final transactions = await _paymentRepository.getTransactions(orderId: widget.orderId);
+      final match = transactions.where(
+        (t) => t.providerReference == checkout.transaction.providerReference,
+      );
+      if (match.isEmpty) return;
+      final current = match.first;
+
+      if (current.isCompleted) {
+        _pollTimer?.cancel();
+        setState(() => _paymentStatus = PaymentStatus.completed);
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && context.mounted) Navigator.of(context).pop(true);
+        });
+      } else if (current.isFailed) {
+        _pollTimer?.cancel();
+        setState(() {
+          _paymentStatus = PaymentStatus.error;
+          _errorMessage = current.failureReason.isNotEmpty
+              ? current.failureReason
+              : 'Le paiement a échoué.';
+        });
+      }
+    } catch (e) {
+      debugPrint('PaymentScreen: erreur pendant le sondage - $e');
+    }
+  }
+
+  Future<void> _openCheckoutUrl() async {
+    final url = _checkout?.checkoutUrl;
+    if (url == null) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Impossible d\'ouvrir : $url')),
+        );
+      }
+    }
   }
 
   @override
@@ -175,15 +162,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
         child: Column(
           children: [
             Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _buildPaymentIcon(),
-                  const SizedBox(height: 24),
-                  _buildPaymentInfo(),
-                  const SizedBox(height: 32),
-                  _buildPaymentStatus(),
-                ],
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildPaymentIcon(),
+                    const SizedBox(height: 24),
+                    _buildPaymentInfo(),
+                    const SizedBox(height: 32),
+                    _buildPaymentStatus(),
+                  ],
+                ),
               ),
             ),
             _buildActionButtons(),
@@ -222,50 +211,42 @@ class _PaymentScreenState extends State<PaymentScreen> {
         color: iconColor.withValues(alpha: 0.1),
         shape: BoxShape.circle,
       ),
-      child: Icon(
-        iconData,
-        size: 50,
-        color: iconColor,
-      ),
+      child: Icon(iconData, size: 50, color: iconColor),
     );
   }
 
   Widget _buildPaymentInfo() {
+    final order = _order;
     return Column(
       children: [
         Text(
           'Commande #${widget.orderId.substring(0, 8).toUpperCase()}',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         Text(
           'Montant à payer',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.grey[600],
-              ),
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
         ),
         const SizedBox(height: 4),
         Text(
-          PriceFormatter.format(widget.amount),
+          PriceFormatter.format(order?.total ?? 0),
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: Theme.of(context).colorScheme.primary,
               ),
         ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(widget.paymentMethod.emoji),
-            const SizedBox(width: 8),
-            Text(
-              widget.paymentMethod.displayName,
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ],
-        ),
+        if (order != null) ...[
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(order.paymentMethod.emoji),
+              const SizedBox(width: 8),
+              Text(order.paymentMethod.displayName, style: Theme.of(context).textTheme.titleMedium),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -276,36 +257,31 @@ class _PaymentScreenState extends State<PaymentScreen> {
         children: [
           const CircularProgressIndicator(),
           const SizedBox(height: 16),
-          Text(
-            'Traitement du paiement...',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
+          Text('Ouverture du paiement...', style: Theme.of(context).textTheme.bodyLarge),
         ],
+      );
+    }
+
+    if (_isCashOnDelivery && _paymentStatus == PaymentStatus.completed) {
+      return Text(
+        'À régler à la livraison 💵',
+        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: Colors.green,
+              fontWeight: FontWeight.bold,
+            ),
+        textAlign: TextAlign.center,
       );
     }
 
     switch (_paymentStatus) {
       case PaymentStatus.completed:
-        return Column(
-          children: [
-            Text(
-              'Paiement effectué avec succès! 🎉',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Colors.green,
-                    fontWeight: FontWeight.bold,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            if (_transactionId != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Transaction: $_transactionId',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Colors.grey[600],
-                    ),
+        return Text(
+          'Paiement effectué avec succès ! 🎉',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: Colors.green,
+                fontWeight: FontWeight.bold,
               ),
-            ],
-          ],
+          textAlign: TextAlign.center,
         );
       case PaymentStatus.error:
         return Column(
@@ -321,10 +297,42 @@ class _PaymentScreenState extends State<PaymentScreen> {
               const SizedBox(height: 8),
               Text(
                 _errorMessage!,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.red[700],
-                    ),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.red[700]),
                 textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+        );
+      case PaymentStatus.pending:
+        final checkout = _checkout;
+        final waitingTooLong = _pollDeadline != null && DateTime.now().isAfter(_pollDeadline!);
+        return Column(
+          children: [
+            if (!waitingTooLong) ...[
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+            ],
+            Text(
+              waitingTooLong
+                  ? 'Toujours en attente de confirmation.'
+                  : 'En attente de confirmation du paiement...',
+              style: Theme.of(context).textTheme.bodyLarge,
+              textAlign: TextAlign.center,
+            ),
+            if (checkout != null && checkout.instructions.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                checkout.instructions,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            if (checkout != null) ...[
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: _openCheckoutUrl,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Ouvrir la page de paiement'),
               ),
             ],
           ],
@@ -340,21 +348,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
         if (_paymentStatus == PaymentStatus.error) ...[
           SizedBox(
             width: double.infinity,
-            child: CustomButton(
-              text: 'Réessayer',
-              onPressed: _initializePayment,
-            ),
+            child: CustomButton(text: 'Réessayer', onPressed: _initializePayment),
           ),
           const SizedBox(height: 12),
         ],
         SizedBox(
           width: double.infinity,
           child: CustomButton(
-            text: _paymentStatus == PaymentStatus.completed
-                ? 'Continuer'
-                : 'Annuler',
-            onPressed: () => Navigator.of(context)
-                .pop(_paymentStatus == PaymentStatus.completed),
+            text: _paymentStatus == PaymentStatus.completed ? 'Continuer' : 'Continuer vers le suivi',
+            onPressed: () => Navigator.of(context).pop(_paymentStatus == PaymentStatus.completed),
           ),
         ),
       ],

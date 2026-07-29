@@ -1,7 +1,7 @@
+import 'package:elcorazon_core/elcorazon_core.dart' show SupportTicket;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/support_service.dart';
-import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/theme.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
 import 'package:elcora_fast/services/design_enhancement_service.dart';
@@ -22,6 +22,13 @@ class _SupportScreenState extends State<SupportScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    // L'écran n'avait jamais déclenché de chargement : la liste des tickets
+    // était donc vide en permanence, quel que soit le backend.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<SupportService>().loadTickets();
+      }
+    });
   }
 
   @override
@@ -59,6 +66,15 @@ class _SupportScreenState extends State<SupportScreen>
   }
 }
 
+/// Libellés des valeurs de `TicketCategory` servies par l'API.
+const Map<String, String> _categoryLabels = {
+  'order': 'Commande',
+  'payment': 'Paiement',
+  'delivery': 'Livraison',
+  'account': 'Compte',
+  'other': 'Autre',
+};
+
 /// Liste des tickets de support
 class _SupportTicketsList extends StatelessWidget {
   const _SupportTicketsList();
@@ -74,25 +90,42 @@ class _SupportTicketsList extends StatelessWidget {
         final tickets = supportService.tickets;
 
         if (tickets.isEmpty) {
-          return const Center(
+          // Une liste vide et un chargement en échec ne disent pas la même
+          // chose au client — l'ancienne version confondait les deux.
+          final error = supportService.error;
+          return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.inbox_outlined, size: 64, color: Colors.grey),
-                SizedBox(height: 16),
-                Text('Aucun ticket de support'),
+                Icon(
+                  error == null ? Icons.inbox_outlined : Icons.cloud_off,
+                  size: 64,
+                  color: Colors.grey,
+                ),
+                const SizedBox(height: 16),
+                Text(error ?? 'Aucun ticket de support'),
+                if (error != null) ...[
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: supportService.loadTickets,
+                    child: const Text('Réessayer'),
+                  ),
+                ],
               ],
             ),
           );
         }
 
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: tickets.length,
-          itemBuilder: (context, index) {
-            final ticket = tickets[index];
-            return _buildTicketCard(context, ticket);
-          },
+        return RefreshIndicator(
+          onRefresh: supportService.loadTickets,
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: tickets.length,
+            itemBuilder: (context, index) {
+              final ticket = tickets[index];
+              return _buildTicketCard(context, ticket);
+            },
+          ),
         );
       },
     );
@@ -144,7 +177,7 @@ class _SupportTicketsList extends StatelessWidget {
           children: [
             const SizedBox(height: 4),
             Text(
-              ticket.category,
+              _categoryLabels[ticket.category] ?? ticket.category,
               style: TextStyle(
                 color: Colors.grey[600],
                 fontSize: 12,
@@ -198,7 +231,7 @@ class _CreateTicketTabState extends State<_CreateTicketTab> {
   final _formKey = GlobalKey<FormState>();
   final _subjectController = TextEditingController();
   final _descriptionController = TextEditingController();
-  String _selectedCategory = 'general';
+  String _selectedCategory = 'other';
 
   @override
   void dispose() {
@@ -210,35 +243,26 @@ class _CreateTicketTabState extends State<_CreateTicketTab> {
   Future<void> _submitTicket() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final appService = context.read<AppService>();
-    final currentUser = appService.currentUser;
-    
-    if (currentUser == null) {
-      if (mounted) {
-        context.showErrorMessage('Vous devez être connecté pour créer un ticket');
-      }
-      return;
-    }
-
+    // Plus de garde « connecté ? » ici : la requête part avec le jeton de
+    // session, et c'est le serveur qui refuse (401) s'il n'y en a pas.
     final service = context.read<SupportService>();
 
-    final ticket = SupportTicket(
-      id: '',
-      userId: currentUser.id,
+    final success = await service.createTicket(
       category: _selectedCategory,
       subject: _subjectController.text,
       description: _descriptionController.text,
-      createdAt: DateTime.now(),
     );
 
-    final success = await service.createTicket(ticket);
+    if (!mounted) return;
 
-    if (success && mounted) {
+    if (success) {
       context.showSuccessMessage('Ticket créé avec succès !');
       _subjectController.clear();
       _descriptionController.clear();
-    } else if (mounted) {
-      context.showErrorMessage('Erreur lors de la création du ticket');
+    } else {
+      context.showErrorMessage(
+        service.error ?? 'Erreur lors de la création du ticket',
+      );
     }
   }
 
@@ -265,15 +289,18 @@ class _CreateTicketTabState extends State<_CreateTicketTab> {
                 border: OutlineInputBorder(),
                 hintText: 'Sélectionner une catégorie',
               ),
+              // Valeurs de `TicketCategory` côté serveur, à la lettre : il n'y
+              // a pas de catégorie « général », et une valeur inconnue serait
+              // refusée en 400.
               items: const [
-                DropdownMenuItem(value: 'general', child: Text('Général')),
                 DropdownMenuItem(value: 'order', child: Text('Commande')),
                 DropdownMenuItem(value: 'payment', child: Text('Paiement')),
                 DropdownMenuItem(value: 'delivery', child: Text('Livraison')),
                 DropdownMenuItem(value: 'account', child: Text('Compte')),
+                DropdownMenuItem(value: 'other', child: Text('Autre')),
               ],
               onChanged: (value) {
-                setState(() => _selectedCategory = value ?? 'general');
+                setState(() => _selectedCategory = value ?? 'other');
               },
             ),
             const SizedBox(height: 24),

@@ -6,8 +6,15 @@ import '../../widgets/custom_button.dart';
 import '../../widgets/custom_text_field.dart';
 import '../../widgets/loading_widget.dart';
 import '../../widgets/el_corazon_logo.dart';
-import 'driver_registration_screen.dart';
 
+/// Connexion uniquement (Phase 6) : le backend Django n'a aucun endpoint de
+/// création de compte livreur — `/api/v1/auth/register/` ne crée que des
+/// comptes `customer`, et l'API livraison n'expose la lecture des dossiers
+/// livreur que pour le personnel (`StaffCourierViewSet`, lecture seule).
+/// L'inscription en self-service (`registerDriver`,
+/// `registerDriverWithDocuments*` dans `AppService`) reste dans le code, sur
+/// Supabase, mais n'est plus accessible depuis cet écran tant que le backend
+/// n'a pas d'équivalent — voir `docs/architecture/04-migration-flutter.md`.
 class DriverAuthScreen extends StatefulWidget {
   const DriverAuthScreen({super.key});
 
@@ -21,7 +28,6 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
   final _passwordController = TextEditingController();
 
   bool _isLoading = false;
-  bool _isLogin = true;
   bool _obscurePassword = true;
 
   @override
@@ -53,44 +59,6 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erreur de connexion: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _register() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
-    try {
-      final appService = Provider.of<AppService>(context, listen: false);
-
-      await appService.registerDriver(
-        _emailController.text,
-        _passwordController.text,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Inscription réussie! Vérifiez votre email.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        setState(() => _isLogin = true);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur d\'inscription: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -134,7 +102,7 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          _isLogin ? l10n.loginTitle : l10n.registerTitle,
+                          l10n.loginTitle,
                           style: Theme.of(context).textTheme.bodyLarge
                               ?.copyWith(color: Colors.grey[600]),
                           textAlign: TextAlign.center,
@@ -188,93 +156,13 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
                           ),
                           const SizedBox(height: 24),
                           CustomButton(
-                            text: _isLogin
-                                ? l10n.loginButton
-                                : l10n.registerButton,
-                            onPressed: _isLogin ? _login : _register,
-                            icon: _isLogin ? Icons.login : Icons.person_add,
+                            text: l10n.loginButton,
+                            onPressed: _login,
+                            icon: Icons.login,
                           ),
                         ],
                       ),
                     ),
-
-                    const SizedBox(height: 24),
-
-                    // Toggle between login and register
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          _isLogin
-                              ? '${l10n.noAccount} '
-                              : '${l10n.haveAccount} ',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            setState(() {
-                              _isLogin = !_isLogin;
-                            });
-                          },
-                          child: Text(
-                            _isLogin ? l10n.registerButton : l10n.loginButton,
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // Driver registration link
-                    if (_isLogin) ...[
-                      const Divider(),
-                      const SizedBox(height: 16),
-                      Text(
-                        l10n.newDriver,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const DriverRegistrationScreen(),
-                              ),
-                            );
-                          },
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.badge),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  l10n.completeRegistration,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
 
                     const SizedBox(height: 32),
 
@@ -295,22 +183,23 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Pour devenir livreur, vous devez :',
+                            'Pour devenir livreur, contactez El Corazón :',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               color: Colors.blue[700],
                             ),
+                            textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '• Avoir un permis de conduire valide\n'
-                            '• Fournir une carte d\'identité\n'
-                            '• Avoir un véhicule en bon état\n'
-                            '• Être disponible dans votre zone',
+                            'l\'inscription se fait pour l\'instant par notre '
+                            'équipe, qui vérifie permis, pièce d\'identité et '
+                            'véhicule avant de créer votre compte.',
                             style: TextStyle(
                               color: Colors.blue[600],
                               fontSize: 12,
                             ),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
