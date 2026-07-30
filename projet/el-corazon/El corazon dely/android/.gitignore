@@ -1,5 +1,10 @@
 gradle-wrapper.jar
 /.gradle
+# Sortie de Gradle. Le `/build/` du .gitignore de l'application est ancré à sa
+# racine et ne couvre donc pas celui-ci, qu'un Gradle invoqué depuis `android/`
+# remplit — d'où le rapport `reports/problems/problems-report.html` qui s'était
+# retrouvé suivi.
+/build/
 /captures/
 /gradlew
 /gradlew.bat
