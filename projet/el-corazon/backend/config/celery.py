@@ -50,6 +50,14 @@ app.conf.beat_schedule = {
         "task": "apps.notifications.tasks.purge_unregistered_devices",
         "schedule": 86400.0,
     },
+    "expire-group-carts": {
+        # Toutes les cinq minutes : l'échéance est déjà opposée à chaque ajout,
+        # donc rien d'incorrect ne passe entre deux tours. Ce qui se joue ici est
+        # la fermeture visible — un participant qui attend doit apprendre que
+        # c'est fini en quelques minutes, pas à l'heure suivante.
+        "task": "apps.groupcarts.tasks.expire_group_carts",
+        "schedule": 300.0,
+    },
     "renew-subscriptions": {
         # Horaire, face à des périodes comptées en jours et un délai de grâce
         # compté en jours lui aussi : une passe par jour laisserait un

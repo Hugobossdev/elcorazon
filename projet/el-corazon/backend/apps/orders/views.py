@@ -53,7 +53,15 @@ IDEMPOTENCY_HEADER = "Idempotency-Key"
 class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
     # Déclaré pour le générateur de schéma seulement — voir `get_queryset`.
     queryset = Order.objects.none()
-    filterset_fields = {"status": ["exact"], "restaurant__slug": ["exact"]}
+    # `customer` sert la fiche client du back-office — « l'historique de cette
+    # personne » — et ne fuit rien : le filtre s'applique **après** le
+    # cloisonnement de `get_queryset`, si bien qu'un client qui l'emploierait
+    # ne réduirait que ses propres commandes.
+    filterset_fields = {
+        "status": ["exact"],
+        "restaurant__slug": ["exact"],
+        "customer": ["exact"],
+    }
 
     def get_serializer_class(self) -> type[BaseSerializer[Order]]:
         return OrderDetailSerializer if self.action == "retrieve" else OrderSerializer

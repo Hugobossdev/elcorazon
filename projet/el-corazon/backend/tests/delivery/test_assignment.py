@@ -13,6 +13,7 @@ from django.db import IntegrityError, transaction
 
 from apps.accounts.models import User, UserType
 from apps.delivery.models import Assignment, CourierProfile, VehicleType
+from apps.delivery.services import CourierApplication, CourierService
 from apps.delivery.states import (
     DELIVERY_MACHINE,
     ORDER_STATUS_PROJECTION,
@@ -21,6 +22,7 @@ from apps.delivery.states import (
     VerificationStatus,
 )
 from apps.orders.states import ORDER_MACHINE
+from apps.restaurants.models import Restaurant
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
 
@@ -154,3 +156,33 @@ class TestDossierLivreur:
     def test_un_statut_hors_enumeration_est_rejete(self, courier: CourierProfile) -> None:
         with pytest.raises(IntegrityError, match="courier_verification"), transaction.atomic():
             CourierProfile.objects.filter(pk=courier.pk).update(verification_status="valide")
+
+
+class TestOuvertureDeCompte:
+    """Le compte et le dossier, ou ni l'un ni l'autre."""
+
+    def test_l_echec_du_dossier_ne_laisse_pas_de_compte_orphelin(
+        self, restaurant: Restaurant, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Sans la transaction, l'échec laisserait un compte de type livreur sans
+        dossier : quelqu'un qui se connecte à l'application livreur et n'y trouve
+        rien, avec une adresse désormais prise qu'on ne peut pas réutiliser pour
+        recommencer."""
+
+        def echoue(*args: object, **kwargs: object) -> CourierProfile:
+            raise RuntimeError("stockage indisponible")
+
+        monkeypatch.setattr(CourierProfile.objects, "create", echoue)
+
+        with pytest.raises(RuntimeError):
+            CourierService.provision(
+                application=CourierApplication(
+                    email="orphelin@elcorazon.test",
+                    password="brochette-piment-2026",
+                    full_name="Compte Orphelin",
+                    restaurant=restaurant,
+                    vehicle_type=VehicleType.BICYCLE,
+                )
+            )
+
+        assert not User.objects.filter(email="orphelin@elcorazon.test").exists()

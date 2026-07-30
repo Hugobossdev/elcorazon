@@ -51,6 +51,9 @@ LOCAL_APPS: list[str] = [
     "apps.catalog",
     "apps.carts",
     "apps.orders",
+    # Après `orders` : le panier collaboratif se confirme *en* commande, donc il
+    # en dépend — et jamais l'inverse.
+    "apps.groupcarts",
     "apps.payments",
     "apps.delivery",
     "apps.tracking",
@@ -270,6 +273,7 @@ SPECTACULAR_SETTINGS = {
         "GroupKindEnum": "apps.social.models.GroupKind.choices",
         "PostKindEnum": "apps.social.models.PostKind.choices",
         "ComplaintKindEnum": "apps.support.models.ComplaintKind.choices",
+        "DiscountKindEnum": "apps.promotions.models.DiscountKind.choices",
         "SubscriptionStatusEnum": "apps.loyalty.models.SubscriptionStatus.choices",
     },
 }
@@ -354,6 +358,15 @@ TRACKING_MIN_WRITE_METERS: int = config("TRACKING_MIN_WRITE_METERS", default=100
 # se négocient et changent sans redéploiement.
 TRACKING_RETENTION_DAYS: int = config("TRACKING_RETENTION_DAYS", default=30, cast=int)
 IDEMPOTENCY_RETENTION_HOURS: int = config("IDEMPOTENCY_RETENTION_HOURS", default=72, cast=int)
+
+# Panier collaboratif. L'échéance est **obligatoire** : sans elle, un panier de
+# groupe reste ouvert indéfiniment et le groupe attend un hôte qui a oublié. Deux
+# heures couvrent la commande d'un déjeuner d'équipe ; la borne haute existe pour
+# qu'un panier ne survive pas au service qu'il prépare.
+GROUP_CART_DEFAULT_WINDOW_MINUTES: int = config(
+    "GROUP_CART_DEFAULT_WINDOW_MINUTES", default=120, cast=int
+)
+GROUP_CART_MAX_WINDOW_MINUTES: int = config("GROUP_CART_MAX_WINDOW_MINUTES", default=1440, cast=int)
 
 # Service de notification push, résolu à l'appel (`apps.notifications.push`).
 # `ConsolePushBackend` n'appelle personne et convient au développement comme

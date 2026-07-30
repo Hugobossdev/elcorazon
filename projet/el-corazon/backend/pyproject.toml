@@ -70,7 +70,21 @@ dev = [
 DJANGO_SETTINGS_MODULE = "config.settings.test"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
-addopts = "--strict-markers --strict-config -ra"
+# `--ds` **en plus** de la clé ci-dessus, et ce n'est pas une redondance :
+# pytest-django classe ses sources par priorité décroissante — ligne de
+# commande, puis variable d'environnement, puis option ini. Or le service `api`
+# de `docker compose` exporte `DJANGO_SETTINGS_MODULE=config.settings.dev` pour
+# servir l'application, si bien que la commande documentée
+# (`docker compose run --rm api pytest`) exécutait la suite entière sur les
+# réglages de développement : limitation de débit active, cache Redis partagé
+# avec l'instance qui tourne, stockage objet réel, clés JWT du conteneur. Huit
+# tests d'authentification tombaient en 429 pour cette seule raison, alors que
+# la CI — qui pose la variable sur `config.settings.test` — restait verte.
+#
+# `addopts` compte comme ligne de commande : ce drapeau reprend donc la main sur
+# l'environnement ambiant, quel qu'il soit. Un `--ds` passé explicitement à
+# l'invocation le remplace toujours, l'échappatoire reste ouverte.
+addopts = "--strict-markers --strict-config -ra --ds=config.settings.test"
 # Les tests WebSocket sont asynchrones et le déclarent par `@pytest.mark.asyncio`.
 # Mode explicite plutôt qu'`auto` : un test synchrone accidentellement traité
 # comme une coroutine passerait sans rien exécuter — vert et vide.
@@ -91,7 +105,10 @@ markers = [
 [tool.ruff]
 target-version = "py313"
 line-length = 100
-extend-exclude = ["*/migrations/*"]
+# `.venv*` : ruff exclut `.venv` d'office, mais pas `.venv313` ni les autres
+# variantes qu'on crée pour épingler une version de Python. Sans cette ligne,
+# `ruff check .` sur un poste rapporte les erreurs des dépendances installées.
+extend-exclude = ["*/migrations/*", ".venv*"]
 
 [tool.ruff.lint]
 select = [

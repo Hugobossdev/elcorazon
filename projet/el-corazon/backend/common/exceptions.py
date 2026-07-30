@@ -29,6 +29,17 @@ __all__ = [
 
 ERROR_BASE_URI = "https://api.elcorazon.app/errors"
 
+#: Membres du corps de réponse que la RFC 9457 réserve — plus `headers`, qui est
+#: un paramètre de construction de la réponse.
+#:
+#: Un appelant qui les emploie comme donnée contextuelle est refusé à la
+#: construction. C'est délibérément brutal : `code` est un nom naturel pour
+#: « le code d'invitation » ou « le code promotionnel », et la collision se
+#: manifesterait sinon par un doublon de mot-clé à la sérialisation — donc par un
+#: 500 sur un refus par ailleurs parfaitement légitime, et seulement le jour où ce
+#: refus se produit.
+RESERVED_MEMBERS = frozenset({"code", "detail", "errors", "headers", "status", "title", "type"})
+
 
 class BusinessRuleViolation(Exception):
     """Règle métier non respectée.
@@ -42,6 +53,14 @@ class BusinessRuleViolation(Exception):
     title = "Opération impossible dans l'état actuel"
 
     def __init__(self, detail: str, **extra: Any) -> None:
+        collisions = RESERVED_MEMBERS & set(extra)
+        if collisions:
+            raise ValueError(
+                f"{', '.join(sorted(collisions))} : membre(s) réservé(s) de la RFC 9457. "
+                "Nommez la donnée autrement — `invitation_code`, `promo_code`, "
+                "`current_status` — pour qu'elle voyage sans écraser le contrat."
+            )
+
         self.detail = detail
         self.extra = extra
         super().__init__(detail)

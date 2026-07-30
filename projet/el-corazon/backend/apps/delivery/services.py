@@ -14,13 +14,15 @@ dit que la course vient d'être prise.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from django.conf import settings
 from django.contrib.gis.db.models.functions import Distance
 from django.db import transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
 
-from apps.accounts.models import User
+from apps.accounts.models import User, UserType
 from apps.delivery.models import Assignment, CourierProfile
 from apps.delivery.signals import assignment_offered
 from apps.delivery.states import (
@@ -33,11 +35,12 @@ from apps.delivery.states import (
 from apps.orders.models import Order
 from apps.orders.services import OrderService
 from apps.orders.states import ORDER_MACHINE, OrderStatus
+from apps.restaurants.models import Restaurant
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
 from common.realtime import courier_group, order_group, publish
 
-__all__ = ["AssignmentService", "CourierService", "courier_fee_for"]
+__all__ = ["AssignmentService", "CourierApplication", "CourierService", "courier_fee_for"]
 
 #: Statuts de commande depuis lesquels une course peut être proposée.
 #:
@@ -68,8 +71,77 @@ def courier_fee_for(order: Order) -> Money:
     return valeur.percentage(settings.COURIER_FEE_SHARE_PERCENT)
 
 
+@dataclass(frozen=True, slots=True)
+class CourierApplication:
+    """Ce qu'il faut pour ouvrir un compte livreur.
+
+    Un DTO gelé et non neuf paramètres nommés : c'est la frontière que
+    l'ADR-003 désigne pour les services de livraison, et l'immuabilité garantit
+    que le service ne se réécrit pas ses propres entrées entre la validation et
+    la création.
+
+    **`verification_status` n'y figure pas**, et c'est le point : un dossier
+    naît en attente, quel que soit celui qui l'ouvre. Le personnel qui embauche
+    n'instruit pas le dossier dans le même geste — les pièces ne sont pas encore
+    déposées, il n'y a rien à valider — et laisser le champ en entrée
+    permettrait de créer un livreur déjà validé sans qu'aucune pièce n'ait été
+    lue.
+    """
+
+    email: str
+    password: str
+    full_name: str
+    restaurant: Restaurant
+    vehicle_type: str
+    phone: str = ""
+    vehicle_plate: str = ""
+    national_id_number: str = ""
+    licence_number: str = ""
+
+
 class CourierService:
-    """Dossier livreur : validation, disponibilité, pièces."""
+    """Dossier livreur : ouverture, validation, disponibilité, pièces."""
+
+    @staticmethod
+    @transaction.atomic
+    def provision(*, application: CourierApplication) -> CourierProfile:
+        """Ouvre un compte livreur et son dossier — les deux, ou aucun.
+
+        C'est le pendant de `AuthService.register`, qui ne crée que des clients
+        par conception : un livreur n'est pas quelqu'un qui s'inscrit, c'est
+        quelqu'un qu'on embauche, et son dossier le rattache à un établissement
+        (`CourierProfile.restaurant`, obligatoire). Il n'y a donc pas
+        d'inscription en self-service à laquelle répondre — décision actée en
+        session le 2026-07-29 : le provisioning est un geste du personnel, sous
+        `couriers.write`.
+
+        La transaction est ce qui compte ici. Créer le compte puis échouer sur
+        le dossier laisserait un `User` de type livreur sans `CourierProfile` —
+        exactement l'anomalie que `courier_of` traite en 404, un compte qui
+        peut se connecter à l'application livreur et n'y trouver aucun dossier.
+
+        Le mot de passe est posé par le personnel et communiqué au livreur ;
+        rien n'en force le changement à la première connexion, faute de
+        mécanisme pour cela — le livreur le change depuis son application.
+        """
+        user = User.objects.create_user(
+            email=application.email,
+            password=application.password,
+            full_name=application.full_name,
+            phone=application.phone or None,
+            # Jamais lu d'une requête : c'est ce champ qui décide de ce qu'un
+            # jeton autorise, et l'accepter en entrée ferait de cette route un
+            # chemin d'escalade — on s'y créerait un compte du personnel.
+            user_type=UserType.COURIER,
+        )
+        return CourierProfile.objects.create(
+            user=user,
+            restaurant=application.restaurant,
+            vehicle_type=application.vehicle_type,
+            vehicle_plate=application.vehicle_plate,
+            national_id_number=application.national_id_number,
+            licence_number=application.licence_number,
+        )
 
     @staticmethod
     @transaction.atomic

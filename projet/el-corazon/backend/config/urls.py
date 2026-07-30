@@ -34,11 +34,14 @@ def healthcheck(_request: HttpRequest) -> JsonResponse:
 
 api_v1 = [
     path("auth/", include("apps.accounts.urls")),
+    path("administration/", include("apps.accounts.backoffice_urls")),
     path("geography/", include("apps.geography.urls")),
     path("restaurants/", include("apps.restaurants.urls")),
     path("catalog/", include("apps.catalog.urls")),
     path("profiles/", include("apps.profiles.urls")),
     path("carts/", include("apps.carts.urls")),
+    path("group-carts/", include("apps.groupcarts.urls")),
+    path("promotions/", include("apps.promotions.urls")),
     path("orders/", include("apps.orders.urls")),
     path("payments/", include("apps.payments.urls")),
     path("delivery/", include("apps.delivery.urls")),

@@ -253,3 +253,59 @@ class TestRapports:
         )
 
         assert response.status_code == 400
+
+
+class TestExportCsv:
+    """L'export part du **même sérialiseur** que le JSON.
+
+    Deux listes de colonnes entretenues séparément divergent, et l'export finit
+    par omettre celle qu'on a ajoutée trois mois plus tôt — sans que rien ne le
+    signale, puisqu'un fichier reste produit.
+    """
+
+    def test_le_csv_porte_les_memes_colonnes_que_le_json(
+        self, as_analyst: APIClient, customer: User, restaurant: Restaurant
+    ) -> None:
+        commande = build_order(restaurant, customer, reference="EC000031")
+        deliver(commande)
+        jour = commande.delivered_at.date().isoformat()
+
+        json_reponse = as_analyst.get(
+            reverse("v1:analytics:report-revenue"), {"start": jour, "end": jour}
+        )
+        csv_reponse = as_analyst.get(
+            reverse("v1:analytics:report-revenue"), {"start": jour, "end": jour, "export": "csv"}
+        )
+
+        contenu = csv_reponse.content.decode("utf-8-sig").splitlines()
+
+        assert csv_reponse["Content-Type"].startswith("text/csv")
+        assert contenu[0].split(",") == list(json_reponse.data[0])
+        assert contenu[1].startswith(jour)
+
+    def test_le_csv_se_telecharge_au_lieu_de_s_afficher(self, as_analyst: APIClient) -> None:
+        response = as_analyst.get(
+            reverse("v1:analytics:report-couriers"),
+            {"start": TODAY.isoformat(), "end": TODAY.isoformat(), "export": "csv"},
+        )
+
+        assert "attachment" in response["Content-Disposition"]
+        assert "livreurs" in response["Content-Disposition"]
+
+    def test_le_csv_commence_par_une_marque_d_ordre(self, as_analyst: APIClient) -> None:
+        """Sans elle, Excel lit un CSV UTF-8 en codage local et affiche
+        « CorazÃ³n ». Le tableur est la destination de cet export."""
+        response = as_analyst.get(
+            reverse("v1:analytics:report-top-products"),
+            {"start": TODAY.isoformat(), "end": TODAY.isoformat(), "export": "csv"},
+        )
+
+        assert response.content.startswith("﻿".encode())
+
+    def test_l_export_exige_la_meme_permission_que_le_rapport(self, as_customer: APIClient) -> None:
+        response = as_customer.get(
+            reverse("v1:analytics:report-revenue"),
+            {"start": TODAY.isoformat(), "end": TODAY.isoformat(), "export": "csv"},
+        )
+
+        assert response.status_code == 403

@@ -54,6 +54,12 @@ ALLOWED: dict[str, set[str]] = {
         "promotions",
         "restaurants",
     },
+    # Le panier collaboratif se confirme **en** commande : il dépend donc de
+    # `orders`, et jamais l'inverse. Il dépend aussi de `carts`, dont il réutilise
+    # la valorisation (`price_selection`) plutôt que d'en écrire une seconde — un
+    # panier de groupe dont les prix seraient calculés ailleurs finirait par ne
+    # plus dire la même chose que le panier personnel.
+    "groupcarts": {"accounts", "carts", "catalog", "orders", "profiles", "restaurants"},
     "payments": {"accounts", "orders", "restaurants"},
     "delivery": {"accounts", "geography", "orders", "restaurants"},
     "tracking": {"accounts", "delivery", "orders", "restaurants"},

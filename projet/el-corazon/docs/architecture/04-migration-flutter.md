@@ -1,6 +1,6 @@
 # Phase 6 — Migration Flutter vers l'architecture Django v2
 
-**Statut** : en cours (`fastfood` migré sauf social/commande groupée ; `dely` migré ; `admin` : rien) · **Date** : 2026-07-29 · **Entrée** : [02 — Architecture générale](02-architecture-generale.md), [ADR-009](adr/009-contrat-d-api.md)
+**Statut** : en cours (`fastfood` migré sauf social/commande groupée — **backend désormais complet des deux côtés**, reste la réécriture Flutter ; `dely` migré ; `admin` : rien) · **Date** : 2026-07-30 · **Entrée** : [02 — Architecture générale](02-architecture-generale.md), [ADR-009](adr/009-contrat-d-api.md)
 
 ---
 
@@ -207,13 +207,17 @@ c'est justement l'occasion actée par ADR-009 de lever les trois travers de l'an
 - [x] Migrer la gestion de session (accès + refresh rotatif, révocation) — fait pour `dely`.
 - [ ] Aligner le modèle de rôles/permissions client sur ADR-005 (le back-office n'est plus la
       barrière d'autorisation, seulement un confort d'affichage — le serveur refuse de toute façon).
-- ⚠️ **Écart de périmètre découvert en construisant `dely`** : le backend n'a aucun endpoint pour
-      créer un compte livreur (`/auth/register/` ne crée que des `customer` ; `apps/delivery`
-      n'expose les profils livreurs qu'en lecture, `StaffCourierViewSet`). L'inscription en
-      self-service (`registerDriver`, `registerDriverWithDocuments*`) reste dans le code de `dely`,
-      sur Supabase, mais son accès a été retiré de l'écran de connexion — décision prise en session.
-      Il faudra soit un endpoint Django de provisioning (avec ou sans validation staff), soit
-      accepter que l'onboarding livreur reste un geste manuel (Django admin) indéfiniment.
+- [x] **Écart de périmètre découvert en construisant `dely`, désormais comblé** : le backend n'avait
+      aucun endpoint pour créer un compte livreur (`/auth/register/` ne crée que des `customer` ;
+      `apps/delivery` n'exposait les profils livreurs qu'en lecture). Tranché en session le
+      2026-07-29 : **provisioning par le personnel**, pas de self-service. Un livreur ne s'inscrit
+      pas, parce que son dossier le rattache à un établissement et que personne ne s'attribue un
+      rattachement à soi-même. D'où `POST /api/v1/delivery/couriers/`, sous la permission
+      `couriers.write` (distincte de `couriers.read` : lire la flotte ne donne pas le droit
+      d'embaucher) et sous `assert_in_scope` — on n'embauche pas pour un établissement hors
+      périmètre. Le compte naît `courier` + dossier `pending` : embaucher ne vaut pas valider, aucune
+      pièce n'ayant encore été lue. `registerDriver*` peut donc quitter `dely` et son code Supabase
+      être retiré (l'accès avait déjà disparu de l'écran de connexion).
 
 ### 3.3 Migration domaine par domaine
 
@@ -279,18 +283,47 @@ Ordre retenu par app, du risque le plus faible (lecture seule) au plus élevé (
      état que `dely`. La configuration Android/iOS (`google-services.json`, plugin Gradle,
      `GoogleService-Info.plist`) reste à faire en même temps que le vrai projet.
 
-⚠️ **Écarts de périmètre côté `fastfood`** (aucun endpoint Django équivalent) :
-- **Commande groupée** — décision prise en session le 2026-07-29 : **reportée**, pas retirée. Le
-  backend modélise les groupes sociaux (`/social/groups/`) et le paiement partagé
-  (`payments/split.py`), mais pas la collecte collaborative d'articles avant confirmation.
-  `group_order_screen.dart` (2867 lignes, abonnements Supabase Realtime sur `orders`/`order_items`)
-  et la partie « commandes de groupe » de `SocialService` restent donc sur Supabase. C'est
-  aujourd'hui le principal obstacle au §3.5 : trancher entre construire une app Django dédiée
-  (panier collaboratif : ouverture, ajout par membre, échéance, confirmation en commande unique)
-  et retirer la fonctionnalité.
+✅ **Commande groupée — l'écart est comblé côté backend** (2026-07-30). L'alternative posée le
+2026-07-29 (« construire ou retirer ») est tranchée : construite, dans une app dédiée
+`apps/groupcarts`. Ce qui existe désormais :
+
+- `GroupCart` / `GroupCartMember` / `GroupCartLine` — un panier partagé par établissement, ouvert par
+  un **hôte**, rejoint par **code d'invitation** à six caractères (alphabet sans `O`/`0` ni `I`/`1`,
+  parce qu'un code se lit à voix haute), avec **échéance obligatoire** (2 h par défaut, `GROUP_CART_*`
+  en réglage). Trois principes, chacun réponse à un défaut de l'existant Supabase :
+  **(1)** le panier n'est **pas** une commande — aucune `Order` n'existe avant confirmation, là où
+  `group_order_screen.dart` écrivait dans `orders`/`order_items` dès l'ouverture ;
+  **(2)** une ligne **appartient à celui qui l'a déposée** — `member` est la clé du droit d'écriture,
+  pas une donnée d'affichage, alors que l'abonnement Realtime donnait à tous l'écriture sur les mêmes
+  lignes ; **(3)** aucun montant n'est stocké (C1).
+- `POST /api/v1/group-carts/` (ouvrir) · `join/` (par code) · `{id}/lines/` (déposer, modifier,
+  retirer) · `{id}/lock/` (clore les ajouts) · `{id}/confirm/` (→ **une** commande) · `{id}/cancel/`.
+  L'appartenance est un **filtre** et non une permission : le panier d'un groupe étranger est
+  introuvable, pas interdit — un 403 confirmerait son existence.
+- `ws/group-carts/{id}/` — synchronisation temps réel, autorisée **avant** l'acceptation du socket sur
+  l'appartenance réelle (ADR-008). Lecture seule : les contributions passent par HTTP, qui valide
+  l'article, ses options et l'échéance. C'est le point exact où l'ancienne version ne validait rien.
+- La confirmation emprunte `OrderService.create_from_selection`, extrait de `create_from_cart` pour
+  l'occasion : même relecture des prix, même décompte de stock sous verrou, même barème de zone, même
+  évaluation du code promo. De même, la valorisation passe par `price_selection`, désormais partagée
+  avec le panier personnel via le protocole `PriceableLine`. **Aucun second chemin de calcul** — c'est
+  ainsi que les frais de livraison de l'implémentation précédente avaient fini par être calculés deux
+  fois différemment.
+- Pas d'en-tête d'idempotence sur `confirm/`, contrairement à `POST /orders/`, et ce n'est pas un
+  oubli : le panier **est** la clé. Un second appel trouve un statut `confirmed` et la machine à états
+  refuse la transition ; deux appels simultanés sont sérialisés par `select_for_update`.
+- Tâche `expire_group_carts` toutes les 5 min. L'échéance est déjà opposée à chaque ajout, donc rien
+  d'incorrect ne passe entre deux tours ; la tâche sert à *dire* au groupe que c'est terminé.
+- 54 tests (`tests/groupcarts/`) : API, machine à états exhaustive, WebSocket.
+
+**Reste côté Flutter** : réécrire `group_order_screen.dart` (2867 lignes) et la partie « commandes de
+groupe » de `SocialService` contre ces endpoints, puis retirer le code Supabase correspondant.
+
 - **Groupes sociaux et publications** — le repository partagé existe et est testé
   (`elcorazon_core/social/`), mais le seul écran qui consomme les groupes est celui de la commande
-  groupée : le branchement attend la décision ci-dessus.
+  groupée : le branchement suit sa réécriture.
+
+⚠️ **Écarts de périmètre restants côté `fastfood`** (aucun endpoint Django équivalent) :
 - **Notation du livreur** (`DriverRatingService`) — `rating_average`/`rating_count` sont en lecture
   seule sur le profil livreur, rien ne permet de déposer une note. Reste sur Supabase.
 - **« Avis utile »** — `helpful_count` est servi mais aucun endpoint ne l'incrémente ; le bouton et
@@ -374,8 +407,10 @@ le parcours manuellement.
 ### 3.5 Nettoyage Supabase
 
 - [ ] Retirer `supabase_flutter`, `lib/supabase/`, toute clé/URL Supabase des 3 `pubspec.yaml` et
-      fichiers `.env`. ⚠️ Bloqué côté `fastfood` par la commande groupée (§3.3) et par
-      `DatabaseService`, volontairement intact tant que des domaines non migrés s'appuient dessus.
+      fichiers `.env`. ⚠️ Toujours bloqué côté `fastfood`, mais **plus pour la même raison** : le
+      backend de la commande groupée existe (§3.3), il reste à réécrire `group_order_screen.dart`
+      contre lui. Et par `DatabaseService`, volontairement intact tant que des domaines non migrés
+      s'appuient dessus.
 - [x] Code Supabase devenu mort supprimé au fil des tranches : `supabase_menu_repository.dart`,
       `supabase_order_repository.dart`, `secure_token_storage_service.dart`,
       `social_features_service.dart` (672 lignes, aucun appelant),
@@ -415,12 +450,15 @@ le parcours manuellement.
 - [ ] 3.2 — Authentification commune (`dely` et `fastfood` faits, `admin` à répliquer)
 - [ ] 3.3 — Migration `fastfood` — auth, catalogue, panier, commandes, paiements, suivi temps réel,
   fidélité, gamification, support, avis et notifications (historique + push FCM) faits. **Reste :
-  social et commande groupée**, tous deux suspendus à la décision sur la commande groupée (§3.3),
-  et les écarts de périmètre listés au même endroit.
+  social et commande groupée** — le backend des deux existe désormais (`apps/groupcarts`,
+  `/social/groups/`), ce qui reste est la réécriture Flutter de `group_order_screen.dart` et du
+  branchement des groupes, plus les écarts de périmètre listés au §3.3.
 - [x] 3.3 — Migration `dely` — auth, courses (`delivery`), émission de position et file
-  `ws/couriers/me/`, jeton FCM. **Reste** : l'inscription livreur, faute d'endpoint de
-  provisioning (écart de périmètre §3.2), et les domaines que `dely` partage avec `fastfood` sans
-  écran migré (portefeuille, promotions, social).
+  `ws/couriers/me/`, jeton FCM. **Reste** : brancher l'onboarding livreur sur
+  `POST /delivery/couriers/` — l'endpoint de provisioning existe maintenant, mais le geste est
+  réservé au personnel (§3.2), donc c'est un écran de back-office à construire, pas un écran
+  d'inscription dans `dely`. Plus les domaines que `dely` partage avec `fastfood` sans écran migré
+  (portefeuille, promotions, social).
 - [ ] 3.3 — Migration `admin`
 - [ ] 3.4 — Flux externes (Agora, stockage)
 - [ ] 3.5 — Nettoyage Supabase

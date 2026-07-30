@@ -29,6 +29,7 @@ __all__ = [
     "BACKLOG_TTL_SECONDS",
     "Event",
     "courier_group",
+    "group_cart_group",
     "order_chat_group",
     "order_group",
     "publish",
@@ -68,6 +69,17 @@ def order_group(order_id: object) -> str:
 def order_chat_group(order_id: object) -> str:
     """Chat d'une commande : son client et son livreur, personne d'autre (ADR-008)."""
     return f"order.{order_id}.chat"
+
+
+def group_cart_group(group_cart_id: object) -> str:
+    """Panier collaboratif : ses participants, personne d'autre.
+
+    C'est le groupe le plus « conversationnel » du projet — plusieurs personnes
+    modifient la même chose en même temps, et chacune doit voir arriver les plats
+    des autres. Sans diffusion, il faudrait interroger l'API en boucle pendant
+    toute la durée de la commande groupée.
+    """
+    return f"groupcart.{group_cart_id}"
 
 
 def courier_group(courier_id: object) -> str:

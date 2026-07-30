@@ -8,12 +8,18 @@ personnelle du client qui appelle.
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
+from collections.abc import Sequence
+from typing import Any
 
-from drf_spectacular.utils import extend_schema
+from django.http import HttpResponse
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.serializers import Serializer
 from rest_framework.views import APIView
 
 from apps.analytics.reports import ReportingService
@@ -64,16 +70,66 @@ def _period(request: Request) -> tuple[dt.date, dt.date, int]:
     return query.validated_data["start"], query.validated_data["end"], query.validated_data["limit"]
 
 
+#: Paramètre documenté de l'export, déclaré une fois pour les trois rapports.
+#:
+#: Nommé `export` et non `format` : `format` est réservé par DRF, qui s'en sert
+#: à choisir un renderer et rend 404 pour une valeur qu'il ne connaît pas — le
+#: rapport disparaîtrait au lieu de s'exporter.
+EXPORT = OpenApiParameter(
+    name="export",
+    type=OpenApiTypes.STR,
+    enum=["csv"],
+    description=(
+        "`csv` rend le même rapport en pièce jointe téléchargeable, pour reprise dans un tableur."
+    ),
+)
+
+
+def _rendu(
+    request: Request, rows: Sequence[Any], serializer: type[Serializer[Any]], nom: str
+) -> Response | HttpResponse:
+    """Rend un rapport en JSON, ou en CSV si la requête le demande.
+
+    **Le CSV part du même sérialiseur que le JSON**, et pas d'une seconde
+    écriture des colonnes : deux listes de champs entretenues séparément
+    divergent, et l'export finit par omettre la colonne ajoutée trois mois plus
+    tôt — sans que rien ne le signale, puisqu'un fichier reste produit.
+
+    Un vrai `HttpResponse` et non une `Response` DRF : la négociation de contenu
+    de DRF choisirait un renderer sur l'en-tête `Accept`, alors qu'un export
+    déclenché depuis un navigateur n'en envoie pas d'utile — il faut décider sur
+    le paramètre, et poser `Content-Disposition` pour que le navigateur
+    télécharge au lieu d'afficher.
+    """
+    donnees = serializer(rows, many=True).data
+    if str(request.query_params.get("export", "")).lower() != "csv":
+        return Response(donnees)
+
+    colonnes = list(serializer().fields)
+    reponse = HttpResponse(content_type="text/csv; charset=utf-8")
+    reponse["Content-Disposition"] = f'attachment; filename="{nom}.csv"'
+    # BOM : sans lui, Excel lit un CSV UTF-8 en codage local et affiche
+    # « CorazÃ³n ». Le tableur est la destination de cet export, pas un script.
+    reponse.write("﻿")
+
+    writer = csv.DictWriter(reponse, fieldnames=colonnes)
+    writer.writeheader()
+    writer.writerows(donnees)
+    return reponse
+
+
 class RevenueReportView(APIView):
     """`GET /analytics/reports/revenue/?start=&end=` — chiffre d'affaires par jour."""
 
     permission_classes = [HasPermission.of("analytics.read")]
 
-    @extend_schema(responses={200: RevenueRowSerializer(many=True)}, tags=["analytics"])
-    def get(self, request: Request) -> Response:
+    @extend_schema(
+        responses={200: RevenueRowSerializer(many=True)}, parameters=[EXPORT], tags=["analytics"]
+    )
+    def get(self, request: Request) -> Response | HttpResponse:
         start, end, _ = _period(request)
         rows = ReportingService.revenue_by_day(start=start, end=end)
-        return Response(RevenueRowSerializer(rows, many=True).data)
+        return _rendu(request, rows, RevenueRowSerializer, f"chiffre-affaires-{start}-{end}")
 
 
 class TopProductsReportView(APIView):
@@ -81,11 +137,13 @@ class TopProductsReportView(APIView):
 
     permission_classes = [HasPermission.of("analytics.read")]
 
-    @extend_schema(responses={200: TopProductRowSerializer(many=True)}, tags=["analytics"])
-    def get(self, request: Request) -> Response:
+    @extend_schema(
+        responses={200: TopProductRowSerializer(many=True)}, parameters=[EXPORT], tags=["analytics"]
+    )
+    def get(self, request: Request) -> Response | HttpResponse:
         start, end, limit = _period(request)
         rows = ReportingService.top_products(start=start, end=end, limit=limit)
-        return Response(TopProductRowSerializer(rows, many=True).data)
+        return _rendu(request, rows, TopProductRowSerializer, f"top-produits-{start}-{end}")
 
 
 class CourierPerformanceReportView(APIView):
@@ -93,8 +151,12 @@ class CourierPerformanceReportView(APIView):
 
     permission_classes = [HasPermission.of("analytics.read")]
 
-    @extend_schema(responses={200: CourierPerformanceRowSerializer(many=True)}, tags=["analytics"])
-    def get(self, request: Request) -> Response:
+    @extend_schema(
+        responses={200: CourierPerformanceRowSerializer(many=True)},
+        parameters=[EXPORT],
+        tags=["analytics"],
+    )
+    def get(self, request: Request) -> Response | HttpResponse:
         start, end, _ = _period(request)
         rows = ReportingService.courier_performance(start=start, end=end)
-        return Response(CourierPerformanceRowSerializer(rows, many=True).data)
+        return _rendu(request, rows, CourierPerformanceRowSerializer, f"livreurs-{start}-{end}")

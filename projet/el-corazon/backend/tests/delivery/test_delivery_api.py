@@ -7,6 +7,8 @@ faisaient le même trajet et qu'un seul était payé.
 
 from __future__ import annotations
 
+from typing import Final
+
 import pytest
 from django.urls import reverse
 from rest_framework import status
@@ -46,7 +48,12 @@ def dispatcher(restaurant: Restaurant) -> User:
     member.roles.add(
         Role.objects.create(
             name="Dispatch",
-            permissions=["orders.assign_courier", "couriers.read", "couriers.approve"],
+            permissions=[
+                "orders.assign_courier",
+                "couriers.read",
+                "couriers.approve",
+                "couriers.suspend",
+            ],
         )
     )
     StaffMembership.objects.create(user=member, restaurant=restaurant)
@@ -61,11 +68,52 @@ def as_dispatcher(dispatcher: User) -> APIClient:
 
 
 @pytest.fixture
+def as_recruteur(restaurant: Restaurant) -> APIClient:
+    """Personnel muni de `couriers.write` — le droit d'ouvrir un compte livreur.
+
+    Distinct de `dispatcher` : affecter une course et embaucher ne sont pas le
+    même geste, et les tests de cloisonnement ci-dessous ont besoin que les deux
+    permissions soient séparables.
+    """
+    recruteur = User.objects.create_user(
+        "recrute@elcorazon.test", "motdepasse", full_name="Afi Recrute", user_type=UserType.STAFF
+    )
+    recruteur.roles.add(
+        Role.objects.create(
+            name="Responsable flotte", permissions=["couriers.read", "couriers.write"]
+        )
+    )
+    StaffMembership.objects.create(user=recruteur, restaurant=restaurant)
+
+    separate = APIClient()
+    separate.force_authenticate(recruteur)
+    return separate
+
+
+@pytest.fixture
 def ready_order(order: Order) -> Order:
     """Commande confirmée, prête à être confiée à un livreur."""
     Order.objects.filter(pk=order.pk).update(status=OrderStatus.READY)
     order.refresh_from_db()
     return order
+
+
+#: Candidature de référence. L'adresse porte volontairement des majuscules —
+#: elle doit ressortir normalisée, sans quoi deux comptes ne différant que par la
+#: casse rendraient l'un des deux inaccessible.
+CANDIDATURE: Final[dict[str, object]] = {
+    "email": "Nouveau.Livreur@elcorazon.test",
+    "password": "brochette-piment-2026",
+    "full_name": "Kossi Mensah",
+    "vehicle_type": VehicleType.MOTORCYCLE,
+    "vehicle_plate": "TG-4412-AB",
+}
+
+NOUVEAU = "nouveau.livreur@elcorazon.test"
+
+
+def candidature(restaurant: Restaurant, **overrides: object) -> dict[str, object]:
+    return {**CANDIDATURE, "restaurant": restaurant.slug, **overrides}
 
 
 def second_courier(
@@ -133,6 +181,175 @@ class TestDossierLivreur:
         assert "verification_status" not in DocumentsSerializer().fields
 
 
+class TestProvisioningLivreur:
+    """Ouverture d'un compte livreur par le personnel.
+
+    Un livreur ne s'inscrit pas — décision actée en session le 2026-07-29 : son
+    dossier le rattache à un établissement, et personne ne s'attribue un
+    rattachement à soi-même.
+    """
+
+    def test_le_personnel_ouvre_un_compte_livreur(
+        self, as_recruteur: APIClient, restaurant: Restaurant
+    ) -> None:
+        response = as_recruteur.post(
+            reverse("v1:delivery:courier-list"), candidature(restaurant), format="json"
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["verification_status"] == VerificationStatus.PENDING
+        # Le compte existe mais ne travaille pas encore : aucune pièce n'a été
+        # déposée, donc rien n'a été instruit.
+        assert response.data["can_accept_orders"] is False
+        assert response.data["restaurant"] == restaurant.slug
+
+        cree = User.objects.get(email=NOUVEAU)
+        assert cree.user_type == UserType.COURIER
+        assert cree.courier_profile.vehicle_plate == "TG-4412-AB"
+
+    def test_le_compte_et_le_dossier_naissent_ensemble(
+        self, as_recruteur: APIClient, restaurant: Restaurant
+    ) -> None:
+        """Un `User` livreur sans `CourierProfile` se connecte à l'application
+        et n'y trouve rien — c'est l'anomalie que `courier_of` traite en 404."""
+        as_recruteur.post(
+            reverse("v1:delivery:courier-list"), candidature(restaurant), format="json"
+        )
+
+        assert CourierProfile.objects.filter(user__email=NOUVEAU).exists()
+
+    def test_le_dossier_ne_naît_jamais_valide_meme_si_la_requete_le_demande(
+        self, as_recruteur: APIClient, restaurant: Restaurant
+    ) -> None:
+        """Sinon embaucher vaudrait valider, sans qu'aucune pièce n'ait été lue."""
+        response = as_recruteur.post(
+            reverse("v1:delivery:courier-list"),
+            candidature(
+                restaurant,
+                verification_status=VerificationStatus.APPROVED,
+                is_online=True,
+                deliveries_completed=99,
+            ),
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["verification_status"] == VerificationStatus.PENDING
+        assert response.data["is_online"] is False
+        assert response.data["deliveries_completed"] == 0
+
+    def test_le_type_de_compte_ne_se_choisit_pas_dans_la_requete(
+        self, as_recruteur: APIClient, restaurant: Restaurant
+    ) -> None:
+        """C'est ce champ qui décide de ce qu'un jeton autorise : l'accepter en
+        entrée ferait de cette route un chemin d'escalade."""
+        as_recruteur.post(
+            reverse("v1:delivery:courier-list"),
+            candidature(restaurant, user_type=UserType.STAFF, is_superuser=True),
+            format="json",
+        )
+
+        cree = User.objects.get(email=NOUVEAU)
+        assert cree.user_type == UserType.COURIER
+        assert cree.is_superuser is False
+
+    def test_le_livreur_cree_peut_se_connecter(
+        self, as_recruteur: APIClient, client: APIClient, restaurant: Restaurant
+    ) -> None:
+        """Le geste n'a de valeur que si le compte est réellement utilisable
+        depuis l'application livreur."""
+        as_recruteur.post(
+            reverse("v1:delivery:courier-list"), candidature(restaurant), format="json"
+        )
+
+        response = client.post(
+            reverse("v1:accounts:login"),
+            {"email": NOUVEAU, "password": CANDIDATURE["password"]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["user"]["user_type"] == UserType.COURIER
+
+    def test_on_n_embauche_pas_pour_un_etablissement_hors_perimetre(
+        self, as_recruteur: APIClient, zone, restaurant: Restaurant
+    ) -> None:
+        """`assert_in_scope` et non le filtre de lecture : l'objet n'existe pas
+        encore, l'établissement arrive du corps de la requête."""
+        ailleurs = Restaurant.objects.create(
+            name="El Corazón Kara",
+            slug="el-corazon-kara-embauche",
+            zone=zone,
+            address="Kara",
+            location=restaurant.location,
+            phone="+22890000019",
+        )
+
+        response = as_recruteur.post(
+            reverse("v1:delivery:courier-list"), candidature(ailleurs), format="json"
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert not User.objects.filter(email=NOUVEAU).exists()
+
+    def test_lire_la_flotte_ne_donne_pas_le_droit_d_embaucher(
+        self, client: APIClient, restaurant: Restaurant
+    ) -> None:
+        observateur = User.objects.create_user(
+            "observateur@elcorazon.test",
+            "motdepasse",
+            full_name="Lit Seulement",
+            user_type=UserType.STAFF,
+        )
+        observateur.roles.add(
+            Role.objects.create(name="Lecture seule flotte", permissions=["couriers.read"])
+        )
+        StaffMembership.objects.create(user=observateur, restaurant=restaurant)
+        client.force_authenticate(observateur)
+
+        response = client.post(
+            reverse("v1:delivery:courier-list"), candidature(restaurant), format="json"
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_une_adresse_deja_utilisee_est_refusee(
+        self, as_recruteur: APIClient, restaurant: Restaurant, customer: User
+    ) -> None:
+        """L'adresse est l'identifiant de connexion : un doublon rendrait l'un
+        des deux comptes inaccessible."""
+        response = as_recruteur.post(
+            reverse("v1:delivery:courier-list"),
+            candidature(restaurant, email=customer.email.upper()),
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "email" in response.data["errors"]
+
+    def test_un_mot_de_passe_faible_est_refuse(
+        self, as_recruteur: APIClient, restaurant: Restaurant
+    ) -> None:
+        """Les règles du projet valent aussi pour le mot de passe qu'un tiers
+        choisit — c'est là qu'un « livreur123 » a le plus de chances
+        d'apparaître."""
+        response = as_recruteur.post(
+            reverse("v1:delivery:courier-list"),
+            candidature(restaurant, password="livreur123"),
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "password" in response.data["errors"]
+
+    def test_un_livreur_n_embauche_pas(self, as_courier: APIClient, restaurant: Restaurant) -> None:
+        response = as_courier.post(
+            reverse("v1:delivery:courier-list"), candidature(restaurant), format="json"
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
 class TestValidationDeDossier:
     def test_le_personnel_valide_un_dossier(
         self, as_dispatcher: APIClient, courier: CourierProfile
@@ -191,6 +408,61 @@ class TestValidationDeDossier:
         )
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+class TestDeuxPermissionsPourDeuxGestes:
+    """`couriers.approve` instruit un dossier, `couriers.suspend` retire du service.
+
+    Les deux gestes n'ont ni la même urgence ni le même auteur : l'instruction
+    se fait au calme sur pièces, la suspension se décide un samedi soir après
+    un incident. Les confondre reviendrait à donner le second pouvoir à toute
+    personne chargée du premier.
+    """
+
+    @staticmethod
+    def _agent(restaurant: Restaurant, email: str, *permissions: str) -> APIClient:
+        member = User.objects.create_user(
+            email, "motdepasse", full_name="Agent", user_type=UserType.STAFF
+        )
+        member.roles.add(Role.objects.create(name=f"Rôle {email}", permissions=list(permissions)))
+        StaffMembership.objects.create(user=member, restaurant=restaurant)
+        client = APIClient()
+        client.force_authenticate(member)
+        return client
+
+    def test_instruire_ne_donne_pas_le_droit_de_suspendre(
+        self, restaurant: Restaurant, courier: CourierProfile
+    ) -> None:
+        client = self._agent(
+            restaurant, "instructeur@elcorazon.test", "couriers.read", "couriers.approve"
+        )
+
+        response = client.post(
+            reverse("v1:delivery:courier-verification", args=[courier.pk]),
+            {"status": VerificationStatus.SUSPENDED},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        courier.refresh_from_db()
+        assert courier.verification_status == VerificationStatus.APPROVED
+
+    def test_suspendre_ne_donne_pas_le_droit_d_instruire(
+        self, restaurant: Restaurant, courier: CourierProfile
+    ) -> None:
+        """La route accepte l'une ou l'autre permission — sinon un compte
+        n'ayant que `couriers.suspend` ne l'atteindrait pas — et c'est le
+        statut demandé qui départage."""
+        client = self._agent(
+            restaurant, "astreinte@elcorazon.test", "couriers.read", "couriers.suspend"
+        )
+        url = reverse("v1:delivery:courier-verification", args=[courier.pk])
+
+        suspension = client.post(url, {"status": VerificationStatus.SUSPENDED}, format="json")
+        validation = client.post(url, {"status": VerificationStatus.APPROVED}, format="json")
+
+        assert suspension.status_code == status.HTTP_200_OK
+        assert validation.status_code == status.HTTP_403_FORBIDDEN
 
 
 class TestAffectation:

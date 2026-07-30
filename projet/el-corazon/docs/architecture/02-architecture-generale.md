@@ -128,6 +128,7 @@ backend/
     ├── inventory/             #   stock matières et disponibilité article
     ├── carts/                 # ★ panier serveur
     ├── orders/                # ★ commandes, lignes, machine à états
+    ├── groupcarts/            # ★ panier collaboratif  (nouveau)
     ├── payments/              # ★ transactions, PSP, paiement partagé, remboursements
     ├── delivery/              # ★ flotte, dossiers livreurs, affectation, courses
     ├── tracking/              # ★ positions, ETA, diffusion temps réel
@@ -291,7 +292,9 @@ graph LR
     catalog --> carts
     catalog --> inventory
     carts --> orders
+    carts --> groupcarts
     promotions --> orders
+    orders --> groupcarts
     orders --> payments
     orders --> delivery
     delivery --> tracking
@@ -303,6 +306,17 @@ graph LR
 
 C'est ce graphe qui rend une extraction future en service autonome possible : `tracking` et
 `analytics` sont déjà des feuilles.
+
+`groupcarts` mérite un mot, parce que le sens de ses deux flèches n'est pas celui qu'on attendrait. Un
+panier collaboratif *ressemble* à un panier, et on l'aurait volontiers placé à côté de `carts` — mais
+il se **confirme en commande**, donc il dépend de `orders`, et jamais l'inverse. Il dépend aussi de
+`carts`, dont il réutilise la valorisation (`price_selection`, via le protocole `PriceableLine`) au lieu
+d'en écrire une seconde : deux paniers dont les prix seraient calculés à deux endroits finiraient par
+ne plus dire la même chose, et c'est précisément ainsi que les frais de livraison de l'implémentation
+précédente avaient divergé.
+
+Ce graphe est **vérifié en CI** (`tests/architecture/test_dependency_graph.py`) : une app ajoutée sans
+déclaration de ses dépendances fait échouer la construction, et une arête hors graphe aussi.
 
 ---
 

@@ -9,15 +9,17 @@ l'autre. Ils sont donc définis **une fois**, ici.
 
 from __future__ import annotations
 
+import json
 from typing import Any, ClassVar
 
-from django.contrib.gis.geos import Point
+from django.contrib.gis.geos import GEOSGeometry, MultiPolygon, Point, Polygon
+from django.contrib.gis.geos.error import GEOSException
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from common.money import Money, UnknownCurrency
 
-__all__ = ["LocationField", "MoneyField"]
+__all__ = ["BoundaryField", "LocationField", "MoneyField"]
 
 
 @extend_schema_field(
@@ -116,3 +118,67 @@ class LocationField(serializers.Field[Point, Any, dict[str, float], Any]):
             self.fail("out_of_range")
 
         return Point(lon, lat, srid=4326)
+
+
+@extend_schema_field(
+    {
+        "type": "object",
+        "description": (
+            "Contour au format GeoJSON — `Polygon` ou `MultiPolygon`. "
+            "Un `Polygon` est accepté et converti : une zone d'un seul tenant "
+            "est le cas courant."
+        ),
+        "properties": {
+            "type": {"type": "string", "example": "MultiPolygon"},
+            "coordinates": {"type": "array", "items": {}},
+        },
+        "required": ["type", "coordinates"],
+    }
+)
+class BoundaryField(serializers.Field[MultiPolygon, Any, dict[str, Any], Any]):
+    """Contour d'une zone de livraison — GeoJSON, à l'écriture comme à la lecture.
+
+    Ici le GeoJSON s'impose, alors que `LocationField` le refuse pour un point.
+    La différence n'est pas une inconséquence : un point a une forme évidente et
+    universelle — deux nombres nommés — qu'aucun client n'a besoin d'apprendre.
+    Un contour, non : il sort d'un outil de dessin cartographique, qui produit
+    du GeoJSON, et inventer une forme maison obligerait chaque outil à être
+    converti avant l'envoi.
+
+    Ce champ n'est **jamais** exposé au client final : le contour pèse plusieurs
+    kilo-octets, aucun écran ne l'affiche, et savoir où passe la frontière n'est
+    pas ce que le client demande — il demande si son point est desservi.
+    """
+
+    default_error_messages: ClassVar[dict[str, Any]] = {
+        "not_geojson": 'Un contour s\'écrit en GeoJSON : {{"type": …, "coordinates": …}}.',
+        "wrong_type": "Contour attendu de type Polygon ou MultiPolygon, reçu {kind}.",
+        "invalid": "Contour illisible : {reason}",
+    }
+
+    def to_representation(self, value: MultiPolygon) -> dict[str, Any]:
+        payload: dict[str, Any] = json.loads(value.geojson)
+        return payload
+
+    def to_internal_value(self, data: Any) -> MultiPolygon:
+        if not isinstance(data, dict) or "type" not in data or "coordinates" not in data:
+            self.fail("not_geojson")
+
+        try:
+            geometry = GEOSGeometry(json.dumps(data), srid=4326)
+        except (GEOSException, ValueError, TypeError) as exc:
+            self.fail("invalid", reason=str(exc))
+
+        if isinstance(geometry, Polygon):
+            # Une zone d'un seul tenant est le cas courant, et exiger d'elle un
+            # `MultiPolygon` à un seul élément ferait échouer l'export de tous
+            # les outils de dessin sur une subtilité de typage.
+            geometry = MultiPolygon(geometry, srid=4326)
+
+        if not isinstance(geometry, MultiPolygon):
+            self.fail("wrong_type", kind=geometry.geom_type)
+
+        if not geometry.valid:
+            self.fail("invalid", reason=geometry.valid_reason)
+
+        return geometry

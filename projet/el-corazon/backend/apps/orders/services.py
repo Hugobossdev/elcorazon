@@ -15,6 +15,10 @@ un statut de commande. Trois choses s'y jouent :
 from __future__ import annotations
 
 import datetime as dt
+import uuid
+from collections import defaultdict
+from collections.abc import Iterable
+from typing import Protocol
 
 from django.contrib.gis.db.models.functions import Distance
 from django.db import connection, transaction
@@ -22,8 +26,8 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.carts.models import Cart
-from apps.carts.services import CartService, price_cart
-from apps.catalog.services import record_purchase
+from apps.carts.services import CartService, PricedSelection, price_cart
+from apps.catalog.services import StockService, record_purchase
 from apps.geography.models import DeliveryZone
 from apps.geography.services import DeliveryQuote, quote_delivery
 from apps.orders.models import Order, OrderLine, OrderStatusEvent
@@ -64,6 +68,33 @@ def next_reference() -> str:
     return f"EC{value:06d}"
 
 
+class _HasItemAndQuantity(Protocol):
+    """Ce qu'une ligne doit porter pour peser sur le stock.
+
+    Le protocole couvre `CartLine` comme `OrderLine` : la consommation part du
+    panier, le retour part de la commande, et les deux se comptent de la même
+    façon. Les typer par leur classe obligerait à écrire deux fois la même
+    agrégation.
+    """
+
+    menu_item_id: uuid.UUID
+    quantity: int
+
+
+def _quantities_by_item(lines: Iterable[_HasItemAndQuantity]) -> dict[uuid.UUID, int]:
+    """Totalise les quantités par article.
+
+    Deux lignes peuvent désigner le même article avec des options différentes —
+    un burger saignant et un burger à point. Les décompter séparément prendrait
+    deux verrous sur la même ligne de stock et pourrait passer la vérification
+    deux fois sur un reliquat d'une unité.
+    """
+    quantities: dict[uuid.UUID, int] = defaultdict(int)
+    for line in lines:
+        quantities[line.menu_item_id] += line.quantity
+    return dict(quantities)
+
+
 class OrderService:
     # ------------------------------------------------------------- création
 
@@ -86,15 +117,48 @@ class OrderService:
         sélection et n'a rien commandé.
         """
         cart = CartService.load(cart)
-        restaurant = cart.restaurant
-        priced = price_cart(cart)
+        order = OrderService.create_from_selection(
+            user=user,
+            restaurant=cart.restaurant,
+            selection=price_cart(cart).selection,
+            address=address,
+            payment_method=payment_method,
+            instructions=instructions,
+            promo_code=promo_code,
+        )
+        CartService.clear(cart)
+        return order
+
+    @staticmethod
+    @transaction.atomic
+    def create_from_selection(
+        *,
+        user: User,
+        restaurant: Restaurant,
+        selection: PricedSelection,
+        address: Address,
+        payment_method: str,
+        instructions: str = "",
+        promo_code: str = "",
+    ) -> Order:
+        """Transforme une sélection déjà valorisée en commande.
+
+        Extraite de `create_from_cart` pour que le panier collaboratif emprunte
+        exactement ce chemin : même relecture des prix, même décompte de stock,
+        même barème de zone, même évaluation du code promotionnel. Un second
+        chemin de création aurait été le moyen le plus sûr de faire diverger C2 —
+        c'est déjà ainsi que les frais de livraison de l'implémentation
+        précédente avaient fini par être calculés deux fois différemment.
+
+        Ce qui reste à l'appelant est ce qui lui est propre : vider le panier
+        personnel, ou clore le panier collaboratif.
+        """
+        priced = selection
 
         if not priced.lines:
             raise BusinessRuleViolation("Le panier est vide.")
         if not priced.is_orderable:
-            indisponibles = [
-                line.line.menu_item.name for line in priced.lines if not line.is_orderable
-            ]
+            indisponibles = priced.unavailable_names
             raise BusinessRuleViolation(
                 "Certains articles ne sont plus commandables : "
                 f"{', '.join(indisponibles)}. Retirez-les du panier.",
@@ -111,6 +175,13 @@ class OrderService:
                 "Un numéro joignable est nécessaire à la livraison : renseignez "
                 "celui du compte ou celui de l'adresse."
             )
+
+        # Le stock est décompté **dans la transaction**, avant toute écriture :
+        # si la suite échoue — adresse hors zone, code promotionnel refusé —,
+        # le retrait est annulé avec le reste. C'est ce qui permet de le faire
+        # tôt, et donc de refuser la commande avant d'avoir créé quoi que ce
+        # soit qu'il faudrait ensuite défaire.
+        StockService.consume(_quantities_by_item(line.line for line in priced.lines))
 
         quote = OrderService._quote_for(restaurant, address, priced.subtotal)
 
@@ -194,7 +265,6 @@ class OrderService:
                 promotion=promotion, user=user, order_id=order.pk, discount=discount
             )
 
-        CartService.clear(cart)
         return order
 
     @staticmethod
@@ -337,6 +407,10 @@ class OrderService:
             # Le client ne doit pas perdre son code parce que le restaurant a
             # annulé : il a été décompté pour un repas qu'il n'a jamais reçu.
             PromotionService.release(order_id=locked.pk)
+            # Même raisonnement pour les denrées : elles n'ont pas été servies.
+            # Le rejeu est déjà écarté plus haut — une commande déjà annulée
+            # sort en `is_noop`, donc rien n'est recrédité deux fois.
+            StockService.restore(_quantities_by_item(locked.lines.all()))
 
         # La diffusion part **après le commit** et non pendant : annoncer
         # « commande confirmée » sur une transaction qui échoue ensuite laisse

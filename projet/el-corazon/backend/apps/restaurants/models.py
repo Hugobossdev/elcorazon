@@ -47,6 +47,23 @@ class Restaurant(UUIDModel, TimeStampedModel):
 
     default_preparation_minutes = models.PositiveSmallIntegerField(default=20)
 
+    # Vue « des deux côtés » du rattachement, à travers `StaffMembership` — donc
+    # sans table supplémentaire ni migration de schéma. Elle n'existe que pour
+    # le sens de lecture qui manquait : `user.restaurants` répond à « où
+    # travaille cette personne ? », question que le back-office pose sur chaque
+    # fiche de personnel. L'écrire à l'envers, en partant des rattachements,
+    # obligeait chaque appelant à recomposer la même liste.
+    #
+    # Elle vit ici et non sur `User` parce que `accounts` ne connaît pas les
+    # établissements (ADR-002) ; `related_name` rend l'accès disponible dans le
+    # bon sens sans inverser le graphe.
+    staff = models.ManyToManyField(
+        User,
+        through="restaurants.StaffMembership",
+        related_name="restaurants",
+        blank=True,
+    )
+
     class Meta:
         verbose_name = "restaurant"
         ordering = ["name"]

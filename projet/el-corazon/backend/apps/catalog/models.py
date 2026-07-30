@@ -84,6 +84,29 @@ class MenuItem(UUIDModel, TimeStampedModel, SoftDeleteModel):
     is_popular = models.BooleanField(default=False)
     vip_exclusive = models.BooleanField(default=False)
 
+    # Stock — relié au cycle de commande, contrairement à
+    # `menu_items.available_quantity` de l'implémentation précédente, qui
+    # n'était décrémenté nulle part : un chiffre décoratif, que l'exploitation
+    # croyait pourtant lire.
+    #
+    # Le suivi est **facultatif par article** parce que les deux cas coexistent
+    # dans la même carte : un burger se prépare à la demande et n'a pas de
+    # stock, une bouteille importée en a un. Un compteur imposé aux deux
+    # obligerait à réapprovisionner chaque soir des plats qui n'en ont pas
+    # besoin, et le premier oubli fermerait la moitié du menu.
+    tracks_stock = models.BooleanField(
+        default=False,
+        help_text="Décompter les commandes du stock. Faux pour un plat préparé à la demande.",
+    )
+    # `PositiveIntegerField` pose la contrainte `>= 0` **en base**. C'est F3
+    # transposé au catalogue : le stock ne peut pas devenir négatif par une
+    # garde applicative qu'un nouveau chemin d'écriture oublierait, mais parce
+    # que PostgreSQL refuse la ligne.
+    stock_quantity = models.PositiveIntegerField(
+        default=0,
+        help_text="Unités restantes. Ignoré tant que le suivi de stock est désactivé.",
+    )
+
     # Dénormalisation assumée : la note moyenne est lue à chaque affichage de
     # liste et recalculée à chaque avis — soit un ratio de lecture sur écriture
     # de plusieurs milliers pour un. La recalculer en agrégat à la volée

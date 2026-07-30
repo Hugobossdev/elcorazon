@@ -19,12 +19,17 @@ from common.serializers import MoneyField
 
 __all__ = [
     "CategorySerializer",
+    "ManagedCategorySerializer",
+    "ManagedMenuItemSerializer",
+    "ManagedOptionGroupSerializer",
+    "ManagedOptionSerializer",
     "MenuItemDetailSerializer",
     "MenuItemSerializer",
     "OptionGroupSerializer",
     "OptionSerializer",
     "ReviewSerializer",
     "ReviewWriteSerializer",
+    "StockSerializer",
 ]
 
 
@@ -137,6 +142,182 @@ class ReviewSerializer(serializers.ModelSerializer[Review]):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+# --------------------------------------------------------------- back-office
+#
+# Les sérialiseurs de lecture publique sont intégralement en lecture seule
+# (`read_only_fields = fields`). Ceux-ci sont leur pendant d'écriture, et ils
+# sont **séparés** plutôt qu'ouverts au cas par cas : un champ rendu inscriptible
+# sur un sérialiseur public l'est pour tout le monde, et rien dans la relecture
+# d'un diff ne le distingue d'un champ de lecture. Deux classes rendent la
+# question visible à chaque ajout de champ — de quel côté va-t-il ?
+
+
+class ManagedCategorySerializer(serializers.ModelSerializer[Category]):
+    """Catégorie vue du back-office : `is_active` compris.
+
+    La liste publique filtre les catégories inactives ; celle-ci les montre,
+    sans quoi désactiver une catégorie la ferait disparaître de l'écran qui
+    sert à la réactiver.
+    """
+
+    restaurant = serializers.SlugRelatedField[Restaurant](
+        slug_field="slug", queryset=Restaurant.objects.all()
+    )
+
+    class Meta:
+        model = Category
+        fields = [
+            "id",
+            "restaurant",
+            "name",
+            "slug",
+            "emoji",
+            "description",
+            "sort_order",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class ManagedMenuItemSerializer(serializers.ModelSerializer[MenuItem]):
+    """Article vu du back-office — le seul endroit où un prix s'écrit.
+
+    `rating_average` et `rating_count` restent en lecture seule : ce sont des
+    agrégats calculés depuis les avis (voir `ReviewService.refresh_rating`), et
+    les rendre inscriptibles permettrait de fabriquer une note.
+    """
+
+    restaurant = serializers.SlugRelatedField[Restaurant](
+        slug_field="slug", queryset=Restaurant.objects.all()
+    )
+    category = serializers.PrimaryKeyRelatedField[Category](queryset=Category.objects.all())
+    price = MoneyField()
+    is_deleted = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = MenuItem
+        fields = [
+            "id",
+            "restaurant",
+            "category",
+            "name",
+            "slug",
+            "description",
+            "image",
+            "price",
+            "preparation_minutes",
+            "calories",
+            "ingredients",
+            "allergens",
+            "dietary_tags",
+            "is_available",
+            "is_popular",
+            "vip_exclusive",
+            "tracks_stock",
+            "stock_quantity",
+            "rating_average",
+            "rating_count",
+            "sort_order",
+            "is_deleted",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "rating_average",
+            "rating_count",
+            "is_deleted",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Deux cohérences qu'aucune contrainte de base ne peut porter.
+
+        La première — la catégorie appartient au même établissement que
+        l'article — parce que PostgreSQL ne sait pas comparer deux clés
+        étrangères d'une même ligne sans dénormaliser le restaurant sur la
+        catégorie. Sans elle, un article de Lomé se range dans une catégorie de
+        Kara et disparaît de sa propre carte.
+
+        La seconde — le prix est libellé dans la devise du marché — parce que
+        la devise n'est pas choisie au niveau de l'article : elle est héritée du
+        pays (ADR-006). Un article tarifé en euros dans un restaurant en francs
+        CFA n'est refusé qu'au moment de l'addition au panier, c'est-à-dire chez
+        le client.
+        """
+        instance = self.instance
+        restaurant = attrs.get("restaurant") or (instance.restaurant if instance else None)
+        category = attrs.get("category") or (instance.category if instance else None)
+
+        if (
+            restaurant is not None
+            and category is not None
+            and category.restaurant_id != (restaurant.pk)
+        ):
+            raise serializers.ValidationError(
+                {"category": "Cette catégorie appartient à un autre établissement."}
+            )
+
+        price = attrs.get("price")
+        if restaurant is not None and price is not None and price.currency != restaurant.currency:
+            raise serializers.ValidationError(
+                {
+                    "price": (
+                        f"Cet établissement facture en {restaurant.currency} ; "
+                        f"prix reçu en {price.currency}."
+                    )
+                }
+            )
+
+        return attrs
+
+
+class ManagedOptionGroupSerializer(serializers.ModelSerializer[OptionGroup]):
+    menu_item = serializers.PrimaryKeyRelatedField[MenuItem](queryset=MenuItem.objects.alive())
+
+    class Meta:
+        model = OptionGroup
+        fields = ["id", "menu_item", "name", "min_select", "max_select", "sort_order"]
+        read_only_fields = ["id"]
+
+
+class ManagedOptionSerializer(serializers.ModelSerializer[Option]):
+    group = serializers.PrimaryKeyRelatedField[OptionGroup](queryset=OptionGroup.objects.all())
+    price_delta = MoneyField()
+
+    class Meta:
+        model = Option
+        fields = [
+            "id",
+            "group",
+            "name",
+            "price_delta",
+            "is_default",
+            "is_available",
+            "sort_order",
+        ]
+        read_only_fields = ["id"]
+
+
+class StockSerializer(serializers.Serializer[Any]):
+    """Correction de stock à l'inventaire.
+
+    Une **valeur absolue** et non un delta : on compte ce qu'il reste en
+    réserve, on ne calcule pas ce qui a été ajouté depuis la dernière fois. Un
+    delta rejoué par un réseau capricieux ajouterait deux fois ; une valeur
+    absolue rejouée écrit deux fois la même chose.
+
+    Les mouvements liés aux commandes, eux, ne passent jamais par ici : ils sont
+    décomptés par `StockService`, sous verrou, au moment où la commande est
+    créée.
+    """
+
+    stock_quantity = serializers.IntegerField(min_value=0)
 
 
 class ReviewWriteSerializer(serializers.Serializer[Any]):

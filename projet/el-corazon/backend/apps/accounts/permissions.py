@@ -33,6 +33,7 @@ PERMISSIONS: Final[dict[str, str]] = {
     "orders.refund": "Rembourser tout ou partie d'une commande",
     # Flotte
     "couriers.read": "Consulter les livreurs et leur position",
+    "couriers.write": "Créer un compte livreur",
     "couriers.approve": "Valider ou rejeter un dossier livreur",
     "couriers.suspend": "Suspendre un livreur",
     # Clients
@@ -47,8 +48,8 @@ PERMISSIONS: Final[dict[str, str]] = {
     "restaurants.write": "Créer et modifier établissements et zones",
     "analytics.read": "Consulter les statistiques et rapports",
     # Administration
-    "roles.read": "Consulter les rôles et permissions",
-    "roles.write": "Créer et modifier des rôles",
+    "roles.read": "Consulter les rôles, les permissions et les comptes du personnel",
+    "roles.write": "Créer et modifier des rôles, et les attribuer au personnel",
 }
 
 PERMISSION_CHOICES: Final[list[tuple[str, str]]] = sorted(PERMISSIONS.items())
@@ -67,6 +68,7 @@ SYSTEM_ROLES: Final[dict[str, tuple[str, ...]]] = {
         "orders.cancel",
         "orders.refund",
         "couriers.read",
+        "couriers.write",
         "couriers.approve",
         "couriers.suspend",
         "customers.read",

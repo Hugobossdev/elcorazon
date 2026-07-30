@@ -13,14 +13,22 @@ chaque changement de statut de commande.
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 
-from django.db import transaction
+from django.db import models, transaction
+from django.utils import timezone
 
-from apps.accounts.models import User
-from apps.notifications.models import Notification, NotificationKind
+from apps.accounts.models import User, UserType
+from apps.notifications.models import (
+    Audience,
+    Campaign,
+    CampaignStatus,
+    Notification,
+    NotificationKind,
+)
 
-__all__ = ["MARKETING_KINDS", "notify"]
+__all__ = ["MARKETING_KINDS", "notify", "recipients_of", "send_campaign"]
 
 #: Catégories soumises au consentement de l'utilisateur.
 #:
@@ -86,3 +94,69 @@ def _dispatch(notification_id: object) -> None:
     from apps.notifications.tasks import send_push
 
     send_push.delay(str(notification_id))
+
+
+# ----------------------------------------------------------------- campagnes
+
+
+def recipients_of(campaign: Campaign) -> models.QuerySet[User]:
+    """Population visée par une campagne.
+
+    Les comptes inactifs sont exclus de tous les segments : écrire à un compte
+    bloqué serait au mieux inutile, au pire une relance commerciale adressée à
+    quelqu'un dont on vient de fermer le compte.
+    """
+    horizon = timezone.now() - dt.timedelta(days=campaign.segment_days)
+
+    if campaign.audience == Audience.COURIERS:
+        return User.objects.filter(user_type=UserType.COURIER, is_active=True)
+
+    clients = User.objects.filter(user_type=UserType.CUSTOMER, is_active=True)
+
+    if campaign.audience == Audience.ACTIVE_CUSTOMERS:
+        return clients.filter(orders__placed_at__gte=horizon).distinct()
+    if campaign.audience == Audience.LAPSED_CUSTOMERS:
+        # `exclude` plutôt que « dernière commande antérieure à l'horizon » : la
+        # formulation par exclusion embarque aussi les comptes qui n'ont jamais
+        # commandé, et c'est la population qu'une campagne de reconquête vise
+        # en premier.
+        return clients.exclude(orders__placed_at__gte=horizon)
+
+    return clients
+
+
+@transaction.atomic
+def send_campaign(campaign: Campaign) -> Campaign:
+    """Envoie une campagne — **une seule fois**.
+
+    Le verrou et la relecture du statut ne sont pas de la prudence : deux clics
+    sur « envoyer » arrivent régulièrement, et sans eux les deux requêtes
+    lisent « brouillon » puis écrivent chacune leur lot de notifications. Le
+    destinataire, lui, reçoit deux fois le même message et se désabonne.
+
+    Le consentement n'est **pas** revérifié ici : `notify` écarte déjà les
+    comptes ayant refusé le marketing. Le redécider à cet endroit produirait
+    deux règles de consentement, dont l'une finirait par être la mauvaise.
+    `recipient_count` compte donc les envois réels, pas la taille du segment.
+    """
+    verrouillee = Campaign.objects.select_for_update().get(pk=campaign.pk)
+    if verrouillee.status == CampaignStatus.SENT:
+        return verrouillee
+
+    envoyees = 0
+    for destinataire in recipients_of(verrouillee).iterator(chunk_size=500):
+        envoi = notify(
+            user=destinataire,
+            kind=NotificationKind.MARKETING,
+            title=verrouillee.title,
+            body=verrouillee.body,
+            data={"campaign": str(verrouillee.pk)},
+        )
+        if envoi is not None:
+            envoyees += 1
+
+    verrouillee.status = CampaignStatus.SENT
+    verrouillee.sent_at = timezone.now()
+    verrouillee.recipient_count = envoyees
+    verrouillee.save(update_fields=["status", "sent_at", "recipient_count", "updated_at"])
+    return verrouillee

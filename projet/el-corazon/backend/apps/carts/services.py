@@ -12,8 +12,10 @@ désignent exactement le même choix.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 from django.db import transaction
 from django.db.models import Prefetch
@@ -27,18 +29,39 @@ from common.money import CurrencyMismatch, Money
 
 __all__ = [
     "CartService",
+    "PriceableLine",
     "PricedCart",
     "PricedLine",
+    "PricedSelection",
     "price_cart",
+    "price_selection",
     "validate_selection",
 ]
 
 
+class PriceableLine(Protocol):
+    """Ce qu'une ligne doit porter pour être valorisée.
+
+    Le protocole couvre la ligne du panier personnel comme celle du panier
+    collaboratif. Sans lui, chacun des deux aurait sa propre boucle de calcul —
+    et le jour où l'une apprend à déduire un « sans fromage », l'autre continue
+    de le facturer. C1 ne dit pas seulement que le prix vient du serveur, il dit
+    qu'il en vient **par un seul chemin**.
+    """
+
+    menu_item: MenuItem
+    menu_item_id: uuid.UUID
+    quantity: int
+    notes: str
+
+    def selected_options(self) -> list[Option]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class PricedLine:
-    """Ligne de panier valorisée à l'instant de la lecture."""
+    """Ligne valorisée à l'instant de la lecture."""
 
-    line: CartLine
+    line: PriceableLine
     options: Sequence[Option]
     unit_price: Money
     total: Money
@@ -47,8 +70,15 @@ class PricedLine:
 
 
 @dataclass(frozen=True, slots=True)
-class PricedCart:
-    cart: Cart
+class PricedSelection:
+    """Un ensemble de lignes valorisé — sans dire d'où elles viennent.
+
+    C'est ce que `orders` consomme pour créer une commande : que la sélection
+    vienne d'un panier personnel ou d'un panier collaboratif ne change rien au
+    calcul du total, et lui faire connaître les deux origines l'aurait fait
+    grossir d'une branche à chaque nouvelle façon de remplir un panier.
+    """
+
     lines: Sequence[PricedLine]
     subtotal: Money
     currency: str
@@ -63,52 +93,75 @@ class PricedCart:
         """
         return bool(self.lines) and all(line.is_orderable for line in self.lines)
 
-
-def _line_options(line: CartLine) -> list[Option]:
-    """Options d'une ligne, dans l'ordre d'affichage de leur groupe."""
-    return sorted(
-        (selection.option for selection in line.options.all()),
-        key=lambda option: (option.group.sort_order, option.group_id, option.sort_order),
-    )
+    @property
+    def unavailable_names(self) -> list[str]:
+        """Articles qui bloquent la commande, pour le message de refus."""
+        return [priced.line.menu_item.name for priced in self.lines if not priced.is_orderable]
 
 
-def _unavailability(item: MenuItem, options: Iterable[Option]) -> str:
+@dataclass(frozen=True, slots=True)
+class PricedCart:
+    cart: Cart
+    lines: Sequence[PricedLine]
+    subtotal: Money
+    currency: str
+
+    @property
+    def is_orderable(self) -> bool:
+        return self.selection.is_orderable
+
+    @property
+    def selection(self) -> PricedSelection:
+        """Vue « sélection » du panier, pour la création de commande."""
+        return PricedSelection(lines=self.lines, subtotal=self.subtotal, currency=self.currency)
+
+
+def _unavailability(item: MenuItem, options: Iterable[Option], quantity: int) -> str:
     """Ce qui empêche de commander cette ligne — chaîne vide si rien.
 
     Le motif est rendu au client plutôt qu'un simple booléen : « plus au menu »
     et « momentanément indisponible » n'appellent pas le même geste, et un
     panier qui refuse sans dire pourquoi se termine par un appel au support.
+
+    La rupture de stock est annoncée **ici**, avec le nombre restant. Le refus
+    ferme est celui de la création de commande, qui décompte sous verrou ; ce
+    que le panier apporte, c'est de le faire savoir avant le paiement plutôt
+    qu'après.
     """
     if item.is_deleted:
         return "Cet article n'est plus au menu."
     if not item.is_available:
         return "Cet article est momentanément indisponible."
+    if item.tracks_stock and item.stock_quantity < quantity:
+        return f"Il n'en reste que {item.stock_quantity} en stock."
     indisponibles = sorted(option.name for option in options if not option.is_available)
     if indisponibles:
         return f"Options indisponibles : {', '.join(indisponibles)}."
     return ""
 
 
-def price_cart(cart: Cart) -> PricedCart:
-    """Valorise un panier depuis le catalogue.
+def price_selection(lines: Iterable[PriceableLine], currency: str) -> PricedSelection:
+    """Valorise un ensemble de lignes depuis le catalogue.
 
     Le prix unitaire est celui de l'article **plus** les écarts des options
     retenues — un supplément fromage se paie, un « sans fromage » peut se
     déduire. Aucune de ces valeurs ne vient de la requête.
+
+    C'est le seul endroit du projet qui sache ce que coûte une ligne, et il
+    ignore délibérément à quel type de panier elle appartient.
     """
-    currency = cart.restaurant.currency
     subtotal = Money.zero(currency)
     priced: list[PricedLine] = []
 
-    for line in cart.lines.all():
-        options = _line_options(line)
+    for line in lines:
+        options = line.selected_options()
         unit = line.menu_item.price
         for option in options:
             unit += option.price_delta
 
         total = unit * line.quantity
         subtotal += total
-        reason = _unavailability(line.menu_item, options)
+        reason = _unavailability(line.menu_item, options, line.quantity)
         priced.append(
             PricedLine(
                 line=line,
@@ -120,7 +173,16 @@ def price_cart(cart: Cart) -> PricedCart:
             )
         )
 
-    return PricedCart(cart=cart, lines=priced, subtotal=subtotal, currency=currency)
+    return PricedSelection(lines=priced, subtotal=subtotal, currency=currency)
+
+
+def price_cart(cart: Cart) -> PricedCart:
+    """Valorise le panier personnel d'un client."""
+    currency = cart.restaurant.currency
+    selection = price_selection(cart.lines.all(), currency)
+    return PricedCart(
+        cart=cart, lines=selection.lines, subtotal=selection.subtotal, currency=currency
+    )
 
 
 def validate_selection(menu_item: MenuItem, options: Sequence[Option]) -> None:

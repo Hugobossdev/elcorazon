@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from apps.delivery.models import Assignment, CourierProfile
+from apps.accounts.models import User
+from apps.delivery.models import Assignment, CourierProfile, VehicleType
 from apps.delivery.states import DELIVERY_MACHINE, VERIFICATION_MACHINE
 from apps.restaurants.models import Restaurant
 from common.serializers import LocationField, MoneyField
@@ -20,6 +23,7 @@ from common.serializers import LocationField, MoneyField
 __all__ = [
     "AssignmentSerializer",
     "CourierProfileSerializer",
+    "CourierProvisioningSerializer",
     "CourierPublicSerializer",
     "DeclineSerializer",
     "DeliveryTransitionSerializer",
@@ -83,6 +87,84 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class CourierProvisioningSerializer(serializers.Serializer[Any]):
+    """Embauche d'un livreur : le compte et le dossier, en une requête.
+
+    Deux écrans pour ce qui est un seul geste — créer le compte ici, ouvrir le
+    dossier là — laisserait régulièrement des comptes de type livreur sans
+    dossier, c'est-à-dire des gens qui se connectent à l'application et n'y
+    trouvent rien.
+
+    Les pièces justificatives ne sont **pas** ici : c'est le livreur qui les
+    dépose, depuis son application (`POST /delivery/me/`), et c'est bien lui qui
+    les a. Les numéros, eux, se relèvent d'une carte présentée à l'embauche —
+    ils sont donc facultatifs mais acceptés.
+
+    Conforme à la promesse du module : aucun champ de statut de dossier ni de
+    compteur en entrée. Le dossier naît en attente, les compteurs à zéro.
+    """
+
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8, trim_whitespace=False)
+    full_name = serializers.CharField(max_length=150)
+    phone = serializers.CharField(max_length=16, required=False, allow_blank=True, default="")
+    restaurant = serializers.SlugRelatedField[Restaurant](
+        slug_field="slug",
+        queryset=Restaurant.objects.all(),
+        help_text="Établissement de rattachement — il doit être dans votre périmètre.",
+    )
+    vehicle_type = serializers.ChoiceField(choices=VehicleType.choices)
+    vehicle_plate = serializers.CharField(
+        max_length=32, required=False, allow_blank=True, default=""
+    )
+    national_id_number = serializers.CharField(
+        max_length=64, required=False, allow_blank=True, default=""
+    )
+    licence_number = serializers.CharField(
+        max_length=64, required=False, allow_blank=True, default=""
+    )
+
+    def validate_email(self, value: str) -> str:
+        """Normalisée et unique, comme à l'inscription.
+
+        La normalisation n'est pas cosmétique : l'adresse est l'identifiant de
+        connexion, et deux comptes ne différant que par la casse rendraient
+        l'un des deux inaccessible.
+        """
+        normalized = value.strip().lower()
+        if User.objects.filter(email__iexact=normalized).exists():
+            raise serializers.ValidationError("Un compte existe déjà avec cette adresse.")
+        return normalized
+
+    def validate_phone(self, value: str) -> str:
+        if value and User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError("Un compte existe déjà avec ce numéro.")
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Valide le mot de passe **en connaissant l'identité** du futur compte.
+
+        Ici et non dans un validateur de champ, où c'est pourtant plus court :
+        le validateur de similarité de Django compare le mot de passe aux
+        attributs de l'utilisateur, et sans utilisateur à lui donner il ne
+        compare rien. C'est exactement le contrôle qui manque quand un tiers
+        choisit un mot de passe pour quelqu'un d'autre — « livreur123 » pour
+        `nouveau.livreur@…` est le cas nominal, pas le cas tordu.
+        """
+        futur = User(
+            email=attrs["email"],
+            full_name=attrs["full_name"],
+            phone=attrs.get("phone") or "",
+        )
+        try:
+            validate_password(attrs["password"], user=futur)
+        except DjangoValidationError as erreur:
+            # Rattachée au champ : levée telle quelle, elle atterrirait dans
+            # `non_field_errors`, où le formulaire ne l'affiche pas.
+            raise serializers.ValidationError({"password": list(erreur.messages)}) from erreur
+        return attrs
 
 
 class AssignmentSerializer(serializers.ModelSerializer[Assignment]):

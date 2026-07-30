@@ -75,6 +75,19 @@ class CartLine(UUIDModel, TimeStampedModel):
     def __str__(self) -> str:
         return f"{self.quantity} × {self.menu_item.name}"
 
+    def selected_options(self) -> list[Option]:
+        """Options retenues, dans l'ordre d'affichage de leur groupe.
+
+        Sur le modèle et non dans le service de tarification : le panier
+        collaboratif porte ses propres lignes, et c'est cette méthode qui permet
+        aux deux d'être valorisées par le même code (`price_selection`) au lieu
+        d'une seconde boucle de calcul qui divergerait.
+        """
+        return sorted(
+            (selection.option for selection in self.options.all()),
+            key=lambda option: (option.group.sort_order, option.group_id, option.sort_order),
+        )
+
 
 class CartLineOption(UUIDModel):
     """Option retenue sur une ligne de panier.
