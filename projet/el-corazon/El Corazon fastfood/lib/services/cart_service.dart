@@ -23,9 +23,7 @@ class CartService extends ChangeNotifier {
   final List<CartItem> _items = [];
   double _deliveryFee = 500.0;
   double _promoDiscount = 0.0;
-  double _freeMealDiscount = 0.0;
   String? _promoCode;
-  bool _isFreeMealApplied = false;
 
   SharedPreferences? _prefs;
   bool _isInitialized = false;
@@ -49,24 +47,19 @@ class CartService extends ChangeNotifier {
   int get itemCount => _items.fold(0, (sum, item) => sum + item.quantity);
   double get subtotal => _items.fold(0.0, (sum, item) => sum + item.totalPrice);
   double get deliveryFee => _deliveryFee;
-  double get discount => _promoDiscount + _freeMealDiscount;
+  double get discount => _promoDiscount;
   double get total =>
       (subtotal + _deliveryFee - discount).clamp(0.0, double.infinity);
   String? get promoCode => _promoCode;
   bool get isInitialized => _isInitialized;
   String? get userId => _userId;
-  bool get isFreeMealApplied => _isFreeMealApplied;
 
   String get _cartItemsKey => 'cart_items_${_userId ?? 'guest'}';
   String get _deliveryFeeKey => 'cart_delivery_fee_${_userId ?? 'guest'}';
   String get _promoDiscountKey => 'cart_promo_discount_${_userId ?? 'guest'}';
-  String get _freeMealDiscountKey =>
-      'cart_free_meal_discount_${_userId ?? 'guest'}';
   // Legacy key for migration
   String get _discountKey => 'cart_discount_${_userId ?? 'guest'}';
   String get _promoCodeKey => 'cart_promo_code_${_userId ?? 'guest'}';
-  String get _isFreeMealAppliedKey =>
-      'cart_is_free_meal_applied_${_userId ?? 'guest'}';
 
   /// Initialise le service (chargement local)
   Future<void> initialize() async {
@@ -113,7 +106,6 @@ class CartService extends ChangeNotifier {
     _items.clear();
     _deliveryFee = 500.0;
     _promoDiscount = 0.0;
-    _freeMealDiscount = 0.0;
     _promoCode = null;
 
     await _loadCartFromStorage(); // recharger le panier "invité"
@@ -260,9 +252,7 @@ class CartService extends ChangeNotifier {
     final itemCount = _items.length;
     _items.clear();
     _promoDiscount = 0.0;
-    _freeMealDiscount = 0.0;
     _promoCode = null;
-    _isFreeMealApplied = false;
     debugPrint('✅ Panier vidé ($itemCount articles)');
     notifyListeners();
     _persistChanges();
@@ -437,46 +427,6 @@ class CartService extends ChangeNotifier {
     return false;
   }
 
-  /// Active ou désactive l'avantage "Repas gratuit" (VIP Premium)
-  void toggleFreeMeal() {
-    // Portefeuille électronique désactivé temporairement
-    debugPrint('⚠️ Repas gratuit VIP désactivé (portefeuille indisponible)');
-    return;
-    // Code désactivé - dépend du portefeuille
-    // Vérifier l'éligibilité via WalletService
-    // final walletService = WalletService();
-    // if (!walletService.isEligibleForFreeMeal) {
-    //   debugPrint('⚠️ Non éligible pour le repas gratuit');
-    //   return;
-    // }
-    // Code désactivé - dépend du portefeuille
-    // if (_items.isEmpty) {
-    //   debugPrint('⚠️ Panier vide');
-    //   return;
-    // }
-    // if (_isFreeMealApplied) {
-    //   // Désactiver
-    //   _isFreeMealApplied = false;
-    //   _freeMealDiscount = 0.0;
-    // } else {
-    //   // Activer
-    //   _isFreeMealApplied = true;
-    //
-    //   // Trouver l'article le plus cher
-    //   double maxPrice = 0.0;
-    //   for (final item in _items) {
-    //     if (item.price > maxPrice) {
-    //       maxPrice = item.price;
-    //     }
-    //   }
-    //
-    //   // Ajouter la remise
-    //   _freeMealDiscount = maxPrice;
-    // }
-    // notifyListeners();
-    // _persistChanges();
-  }
-
   /// Retire le code promo
   void removePromoCode() {
     _promoCode = null;
@@ -560,10 +510,7 @@ class CartService extends ChangeNotifier {
         _promoDiscount = _prefs?.getDouble(_promoDiscountKey) ?? 0.0;
       }
 
-      _freeMealDiscount = _prefs?.getDouble(_freeMealDiscountKey) ?? 0.0;
-
       _promoCode = _prefs?.getString(_promoCodeKey);
-      _isFreeMealApplied = _prefs?.getBool(_isFreeMealAppliedKey) ?? false;
     } catch (e) {
       debugPrint('❌ Erreur lors du chargement du panier local: $e');
     }
@@ -577,8 +524,6 @@ class CartService extends ChangeNotifier {
       await _prefs!.setString(_cartItemsKey, json.encode(itemsData));
       await _prefs!.setDouble(_deliveryFeeKey, _deliveryFee);
       await _prefs!.setDouble(_promoDiscountKey, _promoDiscount);
-      await _prefs!.setDouble(_freeMealDiscountKey, _freeMealDiscount);
-      await _prefs!.setBool(_isFreeMealAppliedKey, _isFreeMealApplied);
 
       // Remove legacy discount key
       await _prefs!.remove(_discountKey);
@@ -600,10 +545,8 @@ class CartService extends ChangeNotifier {
     await _prefs!.remove(_cartItemsKey);
     await _prefs!.remove(_deliveryFeeKey);
     await _prefs!.remove(_promoDiscountKey);
-    await _prefs!.remove(_freeMealDiscountKey);
     await _prefs!.remove(_discountKey); // Legacy
     await _prefs!.remove(_promoCodeKey);
-    await _prefs!.remove(_isFreeMealAppliedKey);
   }
 
   /// Traduit une ligne de panier Django vers le modèle local. Le prix et le

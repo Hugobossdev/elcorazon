@@ -1,10 +1,14 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/main.dart' show apiClient;
 
-/// Gamification contre le backend Django (Phase 6) — badges seulement dans
-/// cette tranche (le seul catalogue affiché par un écran,
-/// `rewards_screen.dart`). Achievements/défis restent construits dans
-/// `elcorazon_core` pour un futur écran, non câblés ici.
+/// Gamification contre le backend Django (Phase 6) — badges, succès et défis.
+///
+/// **Lecture seule, et c'est le fond du sujet.** La progression et le
+/// déblocage sont calculés par le serveur à la livraison d'une commande ; le
+/// client les lit. L'implémentation Supabase écrivait `user_achievements`,
+/// `user_challenges` et le solde de points depuis le téléphone : n'importe qui
+/// pouvait se déclarer tous les succès débloqués et se créditer les points
+/// correspondants.
 class DjangoGamificationRepository {
   DjangoGamificationRepository() : _gamification = eccore.GamificationRepository(apiClient: apiClient);
 
@@ -13,6 +17,51 @@ class DjangoGamificationRepository {
   /// Forme `Map` déjà consommée par `GamificationService`/`rewards_screen.dart`
   /// — pas de nouveau modèle local, `isUnlocked`/`unlockedAt` viennent
   /// directement de Django, plus jamais recalculés côté client.
+  /// Succès du catalogue, avec la progression de l'appelant.
+  Future<List<Map<String, dynamic>>> getAchievements() async {
+    final achievements = await _gamification.getAchievements();
+    return achievements
+        .map(
+          (achievement) => {
+            'id': achievement.id,
+            'title': achievement.name,
+            'description': achievement.description,
+            'icon': achievement.icon,
+            'points': achievement.pointsReward,
+            'target': achievement.conditionValue,
+            'criteria': achievement.conditionType,
+            'progress': achievement.progress,
+            'isUnlocked': achievement.isUnlocked,
+            'unlockedAt': achievement.unlockedAt,
+          },
+        )
+        .toList();
+  }
+
+  /// Défis **en cours** — le serveur écarte ceux qui sont passés ou à venir.
+  Future<List<Map<String, dynamic>>> getChallenges() async {
+    final challenges = await _gamification.getChallenges();
+    return challenges
+        .map(
+          (challenge) => {
+            'id': challenge.id,
+            'title': challenge.title,
+            'description': challenge.description,
+            'icon': '🎯',
+            'reward': challenge.rewardPoints,
+            'target': challenge.targetValue,
+            'criteria': challenge.challengeType,
+            'progress': challenge.progress,
+            'isActive': true,
+            'isCompleted': challenge.isCompleted,
+            'startDate': challenge.startsAt,
+            'endDate': challenge.endsAt,
+            'completedAt': null,
+          },
+        )
+        .toList();
+  }
+
   Future<List<Map<String, dynamic>>> getBadges() async {
     final badges = await _gamification.getBadges();
     return badges

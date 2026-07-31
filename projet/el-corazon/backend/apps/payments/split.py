@@ -110,8 +110,37 @@ class SplitService:
 
     @staticmethod
     def _allocate(total: Money, participants: Sequence[ParticipantInput]) -> list[Money]:
+        """Répartit le total, en garantissant que **chaque part est positive**.
+
+        `share_amount_positive` interdit en base une part nulle ou négative, et
+        deux chemins y menaient sans que rien ne les arrête avant l'insertion :
+
+        * **la répartition égale d'un total plus petit que le nombre de
+          convives.** `Money.allocate` ne perd aucune unité mineure, mais il ne
+          peut pas en inventer : 2 F entre trois personnes donnent 1, 1 et 0.
+          La contrainte rejetait alors la commande entière par une violation
+          d'intégrité, au lieu d'un refus lisible ;
+        * **les montants explicites**, dont seule la *somme* était vérifiée.
+          `[1000, 0]` sur un total de 1 000 F tombait juste et passait la
+          garde ; `[1500, -500]` aussi. Le premier crée un convive qui ne paie
+          rien — donc une part que personne ne réglera jamais et qui laisse le
+          partage éternellement ouvert —, le second un montant négatif.
+
+        Les deux sont désormais refusés avant toute écriture, avec un message
+        qui dit quoi corriger.
+        """
         explicites = [p.amount for p in participants if p.amount is not None]
         if not explicites:
+            if total.amount_minor < len(participants):
+                # Refusé ici plutôt que laissé produire une part nulle : diviser
+                # équitablement suppose qu'il y ait de quoi donner au moins une
+                # unité mineure à chacun.
+                raise BusinessRuleViolation(
+                    f"Le total ({total}) est trop faible pour être partagé entre "
+                    f"{len(participants)} participants.",
+                    total=str(total.amount_minor),
+                    participants=len(participants),
+                )
             return total.allocate([1] * len(participants))
 
         if len(explicites) != len(participants):
@@ -120,9 +149,16 @@ class SplitService:
             )
 
         somme = Money.zero(total.currency)
-        for montant in explicites:
+        for participant, montant in zip(participants, explicites, strict=True):
             if montant.currency != total.currency:
                 raise BusinessRuleViolation(f"Les parts doivent être en {total.currency}.")
+            if not montant.is_positive:
+                raise BusinessRuleViolation(
+                    f"La part de {participant.display_name} doit être strictement "
+                    f"positive (reçu {montant}).",
+                    participant=participant.display_name,
+                    received=str(montant.amount_minor),
+                )
             somme += montant
 
         if somme != total:

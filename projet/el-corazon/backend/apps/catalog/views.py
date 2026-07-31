@@ -22,6 +22,7 @@ from rest_framework.serializers import BaseSerializer
 from rest_framework.throttling import AnonRateThrottle, BaseThrottle, UserRateThrottle
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
+from apps.catalog.filters import MenuItemFilter
 from apps.catalog.models import Category, MenuItem, Option, OptionGroup, Review
 from apps.catalog.serializers import (
     CategorySerializer,
@@ -63,15 +64,16 @@ class MenuItemViewSet(ReadOnlyModelViewSet[MenuItem]):
     permission_classes = [AllowAny]
     throttle_classes = [AnonRateThrottle, UserRateThrottle]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = {
-        "restaurant__slug": ["exact"],
-        "category__slug": ["exact"],
-        "is_available": ["exact"],
-        "is_popular": ["exact"],
-        "vip_exclusive": ["exact"],
-    }
+    filterset_class = MenuItemFilter
     search_fields = ["name", "description"]
-    ordering_fields = ["sort_order", "name", "price_minor", "rating_average"]
+    ordering_fields = [
+        "sort_order",
+        "name",
+        "price_minor",
+        "rating_average",
+        "preparation_minutes",
+        "calories",
+    ]
     ordering = ["sort_order", "name"]
 
     def get_serializer_class(self) -> type[BaseSerializer[MenuItem]]:

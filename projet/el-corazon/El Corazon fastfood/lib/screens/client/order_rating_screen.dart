@@ -75,9 +75,7 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
       if (_driverRating > 0 && widget.order.deliveryPersonId != null) {
         totalActions++;
         final success = await driverRatingService.submitRating(
-          driverId: widget.order.deliveryPersonId!,
           orderId: widget.order.id,
-          customerId: currentUser.id,
           rating: _driverRating.toInt(),
           comment: _driverCommentController.text.trim(),
         );

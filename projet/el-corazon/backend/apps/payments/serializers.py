@@ -12,7 +12,7 @@ from typing import Any
 from rest_framework import serializers
 
 from apps.accounts.models import User
-from apps.payments.models import Refund, SplitPayment, SplitShare, Transaction
+from apps.payments.models import Refund, SplitPayment, SplitShare, Transaction, Withdrawal
 from common.serializers import MoneyField
 
 __all__ = [
@@ -26,6 +26,8 @@ __all__ = [
     "SplitShareSerializer",
     "TransactionSerializer",
     "WebhookSerializer",
+    "WithdrawalRequestSerializer",
+    "WithdrawalSerializer",
 ]
 
 
@@ -163,6 +165,35 @@ class ShareCheckoutSerializer(serializers.Serializer[Any]):
     share = SplitShareSerializer(read_only=True)
     checkout_url = serializers.URLField(read_only=True)
     instructions = serializers.CharField(read_only=True)
+
+
+class WithdrawalSerializer(serializers.ModelSerializer[Withdrawal]):
+    """Une demande de retrait, telle que le livreur la relit."""
+
+    amount = MoneyField(read_only=True)
+
+    class Meta:
+        model = Withdrawal
+        fields = [
+            "id",
+            "amount",
+            "status",
+            "provider_reference",
+            "failure_reason",
+            "completed_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class WithdrawalRequestSerializer(serializers.Serializer[Any]):
+    """Le seul champ d'une demande : combien.
+
+    Ni le bénéficiaire — c'est l'appelant — ni le statut : une demande qui
+    naîtrait « versée » ferait sortir de l'argent sans que personne l'ait versé.
+    """
+
+    amount = MoneyField()
 
 
 class RefundRequestSerializer(serializers.Serializer[Any]):

@@ -453,7 +453,7 @@ class TestAnnulation:
 class TestTransitions:
     def _avance(self, client: APIClient, order: Order, cible: str) -> object:
         return client.post(
-            reverse("v1:orders:order-status", args=[order.pk]),
+            reverse("v1:orders:managed-order-status", args=[order.pk]),
             {"status": cible},
             format="json",
         )
@@ -497,7 +497,7 @@ class TestTransitions:
         client.force_authenticate(staff)
 
         response = client.post(
-            reverse("v1:orders:order-status", args=[order.pk]),
+            reverse("v1:orders:managed-order-status", args=[order.pk]),
             {"status": "accepted"},
             format="json",
         )
@@ -563,7 +563,7 @@ class TestLivraison:
             OrderStatus.DELIVERED,
         ):
             client.post(
-                reverse("v1:orders:order-status", args=[order.pk]),
+                reverse("v1:orders:managed-order-status", args=[order.pk]),
                 {"status": cible},
                 format="json",
             )
@@ -596,7 +596,7 @@ class TestLivraison:
             OrderStatus.DELIVERED,
         ):
             client.post(
-                reverse("v1:orders:order-status", args=[commande["id"]]),
+                reverse("v1:orders:managed-order-status", args=[commande["id"]]),
                 {"status": cible},
                 format="json",
             )

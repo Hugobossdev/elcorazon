@@ -165,10 +165,10 @@ class AddressService extends ChangeNotifier {
       await _saveAddresses();
       notifyListeners();
       debugPrint(
-        'AddressService: Synchronisation Supabase (${_addresses.length} adresses)',
+        'AddressService: Synchronisation serveur (${_addresses.length} adresses)',
       );
     } catch (e) {
-      debugPrint('AddressService: Erreur de synchronisation Supabase - $e');
+      debugPrint('AddressService: Erreur de synchronisation - $e');
     }
   }
 

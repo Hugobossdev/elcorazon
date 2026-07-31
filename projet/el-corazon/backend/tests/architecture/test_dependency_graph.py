@@ -60,9 +60,19 @@ ALLOWED: dict[str, set[str]] = {
     # panier de groupe dont les prix seraient calculés ailleurs finirait par ne
     # plus dire la même chose que le panier personnel.
     "groupcarts": {"accounts", "carts", "catalog", "orders", "profiles", "restaurants"},
-    "payments": {"accounts", "orders", "restaurants"},
+    # `delivery` s'y ajoute pour les retraits : les gains d'un livreur sont sur
+    # son dossier, et c'est le module qui manie l'argent qui les débite. La
+    # flèche va bien dans ce sens — `delivery` ne connaît pas `payments`, sans
+    # quoi le cycle serait immédiat.
+    "payments": {"accounts", "delivery", "orders", "restaurants"},
     "delivery": {"accounts", "geography", "orders", "restaurants"},
     "tracking": {"accounts", "delivery", "orders", "restaurants"},
+    # La signalisation d'appel lit la course pour savoir qui appeler, et la
+    # commande pour savoir de quoi il s'agit. Elle ne dépend pas de `tracking` :
+    # les deux modules parlent de la même livraison, mais l'un relaie des
+    # positions et l'autre fait sonner un téléphone — les coupler ferait
+    # dépendre la sonnerie d'un flux de suivi qui peut être coupé.
+    "calls": {"accounts", "delivery", "orders"},
     "notifications": {"accounts", "delivery", "orders"},
     # Comme `notifications` : l'abonné connaît l'émetteur, jamais l'inverse
     # (voir `test_orders_ne_connait_aucun_de_ses_abonnes`). `loyalty` réagit à

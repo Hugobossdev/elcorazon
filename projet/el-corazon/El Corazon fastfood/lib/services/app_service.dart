@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 // Alias explicite : `eccore.User` (backend Django) et le `User` local
 // (Supabase, ci-dessous) portent le même nom mais pas la même forme — voir
 // `_fromDjangoUser`, qui traduit le premier vers le second.
@@ -14,11 +13,9 @@ import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/notification_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
-import 'package:elcora_fast/services/database_service.dart';
 import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/services/error_handler_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
-import 'package:elcora_fast/services/realtime_sync_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
@@ -28,7 +25,6 @@ import 'package:elcora_fast/services/push_notification_service.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/address.dart';
-import 'package:elcora_fast/services/socket_service.dart';
 
 class AppService extends ChangeNotifier {
   static AppService? _instance;
@@ -37,7 +33,7 @@ class AppService extends ChangeNotifier {
   /// `UncontrolledProviderScope`. Seul `main.dart` le fournit réellement
   /// (`ChangeNotifierProvider(create: (_) => AppService(container))`) ; les
   /// nombreux autres appels `AppService()` sans argument, déjà présents
-  /// ailleurs dans le code (mêmes conventions que `DatabaseService()`), n'ont
+  /// ailleurs dans le code, n'ont
   /// pas besoin d'être réécrits — ils retrouvent l'instance déjà construite.
   factory AppService([ProviderContainer? container]) {
     final existing = _instance;
@@ -77,86 +73,7 @@ class AppService extends ChangeNotifier {
   late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
   late final StreamSubscription<String> _tokenRefreshSubscription;
 
-  final Uuid _uuid = const Uuid();
   User? _currentUser;
-
-  // Helper method to convert PaymentMethod enum to database format
-  String _paymentMethodToDbString(PaymentMethod method) {
-    switch (method) {
-      case PaymentMethod.mobileMoney:
-        return 'mobile_money';
-      case PaymentMethod.creditCard:
-        return 'credit_card';
-      case PaymentMethod.debitCard:
-        return 'debit_card';
-      case PaymentMethod.wallet:
-        return 'wallet';
-      case PaymentMethod.cash:
-        return 'cash';
-    }
-  }
-
-  /// Nettoie l'adresse en supprimant les emojis et caractères non autorisés
-  /// Garde uniquement les lettres, chiffres, espaces et caractères de ponctuation sûrs
-  String _cleanAddressString(String address) {
-    if (address.isEmpty) return address;
-
-    String cleaned = address;
-
-    // Supprimer les emojis (plages Unicode communes)
-    cleaned = cleaned.replaceAll(
-      RegExp(r'[\u{1F300}-\u{1F9FF}]', unicode: true),
-      '',
-    ); // Emojis
-    cleaned = cleaned.replaceAll(
-      RegExp(r'[\u{2600}-\u{26FF}]', unicode: true),
-      '',
-    ); // Symboles divers
-    cleaned = cleaned.replaceAll(
-      RegExp(r'[\u{2700}-\u{27BF}]', unicode: true),
-      '',
-    ); // Symboles Dingbats
-    cleaned = cleaned.replaceAll(
-      RegExp(r'[\u{1F600}-\u{1F64F}]', unicode: true),
-      '',
-    ); // Emojis visages
-    cleaned = cleaned.replaceAll(
-      RegExp(r'[\u{1F680}-\u{1F6FF}]', unicode: true),
-      '',
-    ); // Emojis transport
-    cleaned = cleaned.replaceAll(
-      RegExp(r'[\u{1F900}-\u{1F9FF}]', unicode: true),
-      '',
-    ); // Emojis supplémentaires
-
-    // Garder uniquement les caractères sûrs pour une adresse :
-    // - Lettres (a-z, A-Z) et caractères accentués français (é, è, à, etc.)
-    // - Chiffres (0-9)
-    // - Espaces
-    // - Caractères de ponctuation sûrs : virgule, point, tiret, parenthèses
-    // Exclure : !, @, #, $, %, ^, &, *, etc. qui peuvent être considérés comme dangereux
-    cleaned = cleaned.replaceAll(
-      RegExp(
-        r'[^a-zA-Z0-9\s,\-\.\(\)àáâãäåèéêëìíîïòóôõöùúûüýÿçñÀÁÂÃÄÅÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÝŸÇÑ]',
-      ),
-      '',
-    );
-
-    // Nettoyer les espaces multiples
-    cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ');
-
-    return cleaned.trim();
-  }
-
-  // Helper method to check if a string is a valid UUID
-  bool _isValidUUID(String? id) {
-    if (id == null || id.isEmpty) return false;
-    final uuidRegex = RegExp(
-      r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
-      caseSensitive: false,
-    );
-    return uuidRegex.hasMatch(id);
-  }
 
   bool _isInitialized = false;
   List<MenuItem> _menuItems = [];
@@ -172,7 +89,6 @@ class AppService extends ChangeNotifier {
   final LocationService _locationService = LocationService();
   final NotificationService _notificationService = NotificationService();
   final GamificationService _gamificationService = GamificationService();
-  final DatabaseService _databaseService = DatabaseService();
   final PayDunyaService _payDunyaService = PayDunyaService();
   final ErrorHandlerService _errorHandler = ErrorHandlerService();
   final OfflineSyncService _offlineSyncService = OfflineSyncService();
@@ -202,9 +118,7 @@ class AppService extends ChangeNotifier {
   NotificationService get notificationService => _notificationService;
   GamificationService get gamificationService => _gamificationService;
   RealtimeTrackingService get trackingService => RealtimeTrackingService();
-  DatabaseService get databaseService => _databaseService;
   PayDunyaService get payDunyaService => _payDunyaService;
-  SocketService get socketService => SocketService();
   ErrorHandlerService get errorHandler => _errorHandler;
   bool get isClient => _currentUser?.role == UserRole.client;
 
@@ -261,20 +175,11 @@ class AppService extends ChangeNotifier {
 
       stopwatch.stop();
 
-      // Démarrer la synchro temps réel (Supabase + Firestore si dispo)
-      try {
-        await RealtimeSyncService().initialize();
-        RealtimeSyncService().menuItemsStream.listen((items) {
-          _menuItems = items;
-          notifyListeners();
-        });
-        RealtimeSyncService().ordersStream.listen((orders) {
-          _orders = orders;
-          notifyListeners();
-        });
-      } catch (e) {
-        debugPrint('Realtime sync unavailable: $e');
-      }
+      // Pas de synchro temps réel globale : l'ancienne version s'abonnait aux
+      // tables `menu_items` et `orders` de Supabase en entier. Le backend Django
+      // n'expose volontairement pas de canal catalogue (§3.3 du plan de
+      // migration) — le menu est relu par `DjangoMenuRepository` et les
+      // commandes par `ws/orders/{id}/tracking/`, par commande suivie.
 
       if (kDebugMode) {
         debugPrint(
@@ -431,145 +336,6 @@ class AppService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Order methods
-  Future<String> placeOrder(
-    String address,
-    PaymentMethod paymentMethod, {
-    String? notes,
-  }) async {
-    if (_cartItems.isEmpty || _currentUser == null) return '';
-
-    try {
-      final orderId = _uuid.v4();
-      final subtotal = cartTotal;
-      const deliveryFee = 1000.0;
-      final total = subtotal + deliveryFee;
-
-      // Create order data for database
-      // Nettoyer l'adresse pour supprimer les emojis et caractères non autorisés
-      final cleanedAddress = _cleanAddressString(address);
-      final orderData = {
-        'id': orderId,
-        'user_id': _currentUser!.id,
-        'status': 'pending',
-        'subtotal': subtotal,
-        'delivery_fee': deliveryFee,
-        'total': total,
-        'payment_method': _paymentMethodToDbString(paymentMethod),
-        'delivery_address': cleanedAddress,
-        'delivery_notes': notes ?? '',
-        'created_at': DateTime.now().toIso8601String(),
-      };
-
-      // Save order to database
-      await _databaseService.createOrder(orderData);
-
-      // Create order items
-      final orderItems = _cartItems
-          .map(
-            (item) => {
-              'id': _uuid.v4(),
-              'menu_item_id': _isValidUUID(item.id) ? item.id : _uuid.v4(),
-              'menu_item_name': item.name,
-              'name': item.name,
-              'category': 'Food', // Default category
-              'menu_item_image': item.imageUrl ?? '',
-              'quantity': 1,
-              'unit_price': item.price,
-              'total_price': item.price,
-            },
-          )
-          .toList();
-
-      await _databaseService.addOrderItems(orderId, orderItems);
-
-      // Create local order object
-      final order = Order(
-        id: orderId,
-        userId: _currentUser!.id,
-        items: _cartItems
-            .where(
-              (item) => item.id.isNotEmpty && item.name.isNotEmpty,
-            ) // Filter out invalid items
-            .map(
-              (item) => OrderItem(
-                menuItemId: item.id,
-                menuItemName: item.name,
-                name: item.name,
-                category: item.category?.displayName.toLowerCase() ??
-                    'Non catégorisé',
-                menuItemImage: item.imageUrl ?? '',
-                quantity: 1,
-                unitPrice: item.price,
-                totalPrice: item.price,
-              ),
-            )
-            .toList(),
-        subtotal: subtotal,
-        total: total,
-        paymentMethod: paymentMethod,
-        orderTime: DateTime.now(),
-        createdAt: DateTime.now(),
-        deliveryAddress: address,
-      );
-
-      _orders.insert(0, order);
-
-      // Award loyalty points for clients
-      if (_currentUser?.role == UserRole.client) {
-        final pointsEarned = (total / 100).round(); // 1 point per 100 CFA
-        _currentUser = _currentUser!.copyWith(
-          loyaltyPoints: _currentUser!.loyaltyPoints + pointsEarned,
-        );
-        await _databaseService.updateUserProfile(_currentUser!.id, {
-          'loyalty_points': _currentUser!.loyaltyPoints,
-        });
-      }
-
-      _cartItems.clear();
-
-      // Track order event
-      await _databaseService.trackEvent(
-        eventType: 'order_placed',
-        eventData: {
-          'order_id': orderId,
-          'total_amount': total,
-          'item_count': _cartItems.length,
-        },
-        userId: _currentUser!.id,
-      );
-
-      // Déclencher les notifications et gamification
-      await _notificationService.showOrderConfirmationNotification(
-        orderId,
-        cartItems.map((item) => item.name).join(', '),
-      );
-
-      _gamificationService.onOrderPlaced(total);
-
-      // Démarrer le suivi de livraison
-      _locationService.startDeliveryTracking(orderId);
-
-      notifyListeners();
-
-      return orderId;
-    } catch (e) {
-      debugPrint('Error placing order: $e');
-      return '';
-    }
-  }
-
-  // New method to place order with CartService data
-  //
-  // Backend Django (Phase 6, tranche commandes) : la commande naît du
-  // **panier serveur**, jamais d'une liste d'articles envoyée par le client
-  // (C1/C2, `OrderService.create_from_cart`) — `subtotal`/`deliveryFee`/
-  // `discount` restent des paramètres pour compatibilité de signature avec
-  // `checkout_screen.dart`, mais ne sont plus envoyés : le total affiché
-  // avant validation est une estimation client, le total qui compte est
-  // celui que Django renvoie. Le paiement réel (PayDunya via le backend) est
-  // une tranche à venir — quel que soit le moyen choisi, la commande naît
-  // `pending`, aucun paiement n'est déclenché ici (décision produit actée).
   Future<String> placeOrderFromCartService(
     Address? deliveryAddress,
     PaymentMethod paymentMethod,
@@ -606,28 +372,27 @@ class AppService extends ChangeNotifier {
 
       _orders.insert(0, remoteOrder);
 
-      // Award loyalty points for clients — domaine fidélité pas encore
-      // migré (reste simulé côté client, inchangé par cette tranche).
-      if (_currentUser?.role == UserRole.client) {
-        final pointsEarned = (remoteOrder.total / 100).round();
-        _currentUser = _currentUser!.copyWith(
-          loyaltyPoints: _currentUser!.loyaltyPoints + pointsEarned,
-        );
-        try {
-          await _databaseService.updateUserProfile(_currentUser!.id, {
-            'loyalty_points': _currentUser!.loyaltyPoints,
-          });
-        } catch (e) {
-          if (!_offlineSyncService.isOnline) {
-            await _offlineSyncService.saveUserUpdateOffline(
-              _currentUser!.id,
-              {'loyalty_points': _currentUser!.loyaltyPoints},
-            );
-          } else {
-            rethrow;
-          }
-        }
-      }
+      // Aucun point de fidélité crédité ici : le serveur les attribue à la
+      // **livraison** (`apps/loyalty/receivers.py`). L'ancienne version les
+      // ajoutait à la commande et écrivait le solde depuis le client — un
+      // solde que le client choisissait, et qui doublait le crédit serveur.
+
+      // Mesure d'usage. Best-effort et sans `await` bloquant le parcours : une
+      // commande réussie ne doit pas échouer parce que la télémétrie est
+      // indisponible. L'auteur n'est plus déclaré par le client — le serveur
+      // le déduit du jeton.
+      unawaited(
+        eccore.AnalyticsRepository(apiClient: _container.read(eccore.apiClientProvider))
+            .record(
+              eventType: 'order_placed',
+              eventData: {
+                'order_id': remoteOrder.id,
+                'total_amount': remoteOrder.total,
+                'item_count': cartItems.length,
+              },
+            )
+            .catchError((Object e) => debugPrint('Analytics indisponible: $e')),
+      );
 
       // Déclencher les notifications et gamification (inchangé, simulé
       // côté client — domaines pas encore migrés).
@@ -652,98 +417,6 @@ class AppService extends ChangeNotifier {
   }
 
   // Finalize an existing order (e.g. group order)
-  Future<String> finalizeExistingOrder(
-    String orderId,
-    Address? deliveryAddress,
-    PaymentMethod paymentMethod,
-    double total, {
-    String? notes,
-    String? promoCode,
-    double discount = 0.0,
-  }) async {
-    if (_currentUser == null) throw Exception('Utilisateur non connecté');
-
-    try {
-      // Valider l'adresse
-      final addressString = deliveryAddress?.fullAddress ?? '';
-      if (addressString.isEmpty) {
-        throw Exception('Adresse de livraison requise');
-      }
-
-      // Nettoyer l'adresse pour supprimer les emojis et caractères non autorisés
-      final cleanedAddress = _cleanAddressString(addressString);
-
-      // Mettre à jour la commande existante
-      final updates = {
-        'status':
-            'pending', // Reste en pending jusqu'à confirmation du paiement si nécessaire
-        'payment_method': _paymentMethodToDbString(paymentMethod),
-        'delivery_address': cleanedAddress,
-        'delivery_notes': notes ?? '',
-        'total': total,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-
-      if (promoCode != null) {
-        updates['promo_code'] = promoCode;
-        updates['discount'] = discount;
-      }
-
-      await _databaseService.updateOrder(orderId, updates);
-
-      // Traiter le paiement
-      bool paymentSuccess = false;
-      String? paymentTransactionId;
-
-      if (paymentMethod == PaymentMethod.mobileMoney) {
-        final result = await _payDunyaService.processMobileMoneyPayment(
-          orderId: orderId,
-          amount: total,
-          phoneNumber: _currentUser!.phone,
-          operator: 'mtn',
-          customerName: _currentUser!.name,
-          customerEmail: _currentUser!.email,
-        );
-        paymentSuccess = result.success;
-        paymentTransactionId = result.invoiceToken;
-      } else if (paymentMethod == PaymentMethod.cash) {
-        paymentSuccess = true;
-        paymentTransactionId = 'CASH_${DateTime.now().millisecondsSinceEpoch}';
-      } else {
-        // Autres méthodes (simulation)
-        paymentSuccess = true;
-        paymentTransactionId = 'TXN_${DateTime.now().millisecondsSinceEpoch}';
-      }
-
-      if (!paymentSuccess) {
-        throw Exception('Échec du paiement. Veuillez réessayer.');
-      }
-
-      // Mettre à jour statut post-paiement
-      await _databaseService.updateOrder(orderId, {
-        'payment_status': 'completed',
-        'payment_transaction_id': paymentTransactionId,
-        'status': 'confirmed', // Confirmer la commande
-      });
-
-      // Notifications et Tracking
-      await _notificationService.showOrderConfirmationNotification(
-        orderId,
-        'Commande de groupe',
-      );
-
-      _locationService.startDeliveryTracking(orderId);
-
-      // Mettre à jour la liste locale des commandes
-      await _loadUserOrders();
-
-      return orderId;
-    } catch (e) {
-      debugPrint('Error finalizing existing order: $e');
-      rethrow;
-    }
-  }
-
   // Helper methods
 
   Future<void> _loadMenuItems() async {
@@ -827,37 +500,6 @@ class AppService extends ChangeNotifier {
   }
 
   // Admin methods
-  Future<void> addMenuItem(MenuItem item) async {
-    try {
-      // In a real implementation, this would save to database
-      _menuItems.add(item);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error adding menu item: $e');
-    }
-  }
-
-  Future<void> updateMenuItem(MenuItem item) async {
-    try {
-      final index = _menuItems.indexWhere((i) => i.id == item.id);
-      if (index != -1) {
-        _menuItems[index] = item;
-        notifyListeners();
-      }
-    } catch (e) {
-      debugPrint('Error updating menu item: $e');
-    }
-  }
-
-  Future<void> deleteMenuItem(String id) async {
-    try {
-      _menuItems.removeWhere((item) => item.id == id);
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error deleting menu item: $e');
-    }
-  }
-
   List<Order> get allOrders => _orders;
   List<Order> get pendingOrders =>
       _orders.where((o) => o.status == OrderStatus.pending).toList();
@@ -868,25 +510,6 @@ class AppService extends ChangeNotifier {
             o.status != OrderStatus.cancelled,
       )
       .toList();
-
-  Future<void> updateOrderStatus(String orderId, OrderStatus newStatus) async {
-    try {
-      // Update in database
-      await _databaseService.updateOrderStatus(
-        orderId,
-        newStatus.toString().split('.').last,
-      );
-
-      // Update local state
-      final index = _orders.indexWhere((order) => order.id == orderId);
-      if (index != -1) {
-        _orders[index] = _orders[index].copyWith(status: newStatus);
-        notifyListeners();
-      }
-    } catch (e) {
-      debugPrint('Error updating order status: $e');
-    }
-  }
 
   // Payment methods
   Future<PaymentRequestResult> processPayment({

@@ -16,6 +16,8 @@ import hmac
 import json
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -220,6 +222,40 @@ class TestWebhook:
         assert rejeu.status_code == status.HTTP_200_OK
         assert rejeu.data["accepted"] is True
         assert order.status_events.count() == 1
+
+    def test_un_rejeu_n_ecrit_rien_et_ne_heurte_pas_la_contrainte(
+        self, client: APIClient, initiated: Transaction
+    ) -> None:
+        """Le rejeu se résout par une **lecture**, pas par une erreur avalée.
+
+        L'idempotence était obtenue en tentant l'insertion puis en rattrapant
+        l'`IntegrityError`. Correct fonctionnellement, mais chaque rejeu — cas
+        parfaitement normal, les prestataires renvoient leurs notifications —
+        laissait un `duplicate key value violates unique constraint
+        "webhook_event_unique_per_provider"` dans le journal PostgreSQL. Les
+        vraies erreurs s'y noyaient.
+        """
+        from apps.payments.models import WebhookEvent
+
+        payload = {
+            "event_id": "evt-rejeu",
+            "provider_reference": initiated.provider_reference,
+            "status": PaymentStatus.COMPLETED,
+        }
+        post_webhook(client, payload)
+
+        with CaptureQueriesContext(connection) as capture:
+            rejeu = post_webhook(client, payload)
+
+        assert rejeu.status_code == status.HTTP_200_OK
+        assert WebhookEvent.objects.filter(event_id="evt-rejeu").count() == 1
+
+        inserts = [
+            q["sql"]
+            for q in capture.captured_queries
+            if "INSERT" in q["sql"] and "payments_webhookevent" in q["sql"]
+        ]
+        assert not inserts, f"Le rejeu tente encore une insertion : {inserts}"
 
     def test_un_encaissement_ne_redescend_jamais(
         self, client: APIClient, order: Order, initiated: Transaction

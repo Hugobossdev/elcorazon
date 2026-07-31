@@ -7,23 +7,25 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
-import 'package:elcora_fast/services/supabase_realtime_service.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 
 /// Suivi de commande — Phase 6 : `orderUpdates`/`deliveryLocationUpdates`
-/// viennent désormais de `ws/orders/{id}/tracking/` (backend Django,
-/// `apps/tracking/consumers.py`) au lieu de Supabase Realtime. Le reste de ce
-/// service (statuts admin, position livreur, notifications, création de
-/// commande, géocodage) sert d'autres écrans/rôles ou est déjà supplanté par
-/// une tranche précédente — inchangé, toujours sur `SupabaseRealtimeService`/
-/// `GeocodingService`.
+/// viennent de `ws/orders/{id}/tracking/` (backend Django,
+/// `apps/tracking/consumers.py`).
+///
+/// Ce service ne fait plus qu'écouter et géocoder. Tout ce qu'il déléguait à
+/// `SupabaseRealtimeService` a disparu avec lui : faire avancer un statut,
+/// marquer une commande livrée et pousser une position sont des gestes du
+/// personnel ou du livreur, que le backend refuse à un compte client
+/// (`orders.update_status`, `apps/delivery`) — un client n'a jamais eu à
+/// pouvoir les émettre. Créer une commande passe par `DjangoOrderRepository`,
+/// lire les siennes aussi, et l'envoi de notification appartient au serveur.
 class RealtimeTrackingService extends ChangeNotifier {
   static final RealtimeTrackingService _instance =
       RealtimeTrackingService._internal();
   factory RealtimeTrackingService() => _instance;
   RealtimeTrackingService._internal();
 
-  final SupabaseRealtimeService _supabaseService = SupabaseRealtimeService();
   final GeocodingService _geocodingService = GeocodingService();
 
   eccore.RealtimeChannel? _channel;
@@ -42,12 +44,6 @@ class RealtimeTrackingService extends ChangeNotifier {
   Stream<Order> get orderUpdates => _orderUpdatesController.stream;
   Stream<Map<String, dynamic>> get deliveryLocationUpdates =>
       _deliveryLocationUpdatesController.stream;
-
-  // Hors scope de cette tranche — toujours Supabase
-  Stream<String> get notifications => _supabaseService.notifications;
-  Map<String, Order> get trackedOrders => _supabaseService.trackedOrders;
-  Map<String, Map<String, dynamic>> get activeDeliveries =>
-      _supabaseService.activeDeliveries;
 
   bool get isConnected => _isConnected;
 
@@ -120,42 +116,6 @@ class RealtimeTrackingService extends ChangeNotifier {
     await _channel?.close();
     _channel = null;
     _channelSubscription = null;
-  }
-
-  /// Met à jour le statut d'une commande (pour les admins)
-  Future<void> updateOrderStatus(String orderId, OrderStatus status) async {
-    await _supabaseService.updateOrderStatus(orderId, status);
-  }
-
-  /// Marque une commande comme livrée
-  Future<void> markAsDelivered(String orderId) async {
-    await _supabaseService.markAsDelivered(orderId);
-  }
-
-  /// Met à jour la position de livraison
-  Future<void> updateDeliveryLocation(
-    String orderId,
-    double latitude,
-    double longitude,
-  ) async {
-    await _supabaseService.updateDeliveryLocation(orderId, latitude, longitude);
-  }
-
-  /// Envoie une notification à un utilisateur spécifique
-  Future<void> sendNotification(String targetUserId, String message) async {
-    await _supabaseService.sendNotification(targetUserId, message);
-  }
-
-  /// Crée une nouvelle commande avec géocodage automatique
-  Future<String?> createOrderWithGeocoding(
-    Map<String, dynamic> orderData,
-  ) async {
-    return await _supabaseService.createOrderWithGeocoding(orderData);
-  }
-
-  /// Obtient les commandes d'un utilisateur
-  Future<List<Order>> getUserOrders(String userId) async {
-    return await _supabaseService.getUserOrders(userId);
   }
 
   /// Géocode une adresse

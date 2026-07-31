@@ -29,11 +29,13 @@ from rest_framework.serializers import BaseSerializer
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
-from apps.delivery.models import Assignment, CourierProfile
+from apps.delivery.models import Assignment, CourierProfile, CourierRating
 from apps.delivery.serializers import (
     AssignmentSerializer,
     CourierProfileSerializer,
     CourierProvisioningSerializer,
+    CourierRatingSerializer,
+    CourierRatingWriteSerializer,
     DeclineSerializer,
     DeliveryTransitionSerializer,
     DocumentsSerializer,
@@ -41,7 +43,12 @@ from apps.delivery.serializers import (
     OnlineSerializer,
     VerificationSerializer,
 )
-from apps.delivery.services import AssignmentService, CourierApplication, CourierService
+from apps.delivery.services import (
+    AssignmentService,
+    CourierApplication,
+    CourierRatingService,
+    CourierService,
+)
 from apps.delivery.states import DeliveryStatus, VerificationStatus
 from apps.orders.models import Order
 from apps.restaurants.scoping import assert_in_scope, is_unscoped, staff_restaurant_ids
@@ -50,6 +57,7 @@ from common.permissions import (
     HasPermission,
     HasReadWritePermission,
     IsCourier,
+    IsCustomer,
     authenticated_user,
 )
 
@@ -381,3 +389,54 @@ class CancelAssignmentView(APIView):
             reason=serializer.validated_data["reason"],
         )
         return Response(AssignmentSerializer(cancelled).data)
+
+
+class OrderRatingView(APIView):
+    """`GET|POST /delivery/orders/{order}/rating/` — la note du client sur sa livraison.
+
+    Une seule route pour les deux gestes parce que l'écran pose toujours les
+    deux questions à la suite : « ai-je déjà noté ? », puis « voici ma note ».
+    Le 404 du GET est la réponse à la première, et non une erreur à traiter.
+
+    La commande est cherchée **dans les commandes de l'appelant** : il n'y a
+    donc aucune vérification de propriété à écrire ensuite, et aucune à
+    oublier. Noter la livraison d'autrui rend un 404, pas un 403 — l'existence
+    de la commande d'un tiers ne se déduit pas d'ici.
+    """
+
+    permission_classes = [IsCustomer]
+
+    def _assignment(self, request: Request, order_id: str) -> Assignment:
+        order = get_object_or_404(
+            Order.objects.filter(customer=authenticated_user(request)), pk=order_id
+        )
+        return get_object_or_404(
+            Assignment.objects.select_related("courier__user"),
+            order=order,
+            status=DeliveryStatus.DELIVERED,
+        )
+
+    @extend_schema(responses={200: CourierRatingSerializer}, tags=["delivery"])
+    def get(self, request: Request, order_id: str) -> Response:
+        assignment = self._assignment(request, order_id)
+        rating = get_object_or_404(CourierRating, assignment=assignment)
+        return Response(CourierRatingSerializer(rating).data)
+
+    @extend_schema(
+        request=CourierRatingWriteSerializer,
+        responses={201: CourierRatingSerializer},
+        tags=["delivery"],
+    )
+    def post(self, request: Request, order_id: str) -> Response:
+        assignment = self._assignment(request, order_id)
+
+        payload = CourierRatingWriteSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        rating = CourierRatingService.rate(
+            assignment=assignment,
+            customer=authenticated_user(request),
+            score=payload.validated_data["score"],
+            comment=payload.validated_data.get("comment", ""),
+        )
+        return Response(CourierRatingSerializer(rating).data, status=status.HTTP_201_CREATED)

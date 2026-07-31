@@ -21,11 +21,27 @@ __all__ = [
     "DeviceSerializer",
     "LoginSerializer",
     "PermissionSerializer",
+    "ProfileUpdateSerializer",
     "RegisterSerializer",
     "RoleSerializer",
     "TokenPairSerializer",
     "UserSerializer",
 ]
+
+
+class ProfileUpdateSerializer(serializers.ModelSerializer[User]):
+    """Ce qu'un compte peut changer **de lui-même**.
+
+    Deux champs, et pas un de plus. Ni `email` — il identifie le compte et sert
+    à s'y connecter, le changer se fait avec une vérification —, ni
+    `user_type` : un client qui pourrait s'écrire « livreur » ou « staff » se
+    donnerait des droits. L'implémentation Supabase écrivait la table `users`
+    avec un dictionnaire libre, où rien n'interdisait ces deux clés.
+    """
+
+    class Meta:
+        model = User
+        fields = ["full_name", "phone"]
 
 
 class UserSerializer(serializers.ModelSerializer[User]):

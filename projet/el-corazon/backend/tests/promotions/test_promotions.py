@@ -17,6 +17,8 @@ import uuid
 from typing import Any
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -276,6 +278,75 @@ class TestConsommation:
         promotion.refresh_from_db()
         assert promotion.used_count == 1
         assert PromotionRedemption.objects.count() == 1
+
+    def test_la_meme_commande_se_rejoue_malgre_un_quota_par_personne(
+        self, customer: User, restaurant: Restaurant
+    ) -> None:
+        """Le rejeu ne doit pas se heurter au quota qu'il a lui-même consommé.
+
+        Les quotas étaient vérifiés **avant** la recherche d'une utilisation
+        existante, si bien qu'un rejeu se voyait refuser par le décompte de sa
+        propre consommation : « Vous avez déjà utilisé ce code », alors qu'il
+        s'agissait de la même commande. Le rattrapage de la violation d'unicité,
+        censé porter l'idempotence de l'ADR-009, était inatteignable dans ce cas.
+        """
+        promotion = promo(usage_limit_per_user=1)
+        commande = uuid.uuid4()
+
+        premiere = PromotionService.redeem(
+            promotion=promotion, user=customer, order_id=commande, discount=Money(1_000, XOF)
+        )
+        seconde = PromotionService.redeem(
+            promotion=promotion, user=customer, order_id=commande, discount=Money(1_000, XOF)
+        )
+
+        assert seconde.pk == premiere.pk
+        promotion.refresh_from_db()
+        assert promotion.used_count == 1
+        assert PromotionRedemption.objects.count() == 1
+
+    def test_le_rejeu_passe_par_une_lecture_sans_tenter_d_insertion(
+        self, customer: User, restaurant: Restaurant
+    ) -> None:
+        """Plus d'insertion vouée à violer
+        `one_redemption_per_promotion_and_order` : le rejeu se résout par un
+        `SELECT`, et n'inscrit donc plus d'erreur au journal PostgreSQL pour un
+        cas parfaitement normal."""
+        promotion = promo()
+        commande = uuid.uuid4()
+        PromotionService.redeem(
+            promotion=promotion, user=customer, order_id=commande, discount=Money(1_000, XOF)
+        )
+
+        with CaptureQueriesContext(connection) as capture:
+            PromotionService.redeem(
+                promotion=promotion, user=customer, order_id=commande, discount=Money(1_000, XOF)
+            )
+
+        inserts = [
+            q["sql"]
+            for q in capture.captured_queries
+            if "INSERT" in q["sql"] and "promotions_promotionredemption" in q["sql"]
+        ]
+        assert not inserts, f"Le rejeu tente encore une insertion : {inserts}"
+
+    def test_un_quota_par_personne_reste_oppose_a_une_autre_commande(
+        self, customer: User, restaurant: Restaurant
+    ) -> None:
+        """La contrepartie du test précédent : rendre le rejeu possible ne doit
+        pas rendre le quota inopérant sur une commande *différente*."""
+        promotion = promo(usage_limit_per_user=1)
+        PromotionService.redeem(
+            promotion=promotion, user=customer, order_id=uuid.uuid4(), discount=Money(1_000, XOF)
+        )
+
+        with pytest.raises(PromotionRefused, match="déjà utilisé"):
+            PromotionService.redeem(
+                promotion=promotion,
+                user=customer,
+                order_id=uuid.uuid4(),
+                discount=Money(1_000, XOF),
+            )
 
 
 class TestPassageDeCommande:

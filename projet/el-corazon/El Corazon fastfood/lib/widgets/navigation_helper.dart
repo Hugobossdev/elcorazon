@@ -144,20 +144,6 @@ class NavigationHelper {
     }
   }
 
-  /// Naviguer vers le portefeuille
-  static Future<void> navigateToWallet(BuildContext context) async {
-    try {
-      await NavigationService.pushNamedWithArgs(context, AppRouter.wallet);
-    } catch (e) {
-      if (!context.mounted) return;
-      NavigationErrorHandler.handleNavigationError(
-        context,
-        'Erreur lors de la navigation vers le portefeuille: $e',
-        null,
-      );
-    }
-  }
-
   /// Naviguer vers les récompenses
   static Future<void> navigateToRewards(BuildContext context) async {
     try {
@@ -424,26 +410,6 @@ class NavigationHelper {
     }
   }
 
-  /// Naviguer vers la vérification OTP
-  static Future<void> navigateToOTPVerification(
-    BuildContext context,
-    String phone,
-  ) async {
-    try {
-      await NavigationService.pushNamedWithArgs(
-        context,
-        AppRouter.otpVerification,
-        arguments: {'phone': phone},
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      NavigationErrorHandler.handleNavigationError(
-        context,
-        'Erreur lors de la navigation vers la vérification OTP: $e',
-        null,
-      );
-    }
-  }
 
   /// Retourner à l'accueil
   static Future<void> goToHome(BuildContext context, User? user) async {
@@ -507,7 +473,6 @@ extension NavigationHelperExtension on BuildContext {
       NavigationHelper.navigateToDeliveryTracking(this, orderId);
 
   /// Naviguer vers le portefeuille
-  Future<void> navigateToWallet() => NavigationHelper.navigateToWallet(this);
 
   /// Naviguer vers les récompenses
   Future<void> navigateToRewards() => NavigationHelper.navigateToRewards(this);
@@ -587,10 +552,6 @@ extension NavigationHelperExtension on BuildContext {
   /// Naviguer vers les commandes améliorées
   Future<void> navigateToEnhancedOrders() =>
       NavigationHelper.navigateToEnhancedOrders(this);
-
-  /// Naviguer vers la vérification OTP
-  Future<void> navigateToOTPVerification(String phone) =>
-      NavigationHelper.navigateToOTPVerification(this, phone);
 
   /// Retourner à l'accueil
   Future<void> goToHome(User? user) => NavigationHelper.goToHome(this, user);

@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcora_fast/services/database_service.dart';
 
 class CustomizationOption {
   final String id;
@@ -27,6 +29,24 @@ class CustomizationOption {
     this.imageUrl,
     this.allergens,
   });
+
+  /// Depuis le contrat Django (`OptionSerializer` dans son groupe).
+  ///
+  /// La `category` locale n'a pas d'équivalent : le backend groupe les options
+  /// par `OptionGroup` (« Cuisson », « Taille »...) plutôt que par une
+  /// étiquette libre. Le nom du groupe en tient lieu — c'est aussi ce que
+  /// l'écran affiche en titre de section.
+  factory CustomizationOption.fromRemote(eccore.Option option, eccore.OptionGroup group) {
+    return CustomizationOption(
+      id: option.id,
+      name: option.name,
+      category: group.name,
+      priceModifier: option.priceDelta.toMajorUnits(),
+      isDefault: option.isDefault,
+      isRequired: group.isRequired,
+      maxQuantity: group.maxSelect,
+    );
+  }
 
   factory CustomizationOption.fromDatabase(Map<String, dynamic> row) {
     // Parser l'option depuis la jointure
@@ -189,7 +209,6 @@ class CustomizationService extends ChangeNotifier {
   factory CustomizationService() => _instance;
   CustomizationService._internal();
 
-  final DatabaseService _databaseService = DatabaseService();
 
   Map<String, List<CustomizationOption>> _itemOptions = {};
   Map<String, List<CustomizationOption>> _defaultOptionsByName = {};
@@ -234,44 +253,15 @@ class CustomizationService extends ChangeNotifier {
     }
   }
 
+  /// Plus de préchargement global des options.
+  ///
+  /// L'ancienne version lisait d'un coup la table entière des personnalisations
+  /// de tous les articles. Le contrat Django ne porte les groupes d'options que
+  /// sur le **détail** d'un article (`MenuItemDetailSerializer`), justement
+  /// pour ne pas traîner ces lignes dans chaque liste de menu : elles sont donc
+  /// chargées à la demande, par article ouvert
+  /// ([_loadOptionsForMenuItem]).
   Future<void> _loadCustomizationOptions() async {
-    try {
-      final response = await _databaseService.getAllCustomizationOptions();
-      final Map<String, List<CustomizationOption>> grouped = {};
-
-      for (final row in response) {
-        try {
-          final menuItemId = row['menu_item_id']?.toString();
-          if (menuItemId == null || menuItemId.isEmpty) {
-            debugPrint('⚠️ Customization row missing menu_item_id: $row');
-            continue;
-          }
-
-          // Vérifier que customization_options existe
-          if (row['customization_options'] == null) {
-            debugPrint(
-                '⚠️ Customization row missing customization_options: $row',);
-            continue;
-          }
-
-          grouped.putIfAbsent(menuItemId, () => []);
-          final option = CustomizationOption.fromDatabase(row);
-          grouped[menuItemId]!.add(option);
-        } catch (e) {
-          debugPrint('⚠️ Erreur parsing customization option: $e');
-          debugPrint('   Row data: $row');
-          // Continuer avec les autres options
-        }
-      }
-
-      _itemOptions = grouped;
-      debugPrint(
-          '✅ Customization options loaded from database (${_itemOptions.length} menu items, ${_itemOptions.values.fold<int>(0, (sum, list) => sum + list.length)} total options)',);
-    } catch (e) {
-      debugPrint('❌ Error loading customization options: $e');
-      _itemOptions = {};
-    }
-
     _defaultOptionsByName = _getDefaultCustomizationOptions();
   }
 
@@ -836,22 +826,14 @@ class CustomizationService extends ChangeNotifier {
     }
 
     try {
-      final response =
-          await _databaseService.getCustomizationOptions(menuItemId);
-      final List<CustomizationOption> options = [];
+      final item = await eccore.CatalogRepository(apiClient: apiClient)
+          .getMenuItem(menuItemId);
 
-      for (final row in response) {
-        try {
-          if (row['customization_options'] == null) {
-            continue;
-          }
-          final option = CustomizationOption.fromDatabase(row);
-          options.add(option);
-        } catch (e) {
-          debugPrint(
-              '⚠️ Erreur parsing customization option pour $menuItemId: $e',);
-        }
-      }
+      final options = [
+        for (final group in item.optionGroups)
+          for (final option in group.options)
+            if (option.isAvailable) CustomizationOption.fromRemote(option, group),
+      ];
 
       if (options.isNotEmpty) {
         _itemOptions[menuItemId] = options;

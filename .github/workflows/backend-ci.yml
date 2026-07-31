@@ -19,6 +19,18 @@ defaults:
 
 env:
   PYTHON_VERSION: "3.13"
+  # Les installations échouaient par intermittence sur des `ReadTimeoutError`
+  # de PyPI. Le défaut de pip — 5 tentatives, mais **15 secondes** de délai —
+  # convient à une liaison courte ; un miroir lent ou une roue volumineuse le
+  # dépasse sans qu'il y ait de panne réelle. Les deux réglages traitent deux
+  # causes distinctes : le délai absorbe la lenteur, les tentatives la coupure.
+  #
+  # Posés au niveau du workflow plutôt que sur chaque `run` : les trois jobs
+  # installent les mêmes dépendances, et un quatrième les héritera sans qu'on
+  # ait à y penser. `cache: pip` (déjà présent sur chaque job) reste la
+  # première défense — il évite le réseau quand `pyproject.toml` n'a pas bougé.
+  PIP_RETRIES: "8"
+  PIP_TIMEOUT: "60"
 
 jobs:
   qualite:

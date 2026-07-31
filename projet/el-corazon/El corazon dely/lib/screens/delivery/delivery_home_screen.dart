@@ -117,17 +117,6 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         await appService.initialize();
       }
 
-      // If user is logged in but profile not loaded, try loading it again
-      if (appService.currentUser == null) {
-        final authUser = appService.databaseService.currentUser;
-        if (authUser != null) {
-          // We can't access _loadUserProfile directly as it is private,
-          // but initialize() calls it.
-          // If we are here, initialize() might have failed to load user.
-          // We can try logout/login logic or just show error.
-        }
-      }
-
       // Initialiser les services optionnels (ne pas bloquer si échec)
       try {
         await Provider.of<AddressService>(

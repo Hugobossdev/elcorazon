@@ -148,7 +148,10 @@
 
     // Charger Google Maps avec callback
     const mapsScript = document.createElement('script');
-    mapsScript.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyCtSGHbgwiNKhblSK7NpU7aVUvuxz-w-tM&callback=initGoogleMaps';
+    // `loading=async` : chargement non bloquant recommandé par Google
+    // (https://goo.gle/js-api-loading) — le callback reste le signal de
+    // disponibilité de l'API.
+    mapsScript.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyCtSGHbgwiNKhblSK7NpU7aVUvuxz-w-tM&loading=async&callback=initGoogleMaps';
     mapsScript.async = true;
     mapsScript.defer = true;
     mapsScript.onerror = function() {

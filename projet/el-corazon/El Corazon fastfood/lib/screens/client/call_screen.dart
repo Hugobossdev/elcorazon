@@ -65,36 +65,11 @@ class _CallScreenState extends State<CallScreen> {
         return;
       }
     } else {
-      // Créer un nouvel appel sortant
-      final order = await _getOrderDetails();
-      if (!mounted) return;
-
-      if (order == null) {
-        if (mounted) Navigator.of(context).pop();
-        return;
-      }
-
-      final receiverId = order['delivery_person_id'] ?? order['user_id'];
-      if (receiverId == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Aucun livreur assigné à cette commande'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-          Navigator.of(context).pop();
-        }
-        return;
-      }
-
-      final call = await _callService.initiateCall(
-        orderId: widget.orderId,
-        callerId: currentUser.id,
-        receiverId: receiverId.toString(),
-        callerName: currentUser.name,
-        receiverName: widget.receiverName,
-      );
+      // Nouvel appel sortant. Ni destinataire ni canal ne sont fournis : le
+      // serveur déduit le premier de la course, dérive le second de l'appel.
+      // Le refus (aucune livraison en cours, appel déjà ouvert) vient de lui.
+      await _callService.initialize(userId: currentUser.id);
+      final call = await _callService.initiateCall(orderId: widget.orderId);
 
       if (!mounted) return;
 
@@ -127,24 +102,6 @@ class _CallScreenState extends State<CallScreen> {
     });
 
     setState(() {});
-  }
-
-  Future<Map<String, dynamic>?> _getOrderDetails() async {
-    if (!mounted) return null;
-
-    try {
-      final appService = Provider.of<AppService>(context, listen: false);
-      final response = await appService.databaseService.supabase
-          .from('orders')
-          .select('*, delivery_person_id, user_id')
-          .eq('id', widget.orderId)
-          .maybeSingle();
-
-      return response;
-    } catch (e) {
-      debugPrint('Erreur récupération commande: $e');
-      return null;
-    }
   }
 
   void _startCallTimer() {

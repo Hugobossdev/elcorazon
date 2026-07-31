@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Types de validation
 enum ValidationType {
@@ -90,8 +89,6 @@ class FormValidationService extends ChangeNotifier {
   factory FormValidationService() => _instance;
   FormValidationService._internal();
 
-  SupabaseClient? _supabase;
-
   // Cache des configurations de validation
   final Map<String, FormValidationConfig> _validationConfigs = {};
 
@@ -104,7 +101,6 @@ class FormValidationService extends ChangeNotifier {
   /// Initialiser le service
   Future<void> initialize() async {
     try {
-      _supabase = Supabase.instance.client;
       await _loadValidationConfigs();
       debugPrint('FormValidationService initialized successfully');
     } catch (e) {
@@ -374,15 +370,9 @@ class FormValidationService extends ChangeNotifier {
         }
       }
 
-      // Valider les contraintes de base de données
-      if (isValid) {
-        final dbValidationResult =
-            await _validateWithDatabase(formName, formData);
-        if (!dbValidationResult.isValid) {
-          isValid = false;
-          fieldErrors.addAll(dbValidationResult.fieldErrors);
-        }
-      }
+      // Les contraintes d'unicité (email, téléphone, adresse, moyen de
+      // paiement) sont vérifiées par le backend Django, qui les renvoie en 400
+      // sur le champ concerné : le client ne les pré-vérifie plus.
 
       final result = ValidationResult(
         isValid: isValid,
@@ -409,152 +399,6 @@ class FormValidationService extends ChangeNotifier {
         errorMessage: 'Erreur lors de la validation: $e',
       );
     }
-  }
-
-  /// Valider avec la base de données
-  Future<ValidationResult> _validateWithDatabase(
-      String formName, Map<String, dynamic> formData,) async {
-    try {
-      if (_supabase == null) {
-        debugPrint('Supabase not initialized, skipping database validation');
-        return const ValidationResult(isValid: true);
-      }
-
-      switch (formName) {
-        case 'auth':
-          return await _validateAuthWithDatabase(formData);
-        case 'address':
-          return await _validateAddressWithDatabase(formData);
-        case 'payment':
-          return await _validatePaymentWithDatabase(formData);
-        default:
-          return const ValidationResult(isValid: true);
-      }
-    } catch (e) {
-      debugPrint('Error validating with database: $e');
-      return ValidationResult(
-        isValid: false,
-        errorMessage: 'Erreur de validation avec la base de données: $e',
-      );
-    }
-  }
-
-  /// Valider l'authentification avec la base de données
-  Future<ValidationResult> _validateAuthWithDatabase(
-      Map<String, dynamic> formData,) async {
-    final Map<String, String> errors = {};
-
-    if (_supabase == null) {
-      return const ValidationResult(isValid: true);
-    }
-
-    // Vérifier si l'email existe déjà
-    if (formData.containsKey('email')) {
-      try {
-        final response = await _supabase!
-            .from('users')
-            .select('id')
-            .eq('email', formData['email'])
-            .maybeSingle();
-
-        if (response != null) {
-          errors['email'] = 'Cet email est déjà utilisé';
-        }
-      } catch (e) {
-        debugPrint('Error checking email uniqueness: $e');
-      }
-    }
-
-    // Vérifier si le téléphone existe déjà
-    if (formData.containsKey('phone')) {
-      try {
-        final response = await _supabase!
-            .from('users')
-            .select('id')
-            .eq('phone', formData['phone'])
-            .maybeSingle();
-
-        if (response != null) {
-          errors['phone'] = 'Ce numéro de téléphone est déjà utilisé';
-        }
-      } catch (e) {
-        debugPrint('Error checking phone uniqueness: $e');
-      }
-    }
-
-    return ValidationResult(
-      isValid: errors.isEmpty,
-      fieldErrors: errors,
-    );
-  }
-
-  /// Valider l'adresse avec la base de données
-  Future<ValidationResult> _validateAddressWithDatabase(
-      Map<String, dynamic> formData,) async {
-    final Map<String, String> errors = {};
-
-    // Vérifier si l'adresse existe déjà pour cet utilisateur
-    if (formData.containsKey('street') && formData.containsKey('city')) {
-      try {
-        if (_supabase != null) {
-          final userId = _supabase!.auth.currentUser?.id;
-          if (userId != null) {
-            final response = await _supabase!
-                .from('user_addresses')
-                .select('id')
-                .eq('user_id', userId)
-                .eq('street', formData['street'])
-                .eq('city', formData['city'])
-                .maybeSingle();
-
-            if (response != null) {
-              errors['street'] = 'Cette adresse existe déjà';
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('Error checking address uniqueness: $e');
-      }
-    }
-
-    return ValidationResult(
-      isValid: errors.isEmpty,
-      fieldErrors: errors,
-    );
-  }
-
-  /// Valider le paiement avec la base de données
-  Future<ValidationResult> _validatePaymentWithDatabase(
-      Map<String, dynamic> formData,) async {
-    final Map<String, String> errors = {};
-
-    // Vérifier si la carte existe déjà
-    if (formData.containsKey('cardNumber')) {
-      try {
-        if (_supabase != null) {
-          final userId = _supabase!.auth.currentUser?.id;
-          if (userId != null) {
-            final response = await _supabase!
-                .from('user_payment_methods')
-                .select('id')
-                .eq('user_id', userId)
-                .eq('card_number', formData['cardNumber'])
-                .maybeSingle();
-
-            if (response != null) {
-              errors['cardNumber'] = 'Cette carte est déjà enregistrée';
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('Error checking card uniqueness: $e');
-      }
-    }
-
-    return ValidationResult(
-      isValid: errors.isEmpty,
-      fieldErrors: errors,
-    );
   }
 
   /// Valider une règle spécifique

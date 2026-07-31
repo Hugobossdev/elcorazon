@@ -4,12 +4,9 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/notification_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
-import 'package:elcora_fast/services/promotion_service.dart';
-import 'package:elcora_fast/services/social_service.dart';
+import 'package:elcora_fast/services/group_cart_service.dart';
 import 'package:elcora_fast/services/voice_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
-import 'package:elcora_fast/services/marketing_service.dart';
-import 'package:elcora_fast/services/group_delivery_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
@@ -18,8 +15,8 @@ import 'package:elcora_fast/services/ai_recommendation_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/push_notification_service.dart';
-import 'package:elcora_fast/services/supabase_realtime_service.dart';
-import 'package:elcora_fast/services/wallet_service.dart';
+import 'package:elcora_fast/services/notification_database_service.dart';
+import 'package:elcora_fast/services/subscription_service.dart';
 import 'package:elcora_fast/models/user.dart';
 
 /// Service centralisé pour initialiser tous les services de l'application
@@ -50,14 +47,7 @@ class ServiceInitializer {
       final voiceService = Provider.of<VoiceService>(context, listen: false);
       final customizationService =
           Provider.of<CustomizationService>(context, listen: false);
-      final walletService = Provider.of<WalletService>(context, listen: false);
-      final socialService = Provider.of<SocialService>(context, listen: false);
-      final groupDeliveryService =
-          Provider.of<GroupDeliveryService>(context, listen: false);
-      final promotionService =
-          Provider.of<PromotionService>(context, listen: false);
-      final marketingService =
-          Provider.of<MarketingService>(context, listen: false);
+      final groupCartService = Provider.of<GroupCartService>(context, listen: false);
       final promoCodeService =
           Provider.of<PromoCodeService>(context, listen: false);
       final payDunyaService =
@@ -84,15 +74,11 @@ class ServiceInitializer {
       await _initializeAdvancedServices(
         voiceService: voiceService,
         customizationService: customizationService,
-        walletService: walletService,
       );
 
       // Services optionnels
       await _initializeOptionalServices(
-        socialService: socialService,
-        groupDeliveryService: groupDeliveryService,
-        promotionService: promotionService,
-        marketingService: marketingService,
+        groupCartService: groupCartService,
         promoCodeService: promoCodeService,
         payDunyaService: payDunyaService,
         addressService: addressService,
@@ -143,7 +129,6 @@ class ServiceInitializer {
   Future<void> _initializeAdvancedServices({
     required VoiceService voiceService,
     required CustomizationService customizationService,
-    required WalletService walletService,
   }) async {
     debugPrint('🔧 Initialisation des services avancés...');
 
@@ -154,19 +139,13 @@ class ServiceInitializer {
     await _initializeServiceWithoutContext(
       () => customizationService.initialize(),
     );
-    await _initializeServiceWithoutContext(
-      () => walletService.initialize(),
-    );
 
     debugPrint('✅ Services avancés initialisés');
   }
 
   /// Initialise les services optionnels
   Future<void> _initializeOptionalServices({
-    required SocialService socialService,
-    required GroupDeliveryService groupDeliveryService,
-    required PromotionService promotionService,
-    required MarketingService marketingService,
+    required GroupCartService groupCartService,
     required PromoCodeService promoCodeService,
     required PayDunyaService payDunyaService,
     required AddressService addressService,
@@ -178,19 +157,10 @@ class ServiceInitializer {
 
     // Services sociaux et groupes
     await _initializeServiceWithoutContext(
-      () => socialService.initialize(),
-    );
-    await _initializeServiceWithoutContext(
-      () => groupDeliveryService.initialize(),
+      () => groupCartService.initialize(),
     );
 
-    // Services de marketing et promotions
-    await _initializeServiceWithoutContext(
-      () => promotionService.initialize(),
-    );
-    await _initializeServiceWithoutContext(
-      () => marketingService.initialize(),
-    );
+    // Codes promotionnels
     await _initializeServiceWithoutContext(
       () => promoCodeService.initialize(),
     );
@@ -248,29 +218,26 @@ class ServiceInitializer {
       // Capturer les services avant le gap asynchrone
       final realtimeTrackingService =
           Provider.of<RealtimeTrackingService>(context, listen: false);
-      final supabaseRealtimeService =
-          Provider.of<SupabaseRealtimeService>(context, listen: false);
-      final notificationService =
-          Provider.of<NotificationService>(context, listen: false);
+      final notificationDatabaseService =
+          Provider.of<NotificationDatabaseService>(context, listen: false);
+      final subscriptionService =
+          Provider.of<SubscriptionService>(context, listen: false);
 
-      // Initialiser le service de notifications avec l'utilisateur
+      // Charger l'historique de notifications du compte. Plus d'identifiant à
+      // passer : le serveur cloisonne sur le jeton.
       await _initializeServiceWithoutContext(
-        () => notificationService.initialize(userId: user.id),
+        () => notificationDatabaseService.loadNotifications(),
+      );
+
+      // Abonnement en cours : décide de l'accès aux articles `vip_exclusive`.
+      await _initializeServiceWithoutContext(
+        () => subscriptionService.load(),
       );
 
       // Initialiser le service de suivi en temps réel avec l'utilisateur
       // (pas besoin de passer context car le service est déjà capturé)
       await _initializeServiceWithoutContext(
         () => realtimeTrackingService.initialize(
-          userId: user.id,
-          userRole: user.role,
-        ),
-      );
-
-      // Initialiser le service Supabase Realtime avec l'utilisateur
-      // (pas besoin de passer context car le service est déjà capturé)
-      await _initializeServiceWithoutContext(
-        () => supabaseRealtimeService.initialize(
           userId: user.id,
           userRole: user.role,
         ),
@@ -308,17 +275,10 @@ class ServiceInitializer {
       'CustomizationService':
           Provider.of<CustomizationService>(context, listen: false)
               .isInitialized,
-      'WalletService': true, // Pas de propriété isInitialized
-      'SocialService':
-          Provider.of<SocialService>(context, listen: false).isInitialized,
-      'GroupDeliveryService':
-          Provider.of<GroupDeliveryService>(context, listen: false)
-              .isInitialized,
+      'GroupCartService':
+          Provider.of<GroupCartService>(context, listen: false).isInitialized,
       'RealtimeTrackingService':
           Provider.of<RealtimeTrackingService>(context, listen: false)
-              .isConnected,
-      'SupabaseRealtimeService':
-          Provider.of<SupabaseRealtimeService>(context, listen: false)
               .isConnected,
       'OfflineSyncService':
           Provider.of<OfflineSyncService>(context, listen: false).isInitialized,

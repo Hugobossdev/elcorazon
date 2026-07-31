@@ -227,58 +227,6 @@ class CartScreen extends StatelessWidget {
           _buildPriceSummary(cartService),
           const SizedBox(height: 20),
 
-          // VIP Free Meal Toggle - Désactivé temporairement (dépend du portefeuille)
-          // Consumer<WalletService>(
-          //   builder: (context, walletService, child) {
-          //     if (walletService.isEligibleForFreeMeal) {
-          //       return Container(
-          //         margin: const EdgeInsets.only(bottom: 16),
-          //         padding: const EdgeInsets.all(12),
-          //         decoration: BoxDecoration(
-          //           color: Colors.amber.withValues(alpha: 0.1),
-          //           borderRadius: BorderRadius.circular(12),
-          //           border: Border.all(color: Colors.amber),
-          //         ),
-          //         child: Row(
-          //           children: [
-          //             const Icon(Icons.star, color: Colors.amber),
-          //             const SizedBox(width: 12),
-          //             Expanded(
-          //               child: Column(
-          //                 crossAxisAlignment: CrossAxisAlignment.start,
-          //                 children: [
-          //                   Text(
-          //                     'Repas gratuit VIP',
-          //                     style: TextStyle(
-          //                       fontWeight: FontWeight.bold,
-          //                       color: Colors.amber[800],
-          //                     ),
-          //                   ),
-          //                   Text(
-          //                     cartService.isFreeMealApplied
-          //                         ? 'Appliqué sur l\'article le plus cher'
-          //                         : 'Utiliser votre repas gratuit mensuel',
-          //                     style: TextStyle(
-          //                       fontSize: 12,
-          //                       color: Colors.amber[900],
-          //                     ),
-          //                   ),
-          //                 ],
-          //               ),
-          //             ),
-          //             Switch(
-          //               value: cartService.isFreeMealApplied,
-          //               onChanged: (value) => cartService.toggleFreeMeal(),
-          //               activeThumbColor: Colors.amber,
-          //             ),
-          //           ],
-          //         ),
-          //       );
-          //     }
-          //     return const SizedBox.shrink();
-          //   },
-          // ),
-
           // Codes promo
           SizedBox(
             width: double.infinity,

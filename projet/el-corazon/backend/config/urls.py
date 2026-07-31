@@ -46,6 +46,7 @@ api_v1 = [
     path("payments/", include("apps.payments.urls")),
     path("delivery/", include("apps.delivery.urls")),
     path("tracking/", include("apps.tracking.urls")),
+    path("calls/", include("apps.calls.urls")),
     path("notifications/", include("apps.notifications.urls")),
     path("loyalty/", include("apps.loyalty.urls")),
     path("gamification/", include("apps.gamification.urls")),

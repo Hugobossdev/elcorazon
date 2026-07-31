@@ -3,9 +3,12 @@
 /// `docs/architecture/04-migration-flutter.md`.
 library;
 
+export 'src/analytics/analytics_repository.dart';
 export 'src/auth/auth_repository.dart';
 export 'src/auth/session.dart';
 export 'src/auth/token_storage.dart';
+export 'src/calls/call.dart';
+export 'src/calls/call_repository.dart';
 export 'src/cart/cart.dart';
 export 'src/cart/cart_repository.dart';
 export 'src/catalog/catalog_repository.dart';
@@ -17,6 +20,8 @@ export 'src/delivery/assignment_offer.dart';
 export 'src/delivery/courier_profile.dart';
 export 'src/delivery/delivery_repository.dart';
 export 'src/geography/city.dart';
+export 'src/groupcarts/group_cart.dart';
+export 'src/groupcarts/group_cart_repository.dart';
 export 'src/geography/geography_repository.dart';
 export 'src/gamification/achievement.dart';
 export 'src/gamification/badge.dart';
@@ -27,6 +32,7 @@ export 'src/loyalty/points_account.dart';
 export 'src/loyalty/points_entry.dart';
 export 'src/loyalty/reward.dart';
 export 'src/loyalty/reward_redemption.dart';
+export 'src/loyalty/subscription.dart';
 export 'src/models/money.dart';
 export 'src/models/user.dart';
 export 'src/network/api_client.dart';
@@ -36,6 +42,7 @@ export 'src/network/api_exception.dart';
 export 'src/orders/order.dart';
 export 'src/orders/order_repository.dart';
 export 'src/payments/payment_repository.dart';
+export 'src/payments/split_payment.dart';
 export 'src/payments/transaction.dart';
 export 'src/profile/address.dart';
 export 'src/profile/address_repository.dart';

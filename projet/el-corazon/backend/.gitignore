@@ -21,6 +21,9 @@ media/
 .pytest-media/
 *.log
 
+# Celery — planificateur local, régénéré au démarrage du beat
+celerybeat-schedule*
+
 # Secrets — aucune clé ne doit jamais entrer dans le dépôt
 *.pem
 *.key

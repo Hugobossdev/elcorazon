@@ -810,44 +810,33 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         );
       }
 
-      String finalOrderId;
-      if (widget.existingOrderId != null) {
-        // Commande de groupe : `finalizeExistingOrder` traite son paiement
-        // elle-même (hors scope de la migration Django, inchangée) — pas
-        // d'écran de paiement séparé pour cette branche.
-        finalOrderId = await appService.finalizeExistingOrder(
-          widget.existingOrderId!,
-          addressToUse,
-          _selectedPayment,
-          total,
-          notes: _notesController.text.trim().isNotEmpty
-              ? _notesController.text.trim()
-              : null,
-        );
-      } else {
-        // Créer la commande d'abord (Django, Phase 6) — le paiement s'ouvre
-        // ensuite contre une commande réelle, jamais l'inverse.
-        finalOrderId = await appService.placeOrderFromCartService(
+      // Créer la commande d'abord (Django, Phase 6) — le paiement s'ouvre
+      // ensuite contre une commande réelle, jamais l'inverse.
+      //
+      // La commande de groupe ne passe plus par ici : elle naît de la
+      // confirmation du panier collaboratif (`group-carts/{id}/confirm/`), qui
+      // est le seul chemin où le serveur sait répartir les lignes entre
+      // convives.
+      final finalOrderId = await appService.placeOrderFromCartService(
           addressToUse,
           _selectedPayment,
           cartService.items,
           cartService.subtotal,
           cartService.deliveryFee,
           cartService.discount,
-          notes: _notesController.text.trim().isNotEmpty
-              ? _notesController.text.trim()
-              : null,
-        );
+        notes: _notesController.text.trim().isNotEmpty
+            ? _notesController.text.trim()
+            : null,
+      );
 
-        if (finalOrderId.isNotEmpty && mounted) {
-          cartService.clear();
-          // Le paiement se règle par webhook signé, jamais par le retour de
-          // cet écran (`apps/payments/services.py`) — la commande existe déjà
-          // quelle que soit l'issue.
-          await Navigator.of(context).push<bool>(
-            MaterialPageRoute(builder: (context) => PaymentScreen(orderId: finalOrderId)),
-          );
-        }
+      if (finalOrderId.isNotEmpty && mounted) {
+        cartService.clear();
+        // Le paiement se règle par webhook signé, jamais par le retour de
+        // cet écran (`apps/payments/services.py`) — la commande existe déjà
+        // quelle que soit l'issue.
+        await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (context) => PaymentScreen(orderId: finalOrderId)),
+        );
       }
 
       if (finalOrderId.isNotEmpty && mounted) {

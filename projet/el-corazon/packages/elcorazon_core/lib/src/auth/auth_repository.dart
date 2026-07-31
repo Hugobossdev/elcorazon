@@ -60,6 +60,22 @@ class AuthRepository {
   /// Révoque toutes les sessions, y compris l'appelante : le couple de
   /// jetons renvoyé ici doit immédiatement remplacer l'ancien (voir
   /// `test_revocation_des_sessions` côté serveur).
+  /// Met à jour son propre nom et son téléphone (`PATCH /auth/me/`).
+  ///
+  /// Deux champs, et pas un de plus : ni l'e-mail — il identifie le compte —,
+  /// ni le type de compte, qu'un client pourrait sinon s'écrire pour se donner
+  /// des droits. Le compte modifié est celui du jeton, il ne se désigne pas.
+  Future<User> updateProfile({String? fullName, String? phone}) async {
+    final response = await apiClient.patch(
+      '/auth/me/',
+      data: {
+        if (fullName != null) 'full_name': fullName,
+        if (phone != null) 'phone': phone,
+      },
+    );
+    return User.fromJson(response.data as Map<String, dynamic>);
+  }
+
   Future<User> changePassword({
     required String currentPassword,
     required String newPassword,

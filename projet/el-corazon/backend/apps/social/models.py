@@ -19,6 +19,7 @@ de groupe remontait dans le fil global faute de ce garde-fou.
 from __future__ import annotations
 
 import secrets
+from typing import Any
 
 from django.db import models
 
@@ -168,6 +169,36 @@ class Post(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.author.email} — {self.get_kind_display()}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """S4 — rattache la visibilité au groupe, quel que soit le chemin d'écriture.
+
+        `SocialService.create_post` posait déjà `is_public=group is None`, et le
+        sérialiseur tient `is_public` en lecture seule : l'API était donc sûre.
+        Elle n'est pas le seul chemin. Le back-office, l'admin Django, une
+        commande d'exploitation, une migration de données ou un simple
+        `Post(group=g, is_public=True).save()` depuis un shell contournaient
+        tous cette dérivation et heurtaient `group_post_not_public` — un
+        `IntegrityError` opaque, et une transaction avortée.
+
+        Rattacher un post à un groupe **est** le geste qui le rend privé : la
+        visibilité est dérivée, pas choisie. La corriger ici plutôt que refuser
+        évite d'inventer une décision que l'appelant n'a pas prise, et rend
+        l'invariant vrai par construction plutôt que par vigilance.
+
+        Le déplacement d'un post vers un groupe le rend donc privé ; l'inverse
+        ne le rend pas public — sortir un post d'un groupe ne doit pas le
+        publier dans le dos de son auteur.
+        """
+        if self.group_id is not None and self.is_public:
+            self.is_public = False
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None and "is_public" not in update_fields:
+                # Sans cela la correction ne partirait pas en base, et la
+                # contrainte refuserait la ligne que l'on vient de corriger.
+                kwargs["update_fields"] = [*update_fields, "is_public"]
+
+        super().save(*args, **kwargs)
 
 
 class PostLike(UUIDModel):

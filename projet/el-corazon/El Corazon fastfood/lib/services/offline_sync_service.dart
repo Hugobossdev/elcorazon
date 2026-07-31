@@ -1,15 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'package:elcora_fast/config/app_constants.dart';
+import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/models/cart_item.dart';
-import 'package:elcora_fast/services/database_service.dart';
 
 /// Service complet de synchronisation hors ligne avec stockage persistant
 class OfflineSyncService extends ChangeNotifier {
@@ -39,7 +41,8 @@ class OfflineSyncService extends ChangeNotifier {
   DateTime? _menuCacheTime;
   static const Duration _cacheValidityDuration = Duration(hours: 24);
 
-  final DatabaseService _databaseService = DatabaseService();
+  final eccore.CartRepository _cartRepository =
+      eccore.CartRepository(apiClient: apiClient);
 
   // Getters
   bool get isOnline => _isOnline;
@@ -337,12 +340,6 @@ class OfflineSyncService extends ChangeNotifier {
     try {
       debugPrint('🔄 OfflineSyncService: Début de la synchronisation...');
       
-      // Synchroniser les commandes
-      await _syncPendingOrders();
-      
-      // Synchroniser les mises à jour utilisateur
-      await _syncPendingUserUpdates();
-      
       // Synchroniser les mises à jour panier
       await _syncPendingCartUpdates();
       
@@ -357,94 +354,14 @@ class OfflineSyncService extends ChangeNotifier {
     }
   }
 
-  /// Synchronise les commandes en attente
-  Future<void> _syncPendingOrders() async {
-    final ordersToSync = List<Map<String, dynamic>>.from(_pendingOrders);
-
-    for (final orderData in ordersToSync) {
-      try {
-        final orderId = orderData['id'] as String;
-        
-        // Créer la commande dans Supabase
-        await _databaseService.createOrder(orderData);
-        
-        // Ajouter les items de la commande
-        if (orderData['items'] != null) {
-          final items = List<Map<String, dynamic>>.from(orderData['items'] as List);
-          await _databaseService.addOrderItems(orderId, items);
-        }
-        
-        // Marquer comme synchronisé dans la DB locale
-        await _database!.update(
-          'offline_orders',
-          {'synced': 1},
-          where: 'id = ?',
-          whereArgs: [orderId],
-        );
-        
-        // Retirer de la liste en attente
-        _pendingOrders.removeWhere((order) => order['id'] == orderId);
-        
-        debugPrint('✅ OfflineSyncService: Commande synchronisée - $orderId');
-      } catch (e) {
-        final orderId = orderData['id'] as String;
-        debugPrint('❌ OfflineSyncService: Erreur sync commande $orderId - $e');
-        
-        // Incrémenter le nombre de tentatives
-        await _incrementSyncAttempts('offline_orders', orderId);
-      }
-    }
-
-    if (ordersToSync.isNotEmpty) {
-      notifyListeners();
-    }
-  }
-
-  /// Synchronise les mises à jour utilisateur en attente
-  Future<void> _syncPendingUserUpdates() async {
-    final updatesToSync = List<Map<String, dynamic>>.from(_pendingUserUpdates);
-
-    for (final updateData in updatesToSync) {
-      try {
-        final userId = updateData['user_id'] as String;
-        final updateId = updateData['id'] as String;
-        
-        // Mettre à jour le profil utilisateur dans Supabase
-        await _databaseService.updateUserProfile(userId, updateData);
-        
-        // Marquer comme synchronisé
-        await _database!.update(
-          'pending_user_updates',
-          {'synced': 1},
-          where: 'id = ?',
-          whereArgs: [updateId],
-        );
-        
-        // Retirer de la liste en attente
-        _pendingUserUpdates.removeWhere((update) => update['id'] == updateId);
-        
-        debugPrint('✅ OfflineSyncService: Mise à jour utilisateur synchronisée - $updateId');
-      } catch (e) {
-        final updateId = updateData['id'] as String;
-        debugPrint('❌ OfflineSyncService: Erreur sync utilisateur $updateId - $e');
-        
-        // Incrémenter le nombre de tentatives
-        await _incrementSyncAttempts('pending_user_updates', updateId);
-      }
-    }
-
-    if (updatesToSync.isNotEmpty) {
-      notifyListeners();
-    }
-  }
-
   /// Synchronise les mises à jour panier en attente
   Future<void> _syncPendingCartUpdates() async {
     final updatesToSync = List<Map<String, dynamic>>.from(_pendingCartUpdates);
 
     for (final updateData in updatesToSync) {
       try {
-        final userId = updateData['user_id'] as String;
+        // `user_id` n'est plus lu : le panier serveur est celui du porteur du
+        // jeton, il ne se désigne pas.
         final updateId = updateData['id'] as String;
         final operationType = updateData['operation_type'] as String;
         
@@ -454,13 +371,21 @@ class OfflineSyncService extends ChangeNotifier {
               .map((item) => CartItem.fromMap(Map<String, dynamic>.from(item)))
               .toList();
           
-          await _databaseService.upsertUserCart(
-            userId: userId,
-            items: items,
-            deliveryFee: (updateData['delivery_fee'] as num?)?.toDouble() ?? 500.0,
-            discount: (updateData['discount'] as num?)?.toDouble() ?? 0.0,
-            promoCode: updateData['promo_code'] as String?,
-          );
+          // Réécriture intégrale du panier serveur, comme `CartService` :
+          // il n'existe pas de correspondance stable entre l'identifiant
+          // local d'une ligne et celui de Django.
+          //
+          // Ni frais de livraison, ni remise, ni code promo ne sont rejoués :
+          // le serveur les recalcule au devis de commande (C1). Les envoyer
+          // reviendrait à laisser le client fixer ce qu'il paie.
+          await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
+          for (final item in items) {
+            await _cartRepository.addLine(
+              restaurantSlug: AppConstants.restaurantSlug,
+              menuItemId: item.menuItemId,
+              quantity: item.quantity,
+            );
+          }
         }
         
         // Marquer comme synchronisé
@@ -520,104 +445,6 @@ class OfflineSyncService extends ChangeNotifier {
   }
 
   /// Sauvegarde une commande hors ligne
-  Future<void> saveOrderOffline(Order order) async {
-    try {
-      final orderData = {
-        'id': order.id,
-        'user_id': order.userId,
-        'status': order.status.toString().split('.').last,
-        'subtotal': order.subtotal,
-        'delivery_fee': order.deliveryFee,
-        'discount': order.discount,
-        'total': order.total,
-        'payment_method': order.paymentMethod.toString().split('.').last,
-        'delivery_address': order.deliveryAddress,
-        'delivery_notes': order.deliveryNotes ?? '',
-        'promo_code': order.promoCode,
-        'created_at': order.createdAt.toIso8601String(),
-        'items': order.items.map((item) => {
-          'menu_item_id': item.menuItemId,
-          'menu_item_name': item.menuItemName,
-          'name': item.name,
-          'category': item.category,
-          'menu_item_image': item.menuItemImage,
-          'quantity': item.quantity,
-          'unit_price': item.unitPrice,
-          'total_price': item.totalPrice,
-        },).toList(),
-      };
-
-      // Sauvegarder dans la DB locale
-      await _database!.insert(
-        'offline_orders',
-        {
-          'id': order.id,
-          'user_id': order.userId,
-          'data': json.encode(orderData),
-          'status': 'pending',
-          'created_at': DateTime.now().millisecondsSinceEpoch,
-          'synced': 0,
-          'sync_attempts': 0,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-
-      _pendingOrders.add(orderData);
-      
-      debugPrint('✅ OfflineSyncService: Commande sauvegardée hors ligne - ${order.id}');
-      notifyListeners();
-      
-      // Essayer de synchroniser immédiatement si en ligne
-      if (_isOnline) {
-        await _syncPendingOrders();
-      }
-    } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur sauvegarde commande - $e');
-      rethrow;
-    }
-  }
-
-  /// Sauvegarde une mise à jour utilisateur hors ligne
-  Future<void> saveUserUpdateOffline(String userId, Map<String, dynamic> userData) async {
-    try {
-      final updateId = '${userId}_${DateTime.now().millisecondsSinceEpoch}';
-      final updateData = {
-        'id': updateId,
-        'user_id': userId,
-        ...userData,
-        'timestamp': DateTime.now().toIso8601String(),
-      };
-
-      // Sauvegarder dans la DB locale
-      await _database!.insert(
-        'pending_user_updates',
-        {
-          'id': updateId,
-          'user_id': userId,
-          'data': json.encode(updateData),
-          'created_at': DateTime.now().millisecondsSinceEpoch,
-          'synced': 0,
-          'sync_attempts': 0,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-
-      _pendingUserUpdates.add(updateData);
-      
-      debugPrint('✅ OfflineSyncService: Mise à jour utilisateur sauvegardée hors ligne - $updateId');
-      notifyListeners();
-      
-      // Essayer de synchroniser immédiatement si en ligne
-      if (_isOnline) {
-        await _syncPendingUserUpdates();
-      }
-    } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur sauvegarde utilisateur - $e');
-      rethrow;
-    }
-  }
-
-  /// Sauvegarde une mise à jour panier hors ligne
   Future<void> saveCartUpdateOffline(
     String userId,
     List<CartItem> items,

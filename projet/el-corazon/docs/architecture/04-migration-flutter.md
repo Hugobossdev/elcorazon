@@ -398,9 +398,9 @@ le parcours manuellement.
 
 ### 3.4 Flux externes à rattacher
 
-- [ ] **Agora** : la signalisation d'appel (qui appelle qui) migre de Supabase Realtime vers un
-      canal Django (WebSocket ou endpoint dédié) ; le flux média reste Agora RTC en pair-à-pair,
-      seul le jeton est délivré par l'API (`API -->|jeton RTC| RTC` dans le schéma §2.1).
+- [x] **Agora — fait** (2026-07-31) : `apps/calls` porte la signalisation, `common/agora.py` la
+      délivrance du jeton, `ws/me/` la sonnerie. Le flux média reste en pair-à-pair chez Agora,
+      seul le jeton vient de l'API (`API -->|jeton RTC| RTC`, §2.1). Voir §3.5 pour le détail.
 - [ ] **Stockage** : toutes les images produits, avatars et documents livreurs passent par les URL
       signées MinIO servies par le backend.
 
@@ -416,8 +416,154 @@ le parcours manuellement.
       `social_features_service.dart` (672 lignes, aucun appelant),
       `promo_code_service_supabase.dart` (aucun appelant) et, côté `dely`,
       `supabase_realtime_service.dart` avec `AppService.login()`.
-- [ ] Retirer le canal Socket.IO résiduel dans `fastfood` (`socket_service.dart` et usages),
-      remplacé par le WebSocket Django.
+- [x] **`fastfood` ne dépend plus de Supabase** (2026-07-31) : `supabase_flutter` retiré du
+      `pubspec.yaml`, `lib/supabase/` supprimé, clés `SUPABASE_*` retirées des `.env`. Les 27
+      fichiers du départ sont à zéro. Dernière tranche, la signalisation d'appel :
+      - **Nouvelle app `apps/calls`** : modèle `Call` et sa machine à états (quatre issues
+        terminales, donc rejeu inexprimable — raccrocher deux fois ne compte pas deux durées),
+        `CallService`, endpoints d'ouverture/décrochage/refus/raccrochage, historique, et
+        délivrance du jeton RTC. 18 tests d'API, 5 de WebSocket.
+      - **Le certificat Agora a quitté l'app.** Il vivait dans le `.env` Flutter, c'est-à-dire
+        dans un binaire distribué : l'en extraire suffisait à fabriquer ses propres jetons et à
+        rejoindre n'importe quel canal. Il signe désormais côté serveur
+        (`common/agora.py`, format AccessToken2, 12 tests) et l'app ne reçoit qu'un jeton borné à
+        un canal, un `uid` et une heure.
+      - **Trois choses ne voyagent plus depuis le client** : le destinataire (déduit de la course
+        — l'app fournissait `receiver_id`, donc n'importe quel compte pouvait faire sonner
+        n'importe quel autre), le canal RTC (dérivé de l'appel côté serveur — l'app composait
+        `order_{id}_call`, si bien que connaître une commande suffisait à rejoindre la
+        conversation), et l'`uid` Agora (attribué par le serveur — l'app le tirait d'un hachage
+        tronqué d'UUID, qui peut entrer en collision et expulser un participant du canal).
+      - **Nouveau canal `ws/me/`** (`UserFeedConsumer`), seul canal du projet non rattaché à une
+        ressource : un appel entrant doit joindre son destinataire où qu'il soit dans l'app, ce
+        qu'un canal par commande ne permet pas.
+      **Reste un lien vers l'ancien backend Node**, sans rapport avec Supabase :
+      `geocoding_service`, `directions_service`, `places_service` et `paydunya_service` passent
+      par un mandataire HTTP (`ApiConfig.backendUrl`, renommé `LEGACY_PROXY_URL`) — **sur le web
+      uniquement**, pour contourner CORS sur les API Google. Aucun équivalent Django n'existe
+      encore.
+- [x] **`DatabaseService` supprimé** (2026-07-31, 2255 l) — plus aucun appelant. Avec lui
+      disparaît le dernier accès direct à Postgres depuis l'app cliente. Dans la même passe :
+      - **Paiement partagé migré** sur `payments/{order}/split/` (`SplitPayment`, `SplitShare`,
+        `SplitParticipantInput` ajoutés à `elcorazon_core`, 5 tests). L'écran encaissait
+        **depuis l'app** — il appelait PayDunya pour chaque convive avec le numéro et l'opérateur
+        saisis par l'organisateur, puis écrivait lui-même « payé » : mentir à cette écriture
+        soldait une part que personne n'avait réglée. Désormais chaque part porte un **lien**, le
+        convive paie chez le prestataire (avec ou sans compte), et seul le webhook signé solde.
+        Les champs téléphone/opérateur disparaissent : ils appartiennent à la page du
+        prestataire, qui les demande au payeur — pas à l'organisateur, qui les saisissait pour
+        les autres. Le partage du total est fait par le serveur, sans laisser d'unité mineure
+        orpheline.
+      - **Suivi de livraison migré** sur `tracking/orders/{id}/` : commande, livreur et dernière
+        position viennent d'un seul appel. **L'historique complet du trajet n'est plus relu** —
+        le contrat ne le porte pas volontairement (suivre son repas est un service, suivre un
+        employé après coup n'en est pas un) ; la trace sur la carte est celle accumulée pendant
+        la session, depuis le WebSocket.
+      - **`finalizeExistingOrder` supprimé** : devenu injoignable une fois la commande de groupe
+        née de `group-carts/{id}/confirm/`. C'était le dernier chemin où l'app écrivait le statut
+        d'une commande et son paiement directement en base.
+- [x] **Commande de groupe migrée** (2026-07-31) : `group_order_screen.dart` passe de 2867 à
+      1359 lignes, `social_service.dart` (1382 l) et `group_delivery_service.dart` (736 l) sont
+      supprimés, remplacés par `GroupCartService` (~280 l) au-dessus du repository. Trois écarts
+      de comportement en découlent, tous imposés par le modèle v2 :
+      - **L'onglet « Groupes à proximité » disparaît.** Le backend n'expose aucune découverte
+        géographique de paniers : on rejoint par code, pas sur une carte. Tout le bloc (service,
+        carte Google Maps, marqueurs, dialogue de détail) part avec.
+      - **« Quitter le groupe » devient « fermer le panier », réservé à l'hôte.** Le contrat n'a
+        pas de geste « quitter » : sortir un participant laisserait ses lignes derrière lui, à la
+        charge de l'hôte. Un invité retire ses lignes ; l'hôte referme le panier pour tous.
+      - **Les adresses e-mail des participants ne sont plus affichées** — le contrat ne les porte
+        pas. La ligne montre désormais ce que chaque convive doit, lu dans `per_member`.
+      Le reste suit le serveur : les totaux et la répartition par participant viennent de lui
+      (l'app les additionnait et les divisait elle-même), une ligne devenue indisponible reste
+      visible avec sa raison au lieu de disparaître, la confirmation est refusée si une ligne ne
+      l'est plus, et les trois abonnements temps réel Supabase (commande, lignes, membres) sont
+      remplacés par le seul `ws/group-carts/{id}/`, en lecture seule — l'ancienne version écrivait
+      par le canal temps réel, sans validation nulle part.
+- [x] **Panier collaboratif porté dans `elcorazon_core`** (2026-07-31) : `GroupCart`,
+      `GroupCartLine`, `GroupCartMember`, `GroupCartMemberTotal` et `GroupCartRepository`
+      (ouvrir, rejoindre par code, déposer/modifier/retirer une ligne, clore, confirmer,
+      renoncer), 13 tests. C'est la fondation qui manquait pour réécrire
+      `group_order_screen.dart` : le modèle v2 n'est pas celui de Supabase — un panier
+      **éphémère** à code d'invitation, dont le serveur rend l'intégralité après chaque
+      écriture (sous-total et totaux par participant compris), là où l'app répartissait
+      elle-même les montants entre convives.
+- [x] **`DatabaseService` vidé de ses consommateurs, sauf le bloc commande groupée** (2026-07-31).
+      Il reste 12 fichiers Supabase dans `fastfood` (27 au départ), tous dans le même
+      périmètre : commande groupée, paiement partagé, social, suivi de livraison, appels.
+      Migrés dans cette tranche :
+      - **`CustomizationService`** → groupes d'options du détail d'article
+        (`MenuItemDetailSerializer`). `OptionGroup`/`Option` ajoutés à `elcorazon_core`. Le
+        préchargement global de toutes les personnalisations disparaît : le contrat ne les porte
+        que sur le détail, à dessein.
+      - **`GamificationService`** (832 → 373 l) → **lecture seule**. `upsertUserAchievement`,
+        `upsertUserChallenge`, `updateUserLoyaltyPoints`, `createLoyaltyTransaction` et
+        `addPoints` supprimés : le client se déclarait ses succès débloqués et se créditait les
+        points correspondants. Progression et déblocage sont calculés par le serveur à la
+        livraison ; `onOrderPlaced` ne fait plus que redemander l'état.
+      - **`AppService`** : `placeOrder` (chemin Supabase mort, totaux calculés côté client),
+        `updateOrderStatus`, `addMenuItem`/`updateMenuItem`/`deleteMenuItem` supprimés — gestes
+        du personnel, sans appelant. Le crédit de points après commande disparaît aussi.
+        `trackEvent` → `/analytics/events/` (nouveau `AnalyticsRepository` ; l'auteur vient du
+        jeton, plus d'un `user_id` déclaré par le client).
+      - **`OfflineSyncService`** : la file panier rejoue sur le panier Django (sans frais,
+        remise ni code promo — le serveur les recalcule) ; les files « commandes » et « profil »
+        sont supprimées, plus aucun producteur ne les alimentait.
+      - **`AdvancedSearchService`** → filtres serveur (voir ci-dessous) ; **`ChatService`** →
+        `ws/orders/{id}/chat/` (relais non persisté : plus d'historique à recharger, et
+        `RealtimeChannel.send()` ajouté au package) ; **`AIRecommendationService`** et
+        **`cake_order_screen`** → `DjangoMenuRepository`. Cet écran **créait un article dans le
+        catalogue** quand il manquait : le catalogue s'écrit depuis le back-office, le repli en
+        mémoire (déjà présent) devient le comportement nominal.
+      - Supprimés faute d'équivalent ou d'appelant : `promotion_service` + `promotion_banner`
+        (le backend n'expose **aucune liste publique de promotions**, par décision explicite),
+        `otp_verification_screen` (écran injoignable, et pas d'authentification par téléphone
+        en v2).
+- [x] **Recherche avancée rendue au serveur** (2026-07-31) : `apps/catalog/filters.py`
+      (`MenuItemFilter` — prix, calories, temps de préparation, note, régimes, allergènes,
+      ingrédients), 12 tests. L'app composait la requête depuis le téléphone puis **filtrait la
+      page reçue** : un article correspondant mais absent de cette page ne remontait jamais.
+- [x] **Tranche « domaines sans équivalent backend » arbitrée** (2026-07-31). Trois zones de
+      `fastfood` s'appuyaient sur Supabase sans contrepartie côté Django ; décisions prises en
+      session :
+      - **Notation du livreur → construite côté backend.** `CourierRating` (lien un-à-un avec la
+        course), `CourierRatingService` avec moyenne incrémentale sous verrou, `GET|POST
+        /delivery/orders/{id}/rating/`, migration `0003_courierrating`, 13 tests. Le client
+        n'envoie plus que la note et le commentaire : le livreur vient de la course, l'auteur du
+        jeton — l'ancienne version acceptait `driver_id` et `customer_id`, donc noter le livreur
+        d'un autre. La moyenne affichée pendant le suivi est lue dans `tracking/orders/{id}/`, qui
+        la portait déjà.
+      - **Portefeuille → retiré.** `wallet_service.dart` (699 l), `wallet_screen.dart`, la route,
+        les entrées de menu et le reliquat « repas gratuit VIP » de `CartService`. Aucun modèle de
+        solde n'existe côté v2 ; `PaymentMethod.wallet` reste un moyen de paiement du backend et
+        n'est pas concerné. Le droit **VIP** ne venait pas du portefeuille mais d'un abonnement :
+        il est désormais lu sur `loyalty/subscriptions` (nouveau `SubscriptionService` côté app,
+        `Subscription`/`SubscriptionPlan` + méthodes d'abonnement ajoutés à `elcorazon_core`).
+        Le filtre des articles `vip_exclusive` ne dépend plus du **nom** du plan.
+      - **Signalisation d'appel Agora → à construire côté backend** (voir §3.4, toujours ouvert).
+- [x] **`MarketingService` supprimé** (2026-07-31, 1024 l) : enregistré comme provider et
+      initialisé, mais aucun écran ne le consommait.
+- [x] **Couche temps réel de `fastfood` migrée** (2026-07-31) : `supabase_realtime_service.dart`
+      (591 l) et `realtime_sync_service.dart` supprimés. Ce dernier s'abonnait aux tables
+      `menu_items` et `orders` **entières** ; le backend n'expose délibérément pas de canal
+      catalogue, le menu est relu par `DjangoMenuRepository` et les commandes par
+      `ws/orders/{id}/tracking/`. `RealtimeTrackingService` perd ses délégations d'écriture
+      (statut, position, marquage livré) : ce sont des gestes du personnel ou du livreur, que le
+      backend refuse à un compte client. Le widget `delivery_tracking_widget.dart` qui offrait au
+      client un bouton « Marquer comme livrée » n'avait aucun appelant — supprimé.
+- [x] **`NotificationService` réduit aux notifications locales** (2026-07-31) : sa liste
+      d'historique et son abonnement à la table `notifications` faisaient doublon avec
+      `NotificationDatabaseService` (déjà migré) — aucun écran ne les lisait. `ErrorHandlerService`
+      traduit désormais `ApiException` (RFC 9457) au lieu de `PostgrestException`/`AuthException`.
+- [x] **Canal Socket.IO résiduel retiré dans `fastfood`** (2026-07-31) : `socket_service.dart`,
+      le `Provider` de `main.dart`, le getter d'`AppService` et la dépendance `socket_io_client`
+      supprimés. Aucun écran n'enregistrait de callback (`onOrderUpdate`, `onDriverLocation`) : le
+      service ne faisait plus que boucler sur `localhost:3000`, mort depuis l'abandon du backend
+      Node. Le suivi temps réel passe par `ws/orders/<id>/tracking/` côté Django.
+- [x] **Supabase retiré de `FormValidationService` et `FormManagerService`** (2026-07-31) : les
+      deux plantaient au démarrage sur `Supabase.instance` (aucune clé en `.env`). Les contrôles
+      d'unicité (email, téléphone, adresse, carte) étaient déjà inertes et incombent au backend ;
+      les brouillons de formulaires sont désormais explicitement en mémoire seule.
 - [ ] Mettre à jour `CAHIER_DES_CHARGES.md` et `ETAT_FONCTIONNALITES.md` (actuellement rédigés pour
       l'architecture Supabase) : soit les archiver comme référence historique — à l'image du
       backend Laravel, consultable dans l'historique git jusqu'au commit `56e0bec` — soit les

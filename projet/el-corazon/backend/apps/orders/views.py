@@ -1,11 +1,8 @@
-"""Points d'entrée des commandes.
+"""Points d'entrée des commandes — côté client et côté livreur.
 
-Deux publics sur les mêmes objets, séparés par le `get_queryset` :
-
-* le **client** ne voit que ses commandes, et n'a qu'un verbe d'écriture —
-  annuler, et seulement tant que la cuisine n'a pas démarré ;
-* le **personnel** voit celles de l'établissement et fait avancer le statut,
-  sous permission nommée (`orders.update_status`).
+Ce que voit celui qui a commandé, et ce que voit celui qui livre. Le personnel
+a ses propres routes, dans `backoffice.py` : elles nomment leurs permissions,
+là où celles-ci ne reposent que sur l'appartenance.
 
 L'appartenance est un filtre de requête et non une permission d'objet : une
 commande d'autrui est introuvable, pas interdite. Un 403 confirmerait au
@@ -37,11 +34,9 @@ from apps.orders.serializers import (
     OrderPreviewSerializer,
     OrderQuoteSerializer,
     OrderSerializer,
-    StatusTransitionSerializer,
 )
 from apps.orders.services import OrderService
-from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
-from common.permissions import HasPermission, IsCustomer, authenticated_user
+from common.permissions import IsCustomer, authenticated_user
 from common.throttling import OrderCreationThrottle
 
 __all__ = ["OrderViewSet"]
@@ -53,14 +48,9 @@ IDEMPOTENCY_HEADER = "Idempotency-Key"
 class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
     # Déclaré pour le générateur de schéma seulement — voir `get_queryset`.
     queryset = Order.objects.none()
-    # `customer` sert la fiche client du back-office — « l'historique de cette
-    # personne » — et ne fuit rien : le filtre s'applique **après** le
-    # cloisonnement de `get_queryset`, si bien qu'un client qui l'emploierait
-    # ne réduirait que ses propres commandes.
     filterset_fields = {
         "status": ["exact"],
         "restaurant__slug": ["exact"],
-        "customer": ["exact"],
     }
 
     def get_serializer_class(self) -> type[BaseSerializer[Order]]:
@@ -87,9 +77,11 @@ class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
             # d'autre : ni l'historique du client, ni les courses de ses
             # collègues.
             queryset = queryset.filter(assignments__courier__user=user).distinct()
-        elif user.user_type == UserType.STAFF and not is_unscoped(user):
-            queryset = queryset.filter(restaurant_id__in=staff_restaurant_ids(user))
-        elif user.user_type != UserType.STAFF:
+        else:
+            # Tout le reste — y compris un compte du personnel qui passerait
+            # par ici — ne voit que ce qu'il a commandé lui-même. La
+            # supervision a ses propres routes, sous `manage/`, où elle doit
+            # présenter `orders.read`.
             queryset = queryset.filter(customer=user)
 
         if self.action == "retrieve":
@@ -177,46 +169,22 @@ class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
     @extend_schema(
         request=CancelSerializer, responses={200: OrderDetailSerializer}, tags=["orders"]
     )
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=["post"], permission_classes=[IsCustomer])
     def cancel(self, request: Request, pk: str) -> Response:
+        """Annulation par le client, tant que la cuisine n'a pas démarré.
+
+        `IsCustomer` n'est pas redondant avec le filtre de `get_queryset` :
+        celui-ci rend au livreur les commandes qu'il transporte, si bien que
+        sans cette ligne, le livreur annulait la commande qu'il était en train
+        de livrer. Le service ne l'aurait pas arrêté — `cancel_by_customer` ne
+        regarde que le statut, l'appelant étant censé être le client.
+        """
         serializer = CancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         order = OrderService.cancel_by_customer(
             order=self.get_object(),
             user=authenticated_user(request),
-            reason=serializer.validated_data["reason"],
-        )
-        return Response(OrderDetailSerializer(order).data)
-
-    # -------------------------------------------------------------- personnel
-
-    @extend_schema(
-        request=StatusTransitionSerializer,
-        responses={200: OrderDetailSerializer},
-        tags=["orders"],
-    )
-    @action(
-        detail=True,
-        methods=["post"],
-        url_path="status",
-        url_name="status",
-        permission_classes=[HasPermission.of("orders.update_status")],
-    )
-    def update_status(self, request: Request, pk: str) -> Response:
-        """Avance le statut — réservé au personnel muni de la permission.
-
-        Aucune vérification de flux ici : la machine à états décide, et une
-        transition refusée sort en 409 avec les cibles autorisées, ce qui
-        permet au back-office d'afficher les boutons justes.
-        """
-        serializer = StatusTransitionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        order = OrderService.transition_to(
-            order=self.get_object(),
-            target=serializer.validated_data["status"],
-            actor=authenticated_user(request),
             reason=serializer.validated_data["reason"],
         )
         return Response(OrderDetailSerializer(order).data)

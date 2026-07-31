@@ -24,6 +24,7 @@ from apps.accounts.serializers import (
     ChangePasswordSerializer,
     DeviceSerializer,
     LoginSerializer,
+    ProfileUpdateSerializer,
     RefreshSerializer,
     RegisterSerializer,
     TokenPairSerializer,
@@ -135,6 +136,23 @@ class MeView(APIView):
     @extend_schema(responses={200: UserSerializer}, tags=["auth"])
     def get(self, request: Request) -> Response:
         return Response(UserSerializer(authenticated_user(request)).data)
+
+    @extend_schema(
+        request=ProfileUpdateSerializer, responses={200: UserSerializer}, tags=["auth"]
+    )
+    def patch(self, request: Request) -> Response:
+        """Met à jour son propre nom et son téléphone.
+
+        Le compte modifié est celui du jeton : il n'y a pas d'identifiant en
+        entrée, donc pas de compte d'autrui à viser. La réponse est la forme
+        habituelle du compte, la même que `GET /auth/me/`.
+        """
+        user = authenticated_user(request)
+        serializer = ProfileUpdateSerializer(user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(UserSerializer(user).data)
 
 
 class ChangePasswordView(APIView):

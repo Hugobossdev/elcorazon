@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import F
 
 from apps.accounts.models import User
@@ -176,19 +176,41 @@ class SocialService:
     @staticmethod
     @transaction.atomic
     def toggle_like(*, user: User, post: Post) -> bool:
-        """Bascule le j'aime. Renvoie l'état résultant (aimé ou non)."""
+        """Bascule le j'aime. Renvoie l'état résultant (aimé ou non).
+
+        `get_or_create` **lit avant d'écrire**, là où le `create` rattrapé qui
+        précédait écrivait d'abord et avalait l'erreur. Deux conséquences, dont
+        la seconde est la moins visible et la plus gênante :
+
+        1. chaque j'aime concurrent laissait un `duplicate key value violates
+           unique constraint "one_like_per_user"` dans le journal PostgreSQL,
+           pour un geste aussi banal qu'un double clic sur un cœur. Le journal
+           se remplissait d'erreurs qui n'en sont pas, et les vraies s'y
+           noyaient ;
+        2. le `create` de Django s'exécute dans un `atomic(savepoint=False)`.
+           Une violation d'unicité y pose donc `connection.needs_rollback`, et
+           le bloc `atomic` de cette méthode — le plus externe, `ATOMIC_REQUESTS`
+           valant `False` — en sort par un **rollback silencieux** au lieu d'un
+           commit. Ici le tour est sans dommage, la méthode n'ayant rien d'autre
+           à écrire ; il ne le resterait pas si quelqu'un ajoutait une écriture
+           (une notification, un événement d'analyse) au même bloc, et le défaut
+           ne se signalerait alors par aucune erreur.
+
+        `get_or_create` supprime les deux : le chemin courant est un `SELECT`,
+        et l'insertion qu'il conserve pour la vraie course est protégée par son
+        propre point de reprise. Le j'aime concurrent est réutilisé, et le
+        compteur ne s'incrémente que pour le gagnant — `created` le dit —, ce
+        qui l'empêche de compter deux fois un unique j'aime.
+        """
         like = PostLike.objects.filter(post=post, user=user).first()
         if like is not None:
             like.delete()
             Post.objects.filter(pk=post.pk).update(likes_count=F("likes_count") - 1)
             return False
 
-        try:
-            PostLike.objects.create(post=post, user=user)
-        except IntegrityError:
-            return True  # une requête concurrente a posé le même j'aime entre-temps
-
-        Post.objects.filter(pk=post.pk).update(likes_count=F("likes_count") + 1)
+        _, created = PostLike.objects.get_or_create(post=post, user=user)
+        if created:
+            Post.objects.filter(pk=post.pk).update(likes_count=F("likes_count") + 1)
         return True
 
     @staticmethod

@@ -16,6 +16,7 @@ from common.identifiers import uuid7
 from common.state_machine import StateMachine
 
 __all__ = [
+    "PositiveAmountModel",
     "SoftDeleteManager",
     "SoftDeleteModel",
     "SoftDeleteQuerySet",
@@ -88,6 +89,61 @@ class SoftDeleteModel(models.Model):
     @property
     def is_deleted(self) -> bool:
         return self.deleted_at is not None
+
+
+class PositiveAmountModel(models.Model):
+    """Refuse un montant nul ou négatif **avant** de heurter la base.
+
+    Les modèles d'encaissement portent tous une contrainte `CHECK ... > 0`
+    (`transaction_amount_positive`, `share_amount_positive`,
+    `refund_amount_positive`). Elle est la bonne dernière ligne de défense
+    (ADR-010) mais une mauvaise *première* : quand elle se déclenche, l'appelant
+    reçoit un `IntegrityError` — donc un 500 — au milieu d'un passage de
+    commande, avec pour seule indication le nom d'une contrainte SQL. Pire, elle
+    casse la transaction en cours, si bien que le code qui voudrait rattraper
+    l'erreur ne peut plus émettre la moindre requête.
+
+    Ce garde-fou rend la même règle lisible et rattrapable, et il la rend surtout
+    **inévitable** : il vaut pour tout chemin d'écriture, y compris ceux qui ne
+    passent pas par un service — back-office, commande d'exploitation, migration
+    de données, `save()` appelé depuis un shell.
+
+    Les sous-classes déclarent les champs concernés dans `POSITIVE_AMOUNTS`.
+    """
+
+    #: Noms des `MoneyField` qui doivent être strictement positifs.
+    POSITIVE_AMOUNTS: tuple[str, ...] = ()
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        # Import différé : `common.exceptions` tire DRF, et un modèle qui en
+        # dépendrait à l'import rendrait le domaine inutilisable sans le
+        # transport — exactement ce qu'interdit `test_un_modele_n_importe_ni_vue
+        # _ni_serialiseur`. Ici la dépendance n'existe qu'au moment du refus.
+        from common.exceptions import BusinessRuleViolation
+
+        # `update_fields` restreint l'écriture : ne valider que ce qui part
+        # réellement en base, sinon un `save(update_fields=["status"])` sur une
+        # ligne ancienne se ferait refuser pour un montant qu'il ne touche pas.
+        update_fields = kwargs.get("update_fields")
+        touches = None if update_fields is None else set(update_fields)
+
+        for field in self.POSITIVE_AMOUNTS:
+            if touches is not None and not touches & {field, f"{field}_minor"}:
+                continue
+            amount = getattr(self, field, None)
+            if amount is None:
+                continue
+            if not amount.is_positive:
+                raise BusinessRuleViolation(
+                    f"Le montant « {field} » doit être strictement positif (reçu {amount}).",
+                    field=field,
+                    received=str(amount.amount_minor),
+                )
+
+        super().save(*args, **kwargs)
 
 
 def state_check_constraint(machine: StateMachine, field: str, name: str) -> models.CheckConstraint:

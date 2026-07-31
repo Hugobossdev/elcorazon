@@ -218,6 +218,13 @@ warn_return_any = false
 module = ["apps.*.tasks"]
 disallow_untyped_decorators = false
 
+# `django-filter` ne publie pas non plus d'annotations : `FilterSet` est vu
+# comme `Any`, et en hériter est refusé en mode strict. Même traitement, même
+# limite — seuls les modules de filtres sont assouplis.
+[[tool.mypy.overrides]]
+module = ["apps.*.filters"]
+disallow_subclassing_any = false
+
 # L'admin, enfin : les stubs de django-stubs rendent `ModelAdmin` et
 # `TabularInline` génériques, mais Django ne les rend pas indiçables à
 # l'exécution — `ModelAdmin[Order]` en classe de base lève un `TypeError` au

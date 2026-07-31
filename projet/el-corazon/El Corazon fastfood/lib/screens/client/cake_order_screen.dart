@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:elcora_fast/models/menu_item.dart';
+import 'package:elcora_fast/repositories/django_menu_repository.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
-import 'package:elcora_fast/services/app_service.dart';
-import 'package:elcora_fast/services/database_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
@@ -86,24 +85,19 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
     try {
       if (!mounted || !context.mounted) return;
-      final appService = Provider.of<AppService>(context, listen: false);
-      final databaseService = appService.databaseService;
+      final menuRepository = DjangoMenuRepository();
 
-      // Charger les catégories pour trouver l'ID de la catégorie desserts
-      final categories = await databaseService.getMenuCategories();
-      final dessertsCategory = categories.firstWhere(
-        (cat) =>
-            cat['name']?.toString().toLowerCase() == 'desserts' ||
-            cat['display_name']?.toString().toLowerCase().contains('dessert') ==
-                true,
-        orElse: () => categories.firstWhere(
-          (cat) =>
-              cat['name']?.toString().toLowerCase().contains('dessert') == true,
-          orElse: () => {},
-        ),
-      );
+      // Charger les catégories pour trouver celle des desserts
+      final categories = await menuRepository.getMenuCategories();
+      final dessertsCategory = categories
+          .where(
+            (cat) =>
+                cat.name.toLowerCase().contains('dessert') ||
+                cat.displayName.toLowerCase().contains('dessert'),
+          )
+          .firstOrNull;
 
-      _dessertsCategoryId = dessertsCategory['id'] as String?;
+      _dessertsCategoryId = dessertsCategory?.id;
 
       if (_dessertsCategoryId == null) {
         // Si aucune catégorie desserts n'est trouvée, utiliser tous les items disponibles
@@ -112,18 +106,14 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         );
       }
 
-      // Charger les gâteaux depuis la base de données
-      final menuData = await databaseService.getMenuItems(
+      // Charger les gâteaux depuis le catalogue
+      _readyCakes = (await menuRepository.getMenuItems(
         categoryId: _dessertsCategoryId,
-      );
-
-      _readyCakes = menuData
-          .map((data) => MenuItem.fromMap(data))
+      ))
           .where((item) => item.isAvailable)
           .toList();
 
-      // Créer ou charger le gâteau personnalisé
-      await _loadOrCreateCustomCakeItem(databaseService);
+      await _loadCustomCakeItem(menuRepository);
 
       if (!_isDisposed && mounted && context.mounted) {
         setState(() {
@@ -143,14 +133,18 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     }
   }
 
-  Future<void> _loadOrCreateCustomCakeItem(
-    DatabaseService databaseService,
-  ) async {
+  /// Retrouve l'article « Gâteau personnalisé » du catalogue, sinon en
+  /// fabrique un en mémoire.
+  ///
+  /// L'ancienne version le **créait dans le catalogue** quand il manquait :
+  /// écrire un article depuis l'app client n'est plus possible, et ne devrait
+  /// jamais l'avoir été — le catalogue s'écrit depuis le back-office
+  /// (`catalog/manage/items/`, permission `catalog.write`). Le repli en
+  /// mémoire, lui, existait déjà : c'est le comportement nominal désormais
+  /// tant que l'établissement n'a pas publié l'article.
+  Future<void> _loadCustomCakeItem(DjangoMenuRepository menuRepository) async {
     try {
-      // Chercher un item "Gâteau personnalisé" dans la base de données
-      final menuData = await databaseService.getMenuItems();
-      final customCake = menuData
-          .map((data) => MenuItem.fromMap(data))
+      final customCake = (await menuRepository.getMenuItems())
           .where(
             (item) =>
                 item.name.toLowerCase().contains('personnalisé') ||
@@ -160,47 +154,8 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
       if (customCake != null) {
         _customCakeItem = customCake;
-        debugPrint('✅ Found custom cake item in database: ${customCake.id}');
+        debugPrint('✅ Gâteau personnalisé trouvé au catalogue : ${customCake.id}');
         return;
-      }
-
-      // Si aucun n'existe, essayer de créer l'item dans la base de données
-      if (_dessertsCategoryId != null && _dessertsCategoryId!.isNotEmpty) {
-        try {
-          const customCakeId = 'cake-custom-personnalise';
-          final customCakeData = {
-            'id': customCakeId,
-            'name': 'Gâteau personnalisé',
-            'description':
-                'Composez votre gâteau idéal : forme, taille, saveur et décor. Créez une pièce unique sur-mesure pour toutes vos occasions spéciales.',
-            'price': 20000.0,
-            'category_id': _dessertsCategoryId,
-            'image_url':
-                'https://images.unsplash.com/photo-1542281286-9e0a16bb7366?auto=format&fit=crop&w=600&q=80',
-            'is_popular': true,
-            'is_available': true,
-            'preparation_time': 90,
-            'sort_order': 999,
-            'is_vegetarian': false,
-            'is_vegan': false,
-          };
-
-          await databaseService.createMenuItem(customCakeData);
-          debugPrint('✅ Created custom cake item in database');
-
-          // Recharger l'item depuis la base de données
-          final createdItemData =
-              await databaseService.getMenuItemById(customCakeId);
-          if (createdItemData != null) {
-            _customCakeItem = MenuItem.fromMap(createdItemData);
-            return;
-          }
-        } catch (createError) {
-          debugPrint(
-            '⚠️ Could not create custom cake item in database: $createError',
-          );
-          // Continue avec l'item par défaut en mémoire
-        }
       }
 
       // Créer un item par défaut si la création en DB a échoué ou si pas de catégorie

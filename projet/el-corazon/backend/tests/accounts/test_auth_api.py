@@ -367,3 +367,60 @@ class TestAccesProtege:
     def test_un_jeton_invalide_est_refuse(self, client: APIClient) -> None:
         client.credentials(HTTP_AUTHORIZATION="Bearer nimportequoi")
         assert client.get(reverse("v1:accounts:me")).status_code == status.HTTP_401_UNAUTHORIZED
+
+
+class TestMiseAJourDeSonProfil:
+    """`PATCH /auth/me/` — deux champs, et pas un de plus."""
+
+    def test_le_compte_change_son_nom_et_son_telephone(
+        self, client: APIClient, customer: User
+    ) -> None:
+        client.force_authenticate(customer)
+
+        response = client.patch(
+            reverse("v1:accounts:me"),
+            {"full_name": "Ama Koffi-Mensah", "phone": "+22890222222"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        customer.refresh_from_db()
+        assert customer.full_name == "Ama Koffi-Mensah"
+        assert customer.phone == "+22890222222"
+
+    def test_le_type_de_compte_ne_s_ecrit_pas(
+        self, client: APIClient, customer: User
+    ) -> None:
+        """Un client qui pourrait s'écrire « staff » se donnerait des droits."""
+        client.force_authenticate(customer)
+
+        client.patch(
+            reverse("v1:accounts:me"),
+            {"full_name": "Ama", "user_type": UserType.STAFF},
+            format="json",
+        )
+
+        customer.refresh_from_db()
+        assert customer.user_type == UserType.CUSTOMER
+
+    def test_l_email_ne_s_ecrit_pas(self, client: APIClient, customer: User) -> None:
+        """Il identifie le compte et sert à s'y connecter."""
+        client.force_authenticate(customer)
+        avant = customer.email
+
+        client.patch(
+            reverse("v1:accounts:me"), {"email": "autre@elcorazon.test"}, format="json"
+        )
+
+        customer.refresh_from_db()
+        assert customer.email == avant
+
+    def test_sans_jeton_rien_ne_change(self, client: APIClient, customer: User) -> None:
+        response = client.patch(
+            reverse("v1:accounts:me"), {"full_name": "Intrus"}, format="json"
+        )
+
+        assert response.status_code in {
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_403_FORBIDDEN,
+        }

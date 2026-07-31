@@ -28,11 +28,30 @@ class CatalogRepository {
   /// Le serveur pagine (`PAGE_SIZE=20`) : un menu peut dépasser une page, donc
   /// cette méthode suit `next` jusqu'à épuisement plutôt que de renvoyer la
   /// première page seule.
+  /// Les critères de recherche avancée (prix, régimes, allergènes, calories,
+  /// temps de préparation, note) sont appliqués **par le serveur**
+  /// (`apps/catalog/filters.py`) : filtrer une page déjà reçue ne verrait pas
+  /// les articles restés sur les suivantes.
+  ///
+  /// [priceMinMinor]/[priceMaxMinor] sont en unité mineure, comme tout montant
+  /// du contrat (ADR-007). [dietaryTags] et [ingredients] cumulent (l'article
+  /// doit tous les porter) ; [excludeAllergens] écarte dès qu'un seul est
+  /// présent.
   Future<List<MenuItem>> getMenuItems({
     required String restaurantSlug,
     String? categorySlug,
     bool? isPopular,
     String? search,
+    int? priceMinMinor,
+    int? priceMaxMinor,
+    int? caloriesMin,
+    int? caloriesMax,
+    int? preparationMaxMinutes,
+    double? ratingMin,
+    List<String>? dietaryTags,
+    List<String>? excludeAllergens,
+    List<String>? ingredients,
+    String? ordering,
   }) async {
     final items = <MenuItem>[];
     String? path = '/catalog/items/';
@@ -41,6 +60,17 @@ class CatalogRepository {
       if (categorySlug != null) 'category__slug': categorySlug,
       if (isPopular != null) 'is_popular': isPopular.toString(),
       if (search != null && search.isNotEmpty) 'search': search,
+      if (priceMinMinor != null) 'price_min': '$priceMinMinor',
+      if (priceMaxMinor != null) 'price_max': '$priceMaxMinor',
+      if (caloriesMin != null) 'calories_min': '$caloriesMin',
+      if (caloriesMax != null) 'calories_max': '$caloriesMax',
+      if (preparationMaxMinutes != null) 'preparation_max': '$preparationMaxMinutes',
+      if (ratingMin != null) 'rating_min': '$ratingMin',
+      if (dietaryTags != null && dietaryTags.isNotEmpty) 'dietary_tags': dietaryTags.join(','),
+      if (excludeAllergens != null && excludeAllergens.isNotEmpty)
+        'exclude_allergens': excludeAllergens.join(','),
+      if (ingredients != null && ingredients.isNotEmpty) 'ingredients': ingredients.join(','),
+      if (ordering != null) 'ordering': ordering,
     };
 
     while (path != null) {

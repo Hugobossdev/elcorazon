@@ -1,81 +1,71 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:elcora_fast/main.dart' show apiClient;
+
+/// Notation du livreur, contre `/api/v1/delivery/orders/{id}/rating/`.
+///
+/// Trois champs ont disparu de la signature d'envoi par rapport à la version
+/// Supabase, et c'est le cœur du changement : ni `driverId`, ni `customerId`,
+/// ni la table de destination. Le livreur se déduit de la course, l'auteur du
+/// jeton. Les accepter du client, comme avant, permettait de noter le livreur
+/// d'un autre depuis sa propre commande.
+///
+/// La note moyenne d'un livreur n'est plus interrogeable en tant que telle :
+/// elle arrive avec le suivi de commande (`tracking/orders/{id}/`, bloc
+/// `courier`) — le client voit la note de celui qui lui livre, pas celle de
+/// n'importe quel livreur de la flotte.
 class DriverRatingService {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  eccore.ApiClient get _client => apiClient;
 
-  /// Soumettre une évaluation pour un livreur
+  /// Soumet une note (1 à 5) sur la livraison de [orderId].
+  ///
+  /// Rend `false` sur refus du serveur : livraison déjà notée (409), course
+  /// non livrée ou commande d'autrui (404).
   Future<bool> submitRating({
-    required String driverId,
     required String orderId,
-    required String customerId,
     required int rating,
     String? comment,
   }) async {
     try {
-      await _supabase.from('driver_ratings').insert({
-        'driver_id': driverId,
-        'order_id': orderId,
-        'customer_id': customerId,
-        'rating': rating,
-        'comment': comment,
-      });
+      await _client.post(
+        '/delivery/orders/$orderId/rating/',
+        data: {'score': rating, if (comment != null && comment.isNotEmpty) 'comment': comment},
+      );
       return true;
-    } catch (e) {
-      debugPrint('Error submitting driver rating: $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('DriverRatingService: notation refusée — ${e.code} (${e.detail})');
       return false;
     }
   }
 
-  /// Vérifier si une commande a déjà été évaluée
+  /// La livraison a-t-elle déjà été notée ? Le 404 est la réponse « pas
+  /// encore », pas un incident.
   Future<bool> hasRatedOrder(String orderId) async {
     try {
-      final response = await _supabase
-          .from('driver_ratings')
-          .select('id')
-          .eq('order_id', orderId)
-          .maybeSingle();
-      return response != null;
-    } catch (e) {
-      debugPrint('Error checking if order is rated: $e');
+      await _client.get('/delivery/orders/$orderId/rating/');
+      return true;
+    } on eccore.ApiException {
       return false;
     }
   }
 
-  /// Récupérer la note moyenne d'un livreur
-  Future<double?> getDriverAverageRating(String driverId) async {
+  /// Note et nombre d'avis du livreur affecté à [orderId], lus dans le suivi.
+  /// `null` tant qu'aucun livreur n'est affecté.
+  Future<({double average, int count})?> courierRatingForOrder(String orderId) async {
     try {
-      final response = await _supabase
-          .from('driver_ratings')
-          .select('rating')
-          .eq('driver_id', driverId);
+      final tracking = await eccore.TrackingRepository(apiClient: _client).forOrder(orderId);
+      if (!tracking.hasCourier) return null;
 
-      if (response.isEmpty) {
-        return null; // Aucune évaluation
-      }
-
-      final ratings = response.map((r) => r['rating'] as int).toList();
-      final average = ratings.reduce((a, b) => a + b) / ratings.length;
-
-      return average;
-    } catch (e) {
-      debugPrint('Error fetching driver average rating: $e');
+      final average = tracking.courier['rating_average'];
+      final count = tracking.courier['rating_count'];
+      return (
+        average: double.tryParse('$average') ?? 0.0,
+        count: count is int ? count : int.tryParse('$count') ?? 0,
+      );
+    } on eccore.ApiException catch (e) {
+      debugPrint('DriverRatingService: suivi indisponible — ${e.code}');
       return null;
-    }
-  }
-
-  /// Récupérer le nombre total d'évaluations d'un livreur
-  Future<int> getDriverRatingCount(String driverId) async {
-    try {
-      final response = await _supabase
-          .from('driver_ratings')
-          .select('id')
-          .eq('driver_id', driverId);
-
-      return response.length;
-    } catch (e) {
-      debugPrint('Error fetching driver rating count: $e');
-      return 0;
     }
   }
 }

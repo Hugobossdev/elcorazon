@@ -1,15 +1,16 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:elcora_fast/services/form_validation_service.dart';
 
-/// Service de gestion des formulaires avec sauvegarde automatique
+/// Service de gestion des formulaires avec sauvegarde automatique.
+///
+/// La sauvegarde est purement en mémoire : les brouillons ne survivent pas au
+/// redémarrage de l'app. La persistance passera par le backend Django quand le
+/// domaine correspondant sera migré (Phase 6, §3.3).
 class FormManagerService extends ChangeNotifier {
   static final FormManagerService _instance = FormManagerService._internal();
   factory FormManagerService() => _instance;
   FormManagerService._internal();
 
-  SupabaseClient? _supabase;
   final FormValidationService _validationService = FormValidationService();
 
   // Cache des formulaires en cours
@@ -27,41 +28,10 @@ class FormManagerService extends ChangeNotifier {
   /// Initialiser le service
   Future<void> initialize() async {
     try {
-      _supabase = Supabase.instance.client;
       await _validationService.initialize();
-      await _loadSavedForms();
       debugPrint('FormManagerService initialized successfully');
     } catch (e) {
       debugPrint('Error initializing FormManagerService: $e');
-    }
-  }
-
-  /// Charger les formulaires sauvegardés depuis la base de données
-  Future<void> _loadSavedForms() async {
-    try {
-      if (_supabase == null) {
-        debugPrint('Supabase not initialized, skipping loading saved forms');
-        return;
-      }
-
-      final userId = _supabase!.auth.currentUser?.id;
-      if (userId == null) return;
-
-      // Charger les formulaires sauvegardés
-      final response = await _supabase!
-          .from('saved_forms')
-          .select()
-          .eq('user_id', userId)
-          .eq('is_active', true);
-
-      for (final form in response) {
-        _savedForms[form['form_name']] =
-            Map<String, dynamic>.from(form['form_data']);
-      }
-
-      debugPrint('Loaded ${_savedForms.length} saved forms');
-    } catch (e) {
-      debugPrint('Error loading saved forms: $e');
     }
   }
 
@@ -81,9 +51,6 @@ class FormManagerService extends ChangeNotifier {
         'action': 'auto_save',
         'data': Map.from(formData),
       });
-
-      // Sauvegarder en base de données (en arrière-plan)
-      unawaited(_saveToDatabase(formName, formData, isAutoSave: true));
 
       notifyListeners();
     } catch (e) {
@@ -114,62 +81,11 @@ class FormManagerService extends ChangeNotifier {
         'data': Map.from(formData),
       });
 
-      // Sauvegarder en base de données
-      await _saveToDatabase(formName, formData, isAutoSave: false);
-
       notifyListeners();
       return true;
     } catch (e) {
       debugPrint('Error saving form $formName: $e');
       return false;
-    }
-  }
-
-  /// Sauvegarder en base de données
-  Future<void> _saveToDatabase(
-    String formName,
-    Map<String, dynamic> formData, {
-    required bool isAutoSave,
-  }) async {
-    try {
-      if (_supabase == null) {
-        debugPrint('Supabase not initialized, skipping database save');
-        return;
-      }
-
-      final userId = _supabase!.auth.currentUser?.id;
-      if (userId == null) return;
-
-      final data = {
-        'user_id': userId,
-        'form_name': formName,
-        'form_data': formData,
-        'is_auto_save': isAutoSave,
-        'last_modified': DateTime.now().toIso8601String(),
-        'is_active': true,
-      };
-
-      // Vérifier si le formulaire existe déjà
-      final existingForm = await _supabase!
-          .from('saved_forms')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('form_name', formName)
-          .eq('is_active', true)
-          .maybeSingle();
-
-      if (existingForm != null) {
-        // Mettre à jour le formulaire existant
-        await _supabase!
-            .from('saved_forms')
-            .update(data)
-            .eq('id', existingForm['id']);
-      } else {
-        // Créer un nouveau formulaire
-        await _supabase!.from('saved_forms').insert(data);
-      }
-    } catch (e) {
-      debugPrint('Error saving to database: $e');
     }
   }
 
@@ -205,18 +121,6 @@ class FormManagerService extends ChangeNotifier {
       _formData.remove(formName);
       _savedForms.remove(formName);
       _lastModified.remove(formName);
-
-      // Supprimer de la base de données
-      if (_supabase != null) {
-        final userId = _supabase!.auth.currentUser?.id;
-        if (userId != null) {
-          await _supabase!
-              .from('saved_forms')
-              .update({'is_active': false})
-              .eq('user_id', userId)
-              .eq('form_name', formName);
-        }
-      }
 
       // Ajouter à l'historique
       _modificationHistory.add({
@@ -343,16 +247,6 @@ class FormManagerService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error importing form: $e');
       return false;
-    }
-  }
-
-  /// Synchroniser avec la base de données
-  Future<void> syncWithDatabase() async {
-    try {
-      await _loadSavedForms();
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error syncing with database: $e');
     }
   }
 

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:elcorazon_core/elcorazon_core.dart';
 
 /// Service centralisé pour la gestion des erreurs
 class ErrorHandlerService extends ChangeNotifier {
@@ -205,18 +205,15 @@ class ErrorHandlerService extends ChangeNotifier {
     if (error is TimeoutException) return true;
     if (error is HttpException) return true;
     
-    // Erreurs Supabase temporaires
-    if (error is PostgrestException) {
-      // Retry sur erreurs 5xx (erreurs serveur)
-      final code = error.code;
-      if (code != null && code.startsWith('5')) return true;
+    // Erreurs d'API : seules les pannes de transport et les 5xx méritent une
+    // nouvelle tentative. Un 4xx est un refus argumenté du serveur — le
+    // rejouer à l'identique donnera le même refus.
+    if (error is ApiException) {
+      return error.status == 0 || error.status >= 500;
     }
-    
-    // Erreurs d'authentification temporaires (token expiré, etc.)
-    if (error is AuthException) {
-      // Ne pas retry sur les erreurs d'authentification
-      return false;
-    }
+
+    // Session expirée : il faut se reconnecter, pas réessayer.
+    if (error is SessionExpiredException) return false;
 
     // Par défaut, ne pas retry
     return false;
@@ -245,17 +242,17 @@ class ErrorHandlerService extends ChangeNotifier {
       return 'Erreur de communication avec le serveur. Veuillez réessayer.';
     }
 
-    // Erreurs Supabase
-    if (error is PostgrestException) {
-      return _translatePostgrestError(error);
+    // Erreurs de l'API Django (RFC 9457)
+    if (error is ApiException) {
+      return _translateApiError(error);
     }
 
-    if (error is AuthException) {
-      return _translateAuthError(error);
+    if (error is SessionExpiredException) {
+      return 'Votre session a expiré. Veuillez vous reconnecter.';
     }
 
-    if (error is StorageException) {
-      return _translateStorageError(error);
+    if (error is WrongAccountTypeException) {
+      return 'Ce compte n\'est pas un compte client.';
     }
 
     // Erreurs de format
@@ -298,93 +295,28 @@ class ErrorHandlerService extends ChangeNotifier {
     return 'Une erreur est survenue. Veuillez réessayer.';
   }
 
-  /// Traduit les erreurs PostgREST (Supabase)
-  static String _translatePostgrestError(PostgrestException error) {
-    final code = error.code;
-    final message = error.message.toLowerCase();
-
-    // Erreurs par code HTTP
-    switch (code) {
-      case 'PGRST116':
-        return 'Aucun résultat trouvé.';
-      case 'PGRST301':
-        return 'Vous n\'avez pas la permission d\'effectuer cette action.';
-      case '42501':
-        return 'Accès refusé. Vérifiez vos permissions.';
-      case '23505':
-        return 'Cette information existe déjà.';
-      case '23503':
-        return 'Cette action n\'est pas possible.';
-      case '23502':
-        return 'Des informations obligatoires sont manquantes.';
-      default:
-        // Erreurs par message
-        if (message.contains('permission') || message.contains('denied')) {
-          return 'Vous n\'avez pas la permission d\'effectuer cette action.';
-        }
-        if (message.contains('not found')) {
-          return 'La ressource demandée est introuvable.';
-        }
-        if (message.contains('duplicate') || message.contains('already exists')) {
-          return 'Cette information existe déjà.';
-        }
-        if (message.contains('foreign key') || message.contains('constraint')) {
-          return 'Cette action n\'est pas possible.';
-        }
-        if (message.contains('null') || message.contains('required')) {
-          return 'Des informations obligatoires sont manquantes.';
-        }
-        return 'Erreur de base de données. Veuillez réessayer.';
+  /// Traduit une erreur `application/problem+json` du backend.
+  ///
+  /// `detail` est déjà un message destiné à l'utilisateur, rédigé côté serveur
+  /// (`common/exceptions.py`) : on l'affiche tel quel plutôt que de le
+  /// réécrire ici, où il divergerait à la première évolution du backend. Les
+  /// cas traités à part sont ceux où le serveur ne peut pas savoir quoi dire —
+  /// panne de transport — ou dont la formulation appartient à l'app.
+  static String _translateApiError(ApiException error) {
+    if (error.status == 0) {
+      return 'Problème de connexion. Vérifiez votre internet.';
     }
-  }
-
-  /// Traduit les erreurs d'authentification
-  static String _translateAuthError(AuthException error) {
-    final message = error.message.toLowerCase();
-
-    if (message.contains('invalid') && message.contains('credentials')) {
-      return 'Email ou mot de passe incorrect.';
+    if (error.isThrottled) {
+      return 'Trop de tentatives. Patientez un instant avant de réessayer.';
     }
-    if (message.contains('email not confirmed')) {
-      return 'Veuillez confirmer votre email avant de continuer.';
-    }
-    if (message.contains('user not found')) {
-      return 'Aucun compte trouvé avec cet email.';
-    }
-    if (message.contains('email already registered')) {
-      return 'Cet email est déjà utilisé.';
-    }
-    if (message.contains('weak password')) {
-      return 'Le mot de passe est trop faible. Utilisez au moins 6 caractères.';
-    }
-    if (message.contains('token') && message.contains('expired')) {
+    if (error.isUnauthorized) {
       return 'Votre session a expiré. Veuillez vous reconnecter.';
     }
-    if (message.contains('network')) {
-      return 'Erreur de connexion. Vérifiez votre internet.';
+    if (error.status >= 500) {
+      return 'Erreur serveur. Veuillez réessayer plus tard.';
     }
 
-    return 'Erreur d\'authentification. Veuillez réessayer.';
-  }
-
-  /// Traduit les erreurs de stockage
-  static String _translateStorageError(StorageException error) {
-    final message = error.message.toLowerCase();
-
-    if (message.contains('not found')) {
-      return 'Le fichier demandé est introuvable.';
-    }
-    if (message.contains('permission') || message.contains('denied')) {
-      return 'Vous n\'avez pas la permission d\'accéder à ce fichier.';
-    }
-    if (message.contains('size') || message.contains('too large')) {
-      return 'Le fichier est trop volumineux.';
-    }
-    if (message.contains('format') || message.contains('type')) {
-      return 'Le format du fichier n\'est pas supporté.';
-    }
-
-    return 'Erreur lors de l\'accès au fichier. Veuillez réessayer.';
+    return error.detail;
   }
 
   // =====================================================

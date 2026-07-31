@@ -472,3 +472,31 @@ class OrderService:
         return OrderService.transition_to(
             order=order, target=OrderStatus.CANCELLED, actor=user, reason=reason
         )
+
+    @staticmethod
+    def cancel_by_staff(*, order: Order, actor: User, reason: str) -> Order:
+        """Annulation à l'initiative de l'exploitation.
+
+        Va plus loin que celle du client — jusqu'à `ready`, tout ce que la
+        machine autorise — parce que c'est justement le cas qu'elle ne couvre
+        pas : la rupture de stock découverte en cuisine, l'adresse
+        introuvable, le client injoignable. Sans ce verbe, ces commandes
+        restaient bloquées en préparation jusqu'à ce que quelqu'un les fasse
+        avancer vers une livraison qui n'aura pas lieu.
+
+        Le motif est **obligatoire**, là où celui du client est facultatif. Ce
+        n'est pas une asymétrie gratuite : le client annule sa propre commande
+        et n'a de comptes à rendre à personne, tandis qu'un opérateur annule
+        celle d'un tiers, qui sera remboursé et rappellera pour comprendre. Un
+        journal d'annulations sans motif ne répond pas à cette question, et
+        c'est la seule pour laquelle on le consulte.
+
+        Rien d'autre n'est fait ici : la libération du code promotionnel, la
+        remise en stock, le journal et la diffusion temps réel appartiennent à
+        `transition_to`, qui les fait pour toute annulation d'où qu'elle
+        vienne. Les refaire ici les ferait deux fois le jour où quelqu'un
+        annule par l'autre chemin.
+        """
+        return OrderService.transition_to(
+            order=order, target=OrderStatus.CANCELLED, actor=actor, reason=reason
+        )

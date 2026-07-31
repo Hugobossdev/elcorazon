@@ -4,10 +4,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 /// Configuration centralisée des clés API
 /// Les valeurs sont chargées depuis le fichier .env pour la sécurité
 class ApiConfig {
-  // Configuration Supabase
-  static String get supabaseUrl => dotenv.env['SUPABASE_URL'] ?? '';
-  static String get supabaseAnonKey => dotenv.env['SUPABASE_ANON_KEY'] ?? '';
-
   // Configuration PayDunya (Mode Test)
   static String get payDunyaMasterKey =>
       dotenv.env['PAYDUNYA_MASTER_KEY'] ?? '';
@@ -40,12 +36,24 @@ class ApiConfig {
       dotenv.env['FIREBASE_MESSAGING_SENDER_ID'] ?? '';
   static String get firebaseAppId => dotenv.env['FIREBASE_APP_ID'] ?? '';
 
-  // Configuration Agora RTC
+  // Configuration Agora RTC.
+  //
+  // L'identifiant d'application seulement : il est public par nature. Le
+  // **certificat** signe les jetons d'appel et vit côté serveur — l'embarquer
+  // ici reviendrait à le distribuer dans un binaire, donc à laisser fabriquer
+  // des jetons pour n'importe quel canal.
   static String get agoraAppId => dotenv.env['AGORA_APP_ID'] ?? '';
 
-  // Configuration Backend (Node.js/Express)
+  /// Mandataire HTTP des API Google, **uniquement sur le web**.
+  ///
+  /// Reliquat de l'ancien backend Node : `geocoding_service`,
+  /// `directions_service` et `places_service` passent par lui pour contourner
+  /// CORS, et `paydunya_service` y garde un chemin de paiement client. Sur
+  /// mobile, ces services appellent Google directement et ce réglage ne sert
+  /// pas. Aucun équivalent Django n'existe encore — c'est le dernier lien vers
+  /// un backend retiré, à traiter avec ces quatre services.
   static String get backendUrl =>
-      dotenv.env['BACKEND_URL'] ?? 'http://localhost:3000';
+      dotenv.env['LEGACY_PROXY_URL'] ?? 'http://localhost:3000';
 
   // Configuration de l'environnement
   static String get environment => dotenv.env['ENVIRONMENT'] ?? 'development';
@@ -53,9 +61,7 @@ class ApiConfig {
 
   /// Vérifie si toutes les clés API sont configurées
   static bool get isFullyConfigured {
-    return supabaseUrl.isNotEmpty &&
-        supabaseAnonKey.isNotEmpty &&
-        googleMapsApiKey.isNotEmpty &&
+    return googleMapsApiKey.isNotEmpty &&
         googleMapsApiKey != 'your-google-maps-api-key' &&
         firebaseApiKey.isNotEmpty &&
         firebaseApiKey != 'your-api-key' &&
@@ -63,21 +69,10 @@ class ApiConfig {
         payDunyaMasterKey != 'your-paydunya-master-key';
   }
 
-  /// Vérifie si les services essentiels sont configurés
-  static bool get isEssentialConfigured {
-    return supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
-  }
-
   /// Retourne les clés manquantes
   static List<String> get missingKeys {
     final List<String> missing = [];
 
-    if (supabaseUrl.isEmpty) {
-      missing.add('Supabase URL');
-    }
-    if (supabaseAnonKey.isEmpty) {
-      missing.add('Supabase Anon Key');
-    }
     if (googleMapsApiKey.isEmpty ||
         googleMapsApiKey == 'your-google-maps-api-key') {
       missing.add('Google Maps API Key');

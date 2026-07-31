@@ -26,7 +26,12 @@ from django.db import models
 from apps.accounts.models import User
 from apps.orders.models import Order
 from common.fields import MoneyField
-from common.models import TimeStampedModel, UUIDModel, state_check_constraint
+from common.models import (
+    PositiveAmountModel,
+    TimeStampedModel,
+    UUIDModel,
+    state_check_constraint,
+)
 from common.state_machine import StateMachine
 
 __all__ = [
@@ -38,6 +43,7 @@ __all__ = [
     "SplitShare",
     "Transaction",
     "WebhookEvent",
+    "Withdrawal",
     "new_share_token",
 ]
 
@@ -85,12 +91,18 @@ class PaymentProvider(models.TextChoices):
     WALLET = "wallet", "Portefeuille interne"
 
 
-class Transaction(UUIDModel, TimeStampedModel):
+class Transaction(UUIDModel, TimeStampedModel, PositiveAmountModel):
     """Mouvement d'encaissement auprès d'un prestataire.
 
     Une commande peut en porter plusieurs : une tentative échouée suivie d'une
     réussie, ou une part par participant d'un paiement partagé.
+
+    Le montant est refusé à zéro **avant** l'insertion : encaisser 0 F n'a pas
+    de sens, et la contrainte `transaction_amount_positive` seule ne rendait
+    qu'un `IntegrityError`.
     """
+
+    POSITIVE_AMOUNTS = ("amount",)
 
     # Nul pour un encaissement qui ne règle pas de commande — un abonnement
     # aujourd'hui. `payments` ne connaît pas ces domaines : c'est à eux de
@@ -191,7 +203,7 @@ class SplitPayment(UUIDModel, TimeStampedModel):
         return f"Partage — {self.order.reference}"
 
 
-class SplitShare(UUIDModel, TimeStampedModel):
+class SplitShare(UUIDModel, TimeStampedModel, PositiveAmountModel):
     """Part d'un participant.
 
     **P2 — le correctif structurel.** Une part n'est `completed` que si
@@ -202,6 +214,8 @@ class SplitShare(UUIDModel, TimeStampedModel):
     La contrainte ci-dessous l'impose en base — c'est-à-dire indépendamment de
     tout code applicatif présent ou futur.
     """
+
+    POSITIVE_AMOUNTS = ("amount",)
 
     split = models.ForeignKey(SplitPayment, on_delete=models.CASCADE, related_name="shares")
     participant = models.ForeignKey(
@@ -256,7 +270,7 @@ class SplitShare(UUIDModel, TimeStampedModel):
         return f"{self.display_name} — {self.amount}"
 
 
-class Refund(UUIDModel, TimeStampedModel):
+class Refund(UUIDModel, TimeStampedModel, PositiveAmountModel):
     """Remboursement.
 
     **P3** — le plafonnement au montant réellement encaissé ne peut pas être une
@@ -265,6 +279,8 @@ class Refund(UUIDModel, TimeStampedModel):
     commande, et couvert par un test d'attaque — l'ancien code autorisait un
     remboursement supérieur au montant payé.
     """
+
+    POSITIVE_AMOUNTS = ("amount",)
 
     order = models.ForeignKey(Order, on_delete=models.PROTECT, related_name="refunds")
     transaction = models.ForeignKey(Transaction, on_delete=models.PROTECT, related_name="refunds")
@@ -289,3 +305,49 @@ class Refund(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"Remboursement {self.amount} — {self.order.reference}"
+
+
+class Withdrawal(UUIDModel, TimeStampedModel, PositiveAmountModel):
+    """Demande de retrait des gains d'un livreur.
+
+    Écrite comme un `Refund`, et pour la même raison : elle enregistre une
+    **intention de versement**, avec sa trace, et laisse le mouvement d'argent à
+    un geste contrôlé. Ce que l'app livreur faisait — appeler l'API de
+    décaissement PayDunya depuis le téléphone, avec un montant calculé
+    localement, puis écrire elle-même « payé » — revenait à laisser le
+    bénéficiaire décider de ce qu'il touche.
+
+    Le solde, lui, est débité **à la demande** et sous verrou : sans cela, deux
+    demandes simultanées passeraient toutes deux la vérification et videraient
+    le compteur deux fois. Un retrait refusé par l'exploitation le recrédite.
+    """
+
+    POSITIVE_AMOUNTS = ("amount",)
+
+    courier = models.ForeignKey(
+        "delivery.CourierProfile", on_delete=models.PROTECT, related_name="withdrawals"
+    )
+    amount = MoneyField()
+    status = models.CharField(
+        max_length=16, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
+    )
+
+    #: Référence du virement chez le prestataire, renseignée par l'exploitation
+    #: au moment où elle l'exécute.
+    provider_reference = models.CharField(max_length=128, blank=True)
+    failure_reason = models.TextField(blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "retrait"
+        ordering = ["-created_at"]
+        constraints = [
+            state_check_constraint(PAYMENT_MACHINE, "status", "withdrawal_status_in_enum"),
+            models.CheckConstraint(
+                condition=models.Q(amount_minor__gt=0), name="withdrawal_amount_positive"
+            ),
+        ]
+        indexes = [models.Index(fields=["courier", "-created_at"])]
+
+    def __str__(self) -> str:
+        return f"Retrait {self.amount} — {self.courier.user.full_name}"

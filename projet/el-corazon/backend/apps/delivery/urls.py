@@ -24,6 +24,11 @@ urlpatterns = [
         name="offer",
     ),
     path(
+        "orders/<uuid:order_id>/rating/",
+        views.OrderRatingView.as_view(),
+        name="order-rating",
+    ),
+    path(
         "assignments/<uuid:assignment_id>/cancel/",
         views.CancelAssignmentView.as_view(),
         name="assignment-cancel",

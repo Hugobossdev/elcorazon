@@ -10,13 +10,9 @@ import 'services/app_service.dart';
 import 'services/location_service.dart';
 import 'services/notification_service.dart';
 import 'services/gamification_service.dart';
-import 'services/promotion_service.dart';
-import 'services/social_service.dart';
 import 'services/voice_service.dart';
 import 'services/ar_service.dart';
 import 'services/ai_service.dart';
-import 'services/customization_service.dart';
-import 'services/marketing_service.dart';
 import 'services/group_delivery_service.dart';
 import 'services/realtime_tracking_service.dart';
 import 'services/paydunya_service.dart';
@@ -39,7 +35,6 @@ import 'screens/delivery/delivery_navigation_screen.dart';
 import 'screens/delivery/real_time_tracking_screen.dart';
 import 'screens/communication/chat_screen.dart';
 import 'screens/payments/earnings_screen.dart';
-import 'supabase/supabase_config.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
@@ -64,9 +59,8 @@ void main() async {
     // The app can work in offline mode or with cached data
   }
 
-  // Backend Django v2 (Phase 6) — authentification uniquement pour l'instant,
-  // le reste de l'app (menu, courses, portefeuille...) reste sur Supabase
-  // jusqu'à ce que son propre domaine soit migré à son tour.
+  // Backend Django v2 (Phase 6). L'app n'a plus aucun accès direct à une base
+  // de données : tout passe par `/api/v1/` et les WebSockets `ws/`.
   final tokenStorage = TokenStorage();
   final apiClient = ApiClient(
     baseUrl: dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1',
@@ -109,14 +103,6 @@ Future<void> _initializeCoreServices() async {
   }
 
   try {
-    // Initialize Supabase (essential)
-    await SupabaseConfig.initialize();
-  } catch (e) {
-    debugPrint('⚠️ Failed to initialize Supabase: ${e.toString()}');
-    // Continue without Supabase - app can work in offline mode
-  }
-
-  try {
     // Initialize Firebase
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
@@ -145,13 +131,9 @@ class DeliverApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => NotificationService()),
         ChangeNotifierProvider(create: (_) => GamificationService()),
-        ChangeNotifierProvider(create: (_) => PromotionService()),
-        ChangeNotifierProvider(create: (_) => SocialService()),
         ChangeNotifierProvider(create: (_) => VoiceService()),
         ChangeNotifierProvider(create: (_) => ARService()),
         ChangeNotifierProvider(create: (_) => AIService()),
-        ChangeNotifierProvider(create: (_) => CustomizationService()),
-        ChangeNotifierProvider(create: (_) => MarketingService()),
         ChangeNotifierProvider(create: (_) => GroupDeliveryService()),
         ChangeNotifierProvider(create: (_) => RealtimeTrackingService()),
         ChangeNotifierProvider(create: (_) => PayDunyaService()),

@@ -26,6 +26,7 @@ __all__ = [
     "OrderPreviewSerializer",
     "OrderQuoteSerializer",
     "OrderSerializer",
+    "StaffCancelSerializer",
     "StatusTransitionSerializer",
 ]
 
@@ -204,3 +205,15 @@ class StatusTransitionSerializer(serializers.Serializer[Any]):
 
 class CancelSerializer(serializers.Serializer[Any]):
     reason = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+
+
+class StaffCancelSerializer(serializers.Serializer[Any]):
+    """Annulation par l'exploitation — le motif n'est pas facultatif.
+
+    Le client annule sa propre commande ; l'opérateur annule celle d'un tiers,
+    qui sera remboursé et rappellera pour savoir pourquoi. Le champ obligatoire
+    est ce qui rend le journal des annulations exploitable au lieu d'être une
+    liste de dates.
+    """
+
+    reason = serializers.CharField(max_length=500, allow_blank=False)

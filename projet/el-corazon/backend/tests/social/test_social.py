@@ -9,10 +9,12 @@ les deux.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 import pytest
-from django.db import connections
+from django.db import connection, connections, transaction
 from django.db.utils import IntegrityError
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -199,13 +201,44 @@ class TestPublications:
         with pytest.raises(PostRefused):
             SocialService.create_post(author=customer, content="?", kind=PostKind.ORDER_SHARE)
 
+    def test_le_modele_corrige_un_post_de_groupe_marque_public(
+        self, group: SocialGroup, customer: User
+    ) -> None:
+        """S4 — la visibilité est dérivée du groupe, sur tout chemin d'écriture.
+
+        Le service n'est pas le seul à créer des posts (back-office, admin,
+        commande d'exploitation). Un `is_public=True` explicite sur un post de
+        groupe heurtait `group_post_not_public` et rendait un `IntegrityError` ;
+        il est maintenant corrigé avant l'insertion.
+        """
+        post = Post.objects.create(author=customer, content="X", group=group, is_public=True)
+
+        assert post.is_public is False
+        post.refresh_from_db()
+        assert post.is_public is False
+
+    def test_rattacher_un_post_existant_a_un_groupe_le_rend_prive(
+        self, group: SocialGroup, customer: User
+    ) -> None:
+        """Le déplacement vers un groupe est aussi un chemin vers la violation."""
+        post = Post.objects.create(author=customer, content="X")
+        assert post.is_public is True
+
+        post.group = group
+        post.save(update_fields=["group"])
+
+        post.refresh_from_db()
+        assert post.is_public is False
+
     def test_la_base_refuse_un_post_de_groupe_marque_public(
         self, group: SocialGroup, customer: User
     ) -> None:
-        """S4, en dernier ressort : même si le service ne le permet pas, la
-        contrainte tiendrait si un autre chemin d'écriture apparaissait."""
-        with pytest.raises(IntegrityError):
-            Post.objects.create(author=customer, content="X", group=group, is_public=True)
+        """S4, en dernier ressort (ADR-010) : la contrainte tient toujours pour
+        les chemins qui contournent `save()`, comme `bulk_create`."""
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Post.objects.bulk_create(
+                [Post(author=customer, content="X", group=group, is_public=True)]
+            )
 
 
 class TestVisibilite:
@@ -287,6 +320,63 @@ class TestLikesEtCommentaires:
 
         assert resultats == ["aimé", "aimé"]
         assert PostLike.objects.filter(post=post, user=courier_user).count() == 1
+        post.refresh_from_db()
+        assert post.likes_count == 1
+
+    def test_un_j_aime_concurrent_est_reutilise_sans_heurter_la_contrainte(
+        self, customer: User, courier_user: User
+    ) -> None:
+        """La course de `test_deux_j_aimes_concurrents`, rendue déterministe.
+
+        Le test concurrent ne l'attrape qu'avec de la chance : il faut que les
+        deux fils tombent exactement dans la fenêtre. Ici la fenêtre est forcée
+        — le j'aime existe déjà, mais la lecture initiale ne le voit pas —, ce
+        qui reproduit à coup sûr le chemin qui posait problème.
+
+        Le `create` rattrapé qui précédait écrivait d'abord et avalait
+        l'erreur : chaque passage laissait un `duplicate key value violates
+        unique constraint "one_like_per_user"` dans le journal PostgreSQL, et
+        posait `needs_rollback` sur la connexion — d'où une sortie du bloc
+        `atomic` par un rollback silencieux plutôt que par un commit.
+
+        L'assertion porte donc sur les requêtes réellement émises, seule trace
+        observable de la différence : `get_or_create` résout le cas par un
+        `SELECT`, sans tenter l'insertion vouée à échouer.
+        """
+        post = SocialService.create_post(author=customer, content="Bonjour")
+
+        # Le concurrent a gagné la course, et le compteur porte déjà son j'aime.
+        PostLike.objects.create(post=post, user=courier_user)
+        Post.objects.filter(pk=post.pk).update(likes_count=1)
+
+        vrai_filter = PostLike.objects.filter
+        appels = {"n": 0}
+
+        def lecture_aveugle(*args: object, **kwargs: object) -> object:
+            appels["n"] += 1
+            if appels["n"] == 1:
+                # La lecture initiale de `toggle_like` : elle ne voit rien.
+                return mock.Mock(first=mock.Mock(return_value=None))
+            return vrai_filter(*args, **kwargs)
+
+        with (
+            mock.patch.object(PostLike.objects, "filter", side_effect=lecture_aveugle),
+            CaptureQueriesContext(connection) as capture,
+        ):
+            resultat = SocialService.toggle_like(user=courier_user, post=post)
+
+        assert resultat is True
+
+        inserts = [
+            q["sql"]
+            for q in capture.captured_queries
+            if "INSERT" in q["sql"] and "social_postlike" in q["sql"]
+        ]
+        assert not inserts, f"Insertion vouée à violer one_like_per_user : {inserts}"
+
+        # Le j'aime concurrent est réutilisé, pas dupliqué…
+        assert PostLike.objects.filter(post=post, user=courier_user).count() == 1
+        # …et le compteur n'a pas compté deux fois un unique j'aime.
         post.refresh_from_db()
         assert post.likes_count == 1
 

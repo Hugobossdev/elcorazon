@@ -42,7 +42,7 @@ os.environ["JWT_PUBLIC_KEY_PATH"] = ""
 from config.geolibs import discover
 
 from .base import *  # noqa: F403
-from .base import BASE_DIR, REST_FRAMEWORK
+from .base import BASE_DIR, DATABASES, REST_FRAMEWORK
 
 # Idem `dev.py` : sans cela, aucun test — pas même ceux qui n'ouvrent aucune
 # connexion — n'est collectable sur un poste Windows, l'import des modèles
@@ -50,6 +50,31 @@ from .base import BASE_DIR, REST_FRAMEWORK
 globals().update(discover())
 
 TESTING = True
+
+# --------------------------------------------------------------- connexions
+#
+# `CONN_MAX_AGE` vaut 60 s en production, et c'est le bon réglage là-bas : une
+# connexion PostgreSQL coûte cher à ouvrir, la garder entre deux requêtes évite
+# ce coût. En test, le même réglage **casse la destruction de la base**.
+#
+# La chaîne exacte : les tests WebSocket exécutent leurs requêtes via
+# `channels.db.database_sync_to_async`, qui les délègue au greffon de fils
+# d'asgiref. Chacun de ces fils ouvre sa propre connexion — elles sont
+# thread-local. `database_sync_to_async` appelle bien `close_old_connections()`
+# en sortie, mais celui-ci ne ferme *que* les connexions périmées : avec
+# `CONN_MAX_AGE = 60`, une connexion de trois secondes est jugée encore bonne et
+# reste ouverte. Les fils d'asgiref, eux, survivent à la session pytest.
+#
+# `destroy_test_db` trouve alors ces sessions résiduelles et échoue sur
+# `database "test_elcorazon" is being accessed by other users`, ce qui laisse la
+# base de test en place — l'exécution suivante repart d'un schéma déjà migré et
+# de données rémanentes, jusqu'à ce que quelqu'un la supprime à la main.
+#
+# À zéro, `close_old_connections()` ferme systématiquement, les fils d'asgiref
+# ne retiennent plus rien, et la suite est réexécutable indéfiniment. La
+# persistance des connexions n'apporte de toute façon rien ici : la suite
+# tourne contre une base locale.
+DATABASES = {**DATABASES, "default": {**DATABASES["default"], "CONN_MAX_AGE": 0}}
 
 # `AllowedHostsOriginValidator` protège les WebSocket : sans hôte autorisé, il
 # ferme **toute** connexion, y compris celle d'un test. Le défaut est le bon —
@@ -126,3 +151,10 @@ except ImportError:  # pragma: no cover - cryptography absent : tests purs seule
 LOGGING = {"version": 1, "disable_existing_loggers": False, "root": {"handlers": []}}
 
 MEDIA_ROOT = BASE_DIR / ".pytest-media"
+
+# Identifiants Agora factices : la suite vérifie qu'un jeton est délivré et à
+# qui, pas qu'Agora l'accepte — le format est verrouillé à part
+# (`tests/common/test_agora.py`). Sans ces valeurs, la fabrication échouerait
+# et masquerait les règles d'autorisation qu'on veut réellement tester.
+AGORA_APP_ID = "a" * 32
+AGORA_APP_CERTIFICATE = "b" * 32

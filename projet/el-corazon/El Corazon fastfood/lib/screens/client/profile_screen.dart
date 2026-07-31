@@ -99,12 +99,6 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   _MenuItem(
-                    icon: Icons.payment,
-                    title: 'Méthodes de paiement',
-                    subtitle: 'Cartes et portefeuilles',
-                    onTap: () => context.navigateToWallet(),
-                  ),
-                  _MenuItem(
                     icon: Icons.notifications,
                     title: 'Notifications',
                     subtitle: 'Paramètres de notifications',
@@ -251,12 +245,6 @@ class ProfileScreen extends StatelessWidget {
           label: 'Adresses',
           onTap: () =>
               Navigator.of(context).pushNamed(AppRouter.addressManagement),
-        ),
-        const SizedBox(width: 8),
-        action(
-          icon: Icons.account_balance_wallet,
-          label: 'Wallet',
-          onTap: () => context.navigateToWallet(),
         ),
         const SizedBox(width: 8),
         action(

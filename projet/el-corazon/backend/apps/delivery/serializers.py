@@ -15,7 +15,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from apps.accounts.models import User
-from apps.delivery.models import Assignment, CourierProfile, VehicleType
+from apps.delivery.models import Assignment, CourierProfile, CourierRating, VehicleType
 from apps.delivery.states import DELIVERY_MACHINE, VERIFICATION_MACHINE
 from apps.restaurants.models import Restaurant
 from common.serializers import LocationField, MoneyField
@@ -25,6 +25,8 @@ __all__ = [
     "CourierProfileSerializer",
     "CourierProvisioningSerializer",
     "CourierPublicSerializer",
+    "CourierRatingSerializer",
+    "CourierRatingWriteSerializer",
     "DeclineSerializer",
     "DeliveryTransitionSerializer",
     "DocumentsSerializer",
@@ -255,3 +257,26 @@ class DocumentsSerializer(serializers.Serializer[Any]):
         if not attrs:
             raise serializers.ValidationError("Aucune pièce fournie.")
         return attrs
+
+
+class CourierRatingSerializer(serializers.ModelSerializer[CourierRating]):
+    """Une note telle qu'on la relit — pour savoir si la course est déjà notée."""
+
+    courier = serializers.UUIDField(source="assignment.courier_id", read_only=True)
+    order = serializers.UUIDField(source="assignment.order_id", read_only=True)
+
+    class Meta:
+        model = CourierRating
+        fields = ["id", "order", "courier", "score", "comment", "created_at"]
+        read_only_fields = fields
+
+
+class CourierRatingWriteSerializer(serializers.Serializer[Any]):
+    """Les deux seuls champs qu'une note accepte.
+
+    Ni le livreur ni la course : ils se déduisent de la commande citée dans
+    l'URL. Les accepter du client permettrait de noter le livreur d'un autre.
+    """
+
+    score = serializers.IntegerField(min_value=1, max_value=5)
+    comment = serializers.CharField(required=False, allow_blank=True, max_length=1000)

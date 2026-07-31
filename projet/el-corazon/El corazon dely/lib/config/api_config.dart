@@ -1,12 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-/// Configuration centralisée des clés API pour l'application Deliver
-///
-/// L'URL et la clé Supabase ne vivent plus ici : ce fichier en portait une
-/// copie codée en dur, distincte de celle lue depuis `.env` par
-/// `supabase/supabase_config.dart` (la seule réellement utilisée à
-/// l'initialisation) — deux sources de vérité pour la même valeur, dont
-/// celle-ci n'avait plus aucun appelant.
+/// Configuration centralisée des clés API pour l'application livreur.
 class ApiConfig {
   // Configuration Google Maps
   static const String googleMapsApiKey =

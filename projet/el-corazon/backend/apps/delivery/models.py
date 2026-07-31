@@ -30,7 +30,7 @@ from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
 from common.models import TimeStampedModel, UUIDModel, state_check_constraint
 
-__all__ = ["Assignment", "CourierProfile", "VehicleType"]
+__all__ = ["Assignment", "CourierProfile", "CourierRating", "VehicleType"]
 
 
 class VehicleType(models.TextChoices):
@@ -197,3 +197,46 @@ class Assignment(UUIDModel, TimeStampedModel):
             DeliveryStatus.PICKED_UP,
             DeliveryStatus.ON_THE_WAY,
         }
+
+
+class CourierRating(UUIDModel, TimeStampedModel):
+    """Note laissée par le client sur une course livrée.
+
+    Rattachée à la **course** et non au couple (commande, livreur) : c'est la
+    course qui dit qui a livré quoi, et le lien un-à-un interdit en base de
+    noter deux fois la même livraison. Une commande relivrée après incident
+    aurait une autre course, donc une autre note — ce qui est le comportement
+    voulu.
+
+    `customer` est stocké alors qu'il se déduit de `assignment.order.customer` :
+    la note survit à ce chemin (une commande peut être réattribuée, l'auteur de
+    la note ne change pas) et l'index rend directe la question « ce client
+    a-t-il noté ? ».
+    """
+
+    assignment = models.OneToOneField(
+        Assignment, on_delete=models.CASCADE, related_name="rating"
+    )
+    customer = models.ForeignKey(User, on_delete=models.PROTECT, related_name="courier_ratings")
+    score = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+    comment = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "note de livreur"
+        verbose_name_plural = "notes de livreurs"
+        ordering = ["-created_at"]
+        constraints = [
+            # Le validateur ci-dessus ne s'applique qu'aux formulaires et
+            # sérialiseurs ; la contrainte s'applique à tout le monde, y
+            # compris à un script d'exploitation.
+            models.CheckConstraint(
+                condition=models.Q(score__gte=1) & models.Q(score__lte=5),
+                name="courier_rating_score_range",
+            ),
+        ]
+        indexes = [models.Index(fields=["customer", "-created_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.score}/5 — {self.assignment.courier.user.full_name}"

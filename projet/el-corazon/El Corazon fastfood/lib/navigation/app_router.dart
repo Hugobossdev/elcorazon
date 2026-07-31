@@ -12,7 +12,6 @@ import 'package:elcora_fast/screens/client/main_navigation_screen.dart';
 import 'package:elcora_fast/screens/client/cart_screen.dart';
 import 'package:elcora_fast/screens/client/checkout_screen.dart';
 import 'package:elcora_fast/screens/client/delivery_tracking_screen.dart';
-import 'package:elcora_fast/screens/client/wallet_screen.dart';
 import 'package:elcora_fast/screens/client/rewards_screen.dart';
 import 'package:elcora_fast/screens/client/cake_order_screen.dart';
 import 'package:elcora_fast/screens/client/notifications_screen.dart';
@@ -30,7 +29,6 @@ import 'package:elcora_fast/screens/client/product_reviews_screen.dart';
 import 'package:elcora_fast/screens/client/support_screen.dart';
 import 'package:elcora_fast/screens/client/advanced_search_screen.dart';
 import 'package:elcora_fast/screens/client/enhanced_orders_screen.dart';
-import 'package:elcora_fast/screens/otp_verification_screen.dart';
 import 'package:elcora_fast/models/promo_code.dart';
 import 'package:elcora_fast/screens/client/driver_rating_screen.dart';
 import 'package:elcora_fast/screens/client/order_rating_screen.dart';
@@ -47,7 +45,6 @@ class AppRouter {
   static const String cart = '/client/cart';
   static const String checkout = '/client/checkout';
   static const String deliveryTracking = '/client/delivery-tracking';
-  static const String wallet = '/client/wallet';
   static const String rewards = '/client/rewards';
   static const String cakeOrder = '/client/cake-order';
   static const String notifications = '/client/notifications';
@@ -65,7 +62,6 @@ class AppRouter {
   static const String support = '/client/support';
   static const String advancedSearch = '/client/advanced-search';
   static const String enhancedOrders = '/client/enhanced-orders';
-  static const String otpVerification = '/auth/otp-verification';
   static const String driverRating = '/client/driver-rating';
   static const String orderRating = '/client/order-rating';
 
@@ -156,12 +152,6 @@ class AppRouter {
           builder: (_) => DeliveryTrackingScreen(
             orderId: orderId,
           ),
-          settings: settings,
-        );
-
-      case wallet:
-        return MaterialPageRoute(
-          builder: (_) => const WalletScreen(),
           settings: settings,
         );
 
@@ -299,15 +289,6 @@ class AppRouter {
       case enhancedOrders:
         return MaterialPageRoute(
           builder: (_) => const EnhancedOrdersScreen(),
-          settings: settings,
-        );
-
-      case otpVerification:
-        final args = settings.arguments as Map<String, dynamic>?;
-        return MaterialPageRoute(
-          builder: (_) => OTPVerificationScreen(
-            phone: args?['phone'] ?? '',
-          ),
           settings: settings,
         );
 

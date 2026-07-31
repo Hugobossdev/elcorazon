@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
-import 'package:provider/provider.dart';
-import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/driver_rating_service.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
 
@@ -44,11 +42,10 @@ class _DriverRatingScreenState extends State<DriverRatingScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final appService = Provider.of<AppService>(context, listen: false);
+      // Le livreur et l'auteur ne voyagent plus : le serveur les déduit de la
+      // course et du jeton.
       final success = await _ratingService.submitRating(
-        driverId: widget.driverId,
         orderId: widget.orderId,
-        customerId: appService.currentUser?.id ?? '',
         rating: _rating.toInt(),
         comment: _commentController.text.trim(),
       );

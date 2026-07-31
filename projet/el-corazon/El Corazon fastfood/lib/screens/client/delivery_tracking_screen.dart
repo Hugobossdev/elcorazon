@@ -5,7 +5,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
-import 'package:elcora_fast/services/database_service.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/main.dart' show apiClient;
+import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/directions_service.dart';
 import 'package:elcora_fast/services/driver_rating_service.dart';
@@ -47,7 +49,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
   StreamSubscription<Order>? _orderUpdatesSubscription;
   StreamSubscription<Map<String, dynamic>>? _deliveryLocationSubscription;
   late RealtimeTrackingService? _trackingService;
-  late DatabaseService? _databaseService;
+  /// Suivi serveur : livreur affecté et dernière position connue.
+  final eccore.TrackingRepository _tracking =
+      eccore.TrackingRepository(apiClient: apiClient);
   late GeocodingService? _geocodingService;
   late DirectionsService? _directionsService;
   Timer? _estimatedTimeUpdateTimer;
@@ -97,65 +101,25 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       }
 
       final appService = Provider.of<AppService>(context, listen: false);
-      _databaseService = appService.databaseService;
       _geocodingService = GeocodingService();
       _directionsService = DirectionsService();
 
-      // Charger la commande depuis la base de données
-      try {
-        final orderResponse =
-            await _databaseService!.supabase.from('orders').select('''
-              *,
-              order_items(*)
-            ''').eq('id', widget.orderId).maybeSingle();
-
-        if (orderResponse != null) {
-          _order = Order.fromMap(orderResponse);
-        } else {
-          // Fallback: chercher dans les commandes locales
-          final orders = appService.orders;
-          try {
-            _order = orders.firstWhere(
-              (order) => order.id == widget.orderId,
-            );
-          } catch (e) {
-            throw Exception(
-              'Commande non trouvée dans la base de données ni localement',
-            );
-          }
-        }
-      } catch (e) {
-        // Si c'est une erreur UUID invalide, ne pas essayer le fallback local
-        if (e.toString().contains('invalid input syntax for type uuid') ||
-            e.toString().contains('22P02')) {
-          debugPrint('⚠️ UUID invalide pour la commande: ${widget.orderId}');
-          throw Exception('ID de commande invalide. Veuillez réessayer.');
-        }
-
-        debugPrint('⚠️ Error loading order from database, using local: $e');
-        // Fallback: chercher dans les commandes locales
+      // Charger la commande depuis le backend Django ; à défaut, l'exemplaire
+      // déjà en mémoire (parcours hors ligne).
+      _order = await DjangoOrderRepository().getOrderById(widget.orderId);
+      if (_order == null) {
         final orders = appService.orders;
         try {
-          _order = orders.firstWhere(
-            (order) => order.id == widget.orderId,
-          );
-        } catch (e2) {
-          throw Exception(
-            'Commande non trouvée dans la base de données ni localement',
-          );
+          _order = orders.firstWhere((order) => order.id == widget.orderId);
+        } catch (_) {
+          throw Exception('Commande introuvable');
         }
       }
 
-      // Charger le profil du livreur si assigné
-      if (_order != null && _order!.deliveryPersonId != null) {
-        await _loadDriverProfile(_order!.deliveryPersonId!);
-      }
-
-      // Charger la dernière position de livraison seulement si la commande existe
+      // Livreur et dernière position viennent du même appel de suivi.
       if (_order != null) {
         await _geocodeDeliveryAddress();
-        await _loadLatestDeliveryLocation();
-        await _loadLocationHistory();
+        await _loadTracking();
         _initializeStatusTimestamps();
       }
 
@@ -172,34 +136,64 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     }
   }
 
-  Future<void> _loadDriverProfile(String driverId) async {
+  /// Lit `tracking/orders/{id}/` : le livreur tel que le client peut le voir,
+  /// et sa dernière position.
+  ///
+  /// Le contrat ne rend ni l'e-mail ni le téléphone personnel du livreur, et
+  /// **pas non plus l'historique complet du trajet** : suivre son repas est un
+  /// service, suivre un employé après coup n'en est pas un. La trace affichée
+  /// sur la carte est donc celle accumulée pendant la session, depuis le
+  /// WebSocket — l'ancienne version relisait tout le trajet en base.
+  Future<void> _loadTracking() async {
     try {
-      if (_databaseService == null) return;
-      final profile = await _databaseService!.getUserProfile(driverId);
-      if (profile != null && mounted) {
+      final tracking = await _tracking.forOrder(widget.orderId);
+      if (!mounted) return;
+
+      if (tracking.hasCourier && tracking.courier.isNotEmpty) {
         setState(() {
-          _driverProfile = profile;
+          _driverProfile = {
+            'auth_user_id': tracking.courier['id'],
+            'name': tracking.courier['full_name'] ?? 'Livreur',
+            'profile_image': tracking.courier['avatar'],
+            'vehicle_type': tracking.courier['vehicle_type'],
+          };
+        });
+        await _loadDriverRating();
+      }
+
+      final position = tracking.lastPosition;
+      if (position != null && mounted) {
+        setState(() {
+          _deliveryLocation = {
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+            'timestamp': position.recordedAt,
+            'accuracy': position.accuracyMeters,
+            'speed': position.speedMetersPerSecond,
+            'heading': position.headingDegrees,
+          };
         });
 
-        // Charger la note du livreur
-        await _loadDriverRating(driverId);
+        await _calculateEstimatedDeliveryTime();
+        _updateMapMarkers();
+        _checkProximity();
+        _calculateDeliveryStats();
       }
-    } catch (e) {
-      debugPrint('⚠️ Error loading driver profile: $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('Suivi indisponible : ${e.code}');
     }
   }
 
-  /// Charger la note moyenne du livreur
-  Future<void> _loadDriverRating(String driverId) async {
+  /// Note du livreur affecté à cette commande — lue dans le suivi
+  /// (`tracking/orders/{id}/`), qui la porte déjà : le client voit la note de
+  /// celui qui lui livre, et n'interroge pas la fiche d'un livreur au hasard.
+  Future<void> _loadDriverRating() async {
     try {
-      final ratingService = DriverRatingService();
-      final rating = await ratingService.getDriverAverageRating(driverId);
-      final count = await ratingService.getDriverRatingCount(driverId);
-
-      if (mounted) {
+      final note = await DriverRatingService().courierRatingForOrder(widget.orderId);
+      if (note != null && mounted) {
         setState(() {
-          _driverRating = rating;
-          _driverRatingCount = count;
+          _driverRating = note.average;
+          _driverRatingCount = note.count;
         });
       }
     } catch (e) {
@@ -375,79 +369,6 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     );
   }
 
-  Future<void> _loadLatestDeliveryLocation() async {
-    try {
-      if (_databaseService == null) return;
-
-      final locations =
-          await _databaseService!.getDeliveryLocations(widget.orderId);
-      if (locations.isNotEmpty) {
-        final latestLocation = locations.first;
-        setState(() {
-          _deliveryLocation = {
-            'latitude': (latestLocation['latitude'] as num).toDouble(),
-            'longitude': (latestLocation['longitude'] as num).toDouble(),
-            'timestamp': DateTime.parse(latestLocation['timestamp'] as String),
-            'accuracy': latestLocation['accuracy'] != null
-                ? (latestLocation['accuracy'] as num).toDouble()
-                : null,
-            'speed': latestLocation['speed'] != null
-                ? (latestLocation['speed'] as num).toDouble()
-                : null,
-            'heading': latestLocation['heading'] != null
-                ? (latestLocation['heading'] as num).toDouble()
-                : null,
-          };
-        });
-
-        // Calculer le temps estimé de livraison
-        await _calculateEstimatedDeliveryTime();
-        _updateMapMarkers();
-
-        // Vérifier la proximité et calculer les statistiques
-        _checkProximity();
-        _calculateDeliveryStats();
-      }
-    } catch (e) {
-      debugPrint('⚠️ Error loading delivery location: $e');
-    }
-  }
-
-  /// Charge l'historique des positions du livreur
-  Future<void> _loadLocationHistory() async {
-    try {
-      if (_databaseService == null) return;
-
-      final locations =
-          await _databaseService!.getDeliveryLocations(widget.orderId);
-      if (locations.isNotEmpty) {
-        setState(() {
-          _locationHistory = locations.map((loc) {
-            return {
-              'latitude': (loc['latitude'] as num).toDouble(),
-              'longitude': (loc['longitude'] as num).toDouble(),
-              'timestamp': DateTime.parse(loc['timestamp'] as String),
-              'speed': loc['speed'] != null
-                  ? (loc['speed'] as num).toDouble()
-                  : null,
-            };
-          }).toList();
-          // Trier par timestamp décroissant (plus récent en premier)
-          _locationHistory.sort(
-            (a, b) => (b['timestamp'] as DateTime)
-                .compareTo(a['timestamp'] as DateTime),
-          );
-        });
-
-        // Mettre à jour le polyline de l'historique
-        _updateLocationHistoryPolyline();
-      }
-    } catch (e) {
-      debugPrint('⚠️ Error loading location history: $e');
-    }
-  }
-
-  /// Initialise les horodatages des statuts
   void _initializeStatusTimestamps() {
     if (_order == null) return;
 
@@ -628,7 +549,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
                 (_driverProfile == null ||
                     _driverProfile!['auth_user_id'] !=
                         updatedOrder.deliveryPersonId)) {
-              _loadDriverProfile(updatedOrder.deliveryPersonId!);
+              _loadTracking();
             }
 
             // Si la commande est livrée, arrêter le suivi
@@ -713,7 +634,6 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         (_) {
           if (mounted) {
             _loadOrderDetails();
-            _loadLocationHistory();
           }
         },
       );

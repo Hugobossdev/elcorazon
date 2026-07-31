@@ -101,8 +101,22 @@ class SandboxGateway:
     """
 
     def open_checkout(self, transaction: Transaction) -> CheckoutInstruction:
+        """Référence déterministe, dérivée de la clé primaire **entière**.
+
+        Les 16 premiers caractères hexadécimaux ne suffisaient pas, et le
+        raccourci produisait des doublons sur
+        `payments_transaction_provider_reference_key`. Un UUIDv7 (ADR-007) n'est
+        aléatoire que sur sa fin : ses 48 premiers bits sont l'horodatage en
+        millisecondes et les 4 suivants le numéro de version, constant. Sur 64
+        bits tronqués il ne restait donc que **12 bits** pour départager deux
+        transactions ouvertes dans la même milliseconde — 4 096 valeurs, soit
+        une collision plus probable qu'improbable dès la soixante-quinzième
+        (paradoxe des anniversaires). Un import de commandes, une rafale de
+        parts de paiement partagé ou une suite de tests un peu rapide suffisent
+        à l'atteindre.
+        """
         return CheckoutInstruction(
-            provider_reference=f"SBX-{transaction.pk.hex[:16].upper()}",
+            provider_reference=f"SBX-{transaction.pk.hex.upper()}",
             checkout_url=f"{settings.SANDBOX_CHECKOUT_BASE_URL}/{transaction.pk}",
             instructions="Bac à sable : confirmez par une notification signée.",
         )

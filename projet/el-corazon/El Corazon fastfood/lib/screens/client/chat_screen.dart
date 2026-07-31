@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:elcora_fast/services/chat_service.dart';
 import 'package:elcora_fast/models/chat_message.dart';
 import 'package:elcora_fast/services/app_service.dart';
@@ -29,9 +28,13 @@ class _ChatScreenState extends State<ChatScreen> {
   final ScrollController _scrollController = ScrollController();
   final ChatService _chatService = ChatService();
 
-  ChatRoom? _chatRoom;
   bool _isLoading = true;
-  String? _currentUserId;
+
+  /// Rôle de l'appelant tel que le serveur l'estampille sur chaque message
+  /// (`customer` | `courier`) : c'est ce qui décide du côté de la bulle. Il n'y
+  /// a plus d'identifiant d'utilisateur à comparer — le relais n'en diffuse
+  /// pas, et n'en a pas besoin.
+  static const String _myRole = 'customer';
 
   @override
   void initState() {
@@ -47,54 +50,27 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _initializeChat() async {
-    final appService = Provider.of<AppService>(context, listen: false);
-    // IMPORTANT: Utiliser l'auth_user_id de Supabase, pas l'ID de la table users
-    // appService.currentUser?.id est l'ID de la table users, pas l'auth_user_id
-    final supabase = Supabase.instance.client;
-    final authUser = supabase.auth.currentUser;
-    _currentUserId = authUser?.id ?? appService.currentUser?.id;
-
-    if (_currentUserId == null) {
-      setState(() => _isLoading = false);
-      return;
-    }
-
-    // Ensure socket is connected
+    // Plus de « salon » à charger : le canal est la commande elle-même, et
+    // l'autorisation est vérifiée par le serveur à l'ouverture du socket
+    // (`OrderChatConsumer`). Une commande livrée ou annulée voit sa connexion
+    // refusée — la conversation n'a plus lieu d'être.
     if (!_chatService.isConnected) {
-      await _chatService.initialize(
-        userId: _currentUserId,
-        // token: appService.currentUser?.token, // Add token if available
-      );
+      await _chatService.initialize();
     }
 
-    await _loadChatRoom();
-  }
-
-  Future<void> _loadChatRoom() async {
-    try {
-      final room = await _chatService.getChatRoom(widget.orderId);
-      if (mounted) {
-        setState(() {
-          _chatRoom = room;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error loading chat room: $e');
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+    if (mounted) {
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty || _chatRoom == null) return;
+    if (_messageController.text.trim().isEmpty) return;
 
     final content = _messageController.text.trim();
     _messageController.clear();
 
     final success = await _chatService.sendMessage(
-      roomId: _chatRoom!.id,
+      orderId: widget.orderId,
       message: content,
     );
 
@@ -141,19 +117,17 @@ class _ChatScreenState extends State<ChatScreen> {
           IconButton(
             tooltip: 'Appeler (audio)',
             icon: const Icon(Icons.call),
-            onPressed: _chatRoom == null ? null : _startAudioCall,
+            onPressed: _startAudioCall,
           ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _chatRoom == null
-              ? _buildNoChatRoom()
-              : Column(
+          : Column(
                   children: [
                     Expanded(
                       child: StreamBuilder<List<ChatMessage>>(
-                        stream: _chatService.getMessageStream(_chatRoom!.id),
+                        stream: _chatService.getMessageStream(widget.orderId),
                         builder: (context, snapshot) {
                           if (snapshot.hasError) {
                             return Center(
@@ -186,7 +160,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             itemCount: messages.length,
                             itemBuilder: (context, index) {
                               final message = messages[index];
-                              final isMe = message.senderId == _currentUserId;
+                              final isMe = message.senderId == _myRole;
                               return _buildMessageBubble(message, isMe);
                             },
                           );
@@ -200,7 +174,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _startAudioCall() async {
-    if (_chatRoom == null || _currentUserId == null) return;
     if (!mounted) return;
 
     final appService = Provider.of<AppService>(context, listen: false);
@@ -228,26 +201,6 @@ class _ChatScreenState extends State<ChatScreen> {
           callerName: currentUser.name,
           receiverName: receiverName,
         ),
-      ),
-    );
-  }
-
-  Widget _buildNoChatRoom() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey),
-          const SizedBox(height: 16),
-          const Text('Discussion non disponible'),
-          const SizedBox(height: 8),
-          const Text('La discussion sera activée une fois le livreur assigné.'),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _loadChatRoom,
-            child: const Text('Réessayer'),
-          ),
-        ],
       ),
     );
   }

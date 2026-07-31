@@ -32,6 +32,38 @@ class _FakeServer {
   Future<void> close() => _server.close(force: true);
 }
 
+/// Simule `OrderChatConsumer` : renvoie en écho ce qu'on lui envoie, ce qui
+/// permet de vérifier qu'une trame émise part bien sur le socket.
+class _EchoServer {
+  _EchoServer(this._server) {
+    _server.listen((request) async {
+      final socket = await WebSocketTransformer.upgrade(request);
+      socket.listen((frame) {
+        final message = jsonDecode(frame as String) as Map<String, dynamic>;
+        socket.add(
+          jsonEncode({
+            'seq': 1,
+            'type': 'chat.message',
+            'sender': 'courier',
+            'text': message['text'],
+          }),
+        );
+      });
+    });
+  }
+
+  final HttpServer _server;
+
+  static Future<_EchoServer> start() async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    return _EchoServer(server);
+  }
+
+  int get port => _server.port;
+
+  Future<void> close() => _server.close(force: true);
+}
+
 class _ForbiddenServer {
   _ForbiddenServer(this._server) {
     _server.listen((request) async {
@@ -77,6 +109,38 @@ void main() {
     expect(event.type, 'tracking.position');
     expect(event.seq, 1);
     expect(event.payload['lat'], 6.13);
+  });
+
+  test('send publie une trame sur le canal', () async {
+    final server = await _EchoServer.start();
+    addTearDown(server.close);
+
+    final channel = RealtimeChannel(
+      wsUrl: 'ws://127.0.0.1:${server.port}/ws/orders/order-1/chat/',
+      tokenStorage: TokenStorage(),
+    );
+    addTearDown(channel.close);
+
+    final events = channel.connect();
+    // La connexion est établie de façon asynchrone : émettre avant qu'elle ne
+    // le soit est sans effet, par contrat.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    channel.send({'text': 'Je suis en bas'});
+
+    final event = await events.first;
+
+    expect(event.type, 'chat.message');
+    expect(event.payload['text'], 'Je suis en bas');
+    expect(event.payload['sender'], 'courier');
+  }, timeout: const Timeout(Duration(seconds: 10)));
+
+  test('send avant connexion ne jette pas', () async {
+    final channel = RealtimeChannel(
+      wsUrl: 'ws://127.0.0.1:1/ws/orders/order-1/chat/',
+      tokenStorage: TokenStorage(),
+    );
+
+    expect(() => channel.send({'text': 'perdu'}), returnsNormally);
   });
 
   test('une fermeture 4403 (accès refusé) ne déclenche aucune reconnexion', () async {

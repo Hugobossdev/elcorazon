@@ -82,6 +82,17 @@ def group_cart_group(group_cart_id: object) -> str:
     return f"groupcart.{group_cart_id}"
 
 
+def user_group(user_id: object) -> str:
+    """File personnelle d'un compte : ce qui doit le joindre où qu'il soit.
+
+    Distincte des groupes par ressource (commande, panier, course) : un appel
+    entrant doit faire sonner le destinataire même s'il n'a aucun écran ouvert
+    sur la commande concernée. Un canal par commande ne peut pas le garantir —
+    il faudrait que le destinataire ait deviné laquelle écouter.
+    """
+    return f"user.{user_id}"
+
+
 def courier_group(courier_id: object) -> str:
     """File d'un livreur : les courses qu'on lui propose."""
     return f"courier.{courier_id}"

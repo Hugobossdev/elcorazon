@@ -1,11 +1,9 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/app_service.dart';
 import '../../services/error_handler_service.dart';
 import '../../models/user.dart';
-import '../../models/driver.dart';
-import '../../models/driver_badge.dart';
-import '../../models/driver_rating.dart';
 import '../../utils/validators.dart';
 
 class DriverProfileScreen extends StatefulWidget {
@@ -26,10 +24,11 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   bool _isSaving = false;
   bool _isLoadingDriverData = true;
 
-  Driver? _driverProfile;
-  List<DriverBadge> _badges = [];
-  List<DriverRating> _ratings = [];
-  Map<String, dynamic>? _detailedStats;
+
+  /// Dossier livreur servi par `/delivery/me/` — l'unique source des champs
+  /// affichés ici (véhicule, statut de vérification, compteurs, note).
+  eccore.CourierProfile? get _courier =>
+      Provider.of<AppService>(context, listen: false).courierProfile;
 
   @override
   void initState() {
@@ -68,48 +67,22 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     });
 
     try {
+      // Le dossier livreur vient de `/delivery/me/` : identité, véhicule,
+      // statut de vérification, compteurs et note y sont déjà. Les quatre
+      // requêtes Supabase qu'il remplace lisaient une vue `drivers_with_user_info`
+      // et des tables de badges et d'avis qui n'existent pas en v2.
+      //
+      // Les **badges livreur** et le détail des avis (ponctualité, service,
+      // soin du colis) n'ont pas d'équivalent au contrat : la gamification y
+      // est réservée aux clients, et la note du livreur est un agrégat
+      // (`rating_average`, `rating_count`), pas une liste d'avis.
       final appService = Provider.of<AppService>(context, listen: false);
-      final databaseService = appService.databaseService;
+      final profile = appService.courierProfile;
 
-      // 1. Charger le profil driver
-      // Note: getDriverProfile retourne une map avec les infos user jointes
-      // Nous avons besoin des infos spécifiques driver pour le modèle Driver
-      // On va essayer de récupérer via la table drivers directement si nécessaire
-      // ou parser la réponse existante.
-      
-      // Utilisation de la méthode existante getDriverProfile qui tape sur drivers_with_user_info
-      final driverData = await databaseService.getDriverProfile(userId);
-      
-      if (driverData != null) {
-        _driverProfile = Driver.fromMap(driverData);
-        _licenseController.text = _driverProfile?.licenseNumber ?? '';
-        _vehicleController.text = '${_driverProfile?.vehicleType ?? ''} ${_driverProfile?.vehicleNumber ?? ''}'.trim();
+      if (profile != null) {
+        _licenseController.text = profile.vehiclePlate;
+        _vehicleController.text = profile.vehicleType;
       }
-
-      // 2. Charger les badges
-      final badgesData = await databaseService.getDriverBadges(_driverProfile?.id ?? '');
-      _badges = badgesData.map((data) {
-        // La structure retournée par Supabase pour les relations est parfois imbriquée
-        // driver_earned_badges contient driver_badges via la clé 'driver_badges'
-        if (data['driver_badges'] != null) {
-          final badgeInfo = data['driver_badges'] as Map<String, dynamic>;
-          // On ajoute la date d'obtention qui est dans la table de liaison
-          badgeInfo['earned_at'] = data['earned_at']; 
-          // Si le modèle DriverBadge attend 'created_at', on peut utiliser earned_at ou created_at du badge
-          // Pour l'affichage, earned_at est plus pertinent.
-          // Adaptons selon le modèle DriverBadge.
-          return DriverBadge.fromMap(badgeInfo);
-        }
-        return DriverBadge.fromMap(data);
-      }).toList();
-
-      // 3. Charger les avis
-      final ratingsData = await databaseService.getDriverRatings(_driverProfile?.id ?? '');
-      _ratings = ratingsData.map((data) => DriverRating.fromMap(data)).toList();
-
-      // 4. Charger les stats détaillées
-      _detailedStats = await databaseService.getDriverDetailedStats(_driverProfile?.id ?? '');
-
     } catch (e) {
       debugPrint('Erreur chargement données livreur: $e');
       // On ne bloque pas l'UI, mais on loggue l'erreur
@@ -134,24 +107,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       final user = appService.currentUser;
 
       if (user != null) {
-        // Update user profile in database
-        final databaseService = appService.databaseService;
-        await databaseService.updateUserProfile(user.id, {
-          'name': _nameController.text.trim(),
-          'phone': _phoneController.text.trim(),
-        });
-
-        // Mise à jour des infos driver si nécessaire (license, véhicule...)
-        // Note: Le code actuel ne semble pas permettre l'édition de ces champs via l'UI simple
-        // Si on veut permettre l'édition, il faudrait ajouter la méthode updateDriverProfile
-        if (_driverProfile != null) {
-             // Exemple d'update partiel si implémenté dans le service
-             // await databaseService.updateDriverProfile(_driverProfile!.id, { ... });
-        }
-
-        // Reload user profile
-        await appService.initialize();
-        await _loadProfile(); // Reload driver data too
+        // `PATCH /auth/me/` : le compte modifié est celui du jeton, il ne se
+        // désigne pas. L'ancienne version écrivait la table `users` avec un
+        // dictionnaire libre, où rien n'interdisait `user_type` ni `email`.
+        await appService.updateOwnProfile(
+          fullName: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+        );
+        await _loadProfile();
 
         setState(() {
           _isEditing = false;
@@ -252,14 +215,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   else ...[
                     _buildStatsSection(user),
                     const SizedBox(height: 24),
-                    _buildBadgesSection(),
-                    const SizedBox(height: 24),
+                            const SizedBox(height: 24),
                     _buildPersonalInfoSection(),
                     const SizedBox(height: 24),
                     _buildDriverInfoSection(),
                     const SizedBox(height: 24),
-                    _buildRatingsSection(),
-                    if (_isEditing) ...[
+                            if (_isEditing) ...[
                       const SizedBox(height: 24),
                       _buildSaveButton(),
                     ],
@@ -296,21 +257,18 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 CircleAvatar(
                   radius: 50,
                   backgroundColor: Colors.white,
-                  backgroundImage: _driverProfile?.profilePhotoUrl != null 
-                      ? NetworkImage(_driverProfile!.profilePhotoUrl!) 
-                      : null,
-                  child: _driverProfile?.profilePhotoUrl == null
-                      ? Text(
-                          user.name.substring(0, 2).toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 32,
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                        )
-                      : null,
+                  // Le dossier ne porte pas de photo : le contrat ne l'expose
+                  // qu'au client qui suit sa livraison (`CourierPublic`).
+                  child: Text(
+                    user.name.substring(0, 2).toUpperCase(),
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
                 ),
-                if (_driverProfile?.verificationStatus == 'approved')
+                if (_courier?.verificationStatus == 'approved')
                   Positioned(
                     bottom: 0,
                     right: 0,
@@ -486,7 +444,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     IconData icon;
     String text;
 
-    switch (_driverProfile?.verificationStatus) {
+    switch (_courier?.verificationStatus) {
       case 'approved':
         color = Colors.green;
         icon = Icons.check_circle;
@@ -549,7 +507,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 Expanded(
                   child: _buildStatItem(
                     'Livraisons',
-                    _driverProfile?.completedDeliveries.toString() ?? '0',
+                    _courier?.deliveriesCompleted.toString() ?? '0',
                     Icons.delivery_dining,
                     Colors.blue,
                   ),
@@ -558,7 +516,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 Expanded(
                   child: _buildStatItem(
                     'Note',
-                    (_driverProfile?.rating ?? 0.0).toStringAsFixed(1),
+                    (_courier?.ratingAverage ?? 0.0).toStringAsFixed(1),
                     Icons.star,
                     Colors.orange,
                   ),
@@ -567,7 +525,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 Expanded(
                   child: _buildStatItem(
                     'Avis',
-                    _driverProfile?.totalRatings.toString() ?? '0',
+                    _courier?.ratingCount.toString() ?? '0',
                     Icons.comment,
                     Colors.purple,
                   ),
@@ -576,201 +534,6 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildBadgesSection() {
-    if (_badges.isEmpty) return const SizedBox.shrink();
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Badges (${_badges.length})',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                Icon(Icons.emoji_events, color: Colors.amber[700]),
-              ],
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 100,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: _badges.length,
-                itemBuilder: (context, index) {
-                  final badge = _badges[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 16),
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 60,
-                          height: 60,
-                          decoration: BoxDecoration(
-                            color: Colors.amber.withValues(alpha: 0.1),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.amber, width: 2),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            badge.iconUrl ?? '🏆', 
-                            style: const TextStyle(fontSize: 30),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          badge.name,
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRatingsSection() {
-    if (_ratings.isEmpty && _detailedStats == null) return const SizedBox.shrink();
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Avis et Notes',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            if (_detailedStats != null) ...[
-              _buildRatingBreakdown(),
-              const SizedBox(height: 16),
-              const Divider(),
-              const SizedBox(height: 16),
-            ],
-            if (_ratings.isNotEmpty) ...[
-              Text(
-                'Derniers avis',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[700],
-                    ),
-              ),
-              const SizedBox(height: 8),
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _ratings.take(3).length, // Afficher les 3 derniers
-                separatorBuilder: (context, index) => const Divider(),
-                itemBuilder: (context, index) {
-                  final rating = _ratings[index];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(
-                      backgroundColor: Colors.grey[200],
-                      child: const Icon(Icons.person, color: Colors.grey),
-                    ),
-                    title: Row(
-                      children: [
-                        Text(
-                          'Commande #${rating.orderId.substring(0, 4)}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const Spacer(),
-                        Row(
-                          children: [
-                            const Icon(Icons.star, color: Colors.orange, size: 16),
-                            const SizedBox(width: 4),
-                            Text(
-                              rating.ratingAverage.toStringAsFixed(1),
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    subtitle: rating.comment != null && rating.comment!.isNotEmpty
-                        ? Text(rating.comment!)
-                        : const Text('Pas de commentaire', style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey)),
-                  );
-                },
-              ),
-            ] else
-              const Center(child: Text('Aucun avis pour le moment')),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRatingBreakdown() {
-    if (_detailedStats == null) return const SizedBox.shrink();
-
-    return Column(
-      children: [
-        _buildBreakdownItem('Ponctualité', _detailedStats!['avg_time_rating']),
-        _buildBreakdownItem('Service client', _detailedStats!['avg_service_rating']),
-        _buildBreakdownItem('Soin du colis', _detailedStats!['avg_condition_rating']),
-      ],
-    );
-  }
-
-  Widget _buildBreakdownItem(String label, dynamic value) {
-    double rating = 0.0;
-    if (value is num) rating = value.toDouble();
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.black87)),
-          ),
-          Expanded(
-            child: LinearProgressIndicator(
-              value: rating / 5.0,
-              backgroundColor: Colors.grey[200],
-              color: Colors.orange,
-              minHeight: 6,
-              borderRadius: BorderRadius.circular(3),
-            ),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 30,
-            child: Text(
-              rating.toStringAsFixed(1),
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.end,
-            ),
-          ),
-        ],
       ),
     );
   }

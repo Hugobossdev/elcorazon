@@ -11,12 +11,6 @@ class QuickActionsWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final actions = <_QuickAction>[
       const _QuickAction(
-        icon: Icons.account_balance_wallet,
-        title: 'Portefeuille',
-        subtitle: 'Gérer mes fonds',
-        route: AppRouter.wallet,
-      ),
-      const _QuickAction(
         icon: Icons.card_giftcard,
         title: 'Récompenses',
         subtitle: 'Mes points de fidélité',

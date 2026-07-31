@@ -16,6 +16,7 @@ urlpatterns = [
     # Déclarées avant le routeur : `webhook/` et les actions par commande ne
     # sont pas des détails de la collection des transactions.
     path("webhook/<str:provider>/", views.WebhookView.as_view(), name="webhook"),
+    path("withdrawals/", views.WithdrawalView.as_view(), name="withdrawals"),
     path("<uuid:order_id>/initiate/", views.InitiatePaymentView.as_view(), name="initiate"),
     path("<uuid:order_id>/split/", views.SplitPaymentView.as_view(), name="split"),
     # Le jeton d'une part, pour un convive sans compte. Pas d'identifiant de

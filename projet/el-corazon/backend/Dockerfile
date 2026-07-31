@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Image unique pour l'API, les workers et beat (ADR-001).
 #
 # Une seule image pour trois rôles : c'est ce qui garantit qu'un worker exécute
@@ -8,10 +9,21 @@ FROM python:3.13-slim AS base
 
 # `slim` et non `alpine` : GeoDjango s'appuie sur GDAL et GEOS, dont les
 # binaires sont compilés contre glibc. Sur musl, il faudrait les recompiler.
+#
+# `PIP_RETRIES` et `PIP_TIMEOUT` : la construction échouait sur des
+# `ReadTimeoutError` de PyPI. Les valeurs par défaut de pip — 5 tentatives mais
+# **15 secondes** de délai — sont taillées pour une liaison courte ; sur une
+# connexion lente ou saturée, un paquet volumineux (`Pillow`, `psycopg[binary]`,
+# les roues GDAL) dépasse ce seuil sans que rien ne soit en panne. Le délai
+# passe donc à 60 secondes, et le nombre de tentatives à 8 : ces deux réglages
+# ne se remplacent pas, ils traitent deux pannes différentes — un délai plus
+# long absorbe la lenteur, des tentatives supplémentaires absorbent la coupure.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_RETRIES=8 \
+    PIP_TIMEOUT=60
 
 # `gdal-bin` plutôt qu'un `libgdalNN` explicite : le numéro de SONAME change à
 # chaque version de Debian, et l'épingler casse la construction au premier
@@ -42,11 +54,17 @@ COPY pyproject.toml ./
 # répertoires de paquets sont créés vides le temps de l'installation éditable,
 # car setuptools exige leur existence — le code réel est copié au calque
 # suivant et les remplace.
-RUN mkdir -p config common apps \
+# Le cache pip est monté par BuildKit plutôt qu'écrit dans un calque : une
+# reconstruction après un `ReadTimeoutError` repart des roues déjà téléchargées
+# au lieu de tout retirer de PyPI, et l'image finale n'en porte pas la trace —
+# c'est ce que `PIP_NO_CACHE_DIR=1` cherchait à obtenir, sans le prix.
+# `PIP_NO_CACHE_DIR=0` le réactive pour ce seul `RUN`, le temps du montage.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    mkdir -p config common apps \
     && touch config/__init__.py common/__init__.py apps/__init__.py \
     && python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install -e . "uvicorn[standard]"
+    && PIP_NO_CACHE_DIR=0 /opt/venv/bin/pip install --upgrade pip \
+    && PIP_NO_CACHE_DIR=0 /opt/venv/bin/pip install -e . "uvicorn[standard]"
 
 # ---------------------------------------------------------------- exécution
 FROM base AS runtime
@@ -78,5 +96,6 @@ CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000"
 FROM runtime AS dev
 
 USER root
-RUN /opt/venv/bin/pip install -e ".[dev]"
+RUN --mount=type=cache,target=/root/.cache/pip \
+    PIP_NO_CACHE_DIR=0 /opt/venv/bin/pip install -e ".[dev]"
 USER corazon

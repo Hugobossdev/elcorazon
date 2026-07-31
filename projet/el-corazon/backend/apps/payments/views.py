@@ -26,9 +26,16 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from apps.accounts.models import UserType
+from apps.delivery.views import courier_of
 from apps.orders.models import Order
 from apps.payments.gateway import GatewayError, gateway_for
-from apps.payments.models import PaymentProvider, SplitPayment, SplitShare, Transaction
+from apps.payments.models import (
+    PaymentProvider,
+    SplitPayment,
+    SplitShare,
+    Transaction,
+    Withdrawal,
+)
 from apps.payments.serializers import (
     CheckoutSerializer,
     RefundRequestSerializer,
@@ -39,11 +46,13 @@ from apps.payments.serializers import (
     SplitShareSerializer,
     TransactionSerializer,
     WebhookSerializer,
+    WithdrawalRequestSerializer,
+    WithdrawalSerializer,
 )
-from apps.payments.services import PaymentService, RefundService
+from apps.payments.services import PaymentService, RefundService, WithdrawalService
 from apps.payments.split import ParticipantInput, SplitService
 from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
-from common.permissions import HasPermission, IsCustomer, authenticated_user
+from common.permissions import HasPermission, IsCourier, IsCustomer, authenticated_user
 from common.throttling import PaymentInitiationThrottle
 
 __all__ = [
@@ -304,3 +313,40 @@ class RefundView(APIView):
             actor=actor,
         )
         return Response(RefundSerializer(refund).data, status=status.HTTP_201_CREATED)
+
+
+class WithdrawalView(APIView):
+    """`/payments/withdrawals/` — les retraits du livreur qui appelle.
+
+    Réservé aux livreurs : le bénéficiaire est l'appelant, il ne se désigne pas.
+
+    La demande **débite les gains** et enregistre une intention de versement ;
+    elle ne verse rien. Comme pour les remboursements, le mouvement d'argent est
+    un geste de l'exploitation — c'est ce qu'il faut dire à qui verra une ligne
+    « en attente » apparaître.
+    """
+
+    permission_classes = [IsCourier]
+
+    @extend_schema(responses={200: WithdrawalSerializer(many=True)}, tags=["payments"])
+    def get(self, request: Request) -> Response:
+        withdrawals = Withdrawal.objects.filter(
+            courier=courier_of(request)
+        ).order_by("-created_at")
+        return Response(WithdrawalSerializer(withdrawals, many=True).data)
+
+    @extend_schema(
+        request=WithdrawalRequestSerializer,
+        responses={201: WithdrawalSerializer},
+        tags=["payments"],
+    )
+    def post(self, request: Request) -> Response:
+        payload = WithdrawalRequestSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        withdrawal = WithdrawalService.request(
+            courier=courier_of(request), amount=payload.validated_data["amount"]
+        )
+        return Response(
+            WithdrawalSerializer(withdrawal).data, status=status.HTTP_201_CREATED
+        )

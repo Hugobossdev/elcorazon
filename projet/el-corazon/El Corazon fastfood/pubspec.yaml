@@ -18,7 +18,6 @@ dependencies:
   flutter_riverpod: ^3.0.3
   
   # Backend & Database
-  supabase_flutter: ^2.12.0
   
   # Local storage
   shared_preferences: ^2.3.2
@@ -43,7 +42,6 @@ dependencies:
   
   # Real-time communication
   agora_rtc_engine: ^6.3.0
-  socket_io_client: ^2.0.3+1
   url_launcher: ^6.3.0
   
   # Location & Maps

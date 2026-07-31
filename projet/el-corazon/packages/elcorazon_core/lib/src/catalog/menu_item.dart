@@ -1,9 +1,13 @@
 import '../models/money.dart';
 
 /// Article du catalogue — miroir de `MenuItemSerializer`
-/// (`backend/apps/catalog/serializers.py`). Forme de liste uniquement : pas
-/// d'`ingredients`/`calories`/`option_groups` (`MenuItemDetailSerializer`),
-/// la personnalisation n'est pas migrée par ce module.
+/// (`backend/apps/catalog/serializers.py`).
+///
+/// [ingredients], [calories] et [optionGroups] n'existent que sur le **détail**
+/// (`MenuItemDetailSerializer`, `getMenuItem`) : la liste ne les porte pas, à
+/// dessein — une page de vingt articles traînerait des centaines de lignes que
+/// l'écran de liste n'affiche pas. Ils sont donc vides après un `getMenuItems`,
+/// et renseignés après un `getMenuItem`.
 class MenuItem {
   const MenuItem({
     required this.id,
@@ -24,6 +28,9 @@ class MenuItem {
     required this.ratingAverage,
     required this.ratingCount,
     required this.sortOrder,
+    this.ingredients = const [],
+    this.calories,
+    this.optionGroups = const [],
   });
 
   factory MenuItem.fromJson(Map<String, dynamic> json) {
@@ -46,6 +53,12 @@ class MenuItem {
       ratingAverage: double.parse(json['rating_average'].toString()),
       ratingCount: json['rating_count'] as int,
       sortOrder: json['sort_order'] as int,
+      ingredients:
+          (json['ingredients'] as List<dynamic>? ?? const []).map((e) => e.toString()).toList(),
+      calories: json['calories'] as int?,
+      optionGroups: (json['option_groups'] as List<dynamic>? ?? const [])
+          .map((json) => OptionGroup.fromJson(json as Map<String, dynamic>))
+          .toList(),
     );
   }
 
@@ -66,5 +79,83 @@ class MenuItem {
   final bool vipExclusive;
   final double ratingAverage;
   final int ratingCount;
+  final int sortOrder;
+
+  /// Renseignés par le détail seulement — voir la note de classe.
+  final List<String> ingredients;
+  final int? calories;
+  final List<OptionGroup> optionGroups;
+}
+
+/// Groupe d'options d'un article — miroir de `OptionGroupSerializer`.
+///
+/// [minSelect]/[maxSelect] portent la règle de choix ; [isRequired] est calculé
+/// par le serveur (`min_select > 0`) plutôt que déduit ici, pour que les deux
+/// côtés ne puissent pas diverger.
+class OptionGroup {
+  const OptionGroup({
+    required this.id,
+    required this.name,
+    required this.minSelect,
+    required this.maxSelect,
+    required this.isRequired,
+    required this.sortOrder,
+    required this.options,
+  });
+
+  factory OptionGroup.fromJson(Map<String, dynamic> json) {
+    return OptionGroup(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      minSelect: json['min_select'] as int? ?? 0,
+      maxSelect: json['max_select'] as int? ?? 1,
+      isRequired: json['is_required'] as bool? ?? false,
+      sortOrder: json['sort_order'] as int? ?? 0,
+      options: (json['options'] as List<dynamic>? ?? const [])
+          .map((json) => Option.fromJson(json as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  final String id;
+  final String name;
+  final int minSelect;
+  final int maxSelect;
+  final bool isRequired;
+  final int sortOrder;
+  final List<Option> options;
+}
+
+/// Option d'un groupe — miroir de `OptionSerializer`.
+///
+/// [priceDelta] est le **supplément**, pas un prix : le total reste calculé par
+/// le serveur (C1). Une option indisponible reste visible mais marquée —
+/// masquer ferait croire à un menu qui change de forme d'une minute à l'autre.
+class Option {
+  const Option({
+    required this.id,
+    required this.name,
+    required this.priceDelta,
+    required this.isDefault,
+    required this.isAvailable,
+    required this.sortOrder,
+  });
+
+  factory Option.fromJson(Map<String, dynamic> json) {
+    return Option(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      priceDelta: Money.fromJson(json['price_delta'] as Map<String, dynamic>),
+      isDefault: json['is_default'] as bool? ?? false,
+      isAvailable: json['is_available'] as bool? ?? true,
+      sortOrder: json['sort_order'] as int? ?? 0,
+    );
+  }
+
+  final String id;
+  final String name;
+  final Money priceDelta;
+  final bool isDefault;
+  final bool isAvailable;
   final int sortOrder;
 }

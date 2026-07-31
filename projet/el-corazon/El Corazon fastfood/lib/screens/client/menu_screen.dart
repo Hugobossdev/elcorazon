@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
-import 'package:elcora_fast/services/wallet_service.dart';
+import 'package:elcora_fast/services/subscription_service.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/theme.dart';
@@ -804,11 +804,10 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
   }
 
   List<MenuItem> _getFilteredItems(List<MenuItem> items) {
-    // Get VIP status
-    final walletService = Provider.of<WalletService>(context, listen: false);
+    // Droit VIP : un abonnement en cours côté backend (`loyalty/subscriptions`),
+    // et non plus le nom d'un plan lu dans le portefeuille local.
     final isVipPremium =
-        walletService.vipSubscription?.planName == 'VIP Premium' &&
-            walletService.vipSubscription?.isActive == true;
+        Provider.of<SubscriptionService>(context).hasActiveSubscription;
 
     return items.where((item) {
       // VIP Exclusive filter

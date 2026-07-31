@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:elcora_fast/firebase_options.dart';
 // `Provider`/`Consumer` existent dans les deux packages : ceux de
 // `package:provider` sont ceux réellement utilisés dans ce fichier
-// (`Provider<SocketService>`, `Consumer<ThemeService>`) — seuls
+// (`ChangeNotifierProvider`, `Consumer<ThemeService>`) — seuls
 // `ProviderContainer`/`UncontrolledProviderScope` viennent de Riverpod ici.
 import 'package:flutter_riverpod/flutter_riverpod.dart' hide Provider, Consumer;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -15,12 +15,9 @@ import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/notification_service.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
-import 'package:elcora_fast/services/promotion_service.dart';
-import 'package:elcora_fast/services/social_service.dart';
+import 'package:elcora_fast/services/group_cart_service.dart';
 import 'package:elcora_fast/services/voice_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
-import 'package:elcora_fast/services/marketing_service.dart';
-import 'package:elcora_fast/services/group_delivery_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
@@ -30,8 +27,7 @@ import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/connectivity_service.dart';
 import 'package:elcora_fast/services/push_notification_service.dart';
-import 'package:elcora_fast/services/supabase_realtime_service.dart';
-import 'package:elcora_fast/services/wallet_service.dart';
+import 'package:elcora_fast/services/subscription_service.dart';
 import 'package:elcora_fast/services/error_handler_service.dart';
 import 'package:elcora_fast/services/performance_service.dart';
 import 'package:elcora_fast/services/form_validation_service.dart';
@@ -43,17 +39,14 @@ import 'package:elcora_fast/services/complaints_returns_service.dart';
 import 'package:elcora_fast/services/alert_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/services/theme_service.dart';
-import 'package:elcora_fast/services/socket_service.dart';
-import 'package:elcora_fast/supabase/supabase_config.dart';
 import 'package:elcora_fast/database/init_database.dart';
 import 'package:elcora_fast/widgets/error_boundary.dart';
 import 'package:elcora_fast/widgets/service_initialization_widget.dart';
 import 'package:elcora_fast/widgets/incoming_call_handler.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 
-/// Backend Django v2 (Phase 6) — authentification uniquement pour l'instant,
-/// le reste de l'app (menu, panier, commandes...) reste sur Supabase jusqu'à
-/// ce que son propre domaine soit migré à son tour.
+/// Backend Django v2 (Phase 6). L'app n'a plus aucun accès direct à une base de
+/// données : tout passe par `/api/v1/` et les WebSockets `ws/`.
 late final ProviderContainer _providerContainer;
 
 /// Résolu quand `sessionProvider.restoreSession()` a fini de décider si un
@@ -62,7 +55,7 @@ late final ProviderContainer _providerContainer;
 /// constructeur : `AppRouter.generateRoute` construit `SplashScreen` depuis
 /// une fonction statique (`onGenerateRoute`), qui ne peut pas recevoir de
 /// dépendance autrement — cohérent avec les autres singletons du projet
-/// (`AppService()`, `DatabaseService()`).
+/// (`AppService()`).
 late final Future<void> sessionReadyFuture;
 
 /// Accès à l'`ApiClient` construit dans `main()`, pour les composants hors du
@@ -127,10 +120,6 @@ Future<void> _initializeEssentialServices() async {
   // Initialize error handling
   await ErrorHandlerService().initialize();
 
-  // Initialize Supabase (essential for data) - MUST be before other services that use it
-  await SupabaseConfig.initialize();
-
-  // Initialize form validation services (after Supabase)
   await FormValidationService().initialize();
   await FormManagerService().initialize();
 
@@ -182,16 +171,10 @@ class ClientApp extends StatelessWidget {
           create: (_) => GamificationService(),
           lazy: true,
         ),
-        ChangeNotifierProvider(create: (_) => PromotionService(), lazy: true),
-        ChangeNotifierProvider(create: (_) => SocialService(), lazy: true),
+        ChangeNotifierProvider(create: (_) => GroupCartService(), lazy: true),
         ChangeNotifierProvider(create: (_) => VoiceService(), lazy: true),
         ChangeNotifierProvider(
           create: (_) => CustomizationService(),
-          lazy: true,
-        ),
-        ChangeNotifierProvider(create: (_) => MarketingService(), lazy: true),
-        ChangeNotifierProvider(
-          create: (_) => GroupDeliveryService(),
           lazy: true,
         ),
         ChangeNotifierProvider(
@@ -210,11 +193,7 @@ class ClientApp extends StatelessWidget {
           create: (_) => PushNotificationService(),
           lazy: true,
         ),
-        ChangeNotifierProvider(
-          create: (_) => SupabaseRealtimeService(),
-          lazy: true,
-        ),
-        ChangeNotifierProvider(create: (_) => WalletService(), lazy: true),
+        ChangeNotifierProvider(create: (_) => SubscriptionService(), lazy: true),
         // Services système - toujours disponibles mais lazy
         ChangeNotifierProvider(
           create: (_) => ErrorHandlerService(),
@@ -249,11 +228,6 @@ class ClientApp extends StatelessWidget {
           lazy: true,
         ),
         ChangeNotifierProvider(create: (_) => ThemeService(), lazy: true),
-        // Socket Service - Initialize immediately to establish connection
-        Provider<SocketService>(
-          create: (_) => SocketService()..init(),
-          lazy: false,
-        ),
       ],
       child: Consumer<ThemeService>(
         builder: (context, themeService, child) {

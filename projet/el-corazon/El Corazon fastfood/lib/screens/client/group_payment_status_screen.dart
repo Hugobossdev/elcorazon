@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'package:elcora_fast/models/group_payment.dart';
-import 'package:elcora_fast/services/database_service.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
@@ -24,76 +24,52 @@ class GroupPaymentStatusScreen extends StatefulWidget {
 }
 
 class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
-  final DatabaseService _databaseService = DatabaseService();
+  final eccore.PaymentRepository _payments =
+      eccore.PaymentRepository(apiClient: apiClient);
   GroupPaymentSession? _session;
   bool _isLoading = true;
   String? _loadError;
   Timer? _refreshTimer;
-  RealtimeChannel? _sessionSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadSession();
     _startAutoRefresh();
-    _setupRealtimeSubscription();
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
-    _sessionSubscription?.unsubscribe();
     super.dispose();
   }
 
   Future<void> _loadSession() async {
     try {
-      final session = await _databaseService
-          .getGroupPaymentSessionByOrderId(widget.orderId);
+      final split = await _payments.getSplit(widget.orderId);
       if (mounted) {
         setState(() {
-          _session = session;
+          _session = GroupPaymentSession.fromRemote(split);
           _isLoading = false;
-          _loadError =
-              session == null ? 'Session de paiement introuvable' : null;
+          _loadError = null;
         });
       }
-    } catch (e) {
+    } on eccore.ApiException catch (e) {
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _loadError = e.toString();
+          _loadError = e.status == 404
+              ? 'Aucun partage ouvert sur cette commande'
+              : e.detail;
         });
       }
     }
   }
 
-  void _setupRealtimeSubscription() {
-    if (_session == null) return;
-
-    _sessionSubscription?.unsubscribe();
-
-    _sessionSubscription = _databaseService.supabase
-        .channel('group_payment_${_session!.id}')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'group_payment_participants',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'group_payment_id',
-            value: _session!.id,
-          ),
-          callback: (payload) {
-            debugPrint(
-              '🔄 Changement détecté sur les participants de paiement',
-            );
-            _loadSession();
-          },
-        )
-        .subscribe();
-  }
-
+  /// Sondage périodique plutôt qu'un abonnement : une part n'est soldée que
+  /// par le webhook signé du prestataire, côté serveur — il n'y a pas d'écriture
+  /// client à écouter, et le backend n'expose pas de canal temps réel sur les
+  /// paiements.
   void _startAutoRefresh() {
     _refreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
       if (mounted) {

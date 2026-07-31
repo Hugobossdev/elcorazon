@@ -23,14 +23,14 @@ class DjangoMenuRepository implements MenuRepository {
       restaurantSlug: AppConstants.restaurantSlug,
       categorySlug: categoryId,
     );
-    return items.map(_toLocalMenuItem).toList();
+    return items.map(toLocalMenuItem).toList();
   }
 
   @override
   Future<MenuItem?> getMenuItemById(String id) async {
     try {
       final item = await _catalog.getMenuItem(id);
-      return _toLocalMenuItem(item);
+      return toLocalMenuItem(item);
     } on eccore.ApiException catch (error) {
       if (error.status == 404) return null;
       rethrow;
@@ -57,7 +57,7 @@ class DjangoMenuRepository implements MenuRepository {
       restaurantSlug: AppConstants.restaurantSlug,
       search: query,
     );
-    return items.map(_toLocalMenuItem).toList();
+    return items.map(toLocalMenuItem).toList();
   }
 
   @override
@@ -66,10 +66,14 @@ class DjangoMenuRepository implements MenuRepository {
       restaurantSlug: AppConstants.restaurantSlug,
       isPopular: true,
     );
-    return items.take(limit).map(_toLocalMenuItem).toList();
+    return items.take(limit).map(toLocalMenuItem).toList();
   }
 
-  MenuItem _toLocalMenuItem(eccore.MenuItem item) {
+  /// Traduction du contrat Django vers le modèle local. Statique et publique :
+  /// `AdvancedSearchService` interroge le même endpoint avec ses propres
+  /// critères et doit rendre exactement les mêmes objets — deux traductions
+  /// divergeraient.
+  static MenuItem toLocalMenuItem(eccore.MenuItem item) {
     return MenuItem(
       id: item.id,
       name: item.name,

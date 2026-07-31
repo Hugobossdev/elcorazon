@@ -171,8 +171,32 @@ class PromotionService:
         utilisation sur deux commandes simultanées, ce que le verrou empêche
         déjà — mais la ceinture ne coûte rien et survit à un refactoring qui
         déplacerait le verrou.
+
+        **Le rejeu est traité avant les quotas, et l'ordre n'est pas
+        indifférent.** Il était vérifié en dernier, par le rattrapage de la
+        violation d'unicité ci-dessous — un chemin que les quotas rendaient
+        inatteignable. Rejouer la création d'une commande portant un code limité
+        à une utilisation par personne butait sur « Vous avez déjà utilisé ce
+        code » : le compte des utilisations de l'utilisateur incluait celle de
+        la commande qu'on était précisément en train de rejouer. Le client se
+        voyait refuser son propre code parce qu'il l'avait employé sur cette
+        commande-là. Même mécanique sur `is_exhausted` lorsque la commande
+        rejouée était celle qui avait épuisé le quota global.
+
+        Chercher d'abord l'utilisation de cette commande rend l'idempotence de
+        l'ADR-009 réelle, et fait du rejeu une simple lecture : plus d'insertion
+        vouée à violer `one_redemption_per_promotion_and_order`, donc plus
+        d'erreur inscrite au journal PostgreSQL pour un cas normal.
         """
         verrouillee = Promotion.objects.select_for_update().get(pk=promotion.pk)
+
+        # Le verrou ci-dessus sérialise les consommations d'un même code : cette
+        # lecture voit donc tout ce qui a été validé avant elle.
+        deja_consommee = PromotionRedemption.objects.filter(
+            promotion=verrouillee, order_id=order_id
+        ).first()
+        if deja_consommee is not None:
+            return deja_consommee
 
         if verrouillee.is_exhausted:
             raise PromotionRefused("Ce code vient d'atteindre sa limite d'utilisation.")
@@ -185,7 +209,10 @@ class PromotionService:
         try:
             # Point de reprise imbriqué : une violation d'unicité casse la
             # transaction courante, et sans lui plus aucune requête ne passerait
-            # après — y compris la relecture qui suit.
+            # après — y compris la relecture qui suit. Conservé pour la course
+            # que la lecture ci-dessus ne peut pas fermer à elle seule : deux
+            # transactions concurrentes sur des promotions différentes ne se
+            # verrouillent pas mutuellement.
             with transaction.atomic():
                 # `discount` est un `MoneyField` — deux colonnes derrière une
                 # propriété, que le greffon django-stubs ne relie pas au nom.
@@ -193,11 +220,7 @@ class PromotionService:
                     promotion=verrouillee, user=user, order_id=order_id, discount=discount
                 )
         except IntegrityError:
-            # Même commande rejouée : l'idempotence de l'ADR-009 permet à une
-            # création d'être retentée, et le quota ne doit pas se décompter
-            # deux fois pour un seul repas.
-            existante = PromotionRedemption.objects.get(promotion=verrouillee, order_id=order_id)
-            return existante
+            return PromotionRedemption.objects.get(promotion=verrouillee, order_id=order_id)
 
         Promotion.objects.filter(pk=verrouillee.pk).update(used_count=F("used_count") + 1)
         return redemption

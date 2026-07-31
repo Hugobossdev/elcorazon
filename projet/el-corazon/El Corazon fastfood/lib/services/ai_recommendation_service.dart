@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/services/app_service.dart';
-import 'package:elcora_fast/services/database_service.dart';
+import 'package:elcora_fast/repositories/django_menu_repository.dart';
 import 'package:http/http.dart' as http;
 import 'package:elcora_fast/config/api_config.dart';
 import 'dart:convert';
@@ -466,17 +466,12 @@ class AIRecommendationService extends ChangeNotifier {
         }
       }
 
-      final databaseService = DatabaseService();
-      final rawItems = await databaseService.getMenuItems();
-      final items = rawItems
-          .map((data) => MenuItem.fromMap(Map<String, dynamic>.from(data)))
+      final items = (await DjangoMenuRepository().getMenuItems())
           .where((item) => item.isAvailable)
           .toList();
 
       if (items.isEmpty) {
-        debugPrint(
-          'AIRecommendationService: aucun élément de menu disponible depuis Supabase',
-        );
+        debugPrint('AIRecommendationService: aucun article disponible au catalogue');
       }
 
       return items;

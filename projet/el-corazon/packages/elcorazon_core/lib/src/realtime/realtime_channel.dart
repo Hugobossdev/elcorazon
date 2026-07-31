@@ -81,6 +81,19 @@ class RealtimeChannel {
     });
   }
 
+  /// Publie un message sur le canal — seul `ws/orders/{id}/chat/` en accepte,
+  /// les autres consommateurs sont à sens unique et ignorent ce qui remonte.
+  ///
+  /// Sans effet tant que la connexion n'est pas ouverte : la trame serait
+  /// perdue de toute façon, et jeter ici obligerait chaque appelant à
+  /// distinguer « pas encore connecté » de « refusé ». L'appelant qui a besoin
+  /// de cette certitude attend un premier événement.
+  void send(Map<String, dynamic> message) {
+    final socket = _socket;
+    if (socket == null || _closedByCaller) return;
+    socket.sink.add(jsonEncode(message));
+  }
+
   Future<void> close() async {
     _closedByCaller = true;
     await _subscription?.cancel();

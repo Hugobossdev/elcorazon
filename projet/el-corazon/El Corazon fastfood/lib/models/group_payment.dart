@@ -1,3 +1,5 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
 import 'package:elcora_fast/services/paydunya_service.dart';
 
 enum GroupPaymentStatus {
@@ -39,6 +41,40 @@ class GroupPaymentSession {
     required this.updatedAt,
     required this.participants,
   });
+
+  /// Depuis le contrat Django (`SplitPaymentSerializer`).
+  ///
+  /// `paidAmount` n'est plus un champ tenu en base côté client : il se déduit
+  /// des parts déjà réglées, et le serveur est seul à décider qu'une part l'est
+  /// — via le webhook signé du prestataire.
+  factory GroupPaymentSession.fromRemote(eccore.SplitPayment split) {
+    return GroupPaymentSession(
+      id: split.id,
+      orderId: split.orderId,
+      // Le partage porte sur une commande, pas sur un groupe : le lien au
+      // panier collaboratif n'existe plus une fois la commande née.
+      groupId: null,
+      initiatedBy: null,
+      totalAmount: split.totalAmount.toMajorUnits(),
+      paidAmount: split.paidAmount.toMajorUnits(),
+      status: _statusFromRemote(split.status),
+      createdAt: split.createdAt,
+      updatedAt: null,
+      participants:
+          split.shares.map(GroupPaymentParticipant.fromRemote).toList(growable: false),
+    );
+  }
+
+  static GroupPaymentStatus _statusFromRemote(String status) {
+    switch (status) {
+      case 'completed':
+        return GroupPaymentStatus.completed;
+      case 'cancelled':
+        return GroupPaymentStatus.cancelled;
+      default:
+        return GroupPaymentStatus.pending;
+    }
+  }
 
   factory GroupPaymentSession.fromMap(Map<String, dynamic> map) {
     final participantsRaw =
@@ -116,6 +152,9 @@ class GroupPaymentParticipant {
   final String? transactionId;
   final Map<String, dynamic>? paymentResult;
 
+  /// Jeton du lien de règlement — vide hors contrat Django.
+  final String shareToken;
+
   GroupPaymentParticipant({
     required this.id,
     required this.userId,
@@ -128,7 +167,43 @@ class GroupPaymentParticipant {
     required this.status,
     required this.transactionId,
     required this.paymentResult,
+    this.shareToken = '',
   });
+
+  /// Depuis le contrat Django (`SplitShareSerializer`).
+  ///
+  /// [shareToken] est le lien à transmettre au convive : c'est lui qui permet
+  /// de régler sa part **sans compte**, ce que l'ancienne implémentation ne
+  /// permettait pas — elle exigeait un `user_id` pour chaque participant.
+  factory GroupPaymentParticipant.fromRemote(eccore.SplitShare share) {
+    return GroupPaymentParticipant(
+      id: share.id,
+      userId: null,
+      name: share.displayName,
+      email: null,
+      phone: share.phone,
+      operator: null,
+      amount: share.amount.toMajorUnits(),
+      paidAmount: share.isPaid ? share.amount.toMajorUnits() : 0.0,
+      status: _participantStatusFromRemote(share.status),
+      transactionId: null,
+      paymentResult: null,
+      shareToken: share.shareToken,
+    );
+  }
+
+  static GroupPaymentParticipantStatus _participantStatusFromRemote(String status) {
+    switch (status) {
+      case 'paid':
+        return GroupPaymentParticipantStatus.paid;
+      case 'failed':
+        return GroupPaymentParticipantStatus.failed;
+      case 'cancelled':
+        return GroupPaymentParticipantStatus.cancelled;
+      default:
+        return GroupPaymentParticipantStatus.pending;
+    }
+  }
 
   factory GroupPaymentParticipant.fromMap(Map<String, dynamic> map) {
     return GroupPaymentParticipant(

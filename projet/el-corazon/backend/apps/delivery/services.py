@@ -15,6 +15,8 @@ dit que la course vient d'être prise.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
+from uuid import UUID
 
 from django.conf import settings
 from django.contrib.gis.db.models.functions import Distance
@@ -23,7 +25,7 @@ from django.db.models import F, QuerySet
 from django.utils import timezone
 
 from apps.accounts.models import User, UserType
-from apps.delivery.models import Assignment, CourierProfile
+from apps.delivery.models import Assignment, CourierProfile, CourierRating
 from apps.delivery.signals import assignment_offered
 from apps.delivery.states import (
     DELIVERY_MACHINE,
@@ -40,7 +42,13 @@ from common.exceptions import BusinessRuleViolation
 from common.money import Money
 from common.realtime import courier_group, order_group, publish
 
-__all__ = ["AssignmentService", "CourierApplication", "CourierService", "courier_fee_for"]
+__all__ = [
+    "AssignmentService",
+    "CourierApplication",
+    "CourierRatingService",
+    "CourierService",
+    "courier_fee_for",
+]
 
 #: Statuts de commande depuis lesquels une course peut être proposée.
 #:
@@ -515,3 +523,53 @@ class AssignmentService:
                 "updated_at",
             ]
         )
+
+
+
+class CourierRatingService:
+    """Note d'une course par le client qui l'a reçue.
+
+    Deux règles, et elles tiennent en base autant qu'ici : on ne note qu'une
+    course **livrée**, et on ne la note **qu'une fois** (lien un-à-un). La
+    moyenne du livreur est recalculée dans la même transaction, sous verrou :
+    deux clients notant deux courses du même livreur au même instant
+    additionneraient sinon leurs lectures et en perdraient une.
+    """
+
+    @staticmethod
+    @transaction.atomic
+    def rate(
+        *, assignment: Assignment, customer: User, score: int, comment: str = ""
+    ) -> CourierRating:
+        if assignment.status != DeliveryStatus.DELIVERED:
+            raise BusinessRuleViolation(
+                "Cette course n'est pas encore livrée : elle ne peut pas être notée.",
+                assignment_status=assignment.status,
+            )
+
+        if CourierRating.objects.filter(assignment=assignment).exists():
+            raise BusinessRuleViolation("Cette livraison a déjà été notée.")
+
+        rating = CourierRating.objects.create(
+            assignment=assignment, customer=customer, score=score, comment=comment
+        )
+        CourierRatingService._recompute_average(assignment.courier_id, score)
+        return rating
+
+    @staticmethod
+    def _recompute_average(courier_id: UUID, score: int) -> None:
+        """Moyenne incrémentale plutôt qu'un `Avg` sur toutes les notes.
+
+        Le verrou sérialise les écritures concurrentes ; l'incrément évite de
+        relire l'historique complet à chaque note, qui grossit sans borne. Le
+        champ est un `DecimalField(3, 2)` : sans arrondi explicite, la division
+        rendrait plus de décimales que la colonne n'en accepte.
+        """
+        courier = CourierProfile.objects.select_for_update().get(pk=courier_id)
+
+        total = courier.rating_average * courier.rating_count + score
+        courier.rating_count += 1
+        courier.rating_average = (total / courier.rating_count).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        courier.save(update_fields=["rating_average", "rating_count", "updated_at"])

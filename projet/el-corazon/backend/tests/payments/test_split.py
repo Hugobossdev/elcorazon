@@ -28,7 +28,10 @@ from apps.orders.models import Order
 from apps.orders.states import OrderStatus
 from apps.payments.models import PaymentProvider, PaymentStatus, SplitPayment, SplitShare
 from apps.payments.split import ParticipantInput, SplitService
+from apps.restaurants.models import Restaurant
+from common.exceptions import BusinessRuleViolation
 from common.money import Money
+from tests.fixtures import build_order
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
 
@@ -100,8 +103,6 @@ class TestRepartition:
     ) -> None:
         """Accepter un écart reviendrait à décider en silence qui paie la
         différence."""
-        from common.exceptions import BusinessRuleViolation
-
         with pytest.raises(BusinessRuleViolation, match="ne fait pas le total"):
             SplitService.create(
                 order=order,
@@ -126,6 +127,98 @@ class TestRepartition:
         )
 
         assert sorted(p.amount.amount_minor for p in split.shares.all()) == [1_000, 3_000]
+
+    def test_un_total_trop_faible_pour_le_nombre_de_convives_est_refuse(
+        self, restaurant: Restaurant, customer: User
+    ) -> None:
+        """`share_amount_positive` interdit une part nulle, et la répartition
+        égale en produisait une dès que le total était plus petit que le nombre
+        de convives : 2 F entre trois donne 1, 1 et 0.
+
+        `Money.allocate` ne perd aucune unité mineure, mais il ne peut pas en
+        inventer. La commande entière tombait alors sur une violation
+        d'intégrité ; elle est maintenant refusée avec un message qui l'explique.
+        """
+        petite = build_order(
+            restaurant,
+            customer,
+            reference="EC000099",
+            subtotal=Money(2, XOF),
+            delivery_fee=Money(0, XOF),
+            total=Money(2, XOF),
+        )
+
+        with pytest.raises(BusinessRuleViolation, match="trop faible"):
+            SplitService.create(
+                order=petite,
+                initiator=customer,
+                participants=[
+                    ParticipantInput(display_name="Ama"),
+                    ParticipantInput(display_name="Kossi"),
+                    ParticipantInput(display_name="Yao"),
+                ],
+            )
+
+        assert not SplitPayment.objects.filter(order=petite).exists()
+
+    def test_une_part_explicite_nulle_est_refusee(self, order: Order, customer: User) -> None:
+        """La somme tombait juste, donc la garde passait — et créait un convive
+        qui ne paie rien.
+
+        Deux conséquences : la contrainte `share_amount_positive` rejetait
+        l'insertion, et si elle ne l'avait pas fait, la part serait restée
+        éternellement impayable, laissant le partage ouvert pour toujours.
+        """
+        with pytest.raises(BusinessRuleViolation, match="strictement positive"):
+            SplitService.create(
+                order=order,
+                initiator=customer,
+                participants=[
+                    ParticipantInput(display_name="Ama", amount=Money(4_000, XOF)),
+                    ParticipantInput(display_name="Kossi", amount=Money(0, XOF)),
+                ],
+            )
+
+        assert not SplitPayment.objects.filter(order=order).exists()
+
+    def test_une_part_explicite_negative_est_refusee(self, order: Order, customer: User) -> None:
+        """`[4 500, −500]` tombe aussi sur le total : seule la somme était
+        vérifiée, jamais le signe de chaque part."""
+        with pytest.raises(BusinessRuleViolation, match="strictement positive"):
+            SplitService.create(
+                order=order,
+                initiator=customer,
+                participants=[
+                    ParticipantInput(display_name="Ama", amount=Money(4_500, XOF)),
+                    ParticipantInput(display_name="Kossi", amount=Money(-500, XOF)),
+                ],
+            )
+
+    def test_un_total_juste_suffisant_est_accepte(
+        self, restaurant: Restaurant, customer: User
+    ) -> None:
+        """La borne est bien « strictement moins que », pas « moins ou égal » :
+        3 F entre trois convives donne 1 F à chacun, ce qui est valide."""
+        petite = build_order(
+            restaurant,
+            customer,
+            reference="EC000098",
+            subtotal=Money(3, XOF),
+            delivery_fee=Money(0, XOF),
+            total=Money(3, XOF),
+        )
+
+        split = SplitService.create(
+            order=petite,
+            initiator=customer,
+            participants=[
+                ParticipantInput(display_name="Ama"),
+                ParticipantInput(display_name="Kossi"),
+                ParticipantInput(display_name="Yao"),
+            ],
+        )
+
+        assert sorted(p.amount.amount_minor for p in split.shares.all()) == [1, 1, 1]
 
     def test_un_participant_sans_compte_est_admis(self, split: SplitPayment) -> None:
         """La moitié des convives d'un repas partagé n'ont pas de compte, et

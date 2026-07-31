@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:elcora_fast/config/api_config.dart';
-import 'package:elcora_fast/services/agora_token_service.dart';
 
 class AgoraService extends ChangeNotifier {
   static final AgoraService _instance = AgoraService._internal();
@@ -17,7 +16,6 @@ class AgoraService extends ChangeNotifier {
   String? _currentChannelId;
   int? _localUid;
   int? _remoteUid;
-  final AgoraTokenService _tokenService = AgoraTokenService();
 
   // Streams
   final StreamController<bool> _callStateController =
@@ -103,8 +101,14 @@ class AgoraService extends ChangeNotifier {
     }
   }
 
-  /// Join a voice call channel
-  Future<bool> joinChannel(String channelId, {int? uid}) async {
+  /// Rejoint un canal d'appel.
+  ///
+  /// [token] et [uid] viennent du serveur (`/calls/{id}/rtc-token/`) : c'est
+  /// lui qui signe le jeton avec le certificat Agora, et qui attribue un `uid`
+  /// distinct à chaque partie. L'app fabriquait auparavant les deux — le
+  /// certificat était dans son `.env`, et l'`uid` dérivait d'un hachage tronqué
+  /// d'UUID, qui peut entrer en collision et expulser un participant du canal.
+  Future<bool> joinChannel(String channelId, {required String token, required int uid}) async {
     if (!_isInitialized || _engine == null) {
       debugPrint('AgoraService: Not initialized');
       return false;
@@ -119,16 +123,10 @@ class AgoraService extends ChangeNotifier {
         channelProfile: ChannelProfileType.channelProfileCommunication,
       );
 
-      final resolvedToken = await _tokenService.getRtcToken(
-            channelId: channelId,
-            uid: uid ?? 0,
-          ) ??
-          '';
-
       await _engine!.joinChannel(
-        token: resolvedToken,
+        token: token,
         channelId: channelId,
-        uid: uid ?? 0,
+        uid: uid,
         options: channelMediaOptions,
       );
 

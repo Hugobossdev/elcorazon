@@ -12,10 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.delivery.models import CourierProfile
 from apps.orders.models import Order, PaymentMethod
 from apps.orders.services import OrderService
 from apps.orders.states import ORDER_MACHINE, OrderStatus
@@ -27,12 +28,19 @@ from apps.payments.models import (
     Refund,
     Transaction,
     WebhookEvent,
+    Withdrawal,
 )
 from apps.payments.signals import payment_transaction_settled
-from common.exceptions import BusinessRuleViolation
+from common.exceptions import BusinessRuleViolation, InsufficientBalance
 from common.money import Money
 
-__all__ = ["PaymentService", "RefundService", "WebhookOutcome", "settled_total"]
+__all__ = [
+    "PaymentService",
+    "RefundService",
+    "WebhookOutcome",
+    "WithdrawalService",
+    "settled_total",
+]
 
 #: Moyen de paiement de la commande → prestataire qui l'encaisse.
 PROVIDER_FOR_METHOD = {
@@ -188,15 +196,30 @@ class PaymentService:
         if not notification.event_id.strip(":"):
             raise BusinessRuleViolation("Notification sans identifiant d'événement.")
 
-        try:
-            with transaction.atomic():
-                event = WebhookEvent.objects.create(
-                    provider=provider,
-                    event_id=notification.event_id,
-                    payload=payload,
-                    signature_verified=True,
-                )
-        except IntegrityError:
+        # `get_or_create` **lit avant d'écrire**, et c'est là toute la
+        # différence avec le `create` rattrapé qui précédait. Celui-ci était
+        # correct — son `atomic()` imbriqué posait bien le point de reprise que
+        # réclame une violation d'unicité — mais il obtenait l'idempotence en
+        # provoquant l'erreur puis en l'avalant. Chaque rejeu laissait donc une
+        # ligne `duplicate key value violates unique constraint
+        # "webhook_event_unique_per_provider"` dans le journal PostgreSQL, pour
+        # un cas parfaitement normal : les prestataires renvoient leurs
+        # notifications, c'est le principe. Le journal se remplissait d'erreurs
+        # qui n'en sont pas, et les vraies s'y noyaient.
+        #
+        # Le chemin courant est désormais un simple `SELECT`. La garantie ne
+        # faiblit pas pour autant : `get_or_create` conserve l'insertion sous
+        # point de reprise pour la course où deux workers ne trouvent rien puis
+        # insèrent tous deux — c'est la contrainte qui tranche, comme avant, et
+        # `created` dit lequel des deux a gagné.
+        event, created = WebhookEvent.objects.get_or_create(
+            provider=provider,
+            event_id=notification.event_id,
+            defaults={"payload": payload, "signature_verified": True},
+        )
+        if not created:
+            # Rejeu : on répond succès sans réappliquer. Une erreur ferait
+            # retenter le prestataire indéfiniment sur un événement déjà traité.
             return WebhookOutcome(accepted=True, detail="Événement déjà traité.")
 
         return PaymentService._apply(event, provider=provider, notification=notification)
@@ -348,3 +371,89 @@ class RefundService:
             requested_by=actor,
             status=PaymentStatus.PENDING,
         )
+
+
+
+class WithdrawalService:
+    """Retrait des gains d'un livreur.
+
+    Écrit comme `RefundService`, et pour la même raison : PayDunya ne verse pas
+    sur commande d'API dans cette intégration, et l'app livreur ne doit de toute
+    façon pas déclencher un décaissement. Ce service **débite le solde** — c'est
+    la partie qui ne peut pas attendre — et enregistre l'intention de versement,
+    que l'exploitation exécute ensuite.
+
+    L'implémentation précédente faisait l'inverse : le téléphone appelait l'API
+    de décaissement avec un montant qu'il calculait lui-même, puis écrivait la
+    ligne en base. Le bénéficiaire décidait donc de ce qu'il touchait.
+    """
+
+    @staticmethod
+    @transaction.atomic
+    def request(*, courier: CourierProfile, amount: Money) -> Withdrawal:
+        """Débite les gains et ouvre une demande de retrait.
+
+        Le verrou est indispensable : deux demandes simultanées passeraient
+        toutes deux la vérification de solde et videraient le compteur deux
+        fois. C'est le même schéma que le débit de points de fidélité.
+        """
+        locked = CourierProfile.objects.select_for_update().get(pk=courier.pk)
+        earnings = locked.total_earnings
+
+        if earnings is None or earnings.amount_minor <= 0:
+            raise InsufficientBalance("Aucun gain disponible au retrait.")
+        if amount.currency != earnings.currency:
+            raise BusinessRuleViolation(
+                "Le retrait doit être demandé dans la devise des gains.",
+                earnings_currency=earnings.currency,
+            )
+        if amount.amount_minor > earnings.amount_minor:
+            raise InsufficientBalance(
+                "Le montant demandé dépasse les gains disponibles.",
+                available=str(earnings),
+            )
+
+        locked.total_earnings = earnings - amount
+        locked.save(update_fields=["total_earnings_minor", "total_earnings_currency", "updated_at"])
+
+        # `MoneyField` est un type composite ajouté par `contribute_to_class` :
+        # django-stubs ne le voit pas comme un attribut de modèle, comme pour
+        # `Refund` ci-dessus.
+        return Withdrawal.objects.create(  # type: ignore[misc]
+            courier=locked, amount=amount, status=PaymentStatus.PENDING
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def settle(*, withdrawal: Withdrawal, provider_reference: str) -> Withdrawal:
+        """Le versement a été exécuté — geste de l'exploitation, pas du livreur."""
+        PAYMENT_MACHINE.validate(withdrawal.status, PaymentStatus.PROCESSING)
+        PAYMENT_MACHINE.validate(PaymentStatus.PROCESSING, PaymentStatus.COMPLETED)
+
+        withdrawal.status = PaymentStatus.COMPLETED
+        withdrawal.provider_reference = provider_reference
+        withdrawal.completed_at = timezone.now()
+        withdrawal.save(
+            update_fields=["status", "provider_reference", "completed_at", "updated_at"]
+        )
+        return withdrawal
+
+    @staticmethod
+    @transaction.atomic
+    def fail(*, withdrawal: Withdrawal, reason: str) -> Withdrawal:
+        """Le versement n'a pas abouti : les gains sont **rendus**.
+
+        Sans ce recrédit, un virement échoué ferait disparaître le solde du
+        livreur — l'argent ne serait ni sur son compte, ni dans l'application.
+        """
+        PAYMENT_MACHINE.validate(withdrawal.status, PaymentStatus.FAILED)
+
+        locked = CourierProfile.objects.select_for_update().get(pk=withdrawal.courier_id)
+        current = locked.total_earnings or Money.zero(withdrawal.amount.currency)
+        locked.total_earnings = current + withdrawal.amount
+        locked.save(update_fields=["total_earnings_minor", "total_earnings_currency", "updated_at"])
+
+        withdrawal.status = PaymentStatus.FAILED
+        withdrawal.failure_reason = reason
+        withdrawal.save(update_fields=["status", "failure_reason", "updated_at"])
+        return withdrawal

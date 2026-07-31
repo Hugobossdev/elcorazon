@@ -1,13 +1,34 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/group_payment.dart';
-import 'package:elcora_fast/services/database_service.dart';
 import 'package:elcora_fast/services/paydunya_service.dart';
+import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcora_fast/widgets/custom_button.dart';
-import 'package:elcora_fast/widgets/custom_text_field.dart';
 
+/// Paiement partagé d'une commande — `/payments/{order}/split/` (Phase 6).
+///
+/// La réécriture change la nature de l'écran, parce qu'elle change celle du
+/// paiement. L'implémentation Supabase encaissait **depuis l'app** : elle
+/// appelait PayDunya pour chaque convive avec le numéro et l'opérateur saisis
+/// par l'organisateur, puis écrivait elle-même « payé » dans la table des
+/// participants. Un client qui mentait à cette écriture soldait une part que
+/// personne n'avait réglée.
+///
+/// Ici, l'app n'encaisse plus et ne solde plus rien :
+/// * elle ouvre le partage — le serveur répartit le total, sans perdre d'unité
+///   mineure ;
+/// * chaque part porte un **lien** ; le convive le suit et paie chez le
+///   prestataire, avec ou sans compte ;
+/// * une part passe à « réglée » quand le webhook signé du prestataire l'a dit,
+///   jamais sur la foi de l'écran.
+///
+/// D'où la disparition des champs téléphone et opérateur : ils appartiennent à
+/// la page de paiement du prestataire, qui les collecte auprès du payeur — et
+/// non à l'organisateur, qui les saisissait pour les autres.
 class SharedPaymentScreen extends StatefulWidget {
   final String groupId;
   final String orderId;
@@ -27,23 +48,13 @@ class SharedPaymentScreen extends StatefulWidget {
 }
 
 class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
-  final DatabaseService _databaseService = DatabaseService();
-  final PayDunyaService _payDunyaService = PayDunyaService();
+  final eccore.PaymentRepository _payments =
+      eccore.PaymentRepository(apiClient: apiClient);
 
   GroupPaymentSession? _session;
-  List<PaymentParticipant> _participants = [];
-  List<TextEditingController> _phoneControllers = [];
-  List<String> _selectedOperators = [];
-  List<PaymentResult?> _participantResults = [];
-
   bool _isLoading = true;
-  String? _loadError;
   bool _isProcessing = false;
-  SharedPaymentResult? _paymentResult;
-
-  // Realtime subscriptions
-  RealtimeChannel? _participantsSubscription;
-  RealtimeChannel? _sessionSubscription;
+  String? _loadError;
 
   @override
   void initState() {
@@ -51,16 +62,11 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
     _loadSession();
   }
 
-  @override
-  void dispose() {
-    _participantsSubscription?.unsubscribe();
-    _sessionSubscription?.unsubscribe();
-    for (final controller in _phoneControllers) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
+  /// Récupère le partage de la commande, ou l'ouvre s'il n'existe pas encore.
+  ///
+  /// Aucun montant n'est envoyé par convive : omis pour tout le monde, le
+  /// serveur répartit le total à parts égales sans laisser un franc orphelin —
+  /// ce qu'une division faite ici produirait à chaque partage impair.
   Future<void> _loadSession() async {
     setState(() {
       _isLoading = true;
@@ -68,271 +74,226 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
     });
 
     try {
-      final session = await _databaseService.ensureGroupPaymentSession(
-        orderId: widget.orderId,
-        groupId: widget.groupId,
-        initiatorUserId: widget.participants.isNotEmpty
-            ? widget.participants.first.userId
-            : null,
-        totalAmount: widget.totalAmount,
-        participants: widget.participants,
-      );
+      eccore.SplitPayment split;
+      try {
+        split = await _payments.getSplit(widget.orderId);
+      } on eccore.ApiException catch (e) {
+        if (e.status != 404) rethrow;
+        split = await _payments.createSplit(
+          orderId: widget.orderId,
+          participants: widget.participants
+              .map(
+                (participant) => eccore.SplitParticipantInput(
+                  displayName: participant.name,
+                  userId: participant.userId.isEmpty ? null : participant.userId,
+                  phone: participant.phoneNumber,
+                ),
+              )
+              .toList(),
+        );
+      }
 
-      _applySession(session);
-      _setupRealtimeSubscription(session.id);
-    } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _loadError = e.toString();
+        _session = GroupPaymentSession.fromRemote(split);
+        _isLoading = false;
       });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+    } on eccore.ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError = e.detail;
+      });
     }
   }
 
-  void _setupRealtimeSubscription(String sessionId) {
-    if (_participantsSubscription != null) return;
+  /// Ouvre le règlement d'une part et suit le lien du prestataire.
+  ///
+  /// Ne solde rien : au retour, la part reste « en attente » tant que le webhook
+  /// n'a pas confirmé. L'écran se contente de relire l'état.
+  Future<void> _payShare(GroupPaymentParticipant participant) async {
+    if (participant.shareToken.isEmpty) {
+      _showError("Cette part n'a pas de lien de paiement");
+      return;
+    }
 
-    final supabase = _databaseService.supabase;
+    setState(() => _isProcessing = true);
 
-    // Écouter les mises à jour de la session (statut global)
-    _sessionSubscription = supabase
-        .channel('public:group_payments:id=eq.$sessionId')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.update,
-          schema: 'public',
-          table: 'group_payments',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'id',
-            value: sessionId,
-          ),
-          callback: (payload) {
-            _refreshSession();
-          },
-        )
-        .subscribe();
-
-    // Écouter les mises à jour des participants (paiements individuels)
-    _participantsSubscription = supabase
-        .channel(
-          'public:group_payment_participants:group_payment_id=eq.$sessionId',
-        )
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'group_payment_participants',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'group_payment_id',
-            value: sessionId,
-          ),
-          callback: (payload) {
-            _refreshSession();
-          },
-        )
-        .subscribe();
-  }
-
-  Future<void> _refreshSession() async {
     try {
-      final session = await _databaseService
-          .getGroupPaymentSessionByOrderId(widget.orderId);
-      if (session != null && mounted) {
-        _applySession(session);
-      }
-    } catch (e) {
-      debugPrint('Erreur lors du rafraîchissement de la session: $e');
-    }
-  }
+      final checkout = await _payments.payShare(participant.shareToken);
 
-  void _applySession(GroupPaymentSession session) {
-    final defaultOperator = _payDunyaService
-        .getAvailableMobileMoneyOperators()
-        .first['id'] as String;
-
-    final mappedParticipants = session.participants.map((participant) {
-      return PaymentParticipant(
-        userId: participant.userId ?? '',
-        name: participant.name,
-        email: participant.email ?? '',
-        phoneNumber: participant.phone ?? '',
-        operator: participant.operator ?? '',
-        amount: participant.amount,
-        backendId: participant.id,
-      );
-    }).toList(growable: false);
-
-    final results = <PaymentResult?>[];
-    final controllers = <TextEditingController>[];
-    final operators = <String>[];
-
-    for (var i = 0; i < mappedParticipants.length; i++) {
-      final participant = session.participants[i];
-      PaymentResult? result;
-      if (participant.status == GroupPaymentParticipantStatus.paid) {
-        result = PaymentResult(
-          success: true,
-          invoiceToken: participant.paymentResult?['invoice_token']?.toString(),
-          invoiceUrl: participant.paymentResult?['invoice_url']?.toString(),
-          orderId: _buildOrderId(session.orderId, participant),
-        );
-      } else if (participant.status == GroupPaymentParticipantStatus.failed) {
-        result = PaymentResult(
-          success: false,
-          invoiceToken: participant.paymentResult?['invoice_token']?.toString(),
-          invoiceUrl: participant.paymentResult?['invoice_url']?.toString(),
-          error: participant.paymentResult?['error']?.toString() ??
-              'Paiement échoué',
-          orderId: _buildOrderId(session.orderId, participant),
-        );
-      }
-      results.add(result);
-
-      controllers.add(
-        TextEditingController(
-          text: mappedParticipants[i].phoneNumber,
-        ),
-      );
-
-      final operatorValue = mappedParticipants[i].operator.isNotEmpty
-          ? mappedParticipants[i].operator
-          : defaultOperator;
-      operators.add(operatorValue);
-    }
-
-    for (final controller in _phoneControllers) {
-      controller.dispose();
-    }
-
-    setState(() {
-      _session = session;
-      _participants = mappedParticipants;
-      _participantResults = results;
-      _phoneControllers = controllers;
-      _selectedOperators = operators;
-      _paymentResult = _buildSummaryResultForSession(session);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        appBar:
-            AppBar(title: const Text('Paiement Partagé'), centerTitle: true),
-        body: const Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (_loadError != null) {
-      return Scaffold(
-        appBar:
-            AppBar(title: const Text('Paiement Partagé'), centerTitle: true),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.error_outline,
-                  color: Theme.of(context).colorScheme.error,
-                  size: 48,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Impossible de charger la commande groupée.',
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _loadError!,
-                  style: Theme.of(context).textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                CustomButton(
-                  onPressed: _loadSession,
-                  text: 'Réessayer',
-                  icon: Icons.refresh,
-                ),
-              ],
-            ),
+      if (checkout.checkoutUrl.isNotEmpty) {
+        final uri = Uri.tryParse(checkout.checkoutUrl);
+        if (uri != null) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      } else if (checkout.instructions.isNotEmpty && mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Régler la part de ${participant.name}'),
+            content: Text(checkout.instructions),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Fermer'),
+              ),
+            ],
           ),
-        ),
-      );
-    }
+        );
+      }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Paiement Partagé'),
-        centerTitle: true,
-        elevation: 0,
-      ),
-      backgroundColor: Theme.of(context)
-          .colorScheme
-          .surfaceContainerHighest
-          .withValues(alpha: 0.25),
-      body: SafeArea(
-        child: Column(
-          children: [
-            const SizedBox(height: 12),
-            _buildPaymentSummary(),
-            Expanded(child: _buildParticipantsList()),
-            _buildPaymentButton(),
-          ],
-        ),
+      await _loadSession();
+    } on eccore.ApiException catch (e) {
+      _showError(e.detail);
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  /// Copie le jeton d'une part — c'est ainsi qu'un convive **sans compte** règle
+  /// la sienne : le lien lui suffit, et ne donne accès qu'à cette part, ni à la
+  /// commande ni aux autres participants.
+  void _copyShareLink(GroupPaymentParticipant participant) {
+    if (participant.shareToken.isEmpty) return;
+
+    Clipboard.setData(ClipboardData(text: participant.shareToken));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Lien de paiement de ${participant.name} copié'),
+        backgroundColor: AppColors.success,
       ),
     );
   }
 
-  Widget _buildPaymentSummary() {
-    final totalAmount = _session?.totalAmount ?? widget.totalAmount;
-    final participantCount = _participants.length;
-    final statusColor = _resolveStatusColor(_session?.status);
-    final statusLabel = _resolveStatusLabel(_session?.status);
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: AppColors.error),
+    );
+  }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Theme.of(context).colorScheme.primary.withValues(alpha: 0.9),
-              Theme.of(context).colorScheme.primary.withValues(alpha: 0.7),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Paiement partagé'),
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            onPressed: _isLoading ? null : _loadSession,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Actualiser',
+          ),
+        ],
+      ),
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final session = _session;
+    if (session == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 56, color: AppColors.error),
+              const SizedBox(height: 12),
+              Text(
+                _loadError ?? 'Partage indisponible',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _loadSession,
+                child: const Text('Réessayer'),
+              ),
             ],
           ),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color:
-                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
-            ),
-          ],
         ),
+      );
+    }
+
+    return Column(
+      children: [
+        _buildSummary(session),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: session.participants.length,
+            itemBuilder: (context, index) =>
+                _buildParticipantCard(session.participants[index]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummary(GroupPaymentSession session) {
+    final reste = session.totalAmount - session.paidAmount;
+    final reglees = session.participants
+        .where((p) => p.status == GroupPaymentParticipantStatus.paid)
+        .length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      color: AppColors.primary.withValues(alpha: 0.06),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Total : ${PriceFormatter.format(session.totalAmount)}',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Déjà réglé : ${PriceFormatter.format(session.paidAmount)} • '
+            'Reste : ${PriceFormatter.format(reste)}',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$reglees part(s) réglée(s) sur ${session.participants.length}',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: AppColors.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildParticipantCard(GroupPaymentParticipant participant) {
+    final paid = participant.status == GroupPaymentParticipantStatus.paid;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Container(
-                  height: 42,
-                  width: 42,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(
-                    Icons.groups_rounded,
+                CircleAvatar(
+                  backgroundColor: paid ? AppColors.success : AppColors.primary,
+                  child: Icon(
+                    paid ? Icons.check : Icons.person,
                     color: Colors.white,
+                    size: 20,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -341,917 +302,50 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Paiement groupé',
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                        participant.name,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        'Commande ${widget.orderId}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.white70,
-                            ),
+                        PriceFormatter.format(participant.amount),
+                        style: const TextStyle(color: AppColors.textSecondary),
                       ),
                     ],
                   ),
                 ),
-                _buildStatusChip(statusLabel, statusColor),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                _buildSummaryPill(
-                  label: 'Total',
-                  value: PriceFormatter.format(totalAmount),
-                ),
-                const SizedBox(width: 12),
-                _buildSummaryPill(
-                  label: 'Participants',
-                  value: participantCount.toString(),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildSummaryPill(
-                    label: 'Par personne',
-                    value: PriceFormatter.format(
-                      participantCount == 0
-                          ? totalAmount
-                          : totalAmount / participantCount,
-                    ),
-                  ),
+                Chip(
+                  label: Text(paid ? 'Réglée' : 'En attente'),
+                  backgroundColor:
+                      (paid ? AppColors.success : AppColors.primary)
+                          .withValues(alpha: 0.12),
                 ),
               ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSummaryPill({
-    required String label,
-    required String value,
-  }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 13,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusChip(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(30),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.circle, color: color, size: 10),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildParticipantsList() {
-    if (_participants.isEmpty) {
-      return const Center(
-        child: Text('Aucun participant n’est enregistré pour ce paiement.'),
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
-      physics: const BouncingScrollPhysics(),
-      itemCount: _participants.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 18),
-      itemBuilder: (context, index) {
-        final participant = _participants[index];
-        final isPaid = _participantResults.length > index &&
-            (_participantResults[index]?.success ?? false);
-
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 320),
-          curve: Curves.easeInOut,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: isPaid
-                  ? Colors.green.withValues(alpha: 0.6)
-                  : Theme.of(context).colorScheme.outlineVariant,
-              width: isPaid ? 2 : 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 14,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+            if (!paid) ...[
+              const SizedBox(height: 8),
               Row(
                 children: [
-                  CircleAvatar(
-                    radius: 23,
-                    backgroundColor: Theme.of(context)
-                        .colorScheme
-                        .primary
-                        .withValues(alpha: 0.1),
-                    child: Text(
-                      participant.name.isNotEmpty
-                          ? participant.name[0].toUpperCase()
-                          : '?',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          participant.name,
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                        Text(
-                          participant.email,
-                          style:
-                              Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: Colors.grey[600],
-                                  ),
-                        ),
-                      ],
+                    child: OutlinedButton.icon(
+                      onPressed: () => _copyShareLink(participant),
+                      icon: const Icon(Icons.link, size: 18),
+                      label: const Text('Copier le lien'),
                     ),
                   ),
-                  if (isPaid)
-                    const Chip(
-                      avatar: Icon(
-                        Icons.check,
-                        size: 16,
-                        color: Colors.white,
-                      ),
-                      label: Text(
-                        'Payé',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      backgroundColor: Colors.green,
-                      shape: StadiumBorder(),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed:
+                          _isProcessing ? null : () => _payShare(participant),
+                      icon: const Icon(Icons.payment, size: 18),
+                      label: const Text('Payer'),
                     ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Montant à payer',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  Text(
-                    PriceFormatter.format(participant.amount),
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              if (!isPaid) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Informations de paiement',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        'Participant ${index + 1}',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                _buildOperatorSelector(index),
-                const SizedBox(height: 12),
-                CustomTextField(
-                  controller: _phoneControllers[index],
-                  label: 'Numéro de téléphone',
-                  hint: '+225 XX XX XX XX',
-                  keyboardType: TextInputType.phone,
-                  prefixIcon: Icons.phone,
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: CustomButton(
-                    onPressed: _isProcessing
-                        ? null
-                        : () => _processIndividualPayment(index),
-                    text: 'Payer ma part',
-                    icon: Icons.payment,
-                    isLoading: _isProcessing,
-                  ),
-                ),
-              ],
             ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildOperatorSelector(int participantIndex) {
-    final operators = _payDunyaService.getAvailableMobileMoneyOperators();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Opérateur Mobile Money',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 60,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: operators.length,
-            itemBuilder: (context, index) {
-              final operator = operators[index];
-              final isSelected =
-                  _selectedOperators[participantIndex] == operator['id'];
-
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedOperators[participantIndex] = operator['id'];
-                  });
-                },
-                child: Container(
-                  width: 80,
-                  margin: const EdgeInsets.only(right: 8),
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: 0.1)
-                        : Theme.of(context).colorScheme.surface,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isSelected
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.grey[300]!,
-                      width: isSelected ? 2 : 1,
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: Color((operator['color'] as num).toInt())
-                              .withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.phone_android,
-                          color: Color((operator['color'] as num).toInt()),
-                          size: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        (operator['name'] as String).split(' ')[0],
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontWeight: isSelected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                              color: isSelected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.grey[700],
-                            ),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPaymentButton() {
-    final paidCount =
-        _participantResults.where((r) => r?.success ?? false).length;
-    final allPaid = _participants.isNotEmpty &&
-        _participantResults.length == _participants.length &&
-        paidCount == _participants.length;
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_paymentResult != null && !allPaid) ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Paiements effectués'),
-                Text(
-                  '$paidCount/${_participants.length}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(
-              value:
-                  _participants.isEmpty ? 0 : paidCount / _participants.length,
-              backgroundColor: Colors.grey[300],
-              valueColor: AlwaysStoppedAnimation<Color>(
-                Theme.of(context).colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          SizedBox(
-            width: double.infinity,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child: CustomButton(
-                key: ValueKey<bool>(allPaid),
-                onPressed: allPaid ? _finishOrder : _processAllPayments,
-                text: allPaid
-                    ? 'Finaliser la commande'
-                    : 'Traiter tous les paiements',
-                icon: allPaid ? Icons.check_circle : Icons.payment,
-                isLoading: _isProcessing,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _processIndividualPayment(int participantIndex) async {
-    if (_session == null) {
-      _showError('Session de paiement indisponible. Veuillez réessayer.');
-      return;
-    }
-
-    final participant = _participants[participantIndex];
-    final phoneController = _phoneControllers[participantIndex];
-
-    if (phoneController.text.isEmpty) {
-      _showError('Veuillez saisir le numéro de téléphone');
-      return;
-    }
-
-    final participantId = participant.backendId;
-    if (participantId == null || participantId.isEmpty) {
-      _showError(
-        'Participant introuvable dans la base de données. Veuillez recharger.',
-      );
-      return;
-    }
-
-    setState(() {
-      _isProcessing = true;
-    });
-
-    try {
-      final updatedParticipant = participant.copyWith(
-        phoneNumber: phoneController.text,
-        operator: _selectedOperators[participantIndex],
-      );
-      _participants[participantIndex] = updatedParticipant;
-
-      final result = await _payDunyaService.processMobileMoneyPayment(
-        orderId: '${widget.orderId}_${updatedParticipant.userId}',
-        amount: updatedParticipant.amount,
-        phoneNumber: phoneController.text,
-        operator: _selectedOperators[participantIndex],
-        customerName: updatedParticipant.name,
-        customerEmail: updatedParticipant.email,
-      );
-
-      if (result.success) {
-        _showSuccess(
-          'Paiement effectué avec succès pour ${updatedParticipant.name}',
-        );
-      } else {
-        _showError('Erreur lors du paiement: ${result.error}');
-      }
-
-      await _databaseService.updateGroupPaymentParticipant(
-        participantId: participantId,
-        phone: phoneController.text,
-        operator: _selectedOperators[participantIndex],
-        paidAmount: result.success ? updatedParticipant.amount : 0,
-        status: result.success
-            ? GroupPaymentParticipantStatus.paid
-            : GroupPaymentParticipantStatus.failed,
-        transactionId: result.invoiceToken,
-        paymentResult: {
-          'invoice_token': result.invoiceToken,
-          'invoice_url': result.invoiceUrl,
-          'error': result.error,
-          'success': result.success,
-          'order_id': result.orderId,
-          'processed_at': DateTime.now().toIso8601String(),
-        },
-      );
-
-      await _databaseService.refreshGroupPaymentTotals(_session!.id);
-      final refreshed = await _databaseService
-          .getGroupPaymentSessionByOrderId(widget.orderId);
-      if (refreshed != null) {
-        _applySession(refreshed);
-      } else {
-        setState(() {
-          if (_participantResults.length <= participantIndex) {
-            _participantResults.length = participantIndex + 1;
-          }
-          _participantResults[participantIndex] = result;
-          _paymentResult = _buildSummaryResult();
-        });
-      }
-    } catch (e) {
-      _showError('Erreur: ${e.toString()}');
-    } finally {
-      setState(() {
-        _isProcessing = false;
-      });
-    }
-  }
-
-  Future<void> _processAllPayments() async {
-    if (_session == null) {
-      _showError('Session de paiement indisponible. Veuillez réessayer.');
-      return;
-    }
-
-    if (_participants.isEmpty) {
-      _showError('Aucun participant pour le paiement partagé.');
-      return;
-    }
-
-    // Si on traite TOUS les paiements, on vérifie que tous les numéros sont là pour les participants NON PAYÉS
-    bool hasMissingPhone = false;
-    for (int i = 0; i < _participants.length; i++) {
-      // Ignorer ceux déjà payés
-      final isPaid = _participantResults.length > i &&
-          (_participantResults[i]?.success ?? false);
-      if (isPaid) continue;
-
-      if (_phoneControllers[i].text.trim().isEmpty) {
-        hasMissingPhone = true;
-        break;
-      }
-    }
-
-    if (hasMissingPhone) {
-      _showError(
-        'Veuillez saisir les numéros de téléphone pour tous les participants non payés.',
-      );
-      return;
-    }
-
-    setState(() {
-      _isProcessing = true;
-    });
-
-    try {
-      // Mettre à jour les participants avec les données saisies
-      for (int i = 0; i < _participants.length; i++) {
-        _participants[i] = _participants[i].copyWith(
-          phoneNumber: _phoneControllers[i].text,
-          operator: _selectedOperators[i],
-        );
-      }
-
-      // Appeler le service PayDunya pour traiter les paiements en lot
-      // Note: Idéalement, cela devrait être fait un par un ou via une API batch si disponible
-      // Pour l'instant, on boucle ici
-
-      int successCount = 0;
-      int processedCount = 0;
-
-      for (int i = 0; i < _participants.length; i++) {
-        final participant = _participants[i];
-        final isAlreadyPaid = _participantResults.length > i &&
-            (_participantResults[i]?.success ?? false);
-
-        if (isAlreadyPaid) {
-          successCount++;
-          continue;
-        }
-
-        processedCount++;
-        final participantId = participant.backendId;
-        if (participantId == null) continue;
-
-        try {
-          final result = await _payDunyaService.processMobileMoneyPayment(
-            orderId: '${widget.orderId}_${participant.userId}',
-            amount: participant.amount,
-            phoneNumber: participant.phoneNumber,
-            operator: participant.operator,
-            customerName: participant.name,
-            customerEmail: participant.email,
-          );
-
-          if (result.success) {
-            successCount++;
-          }
-
-          // Mise à jour DB
-          await _databaseService.updateGroupPaymentParticipant(
-            participantId: participantId,
-            phone: participant.phoneNumber,
-            operator: participant.operator,
-            paidAmount: result.success ? participant.amount : 0,
-            status: result.success
-                ? GroupPaymentParticipantStatus.paid
-                : GroupPaymentParticipantStatus.failed,
-            transactionId: result.invoiceToken,
-            paymentResult: {
-              'invoice_token': result.invoiceToken,
-              'invoice_url': result.invoiceUrl,
-              'error': result.error,
-              'success': result.success,
-              'order_id': result.orderId,
-              'processed_at': DateTime.now().toIso8601String(),
-            },
-          );
-        } catch (e) {
-          debugPrint('Erreur paiement participant $i: $e');
-        }
-      }
-
-      // Rafraîchir
-      if (_session != null) {
-        await _databaseService.refreshGroupPaymentTotals(_session!.id);
-      }
-
-      // Feedback utilisateur
-      if (successCount == _participants.length) {
-        _showSuccess('Tous les paiements ont été effectués avec succès !');
-      } else if (processedCount > 0) {
-        _showWarning(
-          '$successCount/${_participants.length} paiements réussis. Vérifiez les erreurs.',
-        );
-      }
-    } catch (e) {
-      _showError('Erreur globale lors du traitement: ${e.toString()}');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isProcessing = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _finishOrder() async {
-    if (_session == null) {
-      _showError('Session de paiement indisponible.');
-      return;
-    }
-
-    try {
-      setState(() {
-        _isProcessing = true;
-      });
-
-      // Mettre à jour le statut du paiement groupé
-      await _databaseService.updateGroupPaymentStatus(
-        _session!.id,
-        status: GroupPaymentStatus.completed,
-      );
-
-      // Mettre à jour le statut de la commande
-      try {
-        await _databaseService.supabase.from('orders').update({
-          'status': 'confirmed',
-          'payment_status': 'completed',
-          'updated_at': DateTime.now().toIso8601String(),
-        }).eq('id', widget.orderId);
-
-        debugPrint('✅ Commande groupée confirmée: ${widget.orderId}');
-      } catch (e) {
-        debugPrint(
-          '⚠️ Erreur lors de la mise à jour du statut de la commande: $e',
-        );
-        // Continuer même en cas d'erreur
-      }
-
-      setState(() {
-        _isProcessing = false;
-      });
-
-      if (!mounted) return;
-
-      // Afficher le dialogue de confirmation
-      await showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.green),
-              SizedBox(width: 8),
-              Text('Commande Confirmée'),
-            ],
-          ),
-          content: const Text(
-            'Tous les paiements ont été effectués avec succès. Votre commande partagée est en cours de préparation.',
-          ),
-          actions: [
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).pop(true);
-              },
-              child: const Text('Continuer'),
-            ),
           ],
         ),
-      );
-    } catch (e) {
-      debugPrint('❌ Erreur lors de la finalisation de la commande: $e');
-      setState(() {
-        _isProcessing = false;
-      });
-
-      if (context.mounted) {
-        _showError('Erreur lors de la finalisation: ${e.toString()}');
-      }
-    }
-  }
-
-  SharedPaymentResult _buildSummaryResult() {
-    final session = _session;
-    final totalAmount = session?.totalAmount ?? widget.totalAmount;
-    final orderId = session?.orderId ?? widget.orderId;
-    return _buildSummaryResultFromState(
-      orderId: orderId,
-      totalAmount: totalAmount,
-      participants: _participants,
-      results: _participantResults,
-    );
-  }
-
-  SharedPaymentResult _buildSummaryResultForSession(
-    GroupPaymentSession session,
-  ) {
-    final participants = session.participants
-        .map(
-          (p) => PaymentParticipant(
-            userId: p.userId ?? '',
-            name: p.name,
-            email: p.email ?? '',
-            phoneNumber: p.phone ?? '',
-            operator: p.operator ?? '',
-            amount: p.amount,
-            backendId: p.id,
-          ),
-        )
-        .toList();
-
-    final results = session.participants.map((participant) {
-      final orderId = _buildOrderId(session.orderId, participant);
-      if (participant.status == GroupPaymentParticipantStatus.paid) {
-        return PaymentResult(
-          success: true,
-          invoiceToken: participant.paymentResult?['invoice_token']?.toString(),
-          invoiceUrl: participant.paymentResult?['invoice_url']?.toString(),
-          orderId: orderId,
-        );
-      }
-      if (participant.status == GroupPaymentParticipantStatus.failed) {
-        return PaymentResult(
-          success: false,
-          invoiceToken: participant.paymentResult?['invoice_token']?.toString(),
-          invoiceUrl: participant.paymentResult?['invoice_url']?.toString(),
-          error: participant.paymentResult?['error']?.toString() ??
-              'Paiement échoué',
-          orderId: orderId,
-        );
-      }
-      return null;
-    }).toList();
-
-    return _buildSummaryResultFromState(
-      orderId: session.orderId,
-      totalAmount: session.totalAmount,
-      participants: participants,
-      results: results,
-    );
-  }
-
-  SharedPaymentResult _buildSummaryResultFromState({
-    required String orderId,
-    required double totalAmount,
-    required List<PaymentParticipant> participants,
-    required List<PaymentResult?> results,
-  }) {
-    double paidAmount = 0.0;
-    final resultList = <PaymentResult>[];
-
-    for (int i = 0; i < participants.length; i++) {
-      final participant = participants[i];
-      final result = (i < results.length) ? results[i] : null;
-      final entryOrderId = '${orderId}_${participant.userId}';
-
-      if (result != null) {
-        resultList.add(result);
-        if (result.success) {
-          paidAmount += participant.amount;
-        }
-      } else {
-        resultList.add(
-          PaymentResult(
-            success: false,
-            orderId: entryOrderId,
-            error: 'En attente',
-          ),
-        );
-      }
-    }
-
-    final success =
-        resultList.isNotEmpty && resultList.every((element) => element.success);
-
-    return SharedPaymentResult(
-      success: success,
-      totalAmount: totalAmount,
-      paidAmount: paidAmount,
-      participants: List<PaymentParticipant>.from(participants),
-      results: resultList,
-      orderId: orderId,
-      error: success ? null : 'Paiements incomplets',
-    );
-  }
-
-  String _buildOrderId(
-    String baseOrderId,
-    GroupPaymentParticipant participant,
-  ) {
-    final userPart = participant.userId?.isNotEmpty == true
-        ? participant.userId
-        : participant.id;
-    return '${baseOrderId}_$userPart';
-  }
-
-  void _showSuccess(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
       ),
     );
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-
-  void _showWarning(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.orange,
-        duration: const Duration(seconds: 5),
-      ),
-    );
-  }
-
-  String _resolveStatusLabel(GroupPaymentStatus? status) {
-    switch (status) {
-      case GroupPaymentStatus.completed:
-        return 'Terminé';
-      case GroupPaymentStatus.inProgress:
-        return 'En cours';
-      case GroupPaymentStatus.cancelled:
-        return 'Annulé';
-      case GroupPaymentStatus.pending:
-      case null:
-        return 'En attente';
-    }
-  }
-
-  Color _resolveStatusColor(GroupPaymentStatus? status) {
-    switch (status) {
-      case GroupPaymentStatus.completed:
-        return Colors.greenAccent;
-      case GroupPaymentStatus.inProgress:
-        return Colors.orangeAccent;
-      case GroupPaymentStatus.cancelled:
-        return Colors.redAccent;
-      case GroupPaymentStatus.pending:
-      case null:
-        return Colors.yellowAccent;
-    }
   }
 }

@@ -57,6 +57,7 @@ LOCAL_APPS: list[str] = [
     "apps.payments",
     "apps.delivery",
     "apps.tracking",
+    "apps.calls",
     "apps.notifications",
     "apps.promotions",
     "apps.loyalty",
@@ -79,6 +80,18 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 # non géospatial de la suite (voir Phase 8), sans que la production ait le
 # moindre chemin de code différent.
 GIS_ENABLED: bool = config("GIS_ENABLED", default=True, cast=bool)
+
+# --- Agora RTC --------------------------------------------------------------
+#
+# Le certificat signe les jetons d'appel et ne quitte jamais le serveur. Il
+# vivait auparavant dans le `.env` des apps Flutter, c'est-à-dire dans un
+# binaire distribué : quiconque l'en extrayait pouvait rejoindre n'importe quel
+# canal.
+AGORA_APP_ID: str = config("AGORA_APP_ID", default="")
+AGORA_APP_CERTIFICATE: str = config("AGORA_APP_CERTIFICATE", default="")
+# Un appel dure quelques minutes ; une heure couvre celui qui s'éternise sans
+# laisser un droit d'accès traîner.
+AGORA_TOKEN_TTL_SECONDS: int = config("AGORA_TOKEN_TTL_SECONDS", default=3600, cast=int)
 
 if GIS_ENABLED:
     INSTALLED_APPS = [*INSTALLED_APPS, "django.contrib.gis"]
@@ -270,6 +283,8 @@ SPECTACULAR_SETTINGS = {
         "PaymentMethodEnum": "apps.orders.models.PaymentMethod.choices",
         "PaymentProviderEnum": "apps.payments.models.PaymentProvider.choices",
         "UserTypeEnum": "apps.accounts.models.UserType.choices",
+        "CallKindEnum": "apps.calls.models.CallKind.choices",
+        "CallStatusEnum": "apps.calls.states.CallStatus.choices",
         "GroupKindEnum": "apps.social.models.GroupKind.choices",
         "PostKindEnum": "apps.social.models.PostKind.choices",
         "ComplaintKindEnum": "apps.support.models.ComplaintKind.choices",

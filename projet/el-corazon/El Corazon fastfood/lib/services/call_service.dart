@@ -1,51 +1,23 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:elcora_fast/services/agora_service.dart';
-import 'package:elcora_fast/services/notification_service.dart';
-// Permission handling - using platform channels or checking at runtime
 
-/// État d'un appel
-enum CallState {
-  idle,
-  calling, // Appel en cours d'établissement
-  ringing, // Sonne
-  connected, // Connecté
-  ended, // Terminé
-  rejected, // Rejeté
-  missed, // Manqué
-  failed, // Échoué
-}
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import 'package:elcora_fast/main.dart' show apiClient;
+import 'package:elcora_fast/services/agora_service.dart';
+
+/// État d'un appel, côté écran.
+enum CallState { idle, calling, ringing, connected, ended, rejected, missed, failed }
 
 /// Type d'appel
-enum CallType {
-  voice, // Appel vocal uniquement
-  video, // Appel vidéo (pour future implémentation)
-}
+enum CallType { voice, video }
 
 /// Direction de l'appel
-enum CallDirection {
-  outgoing, // Appel sortant
-  incoming, // Appel entrant
-}
+enum CallDirection { outgoing, incoming }
 
-/// Modèle d'appel
+/// Appel tel que l'écran le manipule — projection de `eccore.Call`.
 class Call {
-  final String id;
-  final String orderId;
-  final String callerId;
-  final String receiverId;
-  final String? callerName;
-  final String? receiverName;
-  final CallType type;
-  final CallDirection direction;
-  final CallState state;
-  final DateTime createdAt;
-  final DateTime? startedAt;
-  final DateTime? endedAt;
-  final int? duration; // Durée en secondes
-  final String? channelId; // Canal Agora
-
   Call({
     required this.id,
     required this.orderId,
@@ -63,93 +35,100 @@ class Call {
     this.channelId,
   });
 
-  factory Call.fromMap(Map<String, dynamic> map) {
+  /// Depuis le contrat Django. [myUserId] décide de la direction : le même
+  /// appel est « sortant » pour l'un et « entrant » pour l'autre, et le serveur
+  /// n'a pas à trancher pour les deux.
+  factory Call.fromRemote(eccore.Call call, {required String myUserId}) {
+    final outgoing = call.callerId == myUserId;
     return Call(
-      id: map['id']?.toString() ?? '',
-      orderId: map['order_id']?.toString() ?? '',
-      callerId: map['caller_id']?.toString() ?? '',
-      receiverId: map['receiver_id']?.toString() ?? '',
-      callerName: map['caller_name']?.toString(),
-      receiverName: map['receiver_name']?.toString(),
-      type:
-          map['type']?.toString() == 'video' ? CallType.video : CallType.voice,
-      direction: map['direction']?.toString() == 'incoming'
-          ? CallDirection.incoming
-          : CallDirection.outgoing,
-      state: _parseCallState(map['state']?.toString()),
-      createdAt: DateTime.parse(map['created_at']?.toString() ?? ''),
-      startedAt: map['started_at'] != null
-          ? DateTime.parse(map['started_at'].toString())
-          : null,
-      endedAt: map['ended_at'] != null
-          ? DateTime.parse(map['ended_at'].toString())
-          : null,
-      duration: map['duration'] as int?,
-      channelId: map['channel_id']?.toString(),
+      id: call.id,
+      orderId: call.orderId,
+      callerId: call.callerId,
+      receiverId: call.calleeId,
+      callerName: call.callerName,
+      receiverName: call.calleeName,
+      type: call.kind == 'video' ? CallType.video : CallType.voice,
+      direction: outgoing ? CallDirection.outgoing : CallDirection.incoming,
+      state: _stateFromRemote(call.status),
+      createdAt: call.createdAt,
+      startedAt: call.answeredAt,
+      endedAt: call.endedAt,
+      duration: call.durationSeconds,
+      channelId: call.channelName,
     );
   }
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'order_id': orderId,
-      'caller_id': callerId,
-      'receiver_id': receiverId,
-      'caller_name': callerName,
-      'receiver_name': receiverName,
-      'type': type == CallType.video ? 'video' : 'voice',
-      'direction':
-          direction == CallDirection.incoming ? 'incoming' : 'outgoing',
-      'state': state.name,
-      'created_at': createdAt.toIso8601String(),
-      'started_at': startedAt?.toIso8601String(),
-      'ended_at': endedAt?.toIso8601String(),
-      'duration': duration,
-      'channel_id': channelId,
-    };
-  }
-
-  static CallState _parseCallState(String? state) {
-    switch (state) {
-      case 'calling':
-        return CallState.calling;
+  static CallState _stateFromRemote(String status) {
+    switch (status) {
       case 'ringing':
         return CallState.ringing;
-      case 'connected':
+      case 'accepted':
         return CallState.connected;
+      case 'declined':
+        return CallState.rejected;
       case 'ended':
         return CallState.ended;
-      case 'rejected':
-        return CallState.rejected;
       case 'missed':
         return CallState.missed;
-      case 'failed':
-        return CallState.failed;
       default:
         return CallState.idle;
     }
   }
+
+  final String id;
+  final String orderId;
+  final String callerId;
+  final String receiverId;
+  final String? callerName;
+  final String? receiverName;
+  final CallType type;
+  final CallDirection direction;
+  final CallState state;
+  final DateTime createdAt;
+  final DateTime? startedAt;
+  final DateTime? endedAt;
+  final int? duration;
+
+  /// Canal RTC — **dérivé par le serveur**. L'app le composait
+  /// (`order_{id}_call`), ce qui laissait rejoindre la conversation de
+  /// n'importe quelle commande dont on connaissait l'identifiant.
+  final String? channelId;
 }
 
-/// Service de gestion des appels entre livreur et client
+/// Appels client ↔ livreur — `/api/v1/calls/` et `ws/me/` (Phase 6).
+///
+/// Trois choses ont changé de camp par rapport à l'implémentation Supabase, et
+/// toutes les trois pour la même raison — elles ne sont pas vérifiables sur un
+/// téléphone :
+///
+/// * **Le destinataire** vient de la course de la commande. Le client en
+///   fournissait l'identifiant : n'importe quel compte pouvait faire sonner
+///   n'importe quel autre.
+/// * **Le canal RTC** est dérivé de l'appel par le serveur, et différent à
+///   chaque nouvel appel.
+/// * **Le jeton RTC** est signé côté serveur. Le certificat Agora vivait dans
+///   le `.env` de l'app, donc dans un binaire distribué : l'extraire suffisait
+///   à fabriquer ses propres jetons et à rejoindre n'importe quel canal.
+///
+/// La sonnerie arrive par `ws/me/`, la **file personnelle** du compte : un
+/// appel entrant doit joindre son destinataire où qu'il soit dans l'app, ce
+/// qu'un canal par commande ne permet pas.
 class CallService extends ChangeNotifier {
   static final CallService _instance = CallService._internal();
   factory CallService() => _instance;
   CallService._internal();
 
-  final SupabaseClient _supabase = Supabase.instance.client;
+  final eccore.CallRepository _calls = eccore.CallRepository(apiClient: apiClient);
   final AgoraService _agoraService = AgoraService();
-  final NotificationService _notificationService = NotificationService();
 
   Call? _currentCall;
-  StreamSubscription<Map<String, dynamic>>? _callSubscription;
-  RealtimeChannel? _callChannel;
+  String? _userId;
 
-  // Streams
-  final StreamController<Call> _callStateController =
-      StreamController<Call>.broadcast();
-  final StreamController<Call> _incomingCallController =
-      StreamController<Call>.broadcast();
+  eccore.RealtimeChannel? _channel;
+  StreamSubscription<eccore.RealtimeEvent>? _subscription;
+
+  final StreamController<Call> _callStateController = StreamController<Call>.broadcast();
+  final StreamController<Call> _incomingCallController = StreamController<Call>.broadcast();
 
   Stream<Call> get callStateStream => _callStateController.stream;
   Stream<Call> get incomingCallStream => _incomingCallController.stream;
@@ -161,270 +140,174 @@ class CallService extends ChangeNotifier {
           _currentCall!.state == CallState.ringing ||
           _currentCall!.state == CallState.calling);
 
-  /// Initialise le service d'appel
+  /// Ouvre la file personnelle : c'est elle qui fait sonner le téléphone.
   Future<void> initialize({required String userId}) async {
+    if (_userId == userId && _channel != null) return;
+
+    _userId = userId;
+    await _closeChannel();
+
+    final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1';
+    final apiUri = Uri.parse(apiBaseUrl);
+    final wsUrl = Uri(
+      scheme: apiUri.scheme == 'https' ? 'wss' : 'ws',
+      host: apiUri.host,
+      port: apiUri.port,
+      path: '/ws/me/',
+    ).toString();
+
+    final channel = eccore.RealtimeChannel(wsUrl: wsUrl, tokenStorage: eccore.TokenStorage());
+    _channel = channel;
+    _subscription = channel.connect().listen(_onEvent);
+
+    debugPrint('CallService: file personnelle ouverte');
+  }
+
+  /// Les événements ne portent que l'essentiel ; l'appel complet est relu pour
+  /// que l'écran travaille sur l'état du serveur et non sur un delta.
+  Future<void> _onEvent(eccore.RealtimeEvent event) async {
+    if (!event.type.startsWith('call.')) return;
+
+    final callId = event.payload['call'] as String?;
+    if (callId == null || _userId == null) return;
+
     try {
-      // S'abonner aux appels entrants
-      _callChannel = _supabase
-          .channel('calls_$userId')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.insert,
-            schema: 'public',
-            table: 'calls',
-            filter: PostgresChangeFilter(
-              type: PostgresChangeFilterType.eq,
-              column: 'receiver_id',
-              value: userId,
-            ),
-            callback: (payload) {
-              final callData = payload.newRecord;
-              final call = Call.fromMap(callData);
-              if (call.state == CallState.ringing) {
-                _handleIncomingCall(call);
-              }
-            },
-          )
-          .onPostgresChanges(
-            event: PostgresChangeEvent.update,
-            schema: 'public',
-            table: 'calls',
-            filter: PostgresChangeFilter(
-              type: PostgresChangeFilterType.eq,
-              column: 'receiver_id',
-              value: userId,
-            ),
-            callback: (payload) {
-              final callData = payload.newRecord;
-              final call = Call.fromMap(callData);
-              _handleCallUpdate(call);
-            },
-          )
-          .subscribe();
+      final remote = await _calls.history();
+      final match = remote.where((call) => call.id == callId);
+      if (match.isEmpty) return;
 
-      debugPrint('CallService: Initialisé pour l\'utilisateur $userId');
-    } catch (e) {
-      debugPrint('CallService: Erreur d\'initialisation - $e');
+      final call = Call.fromRemote(match.first, myUserId: _userId!);
+      _currentCall = call.state == CallState.connected || call.state == CallState.ringing
+          ? call
+          : null;
+
+      if (event.type == 'call.incoming') {
+        _incomingCallController.add(call);
+      } else {
+        _callStateController.add(call);
+      }
+      notifyListeners();
+    } on eccore.ApiException catch (e) {
+      debugPrint('CallService: relecture impossible — ${e.code}');
     }
   }
 
-  /// Gère un appel entrant
-  void _handleIncomingCall(Call call) {
-    _currentCall = call;
-    _incomingCallController.add(call);
-    notifyListeners();
-
-    // Afficher une notification
-    _notificationService.showOrderConfirmationNotification(
-      call.orderId,
-      'Appel entrant de ${call.callerName ?? "Livreur"}',
-    );
-  }
-
-  /// Gère une mise à jour d'appel
-  void _handleCallUpdate(Call call) {
-    _currentCall = call;
-    _callStateController.add(call);
-    notifyListeners();
-
-    // Si l'appel est terminé, nettoyer
-    if (call.state == CallState.ended ||
-        call.state == CallState.rejected ||
-        call.state == CallState.missed) {
-      _currentCall = null;
-    }
-  }
-
-  /// Initie un appel sortant
+  /// Appelle l'autre partie de la commande. Ni destinataire ni canal ne sont
+  /// déclarés : le serveur les tient.
   Future<Call?> initiateCall({
     required String orderId,
-    required String callerId,
-    required String receiverId,
-    String? callerName,
-    String? receiverName,
     CallType type = CallType.voice,
   }) async {
+    if (_userId == null) return null;
+
     try {
-      // Vérifier les permissions
-      final hasPermission = await _checkPermissions();
-      if (!hasPermission) {
-        debugPrint('CallService: Permissions refusées');
+      final remote = await _calls.place(
+        orderId: orderId,
+        kind: type == CallType.video ? 'video' : 'voice',
+      );
+      final call = Call.fromRemote(remote, myUserId: _userId!);
+
+      if (!await _joinChannel(call)) {
+        await endCall();
         return null;
       }
-
-      // Générer un ID de canal unique basé sur la commande
-      final channelId = 'order_${orderId}_call';
-
-      // Créer l'appel en base de données
-      final callResponse = await _supabase
-          .from('calls')
-          .insert({
-            'order_id': orderId,
-            'caller_id': callerId,
-            'receiver_id': receiverId,
-            'caller_name': callerName,
-            'receiver_name': receiverName,
-            'type': type == CallType.video ? 'video' : 'voice',
-            'direction': 'outgoing',
-            'state': 'calling',
-            'channel_id': channelId,
-          })
-          .select()
-          .single();
-
-      final call = Call.fromMap(callResponse);
-
-      // Initialiser Agora
-      await _agoraService.initialize();
-      final uid = callerId.hashCode.abs() % 2147483647;
-      final joined = await _agoraService.joinChannel(channelId, uid: uid);
-
-      if (!joined) {
-        // Marquer l'appel comme échoué
-        await _updateCallState(call.id, CallState.failed);
-        return null;
-      }
-
-      // Mettre à jour l'état de l'appel
-      await _updateCallState(call.id, CallState.ringing);
 
       _currentCall = call;
       notifyListeners();
-
       return call;
-    } catch (e) {
-      debugPrint('CallService: Erreur lors de l\'initiation de l\'appel - $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('CallService: appel refusé — ${e.code} (${e.detail})');
       return null;
     }
   }
 
-  /// Accepte un appel entrant
   Future<bool> acceptCall(Call call) async {
     try {
-      // Vérifier les permissions
-      final hasPermission = await _checkPermissions();
-      if (!hasPermission) {
-        return false;
-      }
+      final remote = await _calls.accept(call.id);
+      final accepted = Call.fromRemote(remote, myUserId: _userId ?? '');
 
-      // Initialiser Agora et rejoindre le canal
-      await _agoraService.initialize();
-      final uid = call.receiverId.hashCode.abs() % 2147483647;
-      final joined = await _agoraService.joinChannel(
-        call.channelId ?? 'order_${call.orderId}_call',
-        uid: uid,
-      );
+      if (!await _joinChannel(accepted)) return false;
 
-      if (!joined) {
-        await _updateCallState(call.id, CallState.failed);
-        return false;
-      }
-
-      // Mettre à jour l'état de l'appel
-      await _supabase.from('calls').update({
-        'state': 'connected',
-        'started_at': DateTime.now().toIso8601String(),
-      }).eq('id', call.id);
-
-      _currentCall = Call.fromMap({
-        ...call.toMap(),
-        'state': 'connected',
-        'started_at': DateTime.now().toIso8601String(),
-      });
-
+      _currentCall = accepted;
       notifyListeners();
       return true;
-    } catch (e) {
-      debugPrint('CallService: Erreur lors de l\'acceptation de l\'appel - $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('CallService: décrochage refusé — ${e.code}');
       return false;
     }
   }
 
-  /// Rejette un appel entrant
   Future<void> rejectCall(Call call) async {
     try {
-      await _updateCallState(call.id, CallState.rejected);
-      _currentCall = null;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('CallService: Erreur lors du rejet de l\'appel - $e');
+      await _calls.decline(call.id);
+    } on eccore.ApiException catch (e) {
+      debugPrint('CallService: refus impossible — ${e.code}');
     }
+    _currentCall = null;
+    notifyListeners();
   }
 
-  /// Termine un appel
   Future<void> endCall() async {
-    if (_currentCall == null) return;
+    final call = _currentCall;
+    if (call == null) return;
 
     try {
-      final call = _currentCall!;
-      final now = DateTime.now();
-      final duration = call.startedAt != null
-          ? now.difference(call.startedAt!).inSeconds
-          : 0;
-
-      // Mettre à jour l'appel en base de données
-      await _supabase.from('calls').update({
-        'state': 'ended',
-        'ended_at': now.toIso8601String(),
-        'duration': duration,
-      }).eq('id', call.id);
-
-      // Quitter le canal Agora
-      await _agoraService.leaveChannel();
-
-      _currentCall = null;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('CallService: Erreur lors de la fin de l\'appel - $e');
+      await _calls.end(call.id);
+    } on eccore.ApiException catch (e) {
+      debugPrint('CallService: raccrochage impossible — ${e.code}');
     }
+
+    await _agoraService.leaveChannel();
+    _currentCall = null;
+    notifyListeners();
   }
 
-  /// Met à jour l'état d'un appel
-  Future<void> _updateCallState(String callId, CallState state) async {
+  /// Rejoint le canal avec le jeton du serveur.
+  ///
+  /// Le jeton est demandé **au moment de rejoindre**, pas à la création :
+  /// le destinataire n'en a pas tant qu'il n'a pas décroché, et le serveur en
+  /// refuse un sur un appel terminé.
+  Future<bool> _joinChannel(Call call) async {
     try {
-      await _supabase
-          .from('calls')
-          .update({'state': state.name}).eq('id', callId);
-    } catch (e) {
-      debugPrint('CallService: Erreur mise à jour état appel - $e');
-    }
-  }
-
-  /// Vérifie les permissions nécessaires
-  /// Note: Les permissions sont gérées par Agora SDK automatiquement
-  Future<bool> _checkPermissions() async {
-    try {
-      // Agora SDK gère les permissions automatiquement
-      // On retourne true par défaut, Agora demandera les permissions si nécessaire
-      return true;
-    } catch (e) {
-      debugPrint('CallService: Erreur vérification permissions - $e');
+      final credentials = await _calls.rtcCredentials(call.id);
+      await _agoraService.initialize();
+      return _agoraService.joinChannel(
+        credentials.channelName,
+        uid: credentials.uid,
+        token: credentials.token,
+      );
+    } on eccore.ApiException catch (e) {
+      debugPrint('CallService: jeton RTC refusé — ${e.code}');
       return false;
     }
   }
 
-  /// Récupère l'historique des appels pour une commande
+  /// Historique des appels d'une commande.
   Future<List<Call>> getCallHistory(String orderId) async {
-    try {
-      final response = await _supabase
-          .from('calls')
-          .select()
-          .eq('order_id', orderId)
-          .order('created_at', ascending: false);
+    if (_userId == null) return [];
 
-      return (response as List)
-          .map((data) => Call.fromMap(data as Map<String, dynamic>))
+    try {
+      final remote = await _calls.history();
+      return remote
+          .where((call) => call.orderId == orderId)
+          .map((call) => Call.fromRemote(call, myUserId: _userId!))
           .toList();
-    } catch (e) {
-      debugPrint('CallService: Erreur récupération historique - $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('CallService: historique indisponible — ${e.code}');
       return [];
     }
   }
 
-  /// Nettoie les ressources
+  Future<void> _closeChannel() async {
+    await _subscription?.cancel();
+    await _channel?.close();
+    _subscription = null;
+    _channel = null;
+  }
+
   @override
   void dispose() {
-    _callSubscription?.cancel();
-    _callChannel?.unsubscribe();
+    _closeChannel();
     _callStateController.close();
     _incomingCallController.close();
     super.dispose();

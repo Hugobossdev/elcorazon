@@ -263,8 +263,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _openWhatsApp() async {
     try {
       // Récupérer le numéro de téléphone depuis le profil utilisateur
-      final userProfile = await _getUserProfile(widget.order.userId);
-      final phoneNumber = userProfile?['phone'] as String?;
+      final phoneNumber = _recipientPhone();
       
       if (phoneNumber == null || phoneNumber.isEmpty) {
         if (mounted) {
@@ -618,13 +617,9 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<Map<String, dynamic>?> _getUserProfile(String userId) async {
-    try {
-      final appService = Provider.of<AppService>(context, listen: false);
-      return await appService.getUserProfile(userId);
-    } catch (e) {
-      debugPrint('Erreur récupération profil utilisateur: $e');
-      return null;
-    }
+  /// Téléphone du destinataire, lu sur la course.
+  String? _recipientPhone() {
+    return Provider.of<AppService>(context, listen: false)
+        .recipientPhoneFor(widget.order.id);
   }
 }
