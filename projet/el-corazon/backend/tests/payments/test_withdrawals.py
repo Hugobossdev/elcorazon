@@ -148,9 +148,7 @@ class TestCloisonnement:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) == 1
 
-    def test_le_statut_ne_s_ecrit_pas_depuis_la_requete(
-        self, as_courier: APIClient
-    ) -> None:
+    def test_le_statut_ne_s_ecrit_pas_depuis_la_requete(self, as_courier: APIClient) -> None:
         """Une demande qui naîtrait « versée » ferait sortir de l'argent sans
         que personne l'ait versé."""
         response = as_courier.post(
@@ -163,14 +161,10 @@ class TestCloisonnement:
 
 
 class TestReglement:
-    def test_un_versement_echoue_rend_les_gains(
-        self, paid_courier: CourierProfile
-    ) -> None:
+    def test_un_versement_echoue_rend_les_gains(self, paid_courier: CourierProfile) -> None:
         """Sans recrédit, l'argent ne serait ni sur le compte du livreur, ni
         dans l'application."""
-        withdrawal = WithdrawalService.request(
-            courier=paid_courier, amount=Money(4_000, XOF)
-        )
+        withdrawal = WithdrawalService.request(courier=paid_courier, amount=Money(4_000, XOF))
         paid_courier.refresh_from_db()
         assert paid_courier.total_earnings == Money(6_000, XOF)
 
@@ -181,12 +175,8 @@ class TestReglement:
         withdrawal.refresh_from_db()
         assert withdrawal.status == PaymentStatus.FAILED
 
-    def test_un_versement_execute_ne_rend_rien(
-        self, paid_courier: CourierProfile
-    ) -> None:
-        withdrawal = WithdrawalService.request(
-            courier=paid_courier, amount=Money(4_000, XOF)
-        )
+    def test_un_versement_execute_ne_rend_rien(self, paid_courier: CourierProfile) -> None:
+        withdrawal = WithdrawalService.request(courier=paid_courier, amount=Money(4_000, XOF))
 
         WithdrawalService.settle(withdrawal=withdrawal, provider_reference="PD-123")
 

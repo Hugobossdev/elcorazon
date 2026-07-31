@@ -214,9 +214,7 @@ class CourierRating(UUIDModel, TimeStampedModel):
     a-t-il noté ? ».
     """
 
-    assignment = models.OneToOneField(
-        Assignment, on_delete=models.CASCADE, related_name="rating"
-    )
+    assignment = models.OneToOneField(Assignment, on_delete=models.CASCADE, related_name="rating")
     customer = models.ForeignKey(User, on_delete=models.PROTECT, related_name="courier_ratings")
     score = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(5)]

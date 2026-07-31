@@ -137,9 +137,7 @@ class MeView(APIView):
     def get(self, request: Request) -> Response:
         return Response(UserSerializer(authenticated_user(request)).data)
 
-    @extend_schema(
-        request=ProfileUpdateSerializer, responses={200: UserSerializer}, tags=["auth"]
-    )
+    @extend_schema(request=ProfileUpdateSerializer, responses={200: UserSerializer}, tags=["auth"])
     def patch(self, request: Request) -> Response:
         """Met à jour son propre nom et son téléphone.
 

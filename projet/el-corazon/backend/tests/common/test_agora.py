@@ -82,15 +82,11 @@ class TestBornes:
 class TestConfiguration:
     def test_refuse_un_certificat_absent(self) -> None:
         with pytest.raises(AgoraTokenError):
-            build_rtc_token(
-                app_id=APP_ID, app_certificate="", channel_name="order-1", uid=1
-            )
+            build_rtc_token(app_id=APP_ID, app_certificate="", channel_name="order-1", uid=1)
 
     def test_refuse_un_app_id_absent(self) -> None:
         with pytest.raises(AgoraTokenError):
-            build_rtc_token(
-                app_id="", app_certificate=CERTIFICATE, channel_name="order-1", uid=1
-            )
+            build_rtc_token(app_id="", app_certificate=CERTIFICATE, channel_name="order-1", uid=1)
 
     def test_refuse_une_validite_nulle(self) -> None:
         """Un jeton sans durée n'ouvre rien — autant le dire à la construction."""

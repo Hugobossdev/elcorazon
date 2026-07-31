@@ -525,7 +525,6 @@ class AssignmentService:
         )
 
 
-
 class CourierRatingService:
     """Note d'une course par le client qui l'a reçue.
 

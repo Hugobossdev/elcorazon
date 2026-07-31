@@ -82,9 +82,7 @@ def noms(response: object) -> list[str]:
 
 
 class TestFiltresDePrix:
-    def test_prix_minimum_en_unite_mineure(
-        self, client: APIClient, carte: list[MenuItem]
-    ) -> None:
+    def test_prix_minimum_en_unite_mineure(self, client: APIClient, carte: list[MenuItem]) -> None:
         response = client.get(reverse(LISTE), {"price_min": 3_000})
 
         assert response.status_code == status.HTTP_200_OK
@@ -114,9 +112,7 @@ class TestFiltresNutritionnels:
 
 
 class TestRegimesEtAllergenes:
-    def test_cumuler_deux_regimes_restreint(
-        self, client: APIClient, carte: list[MenuItem]
-    ) -> None:
+    def test_cumuler_deux_regimes_restreint(self, client: APIClient, carte: list[MenuItem]) -> None:
         """`vegetarian` en rend deux, `vegetarian,vegan` un seul."""
         assert len(noms(client.get(reverse(LISTE), {"dietary_tags": "vegetarian"}))) == 2
         assert noms(client.get(reverse(LISTE), {"dietary_tags": "vegetarian,vegan"})) == [

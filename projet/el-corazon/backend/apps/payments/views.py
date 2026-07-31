@@ -330,9 +330,7 @@ class WithdrawalView(APIView):
 
     @extend_schema(responses={200: WithdrawalSerializer(many=True)}, tags=["payments"])
     def get(self, request: Request) -> Response:
-        withdrawals = Withdrawal.objects.filter(
-            courier=courier_of(request)
-        ).order_by("-created_at")
+        withdrawals = Withdrawal.objects.filter(courier=courier_of(request)).order_by("-created_at")
         return Response(WithdrawalSerializer(withdrawals, many=True).data)
 
     @extend_schema(
@@ -347,6 +345,4 @@ class WithdrawalView(APIView):
         withdrawal = WithdrawalService.request(
             courier=courier_of(request), amount=payload.validated_data["amount"]
         )
-        return Response(
-            WithdrawalSerializer(withdrawal).data, status=status.HTTP_201_CREATED
-        )
+        return Response(WithdrawalSerializer(withdrawal).data, status=status.HTTP_201_CREATED)

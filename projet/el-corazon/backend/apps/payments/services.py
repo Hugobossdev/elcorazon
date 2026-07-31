@@ -373,7 +373,6 @@ class RefundService:
         )
 
 
-
 class WithdrawalService:
     """Retrait des gains d'un livreur.
 

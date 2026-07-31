@@ -41,9 +41,7 @@ def as_customer(customer: User) -> APIClient:
 def delivered(order: Order, courier: CourierProfile) -> Assignment:
     """Commande livrée par le livreur de référence — l'état nominal."""
     Order.objects.filter(pk=order.pk).update(status=OrderStatus.DELIVERED)
-    return Assignment.objects.create(
-        order=order, courier=courier, status=DeliveryStatus.DELIVERED
-    )
+    return Assignment.objects.create(order=order, courier=courier, status=DeliveryStatus.DELIVERED)
 
 
 def rating_url(order: Order) -> str:
@@ -89,9 +87,7 @@ class TestNotation:
         for rang, score in enumerate((4, 4), start=2):
             autre = build_order(restaurant, customer, reference=f"EC00000{rang}")
             Order.objects.filter(pk=autre.pk).update(status=OrderStatus.DELIVERED)
-            Assignment.objects.create(
-                order=autre, courier=courier, status=DeliveryStatus.DELIVERED
-            )
+            Assignment.objects.create(order=autre, courier=courier, status=DeliveryStatus.DELIVERED)
             as_customer.post(rating_url(autre), {"score": score}, format="json")
 
         courier.refresh_from_db()
@@ -204,9 +200,7 @@ class TestCloisonnement:
 
 
 class TestRelecture:
-    def test_le_client_relit_sa_note(
-        self, as_customer: APIClient, delivered: Assignment
-    ) -> None:
+    def test_le_client_relit_sa_note(self, as_customer: APIClient, delivered: Assignment) -> None:
         as_customer.post(rating_url(delivered.order), {"score": 3}, format="json")
 
         response = as_customer.get(rating_url(delivered.order))
