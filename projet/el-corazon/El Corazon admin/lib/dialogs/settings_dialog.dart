@@ -124,7 +124,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     Consumer<AdminAuthService>(
                       builder: (context, adminAuthService, child) {
                         final admin = adminAuthService.currentAdmin;
-                        final role = adminAuthService.currentRole;
+                        final roleLabel = adminAuthService.roleLabel;
+                        final permissions = adminAuthService.permissions;
 
                         return Card(
                           elevation: 2,
@@ -170,7 +171,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                             ),
                                           ),
                                           Text(
-                                            role?.name ?? 'Rôle',
+                                            roleLabel,
                                             style: TextStyle(
                                               color: Colors.grey[600],
                                               fontSize: 14,
@@ -199,7 +200,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                                 _buildInfoRow(
                                   Icons.security,
                                   'Permissions',
-                                  '${role?.permissions.length ?? 0} permissions',
+                                  '${permissions.length} permission(s)',
                                 ),
                               ],
                             ),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/admin_auth_service.dart';
-import '../../services/paydunya_service.dart';
 import '../../widgets/custom_text_field.dart';
 import '../../utils/dialog_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,10 +34,6 @@ class _SettingsScreenState extends State<SettingsScreen>
   };
 
   // API Keys
-  final _paydunyaMasterKeyController = TextEditingController();
-  final _paydunyaPublicKeyController = TextEditingController();
-  final _paydunyaPrivateKeyController = TextEditingController();
-  final _paydunyaTokenController = TextEditingController();
   final _googleMapsApiKeyController = TextEditingController();
 
   // FAQ/CGV
@@ -60,10 +55,6 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void dispose() {
     _tabController.dispose();
-    _paydunyaMasterKeyController.dispose();
-    _paydunyaPublicKeyController.dispose();
-    _paydunyaPrivateKeyController.dispose();
-    _paydunyaTokenController.dispose();
     _googleMapsApiKeyController.dispose();
     _faqController.dispose();
     _cgvController.dispose();
@@ -105,13 +96,6 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
 
     // Charger les API keys
-    _paydunyaMasterKeyController.text =
-        prefs.getString('paydunya_master_key') ?? '';
-    _paydunyaPublicKeyController.text =
-        prefs.getString('paydunya_public_key') ?? '';
-    _paydunyaPrivateKeyController.text =
-        prefs.getString('paydunya_private_key') ?? '';
-    _paydunyaTokenController.text = prefs.getString('paydunya_token') ?? '';
     _googleMapsApiKeyController.text =
         prefs.getString('google_maps_api_key') ?? '';
 
@@ -149,39 +133,14 @@ class _SettingsScreenState extends State<SettingsScreen>
       await prefs.setBool('opening_day_${entry.key}', entry.value);
     }
 
-    // Sauvegarder les API keys
-    await prefs.setString(
-      'paydunya_master_key',
-      _paydunyaMasterKeyController.text,
-    );
-    await prefs.setString(
-      'paydunya_public_key',
-      _paydunyaPublicKeyController.text,
-    );
-    await prefs.setString(
-      'paydunya_private_key',
-      _paydunyaPrivateKeyController.text,
-    );
-    await prefs.setString('paydunya_token', _paydunyaTokenController.text);
+    // Les clés du prestataire de paiement ne sont plus ici : elles vivent
+    // côté serveur. Les saisir dans l'application revenait à distribuer, dans
+    // chaque poste, de quoi déclencher un remboursement sans permission, sans
+    // rattachement, sans trace et sans plafond.
     await prefs.setString(
       'google_maps_api_key',
       _googleMapsApiKeyController.text,
     );
-
-    // Configurer PayDunya
-    if (_paydunyaMasterKeyController.text.isNotEmpty &&
-        _paydunyaPublicKeyController.text.isNotEmpty &&
-        _paydunyaPrivateKeyController.text.isNotEmpty &&
-        _paydunyaTokenController.text.isNotEmpty) {
-      if (!mounted) return;
-      final paydunyaService = context.read<PayDunyaService>();
-      await paydunyaService.configure(
-        masterKey: _paydunyaMasterKeyController.text,
-        publicKey: _paydunyaPublicKeyController.text,
-        privateKey: _paydunyaPrivateKeyController.text,
-        token: _paydunyaTokenController.text,
-      );
-    }
 
     // Sauvegarder FAQ/CGV
     await prefs.setString('faq_content', _faqController.text);
@@ -426,33 +385,14 @@ class _SettingsScreenState extends State<SettingsScreen>
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  CustomTextField(
-                    controller: _paydunyaMasterKeyController,
-                    label: 'Master Key',
-                    isPassword: true,
-                    prefixIcon: Icons.vpn_key,
-                  ),
                   const SizedBox(height: 12),
-                  CustomTextField(
-                    controller: _paydunyaPublicKeyController,
-                    label: 'Public Key',
-                    isPassword: true,
-                    prefixIcon: Icons.vpn_key,
-                  ),
-                  const SizedBox(height: 12),
-                  CustomTextField(
-                    controller: _paydunyaPrivateKeyController,
-                    label: 'Private Key',
-                    isPassword: true,
-                    prefixIcon: Icons.vpn_key,
-                  ),
-                  const SizedBox(height: 12),
-                  CustomTextField(
-                    controller: _paydunyaTokenController,
-                    label: 'Token',
-                    isPassword: true,
-                    prefixIcon: Icons.vpn_key,
+                  Text(
+                    'Les clés marchandes sont détenues par le serveur et ne '
+                    'transitent plus par cette application. Un remboursement '
+                    'passe par une requête authentifiée, soumise à la '
+                    'permission « orders.refund », au périmètre de votre '
+                    "compte et au plafond de l'encaissement d'origine.",
+                    style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
                 ],
               ),

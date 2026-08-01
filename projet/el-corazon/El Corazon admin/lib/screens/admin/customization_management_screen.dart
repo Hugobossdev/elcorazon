@@ -96,8 +96,7 @@ class _CustomizationManagementScreenState
             // Filtre par recherche
             if (_searchQuery.isNotEmpty) {
               final query = _searchQuery.toLowerCase();
-              return option.name.toLowerCase().contains(query) ||
-                  (option.description?.toLowerCase().contains(query) ?? false);
+              return option.name.toLowerCase().contains(query);
             }
 
             return true;
@@ -553,18 +552,6 @@ class _OptionCardWidgetState extends State<_OptionCardWidget> {
                             ),
                         ],
                       ),
-                      if (widget.option.description != null &&
-                          widget.option.description!.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          widget.option.description!,
-                          style: widget.theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.grey.shade600,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
                       const SizedBox(height: 8),
                       Row(
                         children: [
@@ -611,30 +598,6 @@ class _OptionCardWidgetState extends State<_OptionCardWidget> {
                                 ),
                               ),
                             ),
-                          if (widget.option.maxQuantity > 1) ...[
-                            const SizedBox(width: 8),
-                            Text(
-                              'Max: ${widget.option.maxQuantity}',
-                              style: widget.theme.textTheme.bodySmall?.copyWith(
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
-                          ],
-                          if (widget.option.allergens.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Icon(
-                              Icons.warning_amber_rounded,
-                              size: 16,
-                              color: Colors.orange.shade700,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Allergènes',
-                              style: widget.theme.textTheme.bodySmall?.copyWith(
-                                color: Colors.orange.shade700,
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ],

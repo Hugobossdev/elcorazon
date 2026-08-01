@@ -1,611 +1,178 @@
-import 'dart:io';
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:path/path.dart' as path;
-import '../models/driver_document.dart' as model;
-import '../models/document_history.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:flutter/foundation.dart';
 
-/// Types de documents requis pour les livreurs (codes côté base de données)
-enum DriverDocumentType {
-  idCard,
-  driverLicense,
-  vehicleRegistration,
-  vehicleInsurance,
-  backgroundCheck,
-  profilePhoto,
-}
+import '../models/driver_document.dart';
+import 'admin_auth_service.dart';
 
-extension DriverDocumentTypeExtension on DriverDocumentType {
-  String get displayName {
-    switch (this) {
-      case DriverDocumentType.idCard:
-        return 'Carte d\'identité / Passeport';
-      case DriverDocumentType.driverLicense:
-        return 'Permis de conduire';
-      case DriverDocumentType.vehicleRegistration:
-        return 'Carte grise';
-      case DriverDocumentType.vehicleInsurance:
-        return 'Assurance véhicule';
-      case DriverDocumentType.backgroundCheck:
-        return 'Casier judiciaire';
-      case DriverDocumentType.profilePhoto:
-        return 'Photo de profil';
-    }
-  }
-
-  String get dbCode {
-    switch (this) {
-      case DriverDocumentType.idCard:
-        return 'id_card';
-      case DriverDocumentType.driverLicense:
-        return 'driver_license';
-      case DriverDocumentType.vehicleRegistration:
-        return 'vehicle_registration';
-      case DriverDocumentType.vehicleInsurance:
-        return 'vehicle_insurance';
-      case DriverDocumentType.backgroundCheck:
-        return 'background_check';
-      case DriverDocumentType.profilePhoto:
-        return 'profile_photo';
-    }
-  }
-}
-
+/// Pièces justificatives des livreurs — `/delivery/couriers/` (Phase 6).
+///
+/// Le modèle a changé, et la différence porte tout ce fichier : **la décision
+/// est prise sur le dossier, pas sur chaque pièce**.
+///
+/// Côté Supabase, chaque document avait son propre statut : on pouvait
+/// approuver le permis, rejeter la carte grise, et le compte restait dans un
+/// état que personne ne savait lire — le livreur pouvait-il travailler ? La
+/// réponse dépendait d'une agrégation refaite dans chaque écran.
+///
+/// Côté v2, un dossier porte trois pièces et **un** statut de vérification.
+/// C'est lui qui décide de l'éligibilité (L1), et il n'y a donc qu'une réponse
+/// possible. Instruire un dossier, c'est le regarder en entier puis trancher,
+/// avec un motif.
+///
+/// Trois choses ont disparu, faute d'équivalent — et parce qu'elles ne tenaient
+/// pas :
+///
+/// * **les dates d'expiration.** Saisies à la main, et rien ne les vérifiait :
+///   `checkExpiredDocuments` devait être appelée par un écran pour que
+///   l'expiration prenne effet. Un permis périmé restait donc valide tant que
+///   personne n'ouvrait le tableau de bord ;
+/// * **l'historique de validation.** Une table écrite depuis le navigateur,
+///   avec l'identifiant de l'auteur fourni par le client — une trace que son
+///   auteur pouvait choisir. Elle est maintenant sur le dossier
+///   (`verified_by`, `verified_at`), écrite par le serveur ;
+/// * **le dépôt de pièces depuis le back-office.** C'est le livreur qui a ses
+///   documents et qui les dépose depuis son application ; tout dépôt repasse le
+///   dossier en attente (L5), sans quoi un dossier validé sur des pièces
+///   ensuite remplacées resterait validé.
+///
+/// Les fichiers arrivent en **URL signées, qui expirent** : le stockage est
+/// privé. L'ancienne version les publiait dans un compartiment public, où une
+/// pièce d'identité restait lisible par quiconque connaissait l'adresse.
 class DriverDocumentService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  eccore.ManagedCourierRepository get _fleet =>
+      eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient);
+
+  List<eccore.CourierProfile> _couriers = [];
   bool _isLoading = false;
+  String? _error;
+  bool _isInitialized = false;
 
+  List<eccore.CourierProfile> get couriers => _couriers;
   bool get isLoading => _isLoading;
+  String? get error => _error;
 
-  model.DriverDocument _mapToModelDocument(Map<String, dynamic> data) {
-    final normalized = <String, dynamic>{...data};
+  /// Dossiers en attente d'instruction.
+  List<eccore.CourierProfile> get pendingCouriers =>
+      _couriers.where((c) => c.verificationStatus == 'pending').toList();
 
-    // Mapper driver_id -> user_id attendu par le modèle
-    // Si on a accès à drivers.user_id via jointure
-    if (data['drivers'] != null && data['drivers']['user_id'] != null) {
-      normalized['user_id'] = data['drivers']['user_id'].toString();
-    } else {
-      normalized['user_id'] =
-          data['user_id']?.toString() ?? data['driver_id']?.toString() ?? '';
-    }
+  /// Dossiers en attente **auxquels il manque une pièce** : il n'y a rien à
+  /// instruire tant que le livreur n'a pas fini de déposer.
+  List<eccore.CourierProfile> get incompleteCouriers => _couriers
+      .where((c) => c.verificationStatus == 'pending' && !c.hasAllDocuments)
+      .toList();
 
-    // Extraire les infos du user si présentes (jointure profonde)
-    if (data['drivers'] != null && data['drivers']['users'] != null) {
-      final userData = data['drivers']['users'];
-      // Créer une structure temporaire pour que le modèle puisse l'extraire
-      // ou l'injecter directement dans le modèle si on met à jour le modèle
-      // Le modèle attend 'drivers' -> {name, email...}
-      // On va aplatir la structure pour matcher ce que le modèle attend (voir modification précédente du modèle)
-      normalized['drivers'] = userData;
-    }
-
-    // Mapper URL de fichier
-    normalized['file_url'] =
-        data['file_url'] ?? data['document_url'] ?? data['fileUrl'];
-
-    // Mapper type de document (codes DB -> codes du modèle)
-    final rawType = data['document_type']?.toString();
-    if (rawType != null) {
-      String mapped;
-      switch (rawType) {
-        case 'driver_license':
-          mapped = 'license';
-          break;
-        case 'id_card':
-          mapped = 'identity';
-          break;
-        case 'vehicle_registration':
-          mapped = 'registration';
-          break;
-        case 'vehicle_insurance':
-          mapped = 'insurance';
-          break;
-        default:
-          mapped = rawType;
-      }
-      normalized['document_type'] = mapped;
-    }
-
-    return model.DriverDocument.fromMap(normalized);
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+    _isInitialized = true;
+    await refresh();
   }
 
-  /// Récupérer tous les documents d'un livreur
-  Future<List<model.DriverDocument>> getDriverDocuments(String driverId) async {
+  Future<void> refresh() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
     try {
-      _isLoading = true;
-      notifyListeners();
-
-      final response = await _supabase
-          .from('driver_documents')
-          .select()
-          .eq('driver_id', driverId);
-
-      return (response as List)
-          .map((data) => _mapToModelDocument(Map<String, dynamic>.from(data)))
-          .toList();
-    } catch (e) {
-      debugPrint('Error fetching documents: $e');
-      return [];
+      _couriers = await _fleet.list();
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Dossiers livreurs : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Récupérer un document spécifique par type
-  Future<model.DriverDocument?> getDocumentByType(
-    String driverId,
-    DriverDocumentType type,
-  ) async {
-    try {
-      final response = await _supabase
-          .from('driver_documents')
-          .select()
-          .eq('driver_id', driverId)
-          .eq('document_type', type.dbCode)
-          .maybeSingle();
+  /// Les trois pièces d'un dossier, sous la forme qu'affichent les écrans.
+  ///
+  /// Le statut porté par chaque ligne est celui **du dossier** : c'est la seule
+  /// décision qui existe, et faire semblant qu'il y en a trois laisserait
+  /// croire qu'on peut approuver une pièce isolément.
+  List<DriverDocument> documentsOf(eccore.CourierProfile courier) {
+    final statut = _statut(courier.verificationStatus);
+    final maintenant = DateTime.now();
 
-      if (response == null) return null;
-      return _mapToModelDocument(Map<String, dynamic>.from(response));
-    } catch (e) {
-      debugPrint('Error fetching document by type: $e');
-      return null;
-    }
-  }
-
-  /// Récupérer tous les documents en attente de validation
-  Future<List<model.DriverDocument>> getPendingDocuments() async {
-    try {
-      _isLoading = true;
-      notifyListeners();
-
-      final response = await _supabase
-          .from('driver_documents')
-          .select('*, drivers:driver_id(user_id, users:user_id(name, email, phone))')
-          .eq('status', 'pending');
-
-      return (response as List)
-          .map((data) => _mapToModelDocument(Map<String, dynamic>.from(data)))
-          .toList();
-    } catch (e) {
-      debugPrint('Error fetching pending documents: $e');
-      return [];
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  /// Récupérer les documents nécessitant une attention (expirés ou expirant bientôt)
-  Future<List<model.DriverDocument>> getDocumentsNeedingAttention() async {
-    try {
-      _isLoading = true;
-      notifyListeners();
-
-      final now = DateTime.now();
-      final warningDate = now.add(const Duration(days: 30));
-
-      final response = await _supabase
-          .from('driver_documents')
-          .select('*, drivers:driver_id(user_id, users:user_id(name, email, phone))')
-          .or('status.eq.expired,expiry_date.lte.${warningDate.toIso8601String()}')
-          .neq('status', 'rejected');
-
-      return (response as List)
-          .map((data) => _mapToModelDocument(Map<String, dynamic>.from(data)))
-          .toList();
-    } catch (e) {
-      debugPrint('Error fetching documents needing attention: $e');
-      return [];
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  /// Uploader un document
-  Future<bool> uploadDocument({
-    required String driverId,
-    required DriverDocumentType type,
-    required File file,
-    DateTime? expiryDate,
-  }) async {
-    try {
-      _isLoading = true;
-      notifyListeners();
-
-      // 1. Upload file to Storage
-      final fileExt = path.extension(file.path);
-      final fileName =
-          '$driverId/${type.dbCode}_${DateTime.now().millisecondsSinceEpoch}$fileExt';
-
-      await _supabase.storage.from('driver_documents').upload(fileName, file);
-
-      final documentUrl =
-          _supabase.storage.from('driver_documents').getPublicUrl(fileName);
-
-      // 2. Insert/Update record in DB
-      final existingDoc = await getDocumentByType(driverId, type);
-
-      if (existingDoc != null) {
-        // Update existing document
-        await _supabase.from('driver_documents').update({
-          'document_url': documentUrl,
-          'status': 'pending', // Reset status to pending on new upload
-          'rejection_reason': null,
-          'expiry_date': expiryDate?.toIso8601String(),
-          'updated_at': DateTime.now().toIso8601String(),
-        }).eq('id', existingDoc.id);
-      } else {
-        // Insert new document
-        await _supabase.from('driver_documents').insert({
-          'driver_id': driverId,
-          'document_type': type.dbCode,
-          'document_url': documentUrl,
-          'status': 'pending',
-          'expiry_date': expiryDate?.toIso8601String(),
-          'created_at': DateTime.now().toIso8601String(),
-          'updated_at': DateTime.now().toIso8601String(),
-        });
-      }
-
-      return true;
-    } catch (e) {
-      debugPrint('Error uploading document: $e');
-      return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  /// Mettre à jour la date d'expiration
-  Future<bool> updateDocumentExpiry(
-      String documentId, DateTime expiryDate) async {
-    try {
-      await _supabase.from('driver_documents').update({
-        'expiry_date': expiryDate.toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', documentId);
-
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('Error updating expiry date: $e');
-      return false;
-    }
-  }
-
-  /// Enregistrer l'historique des modifications
-  Future<void> _logDocumentHistory({
-    required String documentId,
-    required String driverId,
-    required String newStatus,
-    String? previousStatus,
-    String? reason,
-  }) async {
-    try {
-      final user = _supabase.auth.currentUser;
-      String? changedBy;
-      
-      // Essayer de récupérer l'ID utilisateur public de l'admin
-      if (user != null) {
-         try {
-           final adminUser = await _supabase
-               .from('users')
-               .select('id')
-               .eq('auth_user_id', user.id)
-               .maybeSingle();
-           changedBy = adminUser?['id'] as String?;
-         } catch (_) {
-           // Fallback si la table users n'est pas accessible ou structure différente
-           debugPrint('Could not fetch admin user ID for history log');
-         }
-      }
-
-      await _supabase.from('driver_document_history').insert({
-        'document_id': documentId,
-        'driver_id': driverId,
-        'previous_status': previousStatus,
-        'new_status': newStatus,
-        'changed_by': changedBy,
-        'change_reason': reason,
-        'changed_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      debugPrint('Error logging document history: $e');
-    }
-  }
-
-  /// Approuver un document
-  Future<bool> approveDocument(String documentId) async {
-    try {
-      _isLoading = true;
-      notifyListeners();
-
-      // Récupérer infos pour historique
-      final currentDoc = await _supabase
-          .from('driver_documents')
-          .select('status, driver_id')
-          .eq('id', documentId)
-          .single();
-      final previousStatus = currentDoc['status'] as String?;
-      final driverId = currentDoc['driver_id'] as String;
-
-      await _supabase.from('driver_documents').update({
-        'status': 'approved',
-        'rejection_reason': null,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', documentId);
-
-      // Log history
-      await _logDocumentHistory(
-        documentId: documentId,
-        driverId: driverId,
-        newStatus: 'approved',
-        previousStatus: previousStatus,
-        reason: 'Document validé par l\'administrateur',
+    DriverDocument ligne(DocumentType type, String? url) {
+      return DriverDocument(
+        id: '${courier.id}:${type.name}',
+        userId: courier.id,
+        type: type,
+        status: statut,
+        fileUrl: url,
+        validationNotes: courier.verificationNotes.isEmpty
+            ? null
+            : courier.verificationNotes,
+        validatedAt: courier.verifiedAt,
+        rejectionReason: statut == DocumentValidationStatus.rejected
+            ? courier.verificationNotes
+            : null,
+        uploadedAt: courier.createdAt,
+        createdAt: courier.createdAt,
+        updatedAt: maintenant,
+        driverName: courier.fullName,
+        driverEmail: courier.email,
       );
-
-      // Vérifier si tous les documents sont approuvés pour activer le compte
-      await _checkAndActivateAccount(driverId);
-
-      return true;
-    } catch (e) {
-      debugPrint('Error approving document: $e');
-      return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
+
+    return [
+      ligne(DocumentType.identity, courier.idDocument),
+      ligne(DocumentType.license, courier.licenceDocument),
+      ligne(DocumentType.registration, courier.vehicleDocument),
+    ];
   }
 
-  /// Rejeter un document
-  Future<bool> rejectDocument(String documentId, String reason) async {
+  eccore.CourierProfile? courierById(String courierId) {
+    for (final courier in _couriers) {
+      if (courier.id == courierId) return courier;
+    }
+    return null;
+  }
+
+  /// Valide un dossier — le livreur devient éligible aux courses (L1).
+  Future<bool> approveCourier(String courierId, {String notes = ''}) =>
+      _decider(courierId, 'approved', notes);
+
+  /// Rejette un dossier, avec un motif.
+  ///
+  /// Le motif est rendu au livreur, qui doit savoir quelle pièce redéposer. Un
+  /// rejet muet le laisse redéposer la même chose.
+  Future<bool> rejectCourier(String courierId, String reason) =>
+      _decider(courierId, 'rejected', reason);
+
+  /// Suspend un dossier déjà validé.
+  Future<bool> suspendCourier(String courierId, String reason) =>
+      _decider(courierId, 'suspended', reason);
+
+  Future<bool> _decider(String courierId, String status, String notes) async {
     try {
-      _isLoading = true;
-      notifyListeners();
-
-      // Récupérer infos pour historique
-      final currentDoc = await _supabase
-          .from('driver_documents')
-          .select('status, driver_id')
-          .eq('id', documentId)
-          .single();
-      final previousStatus = currentDoc['status'] as String?;
-      final driverId = currentDoc['driver_id'] as String;
-
-      await _supabase.from('driver_documents').update({
-        'status': 'rejected',
-        'rejection_reason': reason,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', documentId);
-
-      // Log history
-      await _logDocumentHistory(
-        documentId: documentId,
-        driverId: driverId,
-        newStatus: 'rejected',
-        previousStatus: previousStatus,
-        reason: reason,
+      final maj = await _fleet.setVerification(
+        courierId: courierId,
+        status: status,
+        notes: notes,
       );
-
-      // Désactiver le compte si un document requis est rejeté
-      await _deactivateAccount(driverId);
-
-      // Envoyer une notification au livreur
-      await _sendDocumentRejectionNotification(driverId, reason);
-
-      return true;
-    } catch (e) {
-      debugPrint('Error rejecting document: $e');
-      return false;
-    } finally {
-      _isLoading = false;
+      final index = _couriers.indexWhere((c) => c.id == courierId);
+      if (index != -1) _couriers[index] = maj;
       notifyListeners();
-    }
-  }
-
-  /// Marquer un document comme expiré
-  Future<bool> markDocumentExpired(String documentId) async {
-    try {
-      await _supabase.from('driver_documents').update({
-        'status': 'expired',
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', documentId);
-
-      // Désactiver le compte
-      final doc = await _supabase
-          .from('driver_documents')
-          .select('driver_id')
-          .eq('id', documentId)
-          .single();
-      final driverId = doc['driver_id'] as String;
-
-      await _deactivateAccount(driverId);
-
       return true;
-    } catch (e) {
-      debugPrint('Error marking document expired: $e');
-      return false;
-    }
-  }
-
-  /// Vérifier si tous les documents requis sont approuvés
-  Future<bool> areAllRequiredDocumentsApproved(String driverId) async {
-    try {
-      final documents = await getDriverDocuments(driverId);
-
-      // Types requis côté admin
-      final requiredTypes = [
-        model.DocumentType.license,
-        model.DocumentType.identity,
-        model.DocumentType.vehicle,
-        model.DocumentType.insurance,
-        model.DocumentType.registration,
-      ];
-
-      for (final type in requiredTypes) {
-        final doc = documents
-            .where((d) => d.type == type)
-            .cast<model.DriverDocument?>()
-            .firstWhere(
-              (d) => d != null,
-              orElse: () => null,
-            );
-
-        if (doc == null ||
-            doc.status != model.DocumentValidationStatus.approved) {
-          return false;
-        }
-      }
-
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /// Vérifier et activer le compte si tous les documents sont approuvés
-  Future<void> _checkAndActivateAccount(String driverId) async {
-    if (await areAllRequiredDocumentsApproved(driverId)) {
-      await _supabase.from('drivers').update({
-        'is_active': true,
-        'status': 'offline', // Prêt à travailler mais hors ligne
-      }).eq('id', driverId);
-
-      // Envoyer notification
-      await _sendAccountActivatedNotification(driverId);
-    }
-  }
-
-  /// Désactiver le compte
-  Future<void> _deactivateAccount(String driverId) async {
-    await _supabase.from('drivers').update({
-      'is_active': false,
-      'status': 'unavailable',
-    }).eq('id', driverId);
-  }
-
-  /// Envoyer notification de rejet
-  Future<void> _sendDocumentRejectionNotification(
-      String driverId, String reason) async {
-    try {
-      // Récupérer le user_id associé au driver
-      final driver = await _supabase
-          .from('drivers')
-          .select('user_id')
-          .eq('id', driverId)
-          .single();
-      final userId = driver['user_id'];
-
-      if (userId != null) {
-        await _supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': 'Document rejeté',
-          'message': 'Un de vos documents a été rejeté. Raison : $reason',
-          'type': 'document_rejected',
-          'is_read': false,
-        });
-      }
-    } catch (e) {
-      debugPrint('Error sending notification: $e');
-    }
-  }
-
-  /// Envoyer notification d'activation
-  Future<void> _sendAccountActivatedNotification(String driverId) async {
-    try {
-      // Récupérer le user_id associé au driver
-      final driver = await _supabase
-          .from('drivers')
-          .select('user_id')
-          .eq('id', driverId)
-          .single();
-      final userId = driver['user_id'];
-
-      if (userId != null) {
-        await _supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': 'Compte activé',
-          'message':
-              'Tous vos documents ont été validés. Vous pouvez maintenant commencer à livrer !',
-          'type': 'account_activated',
-          'is_read': false,
-        });
-      }
-    } catch (e) {
-      debugPrint('Error sending notification: $e');
-    }
-  }
-
-  /// Supprimer un document
-  Future<bool> deleteDocument(String documentId) async {
-    try {
-      _isLoading = true;
+    } on eccore.ApiException catch (e) {
+      // La machine à états refuse les transitions impossibles : un dossier
+      // rejeté ne repasse pas « validé » sans nouveau dépôt du livreur.
+      _error = e.detail;
+      debugPrint('Dossiers livreurs : décision refusée — ${e.code}');
       notifyListeners();
-
-      // Get file path from DB first to delete from storage
-      await _supabase
-          .from('driver_documents')
-          .select('document_url')
-          .eq('id', documentId)
-          .single();
-
-      // Extract file path from URL if needed or store path in DB
-      // For now just deleting DB record
-
-      await _supabase.from('driver_documents').delete().eq('id', documentId);
-      return true;
-    } catch (e) {
-      debugPrint('Error deleting document: $e');
       return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
   }
 
-  /// Vérifier les documents expirés
-  Future<void> checkExpiredDocuments() async {
-    try {
-      final now = DateTime.now();
-
-      // Find expired documents that are not marked as expired yet
-      final expiredDocs = await _supabase
-          .from('driver_documents')
-          .select('id, driver_id')
-          .lt('expiry_date', now.toIso8601String())
-          .neq('status', 'expired');
-
-      for (var doc in expiredDocs as List) {
-        await markDocumentExpired(doc['id']);
-      }
-    } catch (e) {
-      debugPrint('Error checking expired documents: $e');
+  DocumentValidationStatus _statut(String verification) {
+    switch (verification) {
+      case 'approved':
+        return DocumentValidationStatus.approved;
+      case 'rejected':
+      case 'suspended':
+        return DocumentValidationStatus.rejected;
+      default:
+        return DocumentValidationStatus.pending;
     }
-  }
-
-  /// Obtenir l'historique des modifications d'un document
-  Future<List<DocumentHistory>> getDocumentHistory(String documentId) async {
-    try {
-      final response = await _supabase
-          .from('driver_document_history')
-          .select('*, changed_by:users!driver_document_history_changed_by_fkey(name)')
-          .eq('document_id', documentId)
-          .order('changed_at', ascending: false);
-
-      return (response as List)
-          .map((data) => DocumentHistory.fromMap(data))
-          .toList();
-    } catch (e) {
-      debugPrint('Error fetching document history: $e');
-      return [];
-    }
-  }
-
-  /// Vérifier les expirations à venir (tâche planifiée)
-  Future<void> checkUpcomingExpirations() async {
-    // Logique pour envoyer des rappels aux livreurs dont les documents expirent bientôt
   }
 }

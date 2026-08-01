@@ -22,11 +22,7 @@ class _CustomizationOptionFormDialogState
     extends State<CustomizationOptionFormDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _descriptionController = TextEditingController();
-  final _imageUrlController = TextEditingController();
   final _priceModifierController = TextEditingController();
-  final _maxQuantityController = TextEditingController();
-  final _allergensController = TextEditingController();
 
   late String _selectedCategory;
   bool _isDefault = false;
@@ -63,11 +59,7 @@ class _CustomizationOptionFormDialogState
     if (widget.option != null) {
       final option = widget.option!;
       _nameController.text = option.name;
-      _descriptionController.text = option.description ?? '';
-      _imageUrlController.text = option.imageUrl ?? '';
       _priceModifierController.text = option.priceModifier.toStringAsFixed(0);
-      _maxQuantityController.text = option.maxQuantity.toString();
-      _allergensController.text = option.allergens.join(', ');
       _selectedCategory = option.category;
       _isDefault = option.isDefault;
       _isActive = option.isActive;
@@ -87,11 +79,7 @@ class _CustomizationOptionFormDialogState
   @override
   void dispose() {
     _nameController.dispose();
-    _descriptionController.dispose();
-    _imageUrlController.dispose();
     _priceModifierController.dispose();
-    _maxQuantityController.dispose();
-    _allergensController.dispose();
     super.dispose();
   }
 
@@ -175,15 +163,6 @@ class _CustomizationOptionFormDialogState
                         },
                       ),
                       const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _descriptionController,
-                        decoration: const InputDecoration(
-                          labelText: 'Description',
-                          hintText: 'Description de l\'option',
-                        ),
-                        maxLines: 2,
-                      ),
-                      const SizedBox(height: 16),
                       Row(
                         children: [
                           Expanded(
@@ -259,52 +238,14 @@ class _CustomizationOptionFormDialogState
                               ),
                             ),
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _maxQuantityController,
-                              decoration: const InputDecoration(
-                                labelText: 'Quantité max',
-                                hintText: '1',
-                              ),
-                              keyboardType: TextInputType.number,
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return '1';
-                                }
-                                final qty = int.tryParse(value);
-                                if (qty == null || qty < 1) {
-                                  return 'Minimum 1';
-                                }
-                                return null;
-                              },
-                            ),
-                          ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _imageUrlController,
-                        decoration: const InputDecoration(
-                          labelText: 'URL de l\'image',
-                          hintText: 'https://...',
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _allergensController,
-                        decoration: const InputDecoration(
-                          labelText: 'Allergènes',
-                          hintText:
-                              'Séparés par des virgules (ex: gluten, lactose)',
-                          helperText:
-                              'Liste des allergènes séparés par des virgules',
-                        ),
-                      ),
-                      const SizedBox(height: 16),
                       SwitchListTile(
                         title: const Text('Option par défaut'),
-                        subtitle: const Text('Sélectionnée automatiquement'),
+                        subtitle: const Text(
+                          'Présélectionnée dans son groupe une fois appliquée '
+                          'à un article',
+                        ),
                         value: _isDefault,
                         onChanged: (value) {
                           setState(() {
@@ -372,14 +313,7 @@ class _CustomizationOptionFormDialogState
       listen: false,
     );
 
-    final allergens = _allergensController.text
-        .split(',')
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
-
     final priceModifier = double.tryParse(_priceModifierController.text) ?? 0.0;
-    final maxQuantity = int.tryParse(_maxQuantityController.text) ?? 1;
 
     if (widget.option == null) {
       // Créer
@@ -388,14 +322,6 @@ class _CustomizationOptionFormDialogState
         category: _selectedCategory,
         priceModifier: priceModifier,
         isDefault: _isDefault,
-        maxQuantity: maxQuantity,
-        description: _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        imageUrl: _imageUrlController.text.trim().isEmpty
-            ? null
-            : _imageUrlController.text.trim(),
-        allergens: allergens,
       );
 
       if (!mounted) return;
@@ -420,14 +346,6 @@ class _CustomizationOptionFormDialogState
         category: _selectedCategory,
         priceModifier: priceModifier,
         isDefault: _isDefault,
-        maxQuantity: maxQuantity,
-        description: _descriptionController.text.trim().isEmpty
-            ? null
-            : _descriptionController.text.trim(),
-        imageUrl: _imageUrlController.text.trim().isEmpty
-            ? null
-            : _imageUrlController.text.trim(),
-        allergens: allergens,
         isActive: _isActive,
       );
 

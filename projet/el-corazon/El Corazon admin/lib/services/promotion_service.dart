@@ -1,12 +1,64 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'admin_auth_service.dart';
+
+/// Code promotionnel tel que l'affichent les écrans du back-office.
+///
+/// Vue locale d'`eccore.Promotion`, et non un second modèle : les montants sont
+/// convertis une fois en unité majeure pour l'affichage, jamais pour recalculer
+/// une remise.
+///
+/// `calculateDiscount` a disparu. L'ancienne version appliquait le pourcentage,
+/// plafonnait, puis bornait — côté client. C'est le calcul que fait déjà le
+/// serveur au devis de commande, et le dupliquer donnait deux réponses
+/// possibles à « combien remise ce code ? », dont une seule était facturée
+/// (C1).
 class Promotion {
+  Promotion({
+    required this.id,
+    required this.code,
+    required this.description,
+    required this.discountType,
+    required this.discountValue,
+    required this.startDate,
+    required this.endDate,
+    required this.usedCount,
+    required this.isActive,
+    this.minOrderAmount = 0.0,
+    this.maxDiscount,
+    this.usageLimit,
+    this.restaurantSlug,
+    this.ownerEmail,
+  });
+
+  factory Promotion.fromRemote(eccore.Promotion remote) {
+    return Promotion(
+      id: remote.id,
+      code: remote.code,
+      description: remote.description,
+      discountType: remote.kind,
+      // Un pourcentage pour l'un, un montant pour l'autre : le serveur ne
+      // renseigne que le champ qui correspond à la nature de la remise.
+      discountValue: remote.kind == eccore.DiscountKind.percentage
+          ? (remote.percentage ?? 0)
+          : (remote.amount?.toMajorUnits() ?? 0),
+      minOrderAmount: remote.minOrderAmount?.toMajorUnits() ?? 0,
+      maxDiscount: remote.maxDiscount?.toMajorUnits(),
+      usageLimit: remote.usageLimit,
+      usedCount: remote.usedCount,
+      startDate: remote.startsAt.toLocal(),
+      endDate: remote.endsAt.toLocal(),
+      isActive: remote.isActive,
+      restaurantSlug: remote.restaurantSlug,
+      ownerEmail: remote.ownerEmail,
+    );
+  }
+
   final String id;
-  final String name;
+  final String code;
   final String description;
-  final String promoCode;
-  final String discountType; // 'percentage', 'fixed', 'free_delivery'
+  final String discountType;
   final double discountValue;
   final double minOrderAmount;
   final double? maxDiscount;
@@ -15,455 +67,203 @@ class Promotion {
   final DateTime startDate;
   final DateTime endDate;
   final bool isActive;
-  final String createdBy;
-  final DateTime createdAt;
-  final DateTime updatedAt;
 
-  Promotion({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.promoCode,
-    required this.discountType,
-    required this.discountValue,
-    this.minOrderAmount = 0.0,
-    this.maxDiscount,
-    this.usageLimit,
-    this.usedCount = 0,
-    required this.startDate,
-    required this.endDate,
-    this.isActive = true,
-    required this.createdBy,
-    required this.createdAt,
-    required this.updatedAt,
-  });
+  /// Vide = code national. Le serveur refuse qu'un compte cloisonné en crée.
+  final String? restaurantSlug;
 
+  /// Bénéficiaire d'un code nominatif, issu d'un échange de points.
+  final String? ownerEmail;
+
+  bool get isNational => restaurantSlug == null;
+  bool get isPersonal => ownerEmail != null;
   bool get isExpired => DateTime.now().isAfter(endDate);
+
+  /// Indicatif : c'est le serveur qui tranche à l'application du code, avec sa
+  /// propre horloge.
   bool get isAvailable =>
-      isActive && !isExpired && (usageLimit == null || usedCount < usageLimit!);
-
-  double calculateDiscount(double orderAmount) {
-    if (!isAvailable || orderAmount < minOrderAmount) {
-      return 0;
-    }
-
-    double discount = 0.0;
-    switch (discountType) {
-      case 'percentage':
-        discount = (orderAmount * discountValue / 100);
-        if (maxDiscount != null && discount > maxDiscount!) {
-          discount = maxDiscount!;
-        }
-        break;
-      case 'fixed':
-        discount = discountValue;
-        break;
-      case 'free_delivery':
-        discount = 0; // Will be handled separately
-        break;
-      default:
-        discount = 0;
-    }
-
-    return discount.clamp(0, orderAmount);
-  }
-
-  factory Promotion.fromMap(Map<String, dynamic> map) {
-    return Promotion(
-      id: map['id'] as String,
-      name: map['name'] as String,
-      description: map['description'] as String,
-      promoCode: map['promo_code'] as String,
-      discountType: map['discount_type'] as String,
-      discountValue: (map['discount_value'] as num).toDouble(),
-      minOrderAmount: (map['min_order_amount'] as num?)?.toDouble() ?? 0.0,
-      maxDiscount: (map['max_discount'] as num?)?.toDouble(),
-      usageLimit: map['usage_limit'] as int?,
-      usedCount: map['used_count'] as int? ?? 0,
-      startDate: DateTime.parse(map['start_date'] as String),
-      endDate: DateTime.parse(map['end_date'] as String),
-      isActive: map['is_active'] as bool? ?? true,
-      createdBy: map['created_by'] as String,
-      createdAt: DateTime.parse(map['created_at'] as String),
-      updatedAt: DateTime.parse(map['updated_at'] as String),
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-      'description': description,
-      'promo_code': promoCode,
-      'discount_type': discountType,
-      'discount_value': discountValue,
-      'min_order_amount': minOrderAmount,
-      'max_discount': maxDiscount,
-      'usage_limit': usageLimit,
-      'used_count': usedCount,
-      'start_date': startDate.toIso8601String(),
-      'end_date': endDate.toIso8601String(),
-      'is_active': isActive,
-      'created_by': createdBy,
-      'created_at': createdAt.toIso8601String(),
-      'updated_at': updatedAt.toIso8601String(),
-    };
-  }
+      isActive &&
+      !isExpired &&
+      (usageLimit == null || usedCount < usageLimit!);
 }
 
+/// Codes promotionnels — `/api/v1/promotions/` (Phase 6).
+///
+/// Trois choses ont changé, et chacune fermait un trou :
+///
+/// * **le compteur d'utilisations ne s'écrit plus depuis ici.** L'ancien code
+///   pouvait remettre `used_count` à zéro, c'est-à-dire rouvrir un quota épuisé
+///   sans que rien n'en garde trace. Il est tenu par le serveur, sous verrou, à
+///   la création de chaque commande ;
+/// * **on ne frappe plus de code nominatif.** Un code au nom d'un client naît
+///   d'un échange de points de fidélité — donc d'un débit. En créer un ici
+///   distribuerait des récompenses gratuites ;
+/// * **la remise ne se calcule plus à l'écran** (voir [Promotion]).
+///
+/// Il n'y a pas de suppression : `isActive` suspend. Les commandes passées
+/// portent la remise de ce code, et l'effacer rendrait leur addition illisible.
 class PromotionService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
-  List<Promotion> _promotions = [];
+  eccore.PromotionRepository get _promotions =>
+      eccore.PromotionRepository(apiClient: AdminAuthService().apiClient);
+
+  List<Promotion> _promotionsLocales = [];
   bool _isLoading = false;
   String? _error;
-  RealtimeChannel? _promotionsChannel;
+  bool _isInitialized = false;
 
-  List<Promotion> get promotions => List.unmodifiable(_promotions);
+  List<Promotion> get promotions => _promotionsLocales;
   List<Promotion> get activePromotions =>
-      _promotions.where((promo) => promo.isAvailable).toList();
+      _promotionsLocales.where((p) => p.isAvailable).toList();
+
+  /// Périmés, suspendus ou épuisés — ce qui ne remise plus rien aujourd'hui.
+  ///
+  /// Le complément d'[activePromotions] et non « ceux dont la date est
+  /// passée » : un code suspendu ou dont le quota est consommé ne remise pas
+  /// davantage, et le ranger ailleurs le rendrait introuvable.
   List<Promotion> get expiredPromotions =>
-      _promotions.where((promo) => promo.isExpired).toList();
+      _promotionsLocales.where((p) => !p.isAvailable).toList();
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  PromotionService() {
-    _loadPromotions();
-    _subscribeToPromotionsRealtime();
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+    _isInitialized = true;
+    await refresh();
   }
 
-  @override
-  void dispose() {
-    _promotionsChannel?.unsubscribe();
-    super.dispose();
-  }
-
-  /// Charger toutes les promotions depuis la base de données
-  Future<void> _loadPromotions() async {
+  Future<void> refresh() async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await _supabase
-          .from('promotions')
-          .select('*')
-          .order('created_at', ascending: false);
-
-      _promotions = (response as List)
-          .map((data) => Promotion.fromMap(data))
-          .toList();
-
-      debugPrint('PromotionService: ${_promotions.length} promotions chargées');
-    } catch (e) {
-      _error = e.toString();
-      _promotions = [];
-      debugPrint('PromotionService: Erreur chargement promotions - $e');
+      final codes = await _promotions.list();
+      _promotionsLocales = codes.map(Promotion.fromRemote).toList();
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Promotions : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// S'abonner aux mises à jour en temps réel
-  void _subscribeToPromotionsRealtime() {
-    try {
-      _promotionsChannel = _supabase
-          .channel('admin_promotions_realtime')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.insert,
-            schema: 'public',
-            table: 'promotions',
-            callback: (payload) {
-              final data = Map<String, dynamic>.from(payload.newRecord);
-              final promotion = Promotion.fromMap(data);
-              _promotions.insert(0, promotion);
-              notifyListeners();
-            },
-          )
-          .onPostgresChanges(
-            event: PostgresChangeEvent.update,
-            schema: 'public',
-            table: 'promotions',
-            callback: (payload) {
-              final data = Map<String, dynamic>.from(payload.newRecord);
-              final promotion = Promotion.fromMap(data);
-              final index = _promotions.indexWhere((p) => p.id == promotion.id);
-              if (index != -1) {
-                _promotions[index] = promotion;
-                notifyListeners();
-              }
-            },
-          )
-          .onPostgresChanges(
-            event: PostgresChangeEvent.delete,
-            schema: 'public',
-            table: 'promotions',
-            callback: (payload) {
-              final oldData = Map<String, dynamic>.from(payload.oldRecord);
-              final id = oldData['id'] as String?;
-              if (id != null) {
-                _promotions.removeWhere((p) => p.id == id);
-                notifyListeners();
-              }
-            },
-          )
-          .subscribe();
-    } catch (e) {
-      debugPrint('Error subscribing to realtime promotions: $e');
-    }
-  }
-
-  /// Créer une nouvelle promotion
+  /// Crée un code.
+  ///
+  /// [restaurantSlug] vide crée un code **national**, que le serveur refuse à
+  /// un compte cloisonné sur un établissement : il remiserait aussi les autres.
   Future<Promotion?> createPromotion({
-    required String name,
-    required String description,
-    required String promoCode,
+    required String code,
     required String discountType,
     required double discountValue,
-    double minOrderAmount = 0.0,
-    double? maxDiscount,
-    int? usageLimit,
     required DateTime startDate,
     required DateTime endDate,
-    bool isActive = true,
+    String description = '',
+    double minOrderAmount = 0,
+    double? maxDiscount,
+    int? usageLimit,
+    int? usageLimitPerUser,
+    String? restaurantSlug,
   }) async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      // Vérifier que le code promo n'existe pas déjà
-      final existing = await _supabase
-          .from('promotions')
-          .select('id')
-          .eq('promo_code', promoCode.toUpperCase())
-          .maybeSingle();
-
-      if (existing != null) {
-        _error = 'Un code promo avec ce code existe déjà';
-        _isLoading = false;
-        notifyListeners();
-        return null;
-      }
-
-      // Récupérer l'ID de l'admin actuel
-      final currentUser = _supabase.auth.currentUser;
-      if (currentUser == null) {
-        _error = 'Vous devez être connecté pour créer une promotion';
-        _isLoading = false;
-        notifyListeners();
-        return null;
-      }
-
-      final userResponse = await _supabase
-          .from('users')
-          .select('id')
-          .eq('auth_user_id', currentUser.id)
-          .maybeSingle();
-
-      if (userResponse == null) {
-        _error = 'Utilisateur non trouvé';
-        _isLoading = false;
-        notifyListeners();
-        return null;
-      }
-
-      final createdBy = userResponse['id'] as String;
-
-      final response = await _supabase
-          .from('promotions')
-          .insert({
-            'name': name,
-            'description': description,
-            'promo_code': promoCode.toUpperCase(),
-            'discount_type': discountType,
-            'discount_value': discountValue,
-            'min_order_amount': minOrderAmount,
-            'max_discount': maxDiscount,
-            'usage_limit': usageLimit,
-            'used_count': 0,
-            'start_date': startDate.toIso8601String(),
-            'end_date': endDate.toIso8601String(),
-            'is_active': isActive,
-            'created_by': createdBy,
-          })
-          .select()
-          .single();
-
-      final promotion = Promotion.fromMap(response);
-      _promotions.insert(0, promotion);
-
-      _isLoading = false;
-      notifyListeners();
-      return promotion;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      debugPrint('PromotionService: Erreur création promotion - $e');
-      return null;
-    }
-  }
-
-  /// Mettre à jour une promotion
-  Future<bool> updatePromotion(String id, Map<String, dynamic> updates) async {
-    try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      updates['updated_at'] = DateTime.now().toIso8601String();
-
-      // Si le code promo est modifié, vérifier qu'il n'existe pas déjà
-      if (updates.containsKey('promo_code')) {
-        final existing = await _supabase
-            .from('promotions')
-            .select('id')
-            .eq('promo_code', updates['promo_code'].toString().toUpperCase())
-            .neq('id', id)
-            .maybeSingle();
-
-        if (existing != null) {
-          _error = 'Un code promo avec ce code existe déjà';
-          _isLoading = false;
-          notifyListeners();
-          return false;
-        }
-
-        updates['promo_code'] = updates['promo_code'].toString().toUpperCase();
-      }
-
-      await _supabase.from('promotions').update(updates).eq('id', id);
-
-      // Recharger les promotions
-      await _loadPromotions();
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      debugPrint('PromotionService: Erreur mise à jour promotion - $e');
-      return false;
-    }
-  }
-
-  /// Supprimer une promotion
-  Future<bool> deletePromotion(String id) async {
-    try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      await _supabase.from('promotions').delete().eq('id', id);
-
-      _promotions.removeWhere((p) => p.id == id);
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      debugPrint('PromotionService: Erreur suppression promotion - $e');
-      return false;
-    }
-  }
-
-  /// Activer/Désactiver une promotion
-  Future<bool> togglePromotionStatus(String id, bool isActive) async {
-    return await updatePromotion(id, {'is_active': isActive});
-  }
-
-  /// Obtenir une promotion par son code
-  Promotion? getPromotionByCode(String code) {
-    try {
-      return _promotions.firstWhere(
-        (promo) =>
-            promo.promoCode.toUpperCase() == code.toUpperCase() &&
-            promo.isAvailable,
-      );
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /// Obtenir les statistiques d'une promotion
-  Future<Map<String, dynamic>> getPromotionStats(String id) async {
-    try {
-      final promotion = _promotions.firstWhere((p) => p.id == id);
-
-      // Récupérer les utilisations de la promotion
-      final usageResponse = await _supabase
-          .from('promotion_usage')
-          .select('*')
-          .eq('promotion_id', id);
-
-      final usages = usageResponse as List;
-      final totalDiscount = usages.fold<double>(
-        0.0,
-        (sum, usage) => sum + ((usage['discount_amount'] as num?)?.toDouble() ?? 0.0),
-      );
-
-      final uniqueUsers = usages.map((u) => u['user_id']).toSet().length;
-
-      return {
-        'total_uses': usages.length,
-        'unique_users': uniqueUsers,
-        'total_discount_given': totalDiscount,
-        'average_discount': usages.isNotEmpty ? totalDiscount / usages.length : 0.0,
-        'usage_rate': promotion.usageLimit != null
-            ? (usages.length / promotion.usageLimit!) * 100
+      final cree = await _promotions.create(
+        code: code.toUpperCase(),
+        description: description,
+        kind: discountType,
+        percentage: discountType == eccore.DiscountKind.percentage
+            ? discountValue
             : null,
-        'is_active': promotion.isActive,
-        'is_expired': promotion.isExpired,
-        'days_remaining': promotion.isExpired
-            ? 0
-            : promotion.endDate.difference(DateTime.now()).inDays,
-      };
-    } catch (e) {
-      debugPrint('PromotionService: Erreur stats promotion - $e');
-      return {};
+        amount: discountType == eccore.DiscountKind.fixed
+            ? _versMoney(discountValue)
+            : null,
+        minOrderAmount: minOrderAmount > 0 ? _versMoney(minOrderAmount) : null,
+        maxDiscount: maxDiscount == null ? null : _versMoney(maxDiscount),
+        startsAt: startDate,
+        endsAt: endDate,
+        usageLimit: usageLimit,
+        usageLimitPerUser: usageLimitPerUser,
+        restaurantSlug: restaurantSlug,
+      );
+      final locale = Promotion.fromRemote(cree);
+      _promotionsLocales = [locale, ..._promotionsLocales];
+      notifyListeners();
+      return locale;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Promotions : création refusée — ${e.code}');
+      notifyListeners();
+      return null;
     }
   }
 
-  /// Obtenir l'historique d'utilisation d'une promotion
-  Future<List<Map<String, dynamic>>> getPromotionUsageHistory(String id) async {
+  /// Modifie un code. Ni le code lui-même ni son compteur : le premier est son
+  /// identité — celle qui circule déjà chez les clients — et le second
+  /// appartient au serveur.
+  Future<bool> updatePromotion({
+    required String id,
+    String? description,
+    String? discountType,
+    double? discountValue,
+    double? minOrderAmount,
+    double? maxDiscount,
+    DateTime? startDate,
+    DateTime? endDate,
+    int? usageLimit,
+    int? usageLimitPerUser,
+    bool? isActive,
+  }) async {
     try {
-      final response = await _supabase
-          .from('promotion_usage')
-          .select('*, orders(id, total, created_at), users(name, email)')
-          .eq('promotion_id', id)
-          .order('used_at', ascending: false);
-
-      return (response as List).map((usage) {
-        return {
-          'id': usage['id'],
-          'user_id': usage['user_id'],
-          'user_name': usage['users']?['name'],
-          'user_email': usage['users']?['email'],
-          'order_id': usage['order_id'],
-          'order_total': usage['orders']?['total'],
-          'discount_amount': usage['discount_amount'],
-          'used_at': usage['used_at'],
-        };
-      }).toList();
-    } catch (e) {
-      debugPrint('PromotionService: Erreur historique utilisation - $e');
-      return [];
+      final maj = await _promotions.update(
+        promotionId: id,
+        description: description,
+        percentage:
+            discountType == eccore.DiscountKind.percentage ? discountValue : null,
+        amount: discountType == eccore.DiscountKind.fixed && discountValue != null
+            ? _versMoney(discountValue)
+            : null,
+        minOrderAmount:
+            minOrderAmount == null ? null : _versMoney(minOrderAmount),
+        maxDiscount: maxDiscount == null ? null : _versMoney(maxDiscount),
+        startsAt: startDate,
+        endsAt: endDate,
+        usageLimit: usageLimit,
+        usageLimitPerUser: usageLimitPerUser,
+        isActive: isActive,
+      );
+      _remplacer(Promotion.fromRemote(maj));
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Promotions : modification refusée — ${e.code}');
+      notifyListeners();
+      return false;
     }
   }
 
-  /// Rafraîchir les promotions
-  Future<void> refresh() async {
-    await _loadPromotions();
+  /// Suspend ou réactive un code — la seule façon de le retirer de la
+  /// circulation.
+  Future<bool> togglePromotionStatus(String id, bool isActive) async {
+    try {
+      final maj = await _promotions.setActive(
+        promotionId: id,
+        isActive: isActive,
+      );
+      _remplacer(Promotion.fromRemote(maj));
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Promotions : suspension refusée — ${e.code}');
+      notifyListeners();
+      return false;
+    }
   }
 
-  /// Initialiser le service
-  Future<void> initialize() async {
-    await _loadPromotions();
+  void _remplacer(Promotion promotion) {
+    final index = _promotionsLocales.indexWhere((p) => p.id == promotion.id);
+    if (index != -1) _promotionsLocales[index] = promotion;
+    notifyListeners();
   }
+
+  /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
+  eccore.Money _versMoney(double montant) =>
+      eccore.Money(amountMinor: montant.round(), currency: 'XOF');
 }

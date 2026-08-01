@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/app_service.dart';
 import '../../models/order.dart';
 import '../../widgets/custom_button.dart';
 import '../../utils/dialog_helper.dart';
 import 'driver_assignment_dialog.dart';
 import '../../services/order_management_service.dart';
-import '../../services/paydunya_service.dart';
+import '../../services/payments_service.dart';
 import '../../widgets/order_timeline_widget.dart';
 import '../../utils/price_formatter.dart';
 
@@ -27,8 +26,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
   final _searchController = TextEditingController();
 
   // Cache des noms de clients (userId -> name)
-  final Map<String, String> _clientNamesCache = {};
-  bool _isLoadingClientNames = false;
 
   @override
   void initState() {
@@ -47,7 +44,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
 
     // Charger les noms de clients après le premier build
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadClientNames();
     });
   }
 
@@ -365,7 +361,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
               onChanged: (value) {
                 setState(() {});
                 // Charger les noms de clients manquants si nécessaire
-                _loadClientNamesIfNeeded();
               },
             ),
             const SizedBox(height: 20),
@@ -1412,7 +1407,9 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
 
         // Recherche par nom de client (utilise le cache)
         bool matchesClientName = false;
-        final clientName = _clientNamesCache[order.userId];
+        final clientName = order.recipientName.isEmpty
+            ? null
+            : order.recipientName;
         if (clientName != null) {
           matchesClientName = clientName.toLowerCase().contains(searchText);
         }
@@ -1881,32 +1878,41 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
       refundAmount = double.tryParse(amountController.text) ?? order.total;
     }
 
-    // Intégrer avec PayDunya
     if (!mounted || !context.mounted) return;
 
-    // Vérifier que la commande a un transaction_id PayDunya
-    final transactionId = order.paymentTransactionId;
-    if (transactionId == null || transactionId.isEmpty) {
-      if (mounted && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              '❌ Cette commande n\'a pas de transaction PayDunya associée. Impossible de rembourser.',
-            ),
-            backgroundColor: Colors.orange,
+    final paymentsService = context.read<PaymentsService>();
+
+    // L'encaissement à rembourser se demande au serveur : une commande peut en
+    // porter plusieurs (paiement partagé), et « rembourser la commande » sans
+    // dire lequel ne voudrait rien dire. L'ancien écran lisait un identifiant
+    // posé sur la commande, qui n'existait que pour le premier paiement.
+    final encaissements = await paymentsService.transactionsOf(order.id);
+    final regle = encaissements
+        .where((t) => t.status == 'succeeded')
+        .firstOrNull;
+
+    if (!mounted || !context.mounted) return;
+
+    if (regle == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Aucun encaissement abouti sur cette commande : il n\'y a rien à '
+            'rembourser.',
           ),
-        );
-      }
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
 
-    final paydunyaService = Provider.of<PayDunyaService>(
-      context,
-      listen: false,
-    );
-    final refundResult = await paydunyaService.refundTransaction(
-      transactionId: transactionId,
-      amount: refundAmount,
+    // Le remboursement passe par le serveur, qui détient les clés du
+    // prestataire, vérifie le rattachement de la commande et applique le
+    // plafond P3. L'écran ne joint plus PayDunya lui-même.
+    final rembourse = await paymentsService.refund(
+      orderId: order.id,
+      transactionId: regle.id,
+      amountMajor: refundAmount,
       reason: refundType == 'partial'
           ? 'Remboursement partiel'
           : 'Remboursement total',
@@ -1914,28 +1920,16 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
 
     if (!mounted || !context.mounted) return;
 
-    if (refundResult != null && refundResult.isSuccess) {
-      if (!mounted || !context.mounted) return;
-      final orderService = context.read<OrderManagementService>();
-      await orderService.processRefund(order.id, refundAmount);
-
-      if (!mounted || !context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '✅ Remboursement de ${PriceFormatter.format(refundAmount)} effectué',
-          ),
-          backgroundColor: Colors.green,
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          rembourse != null
+              ? 'Remboursement de ${PriceFormatter.format(refundAmount)} enregistré'
+              : paymentsService.error ?? 'Remboursement refusé',
         ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ Erreur lors du remboursement'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+        backgroundColor: rembourse != null ? Colors.green : Colors.red,
+      ),
+    );
   }
 
   void _showOrderDetails(Order order) {
@@ -2320,30 +2314,16 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
 
   Future<void> _contactCustomer(Order order) async {
     try {
-      // Récupérer les informations du client depuis Supabase
-      final supabase = Supabase.instance.client;
-      Map<String, dynamic> userData;
-      try {
-        userData = await supabase
-            .from('users')
-            .select('name, phone, email')
-            .eq('auth_user_id', order.userId)
-            .single();
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Informations client non trouvées'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      final phone = userData['phone'] as String?;
-      final email = userData['email'] as String?;
-      final name = userData['name'] as String? ?? 'Client';
+      // Le destinataire est porté par la commande : c'est lui qu'on appelle,
+      // et pas forcément le titulaire du compte — on commande pour un collègue,
+      // pour ses parents. Aller chercher le compte, comme le faisait l'ancien
+      // écran, affichait la mauvaise personne dans ce cas-là.
+      final phone = order.recipientPhone.isEmpty ? null : order.recipientPhone;
+      // L'adresse électronique n'est pas sur la commande : écrire au titulaire
+      // d'un compte à propos d'une livraison faite pour un tiers n'aurait pas
+      // de destinataire évident.
+      const String? email = null;
+      final name = order.recipientName.isEmpty ? 'Client' : order.recipientName;
 
       if (mounted) {
         final action = await DialogHelper.showSafeDialog<String>(
@@ -2478,14 +2458,11 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
 
       for (final order in filteredOrders) {
         try {
-          // Récupérer le nom du client
-          final supabase = Supabase.instance.client;
-          final userData = await supabase
-              .from('users')
-              .select('name')
-              .eq('auth_user_id', order.userId)
-              .single();
-          final clientName = userData['name'] as String? ?? 'Inconnu';
+          // Le nom vient de la commande : une requête par ligne exportée
+          // rendait l'export d'un mois de commandes interminable.
+          final clientName = order.recipientName.isEmpty
+              ? 'Inconnu'
+              : order.recipientName;
 
           csvBuffer.writeln(
             [
@@ -2557,99 +2534,5 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
   }
 
   /// Charger les noms de clients pour toutes les commandes
-  Future<void> _loadClientNames() async {
-    if (_isLoadingClientNames) return;
-
-    final orderService = context.read<OrderManagementService>();
-    final allOrders = orderService.allOrders;
-
-    if (allOrders.isEmpty) return;
-
-    // Identifier les userIds manquants dans le cache
-    final missingUserIds = allOrders
-        .map((order) => order.userId)
-        .where((userId) => !_clientNamesCache.containsKey(userId))
-        .toSet()
-        .toList();
-
-    if (missingUserIds.isEmpty) return;
-
-    _isLoadingClientNames = true;
-
-    try {
-      final supabase = Supabase.instance.client;
-
-      // Charger les noms par lots pour éviter les requêtes trop nombreuses
-      const batchSize = 50;
-      for (int i = 0; i < missingUserIds.length; i += batchSize) {
-        final batch = missingUserIds.skip(i).take(batchSize).toList();
-
-        final response = await supabase
-            .from('users')
-            .select('auth_user_id, name')
-            .inFilter('auth_user_id', batch);
-
-        for (final userData in response) {
-          final userId = userData['auth_user_id'] as String?;
-          final name = userData['name'] as String? ?? 'Inconnu';
-          if (userId != null) {
-            _clientNamesCache[userId] = name;
-          }
-        }
-      }
-
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      debugPrint('Erreur lors du chargement des noms de clients: $e');
-    } finally {
-      _isLoadingClientNames = false;
-    }
-  }
-
   /// Charger les noms de clients manquants si nécessaire (pour la recherche)
-  Future<void> _loadClientNamesIfNeeded() async {
-    if (_searchController.text.isEmpty) return;
-    if (_isLoadingClientNames) return;
-
-    final orderService = context.read<OrderManagementService>();
-    final allOrders = orderService.allOrders;
-
-    // Identifier les userIds manquants dans le cache pour les commandes visibles
-    final missingUserIds = allOrders
-        .map((order) => order.userId)
-        .where((userId) => !_clientNamesCache.containsKey(userId))
-        .take(20) // Limiter à 20 pour éviter de surcharger
-        .toList();
-
-    if (missingUserIds.isEmpty) return;
-
-    _isLoadingClientNames = true;
-
-    try {
-      final supabase = Supabase.instance.client;
-
-      final response = await supabase
-          .from('users')
-          .select('auth_user_id, name')
-          .inFilter('auth_user_id', missingUserIds);
-
-      for (final userData in response) {
-        final userId = userData['auth_user_id'] as String?;
-        final name = userData['name'] as String? ?? 'Inconnu';
-        if (userId != null) {
-          _clientNamesCache[userId] = name;
-        }
-      }
-
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      debugPrint('Erreur lors du chargement des noms de clients: $e');
-    } finally {
-      _isLoadingClientNames = false;
-    }
-  }
 }

@@ -1,203 +1,218 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Modèle pour un horaire de livreur
+import 'admin_auth_service.dart';
+
+/// Créneau planifié d'un livreur, tel que l'affiche l'écran de planning.
+///
+/// [id] vaut `null` tant que la ligne n'existe pas côté serveur : l'écran
+/// montre une semaine complète, sept lignes, même pour un livreur qu'on n'a
+/// encore jamais planifié. L'ancienne version fabriquait des identifiants
+/// (`${driverId}_3`) pour ces lignes fantômes, et les envoyait en base — où
+/// rien ne les distinguait d'un vrai créneau.
 class DriverSchedule {
-  final String id;
-  final String driverId;
-  final int dayOfWeek; // 1 = Monday, 7 = Sunday
-  final TimeOfDay startTime;
-  final TimeOfDay endTime;
-  final bool isAvailable;
-  final DateTime createdAt;
-  final DateTime? updatedAt;
-
-  DriverSchedule({
-    required this.id,
+  const DriverSchedule({
     required this.driverId,
     required this.dayOfWeek,
     required this.startTime,
     required this.endTime,
+    this.id,
     this.isAvailable = true,
-    required this.createdAt,
-    this.updatedAt,
   });
 
-  factory DriverSchedule.fromMap(Map<String, dynamic> map) {
-    final startParts = (map['start_time'] as String).split(':');
-    final endParts = (map['end_time'] as String).split(':');
-    
+  factory DriverSchedule.fromRemote(eccore.CourierShift remote) {
     return DriverSchedule(
-      id: map['id'] as String,
-      driverId: map['driver_id'] as String,
-      dayOfWeek: map['day_of_week'] as int,
+      id: remote.id,
+      driverId: remote.courierId,
+      dayOfWeek: remote.dayOfWeek,
       startTime: TimeOfDay(
-        hour: int.parse(startParts[0]),
-        minute: int.parse(startParts[1]),
+        hour: remote.startMinutes ~/ 60,
+        minute: remote.startMinutes % 60,
       ),
       endTime: TimeOfDay(
-        hour: int.parse(endParts[0]),
-        minute: int.parse(endParts[1]),
+        hour: remote.endMinutes ~/ 60,
+        minute: remote.endMinutes % 60,
       ),
-      isAvailable: map['is_available'] as bool? ?? true,
-      createdAt: DateTime.parse(map['created_at'] as String),
-      updatedAt: map['updated_at'] != null
-          ? DateTime.parse(map['updated_at'] as String)
-          : null,
+      isAvailable: remote.isAvailable,
     );
   }
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'driver_id': driverId,
-      'day_of_week': dayOfWeek,
-      'start_time': '${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}',
-      'end_time': '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}',
-      'is_available': isAvailable,
-      'created_at': createdAt.toIso8601String(),
-      'updated_at': updatedAt?.toIso8601String(),
-    };
+  /// Nul tant que le créneau n'a pas été enregistré.
+  final String? id;
+  final String driverId;
+
+  /// Jour ISO : 1 = lundi, 7 = dimanche.
+  final int dayOfWeek;
+  final TimeOfDay startTime;
+  final TimeOfDay endTime;
+  final bool isAvailable;
+
+  bool get isPersisted => id != null;
+
+  int get startMinutes => startTime.hour * 60 + startTime.minute;
+  int get endMinutes => endTime.hour * 60 + endTime.minute;
+
+  DriverSchedule copyWith({
+    String? id,
+    int? dayOfWeek,
+    TimeOfDay? startTime,
+    TimeOfDay? endTime,
+    bool? isAvailable,
+  }) {
+    return DriverSchedule(
+      id: id ?? this.id,
+      driverId: driverId,
+      dayOfWeek: dayOfWeek ?? this.dayOfWeek,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+      isAvailable: isAvailable ?? this.isAvailable,
+    );
   }
 }
 
-/// Service de gestion des horaires des livreurs
+/// Planning de la flotte — `/delivery/shifts/` (Phase 6).
+///
+/// **Indicatif, et non opposable.** L'éligibilité d'un livreur reste, côté
+/// serveur, « en ligne, dossier validé, compte actif » (invariant L1). Un
+/// créneau ne s'y ajoute pas : un livreur présent, en ligne, à qui le serveur
+/// refuserait une course parce qu'il est 18 h 05 verrait un refus qu'aucun
+/// écran ne sait expliquer, et la commande resterait sans porteur.
+///
+/// D'où la disparition d'`isDriverAvailable` : cette méthode répondait
+/// « disponible » depuis le navigateur, à partir d'horaires que rien
+/// n'appliquait. Elle donnait une réponse que le serveur ne partageait pas —
+/// et c'est le serveur qui affecte les courses.
+///
+/// L'ancienne version fabriquait aussi des horaires par défaut « 7 j/7, 9 h –
+/// 21 h » **quand la table n'existait pas**, puis les enregistrait comme s'ils
+/// venaient de l'exploitation. Ici, [templateWeek] rend la même semaine type,
+/// mais explicitement non enregistrée : elle ne s'écrit que si quelqu'un la
+/// valide.
 class DriverScheduleService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
-  final Map<String, List<DriverSchedule>> _schedules = {}; // driverId -> schedules
+  eccore.ManagedCourierRepository get _fleet =>
+      eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient);
+
+  final Map<String, List<DriverSchedule>> _schedules = {};
+  final Set<String> _chargements = {};
   bool _isLoading = false;
+  String? _error;
 
   Map<String, List<DriverSchedule>> get schedules => _schedules;
   bool get isLoading => _isLoading;
+  String? get error => _error;
 
-  /// Charger les horaires d'un livreur
   Future<void> loadDriverSchedules(String driverId) async {
+    if (_chargements.contains(driverId)) return;
+    _chargements.add(driverId);
+
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
     try {
-      _isLoading = true;
-      notifyListeners();
-
-      final response = await _supabase
-          .from('driver_schedules')
-          .select()
-          .eq('driver_id', driverId)
-          .order('day_of_week', ascending: true);
-
-      _schedules[driverId] = (response as List)
-          .map((data) => DriverSchedule.fromMap(data))
-          .toList();
-
-      _isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('⚠️ Table driver_schedules non trouvée ou erreur: $e');
-      // Créer un horaire par défaut si la table n'existe pas
-      _schedules[driverId] = _getDefaultSchedules(driverId);
+      final creneaux = await _fleet.shifts(courierId: driverId);
+      _schedules[driverId] = creneaux.map(DriverSchedule.fromRemote).toList();
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Planning : chargement impossible — ${e.code}');
+      // Pas de semaine inventée en cas d'échec : afficher « 9 h – 21 h » sur
+      // une erreur réseau ferait croire à un planning qui n'existe pas.
+      _schedules[driverId] = [];
+    } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Obtenir les horaires par défaut (7j/7, 9h-21h)
-  List<DriverSchedule> _getDefaultSchedules(String driverId) {
-    final now = DateTime.now();
-    return List.generate(7, (index) {
-      return DriverSchedule(
-        id: '${driverId}_${index + 1}',
+  Future<void> refresh(String driverId) async {
+    _chargements.remove(driverId);
+    await loadDriverSchedules(driverId);
+  }
+
+  /// Semaine type, **non enregistrée** : sept lignes que l'écran propose et que
+  /// l'exploitation valide, jour par jour, si elle le souhaite.
+  List<DriverSchedule> templateWeek(String driverId) {
+    return List.generate(
+      7,
+      (index) => DriverSchedule(
         driverId: driverId,
         dayOfWeek: index + 1,
         startTime: const TimeOfDay(hour: 9, minute: 0),
         endTime: const TimeOfDay(hour: 21, minute: 0),
-        isAvailable: true,
-        createdAt: now,
-      );
-    });
-  }
-
-  /// Vérifier si un livreur est disponible à un moment donné
-  bool isDriverAvailable(String driverId, DateTime dateTime) {
-    final schedules = _schedules[driverId] ?? [];
-    if (schedules.isEmpty) return true; // Disponible par défaut
-
-    final dayOfWeek = dateTime.weekday;
-    final schedule = schedules.firstWhere(
-      (s) => s.dayOfWeek == dayOfWeek && s.isAvailable,
-      orElse: () => schedules.first,
+      ),
     );
-
-    if (!schedule.isAvailable) return false;
-
-    final currentTime = TimeOfDay.fromDateTime(dateTime);
-    final startMinutes = schedule.startTime.hour * 60 + schedule.startTime.minute;
-    final endMinutes = schedule.endTime.hour * 60 + schedule.endTime.minute;
-    final currentMinutes = currentTime.hour * 60 + currentTime.minute;
-
-    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
   }
 
-  /// Sauvegarder un horaire
+  /// Enregistre un créneau — création s'il n'existe pas encore, sinon mise à
+  /// jour. C'est [DriverSchedule.isPersisted] qui tranche, pas une convention
+  /// sur la forme de l'identifiant.
   Future<bool> saveSchedule(DriverSchedule schedule) async {
     try {
-      try {
-        await _supabase.from('driver_schedules').upsert(schedule.toMap());
-      } catch (e) {
-        debugPrint('⚠️ Table driver_schedules non disponible: $e');
-      }
+      final enregistre = schedule.isPersisted
+          ? await _fleet.updateShift(
+              shiftId: schedule.id!,
+              dayOfWeek: schedule.dayOfWeek,
+              startMinutes: schedule.startMinutes,
+              endMinutes: schedule.endMinutes,
+              isAvailable: schedule.isAvailable,
+            )
+          : await _fleet.createShift(
+              courierId: schedule.driverId,
+              dayOfWeek: schedule.dayOfWeek,
+              startMinutes: schedule.startMinutes,
+              endMinutes: schedule.endMinutes,
+              isAvailable: schedule.isAvailable,
+            );
 
-      if (!_schedules.containsKey(schedule.driverId)) {
-        _schedules[schedule.driverId] = [];
-      }
-      
-      final index = _schedules[schedule.driverId]!
-          .indexWhere((s) => s.id == schedule.id);
-      
+      final locale = DriverSchedule.fromRemote(enregistre);
+      final lignes = _schedules.putIfAbsent(schedule.driverId, () => []);
+      final index = lignes.indexWhere((s) => s.id == locale.id);
       if (index != -1) {
-        _schedules[schedule.driverId]![index] = schedule;
+        lignes[index] = locale;
       } else {
-        _schedules[schedule.driverId]!.add(schedule);
+        lignes.add(locale);
       }
+      lignes.sort((a, b) => a.dayOfWeek.compareTo(b.dayOfWeek));
 
       notifyListeners();
       return true;
-    } catch (e) {
-      debugPrint('Error saving schedule: $e');
+    } on eccore.ApiException catch (e) {
+      // Le serveur refuse un créneau qui passe minuit : il s'écrit en deux
+      // lignes, sur deux jours.
+      _error = e.detail;
+      debugPrint('Planning : enregistrement refusé — ${e.code}');
+      notifyListeners();
       return false;
     }
   }
 
-  /// Supprimer un horaire
   Future<bool> deleteSchedule(String scheduleId, String driverId) async {
     try {
-      try {
-        await _supabase.from('driver_schedules').delete().eq('id', scheduleId);
-      } catch (e) {
-        debugPrint('⚠️ Table driver_schedules non disponible: $e');
-      }
-
+      await _fleet.deleteShift(scheduleId);
       _schedules[driverId]?.removeWhere((s) => s.id == scheduleId);
       notifyListeners();
       return true;
-    } catch (e) {
-      debugPrint('Error deleting schedule: $e');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Planning : suppression refusée — ${e.code}');
+      notifyListeners();
       return false;
     }
   }
 
-  /// Obtenir les horaires d'un livreur
-  List<DriverSchedule> getDriverSchedules(String driverId) {
-    return _schedules[driverId] ?? [];
-  }
+  List<DriverSchedule> getDriverSchedules(String driverId) =>
+      _schedules[driverId] ?? const [];
 
-  /// Obtenir le nom du jour
   String getDayName(int dayOfWeek) {
-    const days = [
+    const jours = [
       'Lundi',
       'Mardi',
       'Mercredi',
       'Jeudi',
       'Vendredi',
       'Samedi',
-      'Dimanche'
+      'Dimanche',
     ];
-    return days[dayOfWeek - 1];
+    return jours[dayOfWeek - 1];
   }
 }

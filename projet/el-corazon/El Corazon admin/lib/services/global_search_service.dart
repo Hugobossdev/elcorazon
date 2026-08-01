@@ -1,211 +1,126 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/order.dart';
-import '../models/menu_models.dart';
-import '../models/user.dart' as app_user;
-import '../models/driver.dart';
 
+import 'admin_auth_service.dart';
+
+/// Un résultat de recherche, tel que l'affiche l'écran.
+///
+/// `title` et `subtitle` viennent du serveur : c'est lui qui sait ce qui
+/// identifie une commande (sa référence) ou un livreur (son nom et son
+/// véhicule). Les composer ici obligerait à recopier quatre mises en forme,
+/// qui divergeraient à la première évolution du modèle.
 class GlobalSearchResult {
-  final String id;
-  final String title;
-  final String subtitle;
-  final String type; // 'order', 'menu_item', 'user', 'driver'
-  final dynamic data;
-  final String? imageUrl;
-  final DateTime? createdAt;
-
-  GlobalSearchResult({
+  const GlobalSearchResult({
     required this.id,
     required this.title,
     required this.subtitle,
     required this.type,
-    this.data,
-    this.imageUrl,
-    this.createdAt,
   });
+
+  final String id;
+  final String title;
+  final String subtitle;
+
+  /// `order` | `customer` | `courier` | `menu_item`.
+  final String type;
 }
 
+/// Résultats rangés par famille.
 class GlobalSearchResults {
-  final List<GlobalSearchResult> orders;
-  final List<GlobalSearchResult> menuItems;
-  final List<GlobalSearchResult> users;
-  final List<GlobalSearchResult> drivers;
-
-  GlobalSearchResults({
+  const GlobalSearchResults({
     this.orders = const [],
     this.menuItems = const [],
     this.users = const [],
     this.drivers = const [],
   });
 
+  final List<GlobalSearchResult> orders;
+  final List<GlobalSearchResult> menuItems;
+  final List<GlobalSearchResult> users;
+  final List<GlobalSearchResult> drivers;
+
   bool get isEmpty =>
-      orders.isEmpty &&
-      menuItems.isEmpty &&
-      users.isEmpty &&
-      drivers.isEmpty;
+      orders.isEmpty && menuItems.isEmpty && users.isEmpty && drivers.isEmpty;
 
   List<GlobalSearchResult> get all => [
-        ...orders,
-        ...menuItems,
-        ...users,
-        ...drivers,
-      ];
+    ...orders,
+    ...menuItems,
+    ...users,
+    ...drivers,
+  ];
 }
 
+/// Recherche transverse — `/search/?q=…` (Phase 6).
+///
+/// **Un appel, pas quatre.** L'ancienne version lançait depuis le navigateur
+/// quatre requêtes sur quatre tables, et c'est la seule chose qu'elle faisait :
+/// ni permission, ni cloisonnement. Un opérateur de Kara y trouvait les
+/// commandes de Lomé ; un compte privé de `customers.read` y lisait des numéros
+/// de téléphone de clients.
+///
+/// Le serveur applique maintenant, famille par famille, la permission du
+/// domaine et le périmètre d'établissement. Une famille dont le compte n'a pas
+/// le droit est **absente** de la réponse plutôt que vide — « rien trouvé » et
+/// « vous n'y avez pas accès » ne se corrigent pas de la même façon, et un
+/// écran qui rend une liste vide dans les deux cas fait chercher au mauvais
+/// endroit.
 class GlobalSearchService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
-  bool _isLoading = false;
+  eccore.SearchRepository get _search =>
+      eccore.SearchRepository(apiClient: AdminAuthService().apiClient);
 
-  bool get isLoading => _isLoading;
+  bool _isSearching = false;
+  String? _error;
 
-  /// Recherche globale
+  bool get isSearching => _isSearching;
+  String? get error => _error;
+
   Future<GlobalSearchResults> searchAll(String query) async {
-    if (query.trim().isEmpty) return GlobalSearchResults();
+    // Le serveur refuse en deçà de trois caractères ; le dire ici évite un
+    // aller-retour à chaque frappe.
+    if (query.trim().length < 3) return const GlobalSearchResults();
 
-    _isLoading = true;
+    _isSearching = true;
+    _error = null;
     notifyListeners();
 
     try {
-      // Lancer les recherches en parallèle
-      final results = await Future.wait([
-        _searchOrders(query),
-        _searchMenuItems(query),
-        _searchUsers(query),
-        _searchDrivers(query),
-      ]);
-
-      _isLoading = false;
-      notifyListeners();
-
+      final hits = await _search.search(query);
       return GlobalSearchResults(
-        orders: results[0],
-        menuItems: results[1],
-        users: results[2],
-        drivers: results[3],
+        orders: _famille(hits, eccore.SearchKind.order),
+        menuItems: _famille(hits, eccore.SearchKind.menuItem),
+        users: _famille(hits, eccore.SearchKind.customer),
+        drivers: _famille(hits, eccore.SearchKind.courier),
       );
-    } catch (e) {
-      debugPrint('Error in global search: $e');
-      _isLoading = false;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Recherche : indisponible — ${e.code}');
+      return const GlobalSearchResults();
+    } finally {
+      _isSearching = false;
       notifyListeners();
-      return GlobalSearchResults();
     }
   }
 
-  /// Recherche de commandes
-  Future<List<GlobalSearchResult>> _searchOrders(String query) async {
-    try {
-      // Recherche par ID ou adresse
-      final response = await _supabase
-          .from('orders')
-          .select()
-          .or('id.ilike.%$query%,delivery_address.ilike.%$query%')
-          .limit(5);
-
-      return (response as List).map((data) {
-        final order = Order.fromMap(data);
-        return GlobalSearchResult(
-          id: order.id,
-          title: 'Commande #${order.id.substring(0, 8)}',
-          subtitle: '${order.status.displayName} - ${order.total} FCFA',
-          type: 'order',
-          data: order,
-          createdAt: order.createdAt,
-        );
-      }).toList();
-    } catch (e) {
-      debugPrint('Error searching orders: $e');
-      return [];
-    }
-  }
-
-  /// Recherche d'éléments de menu
-  Future<List<GlobalSearchResult>> _searchMenuItems(String query) async {
-    try {
-      final response = await _supabase
-          .from('menu_items')
-          .select()
-          .ilike('name', '%$query%')
-          .limit(5);
-
-      return (response as List).map((data) {
-        final item = MenuItem.fromMap(data);
-        return GlobalSearchResult(
-          id: item.id,
-          title: item.name,
-          subtitle: '${item.basePrice} FCFA - ${item.isAvailable ? 'Disponible' : 'Indisponible'}',
-          type: 'menu_item',
-          imageUrl: item.imageUrl,
-          data: item,
-        );
-      }).toList();
-    } catch (e) {
-      debugPrint('Error searching menu items: $e');
-      return [];
-    }
-  }
-
-  /// Recherche d'utilisateurs
-  Future<List<GlobalSearchResult>> _searchUsers(String query) async {
-    try {
-      final response = await _supabase
-          .from('users')
-          .select()
-          .or('name.ilike.%$query%,email.ilike.%$query%,phone.ilike.%$query%')
-          .limit(5);
-
-      return (response as List).map((data) {
-        final user = app_user.User.fromMap(data);
-        return GlobalSearchResult(
-          id: user.id,
-          title: user.name,
-          subtitle: '${user.email} - ${user.role.name}',
-          type: 'user',
-          data: user,
-          createdAt: user.createdAt,
-        );
-      }).toList();
-    } catch (e) {
-      debugPrint('Error searching users: $e');
-      return [];
-    }
-  }
-
-  /// Recherche de livreurs
-  Future<List<GlobalSearchResult>> _searchDrivers(String query) async {
-    try {
-      // Recherche dans la table drivers
-      final response = await _supabase
-          .from('drivers')
-          .select()
-          .or('name.ilike.%$query%,phone.ilike.%$query%')
-          .limit(5);
-
-      return (response as List).map((data) {
-        final driver = Driver.fromMap(data);
-        return GlobalSearchResult(
-          id: driver.id,
-          title: driver.name,
-          subtitle: 'Livreur - ${driver.status.toString().split('.').last}',
-          type: 'driver',
-          imageUrl: driver.profileImageUrl,
-          data: driver,
-        );
-      }).toList();
-    } catch (e) {
-      debugPrint('Error searching drivers: $e');
-      return [];
-    }
-  }
-
-  /// Recherche rapide (autocomplete)
+  /// Recherche rapide pour l'autocomplétion.
   Future<List<GlobalSearchResult>> quickSearch(String query) async {
-    if (query.trim().length < 2) return [];
+    if (query.trim().length < 3) return const [];
 
     try {
-      final results = await searchAll(query);
-      return results.all.take(5).toList();
-    } catch (e) {
-      return [];
+      final hits = await _search.search(query, limit: 3);
+      return hits.map(_toLocal).toList();
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      return const [];
     }
   }
+
+  List<GlobalSearchResult> _famille(List<eccore.SearchHit> hits, String kind) =>
+      hits.where((hit) => hit.kind == kind).map(_toLocal).toList();
+
+  GlobalSearchResult _toLocal(eccore.SearchHit hit) => GlobalSearchResult(
+    id: hit.id,
+    title: hit.title,
+    subtitle: hit.subtitle,
+    type: hit.kind,
+  );
 }

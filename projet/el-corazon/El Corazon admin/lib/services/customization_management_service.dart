@@ -1,21 +1,28 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/menu_models.dart';
 
-/// Modèle pour une option de personnalisation complète (avec infos de liaison)
+import '../models/menu_models.dart';
+import 'admin_auth_service.dart';
+
+/// Option de la bibliothèque réutilisable — miroir local d'`OptionTemplate`.
+///
+/// Elle ne porte plus que ce que le serveur enregistre. Les champs de l'ancien
+/// catalogue Supabase (`description`, `image_url`, `allergens`, `max_quantity`)
+/// ont disparu : les afficher dans un formulaire alors que rien ne les stocke
+/// donnerait à l'exploitation le sentiment de saisir une information qui, en
+/// réalité, se perdrait à l'enregistrement. La quantité maximale, elle, est
+/// désormais une propriété du **groupe** (`min_select` / `max_select`), pas de
+/// l'option.
 class CustomizationOptionModel {
   final String id;
   final String name;
+
+  /// Groupe suggéré à l'application — « Cuisson », « Suppléments ».
   final String category;
   final double priceModifier;
   final bool isDefault;
-  final int maxQuantity;
-  final String? description;
-  final String? imageUrl;
-  final List<String> allergens;
   final bool isActive;
-  final DateTime createdAt;
-  final DateTime updatedAt;
+  final int sortOrder;
 
   CustomizationOptionModel({
     required this.id,
@@ -23,65 +30,9 @@ class CustomizationOptionModel {
     required this.category,
     this.priceModifier = 0.0,
     this.isDefault = false,
-    this.maxQuantity = 1,
-    this.description,
-    this.imageUrl,
-    this.allergens = const [],
     this.isActive = true,
-    required this.createdAt,
-    required this.updatedAt,
+    this.sortOrder = 0,
   });
-
-  factory CustomizationOptionModel.fromMap(Map<String, dynamic> map) {
-    List<String> allergensList = [];
-    if (map['allergens'] is List) {
-      allergensList = (map['allergens'] as List)
-          .map((e) => e.toString())
-          .toList();
-    } else if (map['allergens'] is String &&
-        (map['allergens'] as String).isNotEmpty) {
-      allergensList = (map['allergens'] as String)
-          .split(',')
-          .map((e) => e.trim())
-          .toList();
-    }
-
-    return CustomizationOptionModel(
-      id: map['id']?.toString() ?? '',
-      name: map['name']?.toString() ?? '',
-      category: map['category']?.toString() ?? 'extra',
-      priceModifier: (map['price_modifier'] as num?)?.toDouble() ?? 0.0,
-      isDefault: map['is_default'] as bool? ?? false,
-      maxQuantity: (map['max_quantity'] as num?)?.toInt() ?? 1,
-      description: map['description']?.toString(),
-      imageUrl: map['image_url']?.toString(),
-      allergens: allergensList,
-      isActive: map['is_active'] as bool? ?? true,
-      createdAt: map['created_at'] != null
-          ? DateTime.parse(map['created_at'].toString())
-          : DateTime.now(),
-      updatedAt: map['updated_at'] != null
-          ? DateTime.parse(map['updated_at'].toString())
-          : DateTime.now(),
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'name': name,
-      'category': category,
-      'price_modifier': priceModifier,
-      'is_default': isDefault,
-      'max_quantity': maxQuantity,
-      'description': description,
-      'image_url': imageUrl,
-      'allergens': allergens,
-      'is_active': isActive,
-      'created_at': createdAt.toIso8601String(),
-      'updated_at': updatedAt.toIso8601String(),
-    };
-  }
 
   CustomizationOptionModel copyWith({
     String? id,
@@ -89,13 +40,8 @@ class CustomizationOptionModel {
     String? category,
     double? priceModifier,
     bool? isDefault,
-    int? maxQuantity,
-    String? description,
-    String? imageUrl,
-    List<String>? allergens,
     bool? isActive,
-    DateTime? createdAt,
-    DateTime? updatedAt,
+    int? sortOrder,
   }) {
     return CustomizationOptionModel(
       id: id ?? this.id,
@@ -103,24 +49,28 @@ class CustomizationOptionModel {
       category: category ?? this.category,
       priceModifier: priceModifier ?? this.priceModifier,
       isDefault: isDefault ?? this.isDefault,
-      maxQuantity: maxQuantity ?? this.maxQuantity,
-      description: description ?? this.description,
-      imageUrl: imageUrl ?? this.imageUrl,
-      allergens: allergens ?? this.allergens,
       isActive: isActive ?? this.isActive,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
+      sortOrder: sortOrder ?? this.sortOrder,
     );
   }
 }
 
-/// Modèle pour l'association entre un menu item et une option
+/// Option posée sur un article — un exemplaire, pas un lien.
+///
+/// L'ancien modèle appelait ceci une « association » : une ligne reliant un
+/// article à une option du catalogue global. Ici, [customizationOptionId] est
+/// l'identifiant d'une option qui **appartient** à l'article. La détacher, c'est
+/// la supprimer ; elle ne survit nulle part ailleurs.
 class MenuItemCustomization {
   final String id;
   final String menuItemId;
   final String menuItemName;
   final String customizationOptionId;
   final String customizationOptionName;
+
+  /// Groupe qui la porte — c'est lui qui décide du caractère obligatoire.
+  final String groupId;
+  final String groupName;
   final bool isRequired;
   final int sortOrder;
 
@@ -130,48 +80,34 @@ class MenuItemCustomization {
     required this.menuItemName,
     required this.customizationOptionId,
     required this.customizationOptionName,
+    this.groupId = '',
+    this.groupName = '',
     this.isRequired = false,
     this.sortOrder = 0,
   });
-
-  factory MenuItemCustomization.fromMap(Map<String, dynamic> map) {
-    // Parser les jointures Supabase
-    // Supabase retourne les jointures avec le nom de la table au pluriel
-    String menuItemName = '';
-    final menuItemsData = map['menu_items'];
-    if (menuItemsData is Map) {
-      menuItemName = menuItemsData['name']?.toString() ?? '';
-    } else if (map['menu_item'] is Map) {
-      menuItemName = (map['menu_item'] as Map)['name']?.toString() ?? '';
-    } else if (map['menu_item_name'] != null) {
-      menuItemName = map['menu_item_name'].toString();
-    }
-
-    String optionName = '';
-    final optionsData = map['customization_options'];
-    if (optionsData is Map) {
-      optionName = optionsData['name']?.toString() ?? '';
-    } else if (map['customization_option'] is Map) {
-      optionName =
-          (map['customization_option'] as Map)['name']?.toString() ?? '';
-    } else if (map['customization_option_name'] != null) {
-      optionName = map['customization_option_name'].toString();
-    }
-
-    return MenuItemCustomization(
-      id: map['id']?.toString() ?? '',
-      menuItemId: map['menu_item_id']?.toString() ?? '',
-      menuItemName: menuItemName,
-      customizationOptionId: map['customization_option_id']?.toString() ?? '',
-      customizationOptionName: optionName,
-      isRequired: map['is_required'] as bool? ?? false,
-      sortOrder: (map['sort_order'] as num?)?.toInt() ?? 0,
-    );
-  }
 }
 
+/// Bibliothèque d'options réutilisables — `/catalog/manage/option-templates/`
+/// (Phase 6).
+///
+/// Le modèle a changé, et c'est ce qui explique la forme de ce service.
+///
+/// Côté Supabase, une option vivait dans un catalogue global et une table
+/// d'association la reliait à plusieurs articles : corriger son prix changeait
+/// donc, en silence, ce que facturaient tous les articles qui s'en servaient —
+/// y compris pendant qu'un client composait son panier.
+///
+/// Côté v2, la bibliothèque reste, mais **appliquer un modèle copie l'option
+/// sur l'article**. Le prix facturé est celui porté par l'article (C1), et
+/// corriger un modèle ne reprice rien de ce qui est déjà en vitrine. Détacher
+/// une option, c'est donc la supprimer du groupe de l'article, pas rompre une
+/// association.
 class CustomizationManagementService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  /// Établissement supervisé — une seule enseigne pour l'instant.
+  static const String _restaurantSlug = 'el-corazon-lome';
+
+  eccore.ManagedCatalogRepository get _catalog =>
+      eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient);
 
   List<CustomizationOptionModel> _options = [];
   List<MenuItemCustomization> _menuItemCustomizations = [];
@@ -191,388 +127,232 @@ class CustomizationManagementService extends ChangeNotifier {
   }
 
   Future<void> _loadData() async {
-    await Future.wait([
-      _loadOptions(),
-      _loadMenuItems(),
-      _loadMenuItemCustomizations(),
-    ]);
-  }
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
 
-  /// Charger toutes les options de personnalisation
-  Future<void> _loadOptions() async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
+      final modeles = await _catalog.optionTemplates(
+        restaurantSlug: _restaurantSlug,
+      );
+      _options = modeles.map(_toLocalOption).toList();
 
-      final response = await _supabase
-          .from('customization_options')
-          .select('*')
-          .order('category')
-          .order('name');
+      final articles = await _catalog.menuItems(restaurantSlug: _restaurantSlug);
+      _menuItems = articles.map(_toLocalMenuItem).toList();
 
-      _options = (response as List)
-          .map((data) {
-            try {
-              return CustomizationOptionModel.fromMap(
-                data as Map<String, dynamic>,
-              );
-            } catch (e) {
-              debugPrint('❌ Erreur parsing option: $e');
-              return null;
-            }
-          })
-          .whereType<CustomizationOptionModel>()
-          .toList();
-
-      debugPrint('✅ ${_options.length} options de personnalisation chargées');
-    } catch (e) {
-      _error = e.toString();
-      debugPrint('❌ Erreur chargement options: $e');
-      _options = [];
+      // Les options réellement posées sur les articles sont celles de leurs
+      // groupes : il n'y a plus de table d'association à lire, et la forme
+      // back-office de l'article les porte déjà — d'où une seule requête.
+      _menuItemCustomizations = [
+        for (final article in articles)
+          for (final groupe in article.optionGroups)
+            for (final option in groupe.options)
+              MenuItemCustomization(
+                id: option.id,
+                menuItemId: article.id,
+                menuItemName: article.name,
+                customizationOptionId: option.id,
+                customizationOptionName: option.name,
+                groupId: groupe.id,
+                groupName: groupe.name,
+                isRequired: groupe.isRequired,
+                sortOrder: option.sortOrder,
+              ),
+      ];
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Personnalisations : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Charger tous les menu items
-  Future<void> _loadMenuItems() async {
-    try {
-      final response = await _supabase
-          .from('menu_items')
-          .select('*')
-          .order('name');
+  Future<void> refresh() => _loadData();
 
-      _menuItems = (response as List)
-          .map((data) {
-            try {
-              return MenuItem.fromMap(data as Map<String, dynamic>);
-            } catch (e) {
-              debugPrint('❌ Erreur parsing menu item: $e');
-              return null;
-            }
-          })
-          .whereType<MenuItem>()
-          .toList();
-    } catch (e) {
-      debugPrint('❌ Erreur chargement menu items: $e');
-      _menuItems = [];
-    }
-  }
+  // ------------------------------------------------------- bibliothèque
 
-  /// Charger toutes les associations menu items - options
-  Future<void> _loadMenuItemCustomizations() async {
-    try {
-      final response = await _supabase
-          .from('menu_item_customizations')
-          .select('''
-            *,
-            menu_items!inner(name),
-            customization_options!inner(name)
-          ''')
-          .order('menu_item_id')
-          .order('sort_order');
-
-      _menuItemCustomizations = (response as List)
-          .map((data) {
-            try {
-              return MenuItemCustomization.fromMap(
-                data as Map<String, dynamic>,
-              );
-            } catch (e) {
-              debugPrint('❌ Erreur parsing association: $e');
-              return null;
-            }
-          })
-          .whereType<MenuItemCustomization>()
-          .toList();
-    } catch (e) {
-      debugPrint('❌ Erreur chargement associations: $e');
-      _menuItemCustomizations = [];
-    }
-  }
-
-  /// Créer une nouvelle option de personnalisation
   Future<CustomizationOptionModel?> createOption({
     required String name,
     required String category,
     double priceModifier = 0.0,
     bool isDefault = false,
-    int maxQuantity = 1,
-    String? description,
-    String? imageUrl,
-    List<String> allergens = const [],
+    int sortOrder = 0,
   }) async {
     try {
-      _isLoading = true;
-      _error = null;
+      final cree = await _catalog.createOptionTemplate(
+        restaurantSlug: _restaurantSlug,
+        name: name,
+        groupName: category,
+        priceDelta: _versMoney(priceModifier),
+        isDefault: isDefault,
+        sortOrder: sortOrder,
+      );
+      final locale = _toLocalOption(cree);
+      _options.add(locale);
       notifyListeners();
-
-      final response = await _supabase
-          .from('customization_options')
-          .insert({
-            'name': name,
-            'category': category,
-            'price_modifier': priceModifier,
-            'is_default': isDefault,
-            'max_quantity': maxQuantity,
-            'description': description,
-            'image_url': imageUrl,
-            'allergens': allergens,
-            'is_active': true,
-          })
-          .select()
-          .single();
-
-      final newOption = CustomizationOptionModel.fromMap(response);
-      _options.add(newOption);
-      _options.sort((a, b) {
-        final catCompare = a.category.compareTo(b.category);
-        if (catCompare != 0) return catCompare;
-        return a.name.compareTo(b.name);
-      });
-
-      _isLoading = false;
+      return locale;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Personnalisations : création refusée — ${e.code}');
       notifyListeners();
-      return newOption;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      debugPrint('❌ Erreur création option: $e');
       return null;
     }
   }
 
-  /// Mettre à jour une option de personnalisation
   Future<bool> updateOption(CustomizationOptionModel option) async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      await _supabase
-          .from('customization_options')
-          .update({
-            'name': option.name,
-            'category': option.category,
-            'price_modifier': option.priceModifier,
-            'is_default': option.isDefault,
-            'max_quantity': option.maxQuantity,
-            'description': option.description,
-            'image_url': option.imageUrl,
-            'allergens': option.allergens,
-            'is_active': option.isActive,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', option.id);
-
+      final maj = await _catalog.updateOptionTemplate(
+        templateId: option.id,
+        name: option.name,
+        groupName: option.category,
+        priceDelta: _versMoney(option.priceModifier),
+        isDefault: option.isDefault,
+        isActive: option.isActive,
+        sortOrder: option.sortOrder,
+      );
       final index = _options.indexWhere((o) => o.id == option.id);
-      if (index != -1) {
-        _options[index] = option;
-      }
-
-      _isLoading = false;
+      if (index != -1) _options[index] = _toLocalOption(maj);
       notifyListeners();
       return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Personnalisations : mise à jour refusée — ${e.code}');
       notifyListeners();
-      debugPrint('❌ Erreur mise à jour option: $e');
       return false;
     }
   }
 
-  /// Supprimer une option de personnalisation
+  /// Retire un modèle de la bibliothèque.
+  ///
+  /// Sans effet sur les articles : les options déjà appliquées sont des copies,
+  /// elles restent en vitrine. C'est précisément l'intérêt de la copie.
   Future<bool> deleteOption(String optionId) async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      // Vérifier si l'option est utilisée
-      final usedIn = _menuItemCustomizations
-          .where((m) => m.customizationOptionId == optionId)
-          .toList();
-
-      if (usedIn.isNotEmpty) {
-        _error =
-            'Cette option est utilisée par ${usedIn.length} menu item(s). Supprimez d\'abord les associations.';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
-
-      await _supabase.from('customization_options').delete().eq('id', optionId);
-
+      await _catalog.deleteOptionTemplate(optionId);
       _options.removeWhere((o) => o.id == optionId);
-
-      _isLoading = false;
       notifyListeners();
       return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Personnalisations : suppression refusée — ${e.code}');
       notifyListeners();
-      debugPrint('❌ Erreur suppression option: $e');
       return false;
     }
   }
 
-  /// Associer une option à un menu item
+  // -------------------------------------------------------- application
+
+  /// Applique un modèle à un article — le serveur y **copie** l'option.
+  ///
+  /// [isRequired] ne se pose pas sur l'option mais sur le **groupe** qui la
+  /// reçoit : « obligatoire » veut dire qu'il faut choisir dans ce groupe
+  /// (`min_select ≥ 1`), pas que cette option-là est imposée.
   Future<bool> associateOptionToMenuItem({
     required String menuItemId,
-    required String optionId,
+    required String templateId,
     bool isRequired = false,
-    int sortOrder = 0,
   }) async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
+      final groupe = await _catalog.applyTemplate(
+        menuItemId: menuItemId,
+        templateId: templateId,
+      );
 
-      // Vérifier si l'association existe déjà
-      final existing = await _supabase
-          .from('menu_item_customizations')
-          .select('id')
-          .eq('menu_item_id', menuItemId)
-          .eq('customization_option_id', optionId)
-          .maybeSingle();
-
-      if (existing != null) {
-        _error = 'Cette option est déjà associée à ce menu item';
-        _isLoading = false;
-        notifyListeners();
-        return false;
+      if (isRequired && !groupe.isRequired) {
+        await _catalog.updateOptionGroup(groupId: groupe.id, minSelect: 1);
       }
 
-      await _supabase.from('menu_item_customizations').insert({
-        'menu_item_id': menuItemId,
-        'customization_option_id': optionId,
-        'is_required': isRequired,
-        'sort_order': sortOrder,
-      });
-
-      // Recharger les associations et les menu items pour mettre à jour les noms
-      await Future.wait([_loadMenuItemCustomizations(), _loadMenuItems()]);
-
-      _isLoading = false;
-      notifyListeners();
+      await _loadData();
       return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
+    } on eccore.ApiException catch (e) {
+      _error = e.status == 409
+          ? 'Cette option figure déjà sur cet article.'
+          : e.detail;
+      debugPrint('Personnalisations : application refusée — ${e.code}');
       notifyListeners();
-      debugPrint('❌ Erreur association option: $e');
       return false;
     }
   }
 
-  /// Retirer une option d'un menu item
-  Future<bool> removeOptionFromMenuItem({
-    required String menuItemId,
-    required String optionId,
-  }) async {
+  /// Retire une option d'un article : elle est supprimée de son groupe.
+  Future<bool> removeOptionFromMenuItem({required String optionId}) async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      await _supabase
-          .from('menu_item_customizations')
-          .delete()
-          .eq('menu_item_id', menuItemId)
-          .eq('customization_option_id', optionId);
-
-      await _loadMenuItemCustomizations();
-
-      _isLoading = false;
-      notifyListeners();
+      await _catalog.deleteOption(optionId);
+      await _loadData();
       return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Personnalisations : retrait refusé — ${e.code}');
       notifyListeners();
-      debugPrint('❌ Erreur retrait option: $e');
       return false;
     }
   }
 
-  /// Mettre à jour une association (is_required, sort_order)
-  Future<bool> updateMenuItemCustomization({
-    required String associationId,
-    bool? isRequired,
-    int? sortOrder,
-  }) async {
-    try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
+  // ------------------------------------------------------------ lectures
 
-      final updateData = <String, dynamic>{};
-      if (isRequired != null) updateData['is_required'] = isRequired;
-      if (sortOrder != null) updateData['sort_order'] = sortOrder;
-
-      if (updateData.isEmpty) {
-        _isLoading = false;
-        notifyListeners();
-        return true;
-      }
-
-      await _supabase
-          .from('menu_item_customizations')
-          .update(updateData)
-          .eq('id', associationId);
-
-      await _loadMenuItemCustomizations();
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      debugPrint('❌ Erreur mise à jour association: $e');
-      return false;
-    }
-  }
-
-  /// Obtenir les options associées à un menu item
   List<MenuItemCustomization> getOptionsForMenuItem(String menuItemId) {
     return _menuItemCustomizations
-        .where((m) => m.menuItemId == menuItemId)
-        .toList()
-      ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-  }
-
-  /// Obtenir les options disponibles (non associées à un menu item)
-  List<CustomizationOptionModel> getAvailableOptionsForMenuItem(
-    String menuItemId,
-  ) {
-    final associatedIds = getOptionsForMenuItem(
-      menuItemId,
-    ).map((m) => m.customizationOptionId).toSet();
-
-    return _options
-        .where((o) => !associatedIds.contains(o.id) && o.isActive)
+        .where((c) => c.menuItemId == menuItemId)
         .toList();
   }
 
-  /// Rafraîchir les données
-  Future<void> refresh() async {
-    await _loadData();
+  /// Modèles pas encore posés sur cet article.
+  ///
+  /// Le nom fait foi, faute d'un lien : l'option de l'article est une copie, et
+  /// rien en base ne la rattache au modèle dont elle est issue.
+  List<CustomizationOptionModel> getAvailableOptionsForMenuItem(
+    String menuItemId,
+  ) {
+    final deja = getOptionsForMenuItem(
+      menuItemId,
+    ).map((c) => c.customizationOptionName).toSet();
+    return _options
+        .where((o) => o.isActive && !deja.contains(o.name))
+        .toList();
   }
 
-  /// Obtenir les options par catégorie
   Map<String, List<CustomizationOptionModel>> getOptionsByCategory() {
-    final Map<String, List<CustomizationOptionModel>> grouped = {};
-    for (var option in _options) {
-      grouped.putIfAbsent(option.category, () => []);
-      grouped[option.category]!.add(option);
+    final parCategorie = <String, List<CustomizationOptionModel>>{};
+    for (final option in _options) {
+      parCategorie.putIfAbsent(option.category, () => []).add(option);
     }
-    return grouped;
+    return parCategorie;
   }
+
+  // ---------------------------------------------------------- traduction
+
+  CustomizationOptionModel _toLocalOption(eccore.OptionTemplate modele) {
+    return CustomizationOptionModel(
+      id: modele.id,
+      name: modele.name,
+      category: modele.groupName.isEmpty ? 'extra' : modele.groupName,
+      priceModifier: modele.priceDelta.toMajorUnits(),
+      isDefault: modele.isDefault,
+      isActive: modele.isActive,
+      sortOrder: modele.sortOrder,
+    );
+  }
+
+  MenuItem _toLocalMenuItem(eccore.MenuItem remote) {
+    return MenuItem(
+      id: remote.id,
+      categoryId: remote.categorySlug,
+      name: remote.name,
+      description: remote.description.isEmpty ? null : remote.description,
+      basePrice: remote.price.toMajorUnits(),
+      imageUrl: remote.image,
+      isPopular: remote.isPopular,
+      isVegetarian: remote.dietaryTags.contains('vegetarian'),
+      isVegan: remote.dietaryTags.contains('vegan'),
+      isAvailable: remote.isAvailable,
+      sortOrder: remote.sortOrder,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
+  eccore.Money _versMoney(double montant) =>
+      eccore.Money(amountMinor: montant.round(), currency: 'XOF');
 }

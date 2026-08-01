@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/driver.dart';
 import '../../models/driver_document.dart';
 import '../../services/driver_document_service.dart' as svc;
-import '../../models/document_history.dart';
 import '../../ui/ui.dart';
 
 class DriverDocumentValidationScreen extends StatefulWidget {
@@ -21,13 +19,10 @@ class _DriverDocumentValidationScreenState
     extends State<DriverDocumentValidationScreen> {
   final svc.DriverDocumentService _documentService =
       svc.DriverDocumentService();
-  final SupabaseClient _supabase = Supabase.instance.client;
 
   // Documents chargés depuis la base de données
   final Map<DocumentType, DriverDocument?> _documents = {};
 
-  // Historique des documents
-  final Map<String, List<DocumentHistory>> _documentHistory = {};
 
   // Notes de validation
   final Map<DocumentType, TextEditingController> _notesControllers = {
@@ -66,23 +61,21 @@ class _DriverDocumentValidationScreenState
         throw Exception('L\'ID utilisateur du livreur n\'est pas disponible');
       }
 
-      final documents = await _documentService.getDriverDocuments(userId);
+      await _documentService.refresh();
+      final courier = _documentService.courierById(userId);
+      if (courier == null) {
+        throw Exception('Dossier introuvable dans votre périmètre');
+      }
 
-      // Organiser les documents par type et charger l'historique
-      for (var doc in documents) {
+      // Les trois pièces portent le statut **du dossier** : c'est la seule
+      // décision qui existe côté serveur. Approuver le permis en rejetant la
+      // carte grise laissait le compte dans un état que personne ne savait
+      // lire — le livreur pouvait-il travailler ?
+      for (final doc in _documentService.documentsOf(courier)) {
         _documents[doc.type] = doc;
-        // Charger les notes existantes
         final controller = _notesControllers[doc.type];
         if (controller != null && doc.validationNotes != null) {
           controller.text = doc.validationNotes!;
-        }
-
-        // Charger l'historique pour ce document
-        try {
-          final history = await _documentService.getDocumentHistory(doc.id);
-          _documentHistory[doc.id] = history;
-        } catch (e) {
-          debugPrint('Erreur chargement historique pour ${doc.id}: $e');
         }
       }
 
@@ -179,19 +172,19 @@ class _DriverDocumentValidationScreenState
     });
 
     try {
-      // Récupérer l'ID de l'admin actuel
-      final currentUser = _supabase.auth.currentUser;
-      if (currentUser == null) {
-        throw Exception('Utilisateur non connecté');
-      }
-
+      // L'auteur de la décision vient du jeton, côté serveur : une trace qu'on
+      // renseigne soi-même ne trace rien. La décision porte sur le **dossier**,
+      // pas sur la pièce affichée.
       bool success = false;
       if (status == DocumentValidationStatus.approved) {
-        success = await _documentService.approveDocument(document.id);
+        success = await _documentService.approveCourier(
+          document.userId,
+          notes: notes,
+        );
       } else if (status == DocumentValidationStatus.rejected) {
-        success = await _documentService.rejectDocument(
-          document.id,
-          notes.isNotEmpty ? notes : 'Document non conforme',
+        success = await _documentService.rejectCourier(
+          document.userId,
+          notes.isNotEmpty ? notes : 'Dossier non conforme',
         );
       }
 
@@ -226,46 +219,6 @@ class _DriverDocumentValidationScreenState
         setState(() {
           _isLoading = false;
         });
-      }
-    }
-  }
-
-  Future<void> _updateExpiryDate(DriverDocument document) async {
-    // Capturer les valeurs nécessaires avant le gap async
-    final inverseSurfaceColor =
-        Theme.of(context).colorScheme.inverseSurface;
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: document.expiryDate ?? DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365 * 10)),
-    );
-
-    if (picked != null && picked != document.expiryDate) {
-      final success = await _documentService.updateDocumentExpiry(
-        document.id,
-        picked,
-      );
-
-      if (success) {
-        await _loadDocumentStatus();
-        if (mounted && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Date d\'expiration mise à jour'),
-              backgroundColor: inverseSurfaceColor,
-            ),
-          );
-        }
-      } else {
-        if (mounted && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Erreur lors de la mise à jour'),
-              backgroundColor: inverseSurfaceColor,
-            ),
-          );
-        }
       }
     }
   }
@@ -355,83 +308,6 @@ class _DriverDocumentValidationScreenState
     final doc = _documents[type];
     if (doc == null) return DocumentValidationStatus.pending;
     return doc.status;
-  }
-
-  void _showHistoryDialog(DriverDocument document) {
-    final history = _documentHistory[document.id] ?? [];
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Historique - ${document.type.displayName}'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: history.isEmpty
-              ? const Center(child: Text('Aucun historique disponible'))
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: history.length,
-                  itemBuilder: (context, index) {
-                    final item = history[index];
-                    return ListTile(
-                      leading: _buildStatusIcon(item.newStatus),
-                      title: Text(
-                        '${item.previousStatus ?? "Nouveau"} ➔ ${item.newStatus}',
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Par: ${item.changedByName ?? "Système"}'),
-                          if (item.changeReason != null)
-                            Text('Raison: ${item.changeReason}'),
-                          Text(
-                            _formatDateWithTime(item.changedAt),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusIcon(String? status) {
-    IconData icon;
-    final sem = AdminColorTokens.semantic(Theme.of(context).colorScheme);
-    final scheme = Theme.of(context).colorScheme;
-    Color color;
-
-    switch (status) {
-      case 'approved':
-        icon = Icons.check_circle;
-        color = sem.success;
-        break;
-      case 'rejected':
-        icon = Icons.cancel;
-        color = sem.danger;
-        break;
-      case 'expired':
-        icon = Icons.timer_off;
-        color = sem.warning;
-        break;
-      default:
-        icon = Icons.hourglass_empty;
-        color = scheme.onSurfaceVariant;
-    }
-
-    return Icon(icon, color: color);
   }
 
   @override
@@ -619,64 +495,11 @@ class _DriverDocumentValidationScreenState
                             ),
                           ),
                         ],
-                        if (document.expiryDate != null) ...[
-                          const SizedBox(height: 4),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'Expire le: ${_formatDate(document.expiryDate!)}',
-                                style: TextStyle(
-                                  color: document.isExpired
-                                      ? Theme.of(context).colorScheme.error
-                                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                                  fontSize: 12,
-                                  fontWeight: document.isExpired
-                                      ? FontWeight.bold
-                                      : FontWeight.normal,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              InkWell(
-                                onTap: () => _updateExpiryDate(document),
-                                borderRadius: BorderRadius.circular(12),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(4.0),
-                                  child: Icon(
-                                    Icons.edit_calendar,
-                                    size: 16,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ] else ...[
-                          const SizedBox(height: 4),
-                          TextButton.icon(
-                            onPressed: () => _updateExpiryDate(document),
-                            icon: const Icon(Icons.calendar_month, size: 16),
-                            label: const Text('Définir expiration'),
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: const Size(0, 32),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                        ],
                         const SizedBox(height: 8),
                         ElevatedButton.icon(
                           onPressed: () => _viewDocument(document),
                           icon: const Icon(Icons.visibility),
                           label: const Text('Voir le document'),
-                        ),
-                        const SizedBox(height: 8),
-                        TextButton.icon(
-                          onPressed: () => _showHistoryDialog(document),
-                          icon: const Icon(Icons.history),
-                          label: const Text('Voir l\'historique'),
                         ),
                       ],
                     )
@@ -843,11 +666,4 @@ class _DriverDocumentValidationScreenState
     );
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
-
-  String _formatDateWithTime(DateTime date) {
-    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-  }
 }

@@ -4,7 +4,6 @@ import 'package:fl_chart/fl_chart.dart';
 import '../../services/app_service.dart';
 import '../../services/analytics_service.dart';
 import '../../services/driver_management_service.dart';
-import '../../services/database_service.dart';
 import '../../models/order.dart';
 import '../../models/menu_models.dart';
 import '../../models/driver.dart';
@@ -711,10 +710,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   Future<List<Map<String, dynamic>>>? _topSellingItemsFuture;
 
   Future<List<Map<String, dynamic>>> _getTopSellingItems() {
-    _topSellingItemsFuture ??= DatabaseService().getMenuItemsOrderStatistics(
-      startDate: DateTime.now().subtract(const Duration(days: 30)),
-      limit: 5,
-    );
+    _topSellingItemsFuture ??= context
+        .read<AnalyticsService>()
+        .getTopSellingItems(
+          startDate: DateTime.now().subtract(const Duration(days: 30)),
+          limit: 5,
+        );
     return _topSellingItemsFuture!;
   }
 

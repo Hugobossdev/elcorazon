@@ -10,7 +10,6 @@ import '../../core/constants/admin_constants.dart';
 import '../../core/utils/admin_helpers.dart';
 import '../../core/widgets/admin_card.dart';
 import '../../utils/dialog_helper.dart';
-import '../../services/driver_document_service.dart';
 import '../../ui/ui.dart';
 import '../../theme/modern_theme.dart';
 import 'driver_map_screen.dart';
@@ -32,22 +31,8 @@ class _EnhancedAdminDashboardState extends State<EnhancedAdminDashboard>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
-    _checkDocumentExpirations();
   }
 
-  Future<void> _checkDocumentExpirations() async {
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      try {
-        final service = context.read<DriverDocumentService>();
-        await service.checkUpcomingExpirations();
-        if (!mounted) return;
-        await service.checkExpiredDocuments();
-      } catch (e) {
-        debugPrint('Error checking document expirations: $e');
-      }
-    });
-  }
 
   @override
   void dispose() {

@@ -19,7 +19,11 @@ class ClientManagementScreen extends StatefulWidget {
 class _ClientManagementScreenState extends State<ClientManagementScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
-  String _selectedFilter = 'all'; // all, active, suspended, vip
+  // « VIP » a disparu des filtres : il se calculait à l'écran, à partir de
+  // badges et d'un niveau que la liste ne porte pas, croisés avec des commandes
+  // chargées ailleurs — deux sources jamais du même moment. Ce que le serveur
+  // ne dit pas, l'écran ne le devine pas.
+  String _selectedFilter = 'all'; // all, active, suspended
   List<User> _filteredClients = [];
   bool _hasInitialized = false;
 
@@ -65,8 +69,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
       // Filtre par statut
       final matchesFilter = _selectedFilter == 'all' ||
           (_selectedFilter == 'active' && !_isSuspended(client)) ||
-          (_selectedFilter == 'suspended' && _isSuspended(client)) ||
-          (_selectedFilter == 'vip' && _isVIP(client));
+          (_selectedFilter == 'suspended' && _isSuspended(client));
 
       return matchesSearch && matchesFilter;
     }).toList();
@@ -77,30 +80,6 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     return !client.isActive;
   }
 
-  bool _isVIP(User client) {
-    // Vérifier si le client a un badge VIP
-    if (client.badges.any((badge) => badge.toLowerCase().contains('vip'))) {
-      return true;
-    }
-
-    // Vérifier les critères basés sur les statistiques
-    final appService = Provider.of<AppService>(context, listen: false);
-    final orders =
-        appService.allOrders.where((o) => o.userId == client.id).toList();
-    final completedOrders =
-        orders.where((o) => o.status == OrderStatus.delivered).toList();
-    final totalSpent = completedOrders.fold(0.0, (sum, o) => sum + o.total);
-
-    // Critères VIP:
-    // - Points de fidélité > 10000
-    // - Niveau > 5
-    // - Total dépensé > 100000 FCFA
-    // - Plus de 50 commandes complétées
-    return client.loyaltyPoints > 10000 ||
-        (client.stats?.level ?? 0) > 5 ||
-        totalSpent > 100000 ||
-        completedOrders.length > 50;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -166,11 +145,6 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                 value: 'suspended',
                                 label: Text('Suspendus'),
                                 icon: Icon(Icons.block),
-                              ),
-                              ButtonSegment(
-                                value: 'vip',
-                                label: Text('VIP'),
-                                icon: Icon(Icons.star),
                               ),
                             ],
                             selected: {_selectedFilter},
@@ -377,28 +351,20 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
   Future<void> _showClientDetails(User client, AppService appService) async {
     final clientService = context.read<ClientManagementService>();
 
-    // Charger les statistiques du client
+    // Agrégat calculé par le serveur : le panier moyen porte sur toutes les
+    // commandes du client, pas sur la page que l'écran avait chargée.
     final stats = await clientService.getClientStats(client.id);
 
     if (!mounted) return;
 
-    // Gérer les valeurs null de manière sécurisée
-    // Note: Le service utilise des clés avec underscore
-    final totalSpent = (stats['total_spent'] as num?)?.toDouble() ??
-        (stats['totalSpent'] as num?)?.toDouble() ??
-        0.0;
-    final totalOrders =
-        stats['total_orders'] as int? ?? stats['totalOrders'] as int? ?? 0;
-    final completedOrders = stats['completed_orders'] as int? ??
-        stats['completedOrders'] as int? ??
-        0;
-    final cancelledOrders = stats['cancelled_orders'] as int? ??
-        stats['cancelledOrders'] as int? ??
-        0;
-    final averageOrderValue =
-        (stats['average_order_value'] as num?)?.toDouble() ??
-            (stats['averageOrderValue'] as num?)?.toDouble() ??
-            0.0;
+    if (stats == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(clientService.error ?? 'Fiche client indisponible'),
+        ),
+      );
+      return;
+    }
 
     DialogHelper.showSafeDialog(
       context: context,
@@ -411,17 +377,19 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
             children: [
               _buildDetailRow('Email', client.email),
               _buildDetailRow('Téléphone', client.phone),
-              _buildDetailRow('Total commandes', '$totalOrders'),
-              _buildDetailRow('Commandes complétées', '$completedOrders'),
-              _buildDetailRow('Commandes annulées', '$cancelledOrders'),
+              _buildDetailRow('Total commandes', '${stats.ordersCount}'),
+              _buildDetailRow('Commandes livrées', '${stats.ordersDelivered}'),
+              _buildDetailRow('Commandes annulées', '${stats.ordersCancelled}'),
               _buildDetailRow(
                 'Total dépensé',
-                PriceFormatter.format(totalSpent),
+                PriceFormatter.format(stats.totalSpent.toMajorUnits()),
               ),
               _buildDetailRow(
                 'Panier moyen',
-                PriceFormatter.format(averageOrderValue),
+                PriceFormatter.format(stats.averageBasket.toMajorUnits()),
               ),
+              _buildDetailRow('Points de fidélité', '${stats.loyaltyBalance}'),
+              _buildDetailRow('Adresses enregistrées', '${stats.addressesCount}'),
               _buildDetailRow(
                 'Membre depuis',
                 '${client.createdAt.day}/${client.createdAt.month}/${client.createdAt.year}',
@@ -575,7 +543,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            const Text('Raison de la suspension (optionnel):'),
+            const Text('Raison de la suspension :'),
             const SizedBox(height: 8),
             TextField(
               controller: reasonController,
@@ -616,9 +584,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
       final clientService = context.read<ClientManagementService>();
       final success = await clientService.suspendClient(
         client.id,
-        reason: reasonController.text.trim().isEmpty
-            ? null
-            : reasonController.text.trim(),
+        reason: reasonController.text.trim(),
       );
 
       if (mounted && context.mounted) {
@@ -636,7 +602,15 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     }
   }
 
-  void _showLoyaltyPoints(User client) {
+  Future<void> _showLoyaltyPoints(User client) async {
+    // Le solde vient du serveur : la liste ne le porte pas, et l'afficher
+    // depuis une valeur locale montrerait un chiffre d'une autre heure.
+    final stats = await context.read<ClientManagementService>().getClientStats(
+          client.id,
+        );
+
+    if (!mounted) return;
+
     DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -652,12 +626,12 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              '${client.loyaltyPoints} points',
+              '${stats?.loyaltyBalance ?? 0} points',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             const SizedBox(height: 8),
             Text(
-              'Niveau: ${client.stats?.level ?? 1}',
+              'Cumulés depuis l\'ouverture : ${stats?.loyaltyLifetimeEarned ?? 0}',
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ],
@@ -678,11 +652,11 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     final clients = clientService.clients;
 
     final csvBuffer = StringBuffer();
-    csvBuffer.writeln('ID,Nom,Email,Téléphone,Points,Date Création');
+    csvBuffer.writeln('ID,Nom,Email,Téléphone,Actif,Date Création');
 
     for (final client in clients) {
       csvBuffer.writeln(
-          '${client.id},"${client.name}","${client.email}","${client.phone}",${client.loyaltyPoints},${client.createdAt.toIso8601String()}');
+          '${client.id},"${client.name}","${client.email}","${client.phone}",${client.isActive},${client.createdAt.toIso8601String()}');
     }
 
     final csvContent = csvBuffer.toString();

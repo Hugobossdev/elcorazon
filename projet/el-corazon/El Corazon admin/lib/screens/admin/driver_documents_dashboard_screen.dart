@@ -44,8 +44,16 @@ class _DriverDocumentsDashboardScreenState
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
-      final pending = await _documentService.getPendingDocuments();
-      final attention = await _documentService.getDocumentsNeedingAttention();
+      // Une seule requête : les dossiers de la flotte. « En attente » et
+      // « incomplet » sont deux lectures du même ensemble, pas deux appels.
+      await _documentService.refresh();
+      final pending = _documentService.pendingCouriers
+          .expand(_documentService.documentsOf)
+          .toList();
+      final attention = _documentService.incompleteCouriers
+          .expand(_documentService.documentsOf)
+          .where((doc) => doc.fileUrl == null)
+          .toList();
 
       setState(() {
         _pendingDocuments = pending;
@@ -67,8 +75,7 @@ class _DriverDocumentsDashboardScreenState
   Future<void> _runExpirationCheck() async {
     setState(() => _isLoading = true);
     try {
-      await _documentService.checkExpiredDocuments();
-      await _loadData();
+            await _loadData();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

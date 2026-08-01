@@ -67,7 +67,7 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
     final adminAuthService =
         Provider.of<AdminAuthService>(context, listen: false);
     final prefs = await adminAuthService.getSavedPreferences();
-    if (prefs != null && mounted) {
+    if (mounted) {
       setState(() {
         _emailController.text = prefs['email'] ?? '';
         _rememberMe = prefs['remember'] ?? false;
@@ -101,8 +101,10 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
       if (!mounted) return;
 
       if (success) {
-        // Les préférences sont déjà sauvegardées dans AdminAuthService.loginAdmin()
-        // si "Se souvenir de moi" est coché
+        await adminAuthService.saveEmailPreference(
+          _emailController.text.trim(),
+          remember: _rememberMe,
+        );
 
         // Navigation vers le dashboard
         Navigator.of(context).pushReplacementNamed('/admin-dashboard');

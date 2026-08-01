@@ -1,9 +1,22 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../utils/dialog_helper.dart';
+
 import '../../services/marketing_service.dart';
 import '../../ui/ui.dart';
+import '../../utils/dialog_helper.dart';
 
+/// Campagnes de notifications — rédiger, estimer, envoyer une fois.
+///
+/// L'écran avait trois onglets ; il en garde un. « Analytics » affichait des
+/// prévisions calculées dans le navigateur, avec un « niveau de confiance » qui
+/// ne mesurait rien ; « Clients » un « risque d'attrition » obtenu de la même
+/// façon, après avoir chargé l'historique de commandes de tous les clients sur
+/// un poste de travail. Les chiffres réels de l'exploitation sont dans l'écran
+/// Analytics, alimenté par `/analytics/reports/*`.
+///
+/// Ce qui reste est le geste métier : on écrit, on regarde combien de personnes
+/// c'est, on envoie — et une campagne envoyée ne se retouche plus.
 class MarketingScreen extends StatefulWidget {
   const MarketingScreen({super.key});
 
@@ -11,778 +24,470 @@ class MarketingScreen extends StatefulWidget {
   State<MarketingScreen> createState() => _MarketingScreenState();
 }
 
-class _MarketingScreenState extends State<MarketingScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
+class _MarketingScreenState extends State<MarketingScreen> {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<MarketingService>().initialize();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Marketing & Campagnes'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Theme.of(context).colorScheme.onPrimary,
-          labelColor: Theme.of(context).colorScheme.onPrimary,
-          unselectedLabelColor:
-              Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7),
-          tabs: const [
-            Tab(text: 'Campagnes'),
-            Tab(text: 'Analytics'),
-            Tab(text: 'Clients'),
-          ],
-        ),
+        title: const Text('Campagnes'),
+        backgroundColor: scheme.primary,
+        foregroundColor: scheme.onPrimary,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => context.read<MarketingService>().refresh(),
+            tooltip: 'Recharger',
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _ouvrirFormulaire(null),
+        icon: const Icon(Icons.add),
+        label: const Text('Rédiger'),
       ),
       body: Consumer<MarketingService>(
-        builder: (context, marketingService, child) {
-          if (!marketingService.isInitialized) {
+        builder: (context, service, child) {
+          if (service.isLoading && service.campaigns.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          return TabBarView(
-            controller: _tabController,
+          if (service.error != null && service.campaigns.isEmpty) {
+            return _Vide(
+              icone: Icons.lock_outline,
+              texte: service.error!,
+              action: service.refresh,
+            );
+          }
+
+          if (service.campaigns.isEmpty) {
+            return _Vide(
+              icone: Icons.campaign_outlined,
+              texte: 'Aucune campagne pour le moment.',
+              action: service.refresh,
+            );
+          }
+
+          return Column(
             children: [
-              _CampaignsTab(),
-              _AnalyticsTab(),
-              _CustomersTab(),
+              _bandeauCompteurs(service),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: service.campaigns.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) =>
+                      _carte(service, service.campaigns[index]),
+                ),
+              ),
             ],
           );
         },
       ),
     );
   }
-}
 
-class _CampaignsTab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Consumer<MarketingService>(
-      builder: (context, marketingService, child) {
-        final campaigns = marketingService.campaigns;
-
-        return Column(
-          children: [
-            _buildCampaignStats(context, campaigns),
-            Expanded(
-              child: campaigns.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.campaign,
-                            size: 64,
-                            color:
-                                scheme.onSurfaceVariant.withValues(alpha: 0.6),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Aucune campagne active',
-                            style: TextStyle(color: scheme.onSurfaceVariant),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: campaigns.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final campaign = campaigns[index];
-                        return _buildCampaignCard(context, campaign);
-                      },
-                    ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildCampaignStats(
-      BuildContext context, List<MarketingCampaign> campaigns) {
+  Widget _bandeauCompteurs(MarketingService service) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
-    final active = campaigns.where((c) => c.isActive).length;
-    final total = campaigns.length;
+    final destinataires = service.sent.fold<int>(
+      0,
+      (somme, campagne) => somme + campagne.recipientCount,
+    );
 
     return Container(
       padding: const EdgeInsets.all(16),
-      color: Theme.of(context).colorScheme.surface,
+      color: scheme.surfaceContainerHighest,
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          Expanded(
-            child: _buildStatItem(
-                context, 'Total', '$total', Icons.campaign, scheme.primary),
-          ),
-          Expanded(
-            child: _buildStatItem(
-                context, 'Actives', '$active', Icons.check_circle, sem.success),
-          ),
+          _compteur('Brouillons', '${service.drafts.length}', scheme.primary),
+          _compteur('Envoyées', '${service.sent.length}', sem.success),
+          // Notifications réellement écrites, hors comptes ayant refusé le
+          // marketing : compter la taille des segments donnerait un chiffre
+          // flatteur que personne n'a reçu.
+          _compteur('Destinataires', '$destinataires', scheme.tertiary),
         ],
       ),
     );
   }
 
-  Widget _buildStatItem(BuildContext context, String label, String value,
-      IconData icon, Color color) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: color, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  label,
-                  style:
-                      TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCampaignCard(BuildContext context, MarketingCampaign campaign) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      elevation: 2,
-      child: Container(
-        constraints: const BoxConstraints(
-          minHeight: 56,
-        ),
-        child: ListTile(
-          leading: CircleAvatar(
-            backgroundColor: _getCampaignColor(scheme, campaign.type)
-                .withValues(alpha: 0.15),
-            child: Icon(
-              _getCampaignIcon(campaign.type),
-              color: _getCampaignColor(scheme, campaign.type),
-            ),
-          ),
-          title: Text(
-            campaign.name,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                campaign.title,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  Chip(
-                    label: Text(
-                      campaign.type.toUpperCase(),
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                    backgroundColor: _getCampaignColor(scheme, campaign.type)
-                        .withValues(alpha: 0.1),
-                  ),
-                  const SizedBox(width: 4),
-                  Chip(
-                    label: Text(
-                      campaign.isActive ? 'Actif' : 'Inactif',
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                    backgroundColor: campaign.isActive
-                        ? scheme.secondaryContainer
-                        : scheme.surfaceContainerHighest,
-                  ),
-                ],
-              ),
-            ],
-          ),
-          trailing: Material(
-            color: scheme.surface,
-            child: InkWell(
-              onTap: () => _showCampaignOptions(context, campaign),
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
-                width: 40,
-                height: 40,
-                alignment: Alignment.center,
-                child: const Icon(Icons.more_vert, size: 24),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Color _getCampaignColor(ColorScheme scheme, String type) {
-    switch (type) {
-      case 'personalized':
-        return scheme.secondary;
-      case 'seasonal':
-        return scheme.tertiary;
-      case 'promotional':
-        return scheme.primary;
-      case 'retention':
-        return scheme.error;
-      default:
-        return scheme.onSurfaceVariant;
-    }
-  }
-
-  IconData _getCampaignIcon(String type) {
-    switch (type) {
-      case 'personalized':
-        return Icons.person;
-      case 'seasonal':
-        return Icons.event;
-      case 'promotional':
-        return Icons.local_offer;
-      case 'retention':
-        return Icons.loyalty;
-      default:
-        return Icons.campaign;
-    }
-  }
-
-  void _showCampaignOptions(BuildContext context, MarketingCampaign campaign) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => ListView(
-        padding: const EdgeInsets.all(16),
-        shrinkWrap: true,
-        children: [
-          Container(
-            constraints: const BoxConstraints(
-              minHeight: 56,
-            ),
-            child: ListTile(
-              leading: const Icon(Icons.visibility),
-              title: const Text('Voir les détails'),
-              onTap: () => _showCampaignDetails(context, campaign),
-            ),
-          ),
-          Container(
-            constraints: const BoxConstraints(
-              minHeight: 56,
-            ),
-            child: ListTile(
-              leading: Icon(campaign.isActive ? Icons.pause : Icons.play_arrow),
-              title: Text(campaign.isActive ? 'Désactiver' : 'Activer'),
-              onTap: () async {
-                Navigator.pop(context);
-                await _toggleCampaignStatus(context, campaign);
-              },
-            ),
-          ),
-          Container(
-            constraints: const BoxConstraints(
-              minHeight: 56,
-            ),
-            child: ListTile(
-              leading: const Icon(Icons.bar_chart),
-              title: const Text('Voir les métriques'),
-              onTap: () {
-                Navigator.pop(context);
-                _showCampaignMetrics(context, campaign);
-              },
-            ),
-          ),
-          Container(
-            constraints: const BoxConstraints(
-              minHeight: 56,
-            ),
-            child: ListTile(
-              leading: Icon(Icons.delete,
-                  color: Theme.of(context).colorScheme.error),
-              title: Text(
-                'Supprimer',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _confirmDeleteCampaign(context, campaign);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showCampaignDetails(BuildContext context, MarketingCampaign campaign) {
-    DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(campaign.name),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Type: ${campaign.type}'),
-              const SizedBox(height: 8),
-              Text('Titre: ${campaign.title}'),
-              const SizedBox(height: 8),
-              Text('Message: ${campaign.message}'),
-              const SizedBox(height: 8),
-              Text('Cible: ${campaign.targetUserIds.length} utilisateurs'),
-              const SizedBox(height: 8),
-              Text('Début: ${_formatDate(campaign.startDate)}'),
-              const SizedBox(height: 8),
-              Text('Fin: ${_formatDate(campaign.endDate)}'),
-              const SizedBox(height: 8),
-              Text('Statut: ${campaign.isActive ? "Actif" : "Inactif"}'),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
-
-  Future<void> _toggleCampaignStatus(
-      BuildContext context, MarketingCampaign campaign) async {
-    final marketingService =
-        Provider.of<MarketingService>(context, listen: false);
-    final newStatus = !campaign.isActive;
-
-    try {
-      final success = await marketingService.updateCampaign(
-        campaign.id,
-        {'is_active': newStatus},
-      );
-
-      if (success && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              newStatus
-                  ? 'Campagne activée avec succès'
-                  : 'Campagne désactivée avec succès',
-            ),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-          ),
-        );
-      } else if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Erreur lors de la mise à jour de la campagne'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
-    }
-  }
-
-  void _showCampaignMetrics(BuildContext context, MarketingCampaign campaign) {
-    final marketingService =
-        Provider.of<MarketingService>(context, listen: false);
-    final performance = marketingService.getCampaignPerformance(campaign.id);
-
-    DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Métriques - ${campaign.name}'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildMetricRow(
-                  'Notifications envoyées', '${performance['sent']}'),
-              const SizedBox(height: 8),
-              _buildMetricRow('Clics', '${performance['clicks']}'),
-              const SizedBox(height: 8),
-              _buildMetricRow('Conversions', '${performance['conversions']}'),
-              const SizedBox(height: 8),
-              _buildMetricRow(
-                'Taux de clic',
-                '${performance['clickRate']}%',
-              ),
-              const SizedBox(height: 8),
-              _buildMetricRow(
-                'Taux de conversion',
-                '${performance['conversionRate']}%',
-              ),
-              const SizedBox(height: 8),
-              _buildMetricRow(
-                'Statut',
-                performance['isActive'] ? 'Actif' : 'Inactif',
-              ),
-              const SizedBox(height: 8),
-              _buildMetricRow(
-                'Jours restants',
-                '${performance['daysRemaining']}',
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMetricRow(String label, String value) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _compteur(String libelle, String valeur, Color couleur) {
+    return Column(
       children: [
         Text(
-          label,
-          style: const TextStyle(fontWeight: FontWeight.w500),
+          valeur,
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            color: couleur,
+          ),
         ),
-        Text(
-          value,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
+        const SizedBox(height: 2),
+        Text(libelle, style: Theme.of(context).textTheme.bodySmall),
       ],
     );
   }
 
-  void _confirmDeleteCampaign(
-      BuildContext context, MarketingCampaign campaign) {
-    DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmer la suppression'),
-        content: Text(
-          'Êtes-vous sûr de vouloir supprimer la campagne "${campaign.name}" ? Cette action est irréversible.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _deleteCampaign(context, campaign);
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Theme.of(context).colorScheme.error,
-            ),
-            child: const Text('Supprimer'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _deleteCampaign(
-      BuildContext context, MarketingCampaign campaign) async {
-    final marketingService =
-        Provider.of<MarketingService>(context, listen: false);
-
-    try {
-      final success = await marketingService.deleteCampaign(campaign.id);
-
-      if (success && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Campagne supprimée avec succès'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-          ),
-        );
-      } else if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Erreur lors de la suppression de la campagne'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
-    }
-  }
-}
-
-class _AnalyticsTab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
+  Widget _carte(MarketingService service, eccore.Campaign campagne) {
     final scheme = Theme.of(context).colorScheme;
-    return Consumer<MarketingService>(
-      builder: (context, marketingService, child) {
-        final analytics = marketingService.analytics;
+    final sem = AdminColorTokens.semantic(scheme);
+    final estimation = service.knownAudience(campagne.id);
 
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: analytics.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final analytic = analytics[index];
-            return Card(
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: scheme.primary.withValues(alpha: 0.15),
-                  child: Icon(Icons.insights, color: scheme.primary),
-                ),
-                title: Text(analytic.type),
-                subtitle: Text(
-                    'Confiance: ${(analytic.confidence * 100).toStringAsFixed(1)}%'),
-                trailing: Material(
-                  color: scheme.surface,
-                  child: InkWell(
-                    onTap: () => _showAnalyticDetails(context, analytic),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.arrow_forward, size: 24),
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    campagne.title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
                     ),
                   ),
                 ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showAnalyticDetails(
-      BuildContext context, PredictiveAnalytics analytic) {
-    DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(analytic.type),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                  'Confiance: ${(analytic.confidence * 100).toStringAsFixed(1)}%'),
-              const SizedBox(height: 16),
-              const Text(
-                'Prédictions:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              ...analytic.predictions.entries.map((entry) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text('${entry.key}: ${entry.value}'),
-                  )),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CustomersTab extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final sem = AdminColorTokens.semantic(scheme);
-    return Consumer<MarketingService>(
-      builder: (context, marketingService, child) {
-        final insights = marketingService.customerInsights;
-
-        if (insights.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.people,
-                  size: 64,
-                  color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Aucune donnée client disponible',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
+                Chip(
+                  label: Text(campagne.isSent ? 'Envoyée' : 'Brouillon'),
+                  visualDensity: VisualDensity.compact,
+                  backgroundColor: campagne.isSent
+                      ? sem.success.withValues(alpha: 0.15)
+                      : scheme.surfaceContainerHighest,
                 ),
               ],
             ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: insights.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) {
-            final entry = insights.entries.elementAt(index);
-            final insight = entry.value;
-            return Card(
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: insight.churnRisk > 0.7
-                      ? scheme.error.withValues(alpha: 0.15)
-                      : sem.success.withValues(alpha: 0.15),
-                  child: Icon(
-                    insight.churnRisk > 0.7 ? Icons.warning : Icons.favorite,
-                    color: insight.churnRisk > 0.7 ? scheme.error : sem.success,
-                  ),
-                ),
-                title: Text('Client ${entry.key.substring(0, 8)}'),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                        'Risque d\'abandon: ${(insight.churnRisk * 100).toStringAsFixed(0)}%'),
-                    if (insight.recommendedActions.isNotEmpty)
-                      Text(
-                        'Actions: ${insight.recommendedActions.first}',
-                        style: TextStyle(
-                          color: scheme.onSurfaceVariant,
-                          fontSize: 12,
-                        ),
-                      ),
-                  ],
-                ),
-                trailing: Material(
-                  color: scheme.surface,
-                  child: InkWell(
-                    onTap: () => _showCustomerDetails(context, entry),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      alignment: Alignment.center,
-                      child: const Icon(Icons.arrow_forward, size: 24),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showCustomerDetails(
-      BuildContext context, MapEntry<String, CustomerInsight> entry) {
-    final insight = entry.value;
-    DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Client ${entry.key.substring(0, 8)}'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  const Text('Risque d\'abandon: '),
+            const SizedBox(height: 8),
+            Text(campagne.body, maxLines: 3, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Icon(Icons.group_outlined, size: 16, color: scheme.outline),
+                Text(campagne.audienceLabel),
+                if (campagne.isSent)
                   Text(
-                    '${(insight.churnRisk * 100).toStringAsFixed(0)}%',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: insight.churnRisk > 0.7
-                          ? Theme.of(context).colorScheme.error
-                          : AdminColorTokens.semantic(
-                              Theme.of(context).colorScheme,
-                            ).success,
-                    ),
+                    '· ${campagne.recipientCount} destinataires · '
+                    '${_date(campagne.sentAt)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  )
+                else if (estimation != null)
+                  Text(
+                    '· environ $estimation personnes',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
+            ),
+            if (campagne.createdByEmail != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Rédigée par ${campagne.createdByEmail}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            if (campagne.isDraft) ...[
+              const Divider(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _estimer(service, campagne),
+                    icon: const Icon(Icons.people_outline),
+                    label: const Text('Estimer'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    onPressed: () => _ouvrirFormulaire(campagne),
+                    icon: const Icon(Icons.edit),
+                    label: const Text('Modifier'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: () => _envoyer(service, campagne),
+                    icon: const Icon(Icons.send),
+                    label: const Text('Envoyer'),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              const Text(
-                'Actions recommandées:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              ...insight.recommendedActions.map((action) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text('• $action'),
-                  )),
-              const SizedBox(height: 16),
-              const Text(
-                'Préférences:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              ...insight.preferences.entries.map((pref) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text('${pref.key}: ${pref.value}'),
-                  )),
             ],
-          ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------------------- actions
+
+  Future<void> _estimer(
+    MarketingService service,
+    eccore.Campaign campagne,
+  ) async {
+    final messager = ScaffoldMessenger.of(context);
+    final compte = await service.estimateAudience(campagne.id);
+
+    if (!mounted) return;
+    messager.showSnackBar(
+      SnackBar(
+        content: Text(
+          compte == null
+              ? service.error ?? 'Estimation indisponible'
+              // Majorant : le consentement au marketing ne se vérifie qu'à
+              // l'écriture de chaque notification.
+              : 'Cette campagne viserait au plus $compte personnes.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _envoyer(
+    MarketingService service,
+    eccore.Campaign campagne,
+  ) async {
+    final compte = service.knownAudience(campagne.id);
+    final confirme = await DialogHelper.showSafeDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Envoyer la campagne'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              campagne.title,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text('Segment : ${campagne.audienceLabel}'),
+            if (compte != null) Text('Environ $compte personnes'),
+            const SizedBox(height: 12),
+            const Text(
+              "L'envoi est définitif : le message ne pourra plus être "
+              'corrigé, et une campagne ne part qu'
+              'une fois.',
+            ),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
           ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Envoyer'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirme != true || !mounted) return;
+
+    final messager = ScaffoldMessenger.of(context);
+    final ok = await service.sendCampaign(campagne.id);
+
+    if (!mounted) return;
+    messager.showSnackBar(
+      SnackBar(
+        content: Text(ok ? 'Campagne envoyée' : service.error ?? 'Envoi refusé'),
+      ),
+    );
+  }
+
+  Future<void> _ouvrirFormulaire(eccore.Campaign? campagne) async {
+    final service = context.read<MarketingService>();
+    final titre = TextEditingController(text: campagne?.title ?? '');
+    final corps = TextEditingController(text: campagne?.body ?? '');
+    final jours = TextEditingController(
+      text: '${campagne?.segmentDays ?? 30}',
+    );
+    var segment = campagne?.audience ?? eccore.CampaignAudience.allCustomers;
+    final formKey = GlobalKey<FormState>();
+
+    final valide = await DialogHelper.showSafeDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(
+            campagne == null ? 'Nouvelle campagne' : 'Modifier le brouillon',
+          ),
+          content: SizedBox(
+            width: 480,
+            child: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextFormField(
+                      controller: titre,
+                      maxLength: 120,
+                      decoration: const InputDecoration(labelText: 'Titre *'),
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Le titre est requis'
+                          : null,
+                    ),
+                    TextFormField(
+                      controller: corps,
+                      maxLines: 4,
+                      decoration: const InputDecoration(labelText: 'Message *'),
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'Le message est requis'
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: segment,
+                      decoration: const InputDecoration(labelText: 'Segment *'),
+                      // Liste fermée, celle du serveur : un ciblage libre est
+                      // une requête que personne n'a relue avant qu'elle ne
+                      // parte à des milliers de gens.
+                      items: [
+                        for (final valeur in eccore.CampaignAudience.values)
+                          DropdownMenuItem(
+                            value: valeur,
+                            child: Text(_libelleSegment(valeur)),
+                          ),
+                      ],
+                      onChanged: (valeur) => setDialogState(() {
+                        if (valeur != null) segment = valeur;
+                      }),
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: jours,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Fenêtre du segment (jours)',
+                        helperText:
+                            'Sert aux segments « récemment » et « sans commande '
+                            'récente »',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() ?? false) {
+                  Navigator.of(context).pop(true);
+                }
+              },
+              child: Text(campagne == null ? 'Créer' : 'Enregistrer'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (valide != true || !mounted) return;
+
+    final messager = ScaffoldMessenger.of(context);
+    final fenetre = int.tryParse(jours.text) ?? 30;
+    final ok = campagne == null
+        ? await service.createCampaign(
+                title: titre.text.trim(),
+                body: corps.text.trim(),
+                audience: segment,
+                segmentDays: fenetre,
+              ) !=
+              null
+        : await service.updateCampaign(
+            id: campagne.id,
+            title: titre.text.trim(),
+            body: corps.text.trim(),
+            audience: segment,
+            segmentDays: fenetre,
+          );
+
+    titre.dispose();
+    corps.dispose();
+    jours.dispose();
+
+    if (!mounted) return;
+    messager.showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? (campagne == null
+                    ? 'Brouillon créé — il ne part pas tant que vous ne '
+                          "l'envoyez pas"
+                    : 'Brouillon mis à jour')
+              : service.error ?? 'Opération refusée',
+        ),
+      ),
+    );
+  }
+
+  String _libelleSegment(String valeur) {
+    switch (valeur) {
+      case eccore.CampaignAudience.allCustomers:
+        return 'Tous les clients';
+      case eccore.CampaignAudience.couriers:
+        return 'Tous les livreurs';
+      case eccore.CampaignAudience.activeCustomers:
+        return 'Clients ayant commandé récemment';
+      case eccore.CampaignAudience.lapsedCustomers:
+        return 'Clients sans commande récente';
+      default:
+        return valeur;
+    }
+  }
+
+  String _date(DateTime? date) {
+    if (date == null) return '—';
+    final local = date.toLocal();
+    return '${local.day}/${local.month}/${local.year}';
+  }
+}
+
+class _Vide extends StatelessWidget {
+  const _Vide({
+    required this.icone,
+    required this.texte,
+    required this.action,
+  });
+
+  final IconData icone;
+  final String texte;
+  final VoidCallback action;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icone, size: 56, color: scheme.outline),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(texte, textAlign: TextAlign.center),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton(onPressed: action, child: const Text('Recharger')),
         ],
       ),
     );

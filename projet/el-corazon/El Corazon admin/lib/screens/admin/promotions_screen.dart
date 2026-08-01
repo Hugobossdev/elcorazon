@@ -162,7 +162,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            promotion.name,
+                            promotion.code,
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -218,7 +218,7 @@ class _PromotionsScreenState extends State<PromotionsScreen>
                   children: [
                     _buildInfoChip(
                       Icons.local_offer,
-                      promotion.promoCode,
+                      promotion.code,
                       scheme.tertiary,
                     ),
                     const SizedBox(width: 8),
@@ -316,15 +316,22 @@ class _PromotionsScreenState extends State<PromotionsScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(promotion.name),
+        title: Text(promotion.code),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildDetailRow('Description', promotion.description),
-              _buildDetailRow('Code promo', promotion.promoCode),
               _buildDetailRow('Type', promotion.discountType),
+              _buildDetailRow(
+                'Portée',
+                promotion.isNational
+                    ? 'National — tous les établissements'
+                    : promotion.restaurantSlug!,
+              ),
+              if (promotion.isPersonal)
+                _buildDetailRow('Nominatif', promotion.ownerEmail!),
               _buildDetailRow('Valeur', _getDiscountText(promotion)),
               _buildDetailRow(
                 'Montant minimum',
@@ -419,7 +426,6 @@ class _PromotionFormDialog extends StatefulWidget {
 
 class _PromotionFormDialogState extends State<_PromotionFormDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
   final _descController = TextEditingController();
   final _codeController = TextEditingController();
   final _valueController = TextEditingController();
@@ -437,9 +443,8 @@ class _PromotionFormDialogState extends State<_PromotionFormDialog> {
     super.initState();
     final p = widget.promotion;
     if (p != null) {
-      _nameController.text = p.name;
       _descController.text = p.description;
-      _codeController.text = p.promoCode;
+      _codeController.text = p.code;
       _valueController.text = p.discountValue.toString();
       _minOrderController.text = p.minOrderAmount.toString();
       _maxDiscountController.text = p.maxDiscount?.toString() ?? '';
@@ -453,7 +458,6 @@ class _PromotionFormDialogState extends State<_PromotionFormDialog> {
 
   @override
   void dispose() {
-    _nameController.dispose();
     _descController.dispose();
     _codeController.dispose();
     _valueController.dispose();
@@ -505,16 +509,10 @@ class _PromotionFormDialogState extends State<_PromotionFormDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      TextFormField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Nom *',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (v) =>
-                            v == null || v.isEmpty ? 'Nom requis' : null,
-                      ),
-                      const SizedBox(height: 16),
+                      // Le champ « Nom » a disparu : un code promotionnel n'en
+                      // a pas côté serveur. Son identité est le **code** — ce
+                      // que le client saisit — et sa description l'explique. Un
+                      // troisième libellé n'aurait été montré à personne.
                       TextFormField(
                         controller: _descController,
                         decoration: const InputDecoration(
@@ -721,9 +719,8 @@ class _PromotionFormDialogState extends State<_PromotionFormDialog> {
     if (widget.promotion == null) {
       // Créer une nouvelle promotion
       final promotion = await promoService.createPromotion(
-        name: _nameController.text,
+        code: _codeController.text.toUpperCase(),
         description: _descController.text,
-        promoCode: _codeController.text.toUpperCase(),
         discountType: _type,
         discountValue: value,
         minOrderAmount: minOrder,
@@ -731,7 +728,6 @@ class _PromotionFormDialogState extends State<_PromotionFormDialog> {
         usageLimit: usageLimit,
         startDate: _startDate,
         endDate: _endDate,
-        isActive: _isActive,
       );
 
       if (promotion != null && mounted && context.mounted) {
@@ -752,19 +748,18 @@ class _PromotionFormDialogState extends State<_PromotionFormDialog> {
       }
     } else {
       // Mettre à jour la promotion existante
-      final success = await promoService.updatePromotion(widget.promotion!.id, {
-        'name': _nameController.text,
-        'description': _descController.text,
-        'promo_code': _codeController.text.toUpperCase(),
-        'discount_type': _type,
-        'discount_value': value,
-        'min_order_amount': minOrder,
-        'max_discount': maxDiscount,
-        'usage_limit': usageLimit,
-        'start_date': _startDate.toIso8601String(),
-        'end_date': _endDate.toIso8601String(),
-        'is_active': _isActive,
-      });
+      final success = await promoService.updatePromotion(
+        id: widget.promotion!.id,
+        description: _descController.text,
+        discountType: _type,
+        discountValue: value,
+        minOrderAmount: minOrder,
+        maxDiscount: maxDiscount,
+        usageLimit: usageLimit,
+        startDate: _startDate,
+        endDate: _endDate,
+        isActive: _isActive,
+      );
 
       if (success && mounted && context.mounted) {
         Navigator.pop(context);

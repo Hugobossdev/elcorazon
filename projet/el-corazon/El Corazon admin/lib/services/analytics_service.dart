@@ -1,490 +1,299 @@
-import 'package:flutter/material.dart';
-import 'dart:async';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:flutter/foundation.dart';
 
+import 'admin_auth_service.dart';
+
+/// Rapports d'exploitation — `/analytics/reports/*` (Phase 6).
+///
+/// Ce service ne calcule plus rien. L'ancienne version téléchargeait *toutes*
+/// les commandes, tous les comptes, tous les articles et tous les livreurs pour
+/// les additionner dans le navigateur, avec des pauses de 300 ms entre les
+/// requêtes et trois tentatives en cas d'échec — un aveu que l'appel était trop
+/// lourd. Le tableau de bord ralentissait à mesure que la plateforme
+/// grandissait, et ses totaux ne portaient que sur ce que la pagination avait
+/// bien voulu rendre.
+///
+/// Les montants arrivent en **unité mineure** et ne servent qu'à l'affichage :
+/// un rapport se trace, il ne se refacture pas.
+///
+/// Les méthodes rendent des `Map` parce que c'est la forme qu'attendent les
+/// écrans de graphiques ; ce qui change, c'est que les clés sont désormais
+/// remplies par le serveur, une requête par rapport.
 class AnalyticsService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
-  bool _isLoading = false;
+  eccore.ReportingRepository get _reports =>
+      eccore.ReportingRepository(apiClient: AdminAuthService().apiClient);
+
   Map<String, dynamic> _analyticsData = {};
+  bool _isLoading = false;
   String? _error;
 
-  bool get isLoading => _isLoading;
   Map<String, dynamic> get analyticsData => _analyticsData;
+  bool get isLoading => _isLoading;
   String? get error => _error;
 
-  void _setLoading(bool value) {
-    _isLoading = value;
-    Future.microtask(() => notifyListeners());
-  }
-
-  /// Récupérer toutes les données analytiques
+  /// Charge en une passe les trois séries du tableau de bord.
   Future<void> loadAnalyticsData({
     required DateTime startDate,
     required DateTime endDate,
   }) async {
     if (_isLoading) return;
-    
-    _setLoading(true);
+
+    _isLoading = true;
     _error = null;
-    
-    int retryCount = 0;
-    const maxRetries = 3;
-    
-    while (retryCount < maxRetries) {
-      try {
-        if (retryCount > 0) {
-          await Future.delayed(Duration(milliseconds: 1000 * retryCount));
-        }
+    notifyListeners();
 
-        // 1. Revenus
-        final revenueData = await _supabase
-            .from('orders')
-            .select('total, created_at')
-            .eq('status', 'delivered')
-            .gte('created_at', startDate.toIso8601String())
-            .lte('created_at', endDate.toIso8601String());
+    try {
+      final revenus = await _reports.revenue(start: startDate, end: endDate);
+      final statuts = await _reports.ordersByStatus(
+        start: startDate,
+        end: endDate,
+      );
+      final categories = await _reports.categories(
+        start: startDate,
+        end: endDate,
+      );
 
-        // Pause pour laisser respirer la connexion
-        await Future.delayed(const Duration(milliseconds: 300));
-
-        // 2. Commandes
-        final ordersData = await _supabase
-            .from('orders')
-            .select('status, created_at')
-            .gte('created_at', startDate.toIso8601String())
-            .lte('created_at', endDate.toIso8601String());
-
-        // Pause
-        await Future.delayed(const Duration(milliseconds: 300));
-
-        // 3. Catégories
-        final categoryData = await _supabase
-            .from('order_items')
-            .select('quantity, menu_items(category_id, menu_categories(name))')
-            .gte('created_at', startDate.toIso8601String())
-            .lte('created_at', endDate.toIso8601String());
-
-        // Traitement des données
-        final revenueResult = _processRevenueData(revenueData, startDate, endDate);
-        final orderResult = _processOrderData(ordersData, startDate, endDate);
-        final categoryResult = _processCategoryData(categoryData, startDate, endDate);
-
-        _analyticsData = {
-          'revenue': revenueResult,
-          'orders': orderResult,
-          'categories': categoryResult,
-        };
-        
-        _setLoading(false);
-        return;
-      } catch (e) {
-        retryCount++;
-        debugPrint('Error fetching all analytics (Attempt $retryCount/$maxRetries): $e');
-        
-        if (retryCount >= maxRetries) {
-          _error = 'Impossible de récupérer les données: ${e.toString()}';
-          _setLoading(false);
-        }
-      }
+      _analyticsData = {
+        'revenue': _serieRevenus(revenus),
+        'orders': _serieCommandes(revenus, statuts),
+        'categories': _serieCategories(categories),
+      };
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Analytics : rapports indisponibles — ${e.code}');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
   }
 
-  /// Ancienne méthode conservée pour compatibilité mais dépréciée
-  Future<Map<String, dynamic>> fetchAllAnalytics({
-    required DateTime startDate,
-    required DateTime endDate,
+  /// Chiffres de tête.
+  ///
+  /// La fenêtre est facultative parce que l'écran qui les affiche n'en choisit
+  /// pas : à défaut, les trente derniers jours. Sans fenêtre du tout, le
+  /// serveur agrégerait toute la vie de la plateforme à chaque affichage.
+  Future<Map<String, dynamic>> getGeneralStats({
+    DateTime? startDate,
+    DateTime? endDate,
   }) async {
-    await loadAnalyticsData(startDate: startDate, endDate: endDate);
-    if (_error != null) {
-      return {'error': _error};
+    final fin = endDate ?? DateTime.now();
+    final debut = startDate ?? fin.subtract(const Duration(days: 30));
+
+    try {
+      final apercu = await _reports.overview(start: debut, end: fin);
+      return {
+        'orders': {
+          'total': apercu.ordersCount,
+          'completed': apercu.ordersDelivered,
+          'cancelled': apercu.ordersCancelled,
+          'completionRate': apercu.completionRate,
+        },
+        'revenue': {
+          'total': _majeur(apercu.revenueMinor),
+          'averageOrderValue': _majeur(apercu.averageBasketMinor),
+        },
+        // Les comptes du personnel ne sont plus comptés ici : c'est une donnée
+        // d'administration, pas un chiffre de vente, et elle a son écran.
+        'users': {'total': apercu.customersCount},
+        'products': {
+          'total': apercu.menuItemsTotal,
+          'available': apercu.menuItemsAvailable,
+          'availabilityRate': apercu.menuItemsTotal == 0
+              ? 0.0
+              : apercu.menuItemsAvailable * 100 / apercu.menuItemsTotal,
+        },
+        'drivers': {'active': apercu.couriersOnline},
+      };
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Analytics : aperçu indisponible — ${e.code}');
+      notifyListeners();
+      return _apercuVide();
     }
-    return _analyticsData;
   }
 
-  Map<String, dynamic> _processRevenueData(List<dynamic> data, DateTime startDate, DateTime endDate) {
-    double totalRevenue = 0.0;
-    final Map<String, double> dailyRevenue = {};
-
-    for (final order in data) {
-      final total = (order['total'] as num?)?.toDouble() ?? 0.0;
-      totalRevenue += total;
-
-      final date = DateTime.parse(order['created_at']).toIso8601String().split('T')[0];
-      dailyRevenue[date] = (dailyRevenue[date] ?? 0.0) + total;
-    }
-
-    return {
-      'totalRevenue': totalRevenue,
-      'dailyRevenue': dailyRevenue,
-      'period': {
-        'start': startDate.toIso8601String(),
-        'end': endDate.toIso8601String(),
-      },
-    };
-  }
-
-  Map<String, dynamic> _processOrderData(List<dynamic> data, DateTime startDate, DateTime endDate) {
-    final Map<String, int> statusCounts = {};
-    final Map<String, int> dailyOrders = {};
-
-    for (final order in data) {
-      final status = order['status'] as String;
-      statusCounts[status] = (statusCounts[status] ?? 0) + 1;
-
-      final date = DateTime.parse(order['created_at']).toIso8601String().split('T')[0];
-      dailyOrders[date] = (dailyOrders[date] ?? 0) + 1;
-    }
-
-    return {
-      'totalOrders': data.length,
-      'statusCounts': statusCounts,
-      'dailyOrders': dailyOrders,
-      'period': {
-        'start': startDate.toIso8601String(),
-        'end': endDate.toIso8601String(),
-      },
-    };
-  }
-
-  Map<String, dynamic> _processCategoryData(List<dynamic> data, DateTime startDate, DateTime endDate) {
-    final Map<String, int> categoryCounts = {};
-    final Map<String, double> categoryRevenue = {};
-
-    for (final item in data) {
-      final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
-      final menuItem = item['menu_items'] as Map<String, dynamic>?;
-      final category = menuItem?['menu_categories'] as Map<String, dynamic>?;
-      final categoryName = category?['name'] as String? ?? 'Inconnue';
-
-      categoryCounts[categoryName] = (categoryCounts[categoryName] ?? 0) + quantity;
-      categoryRevenue[categoryName] = (categoryRevenue[categoryName] ?? 0.0) + 0.0;
-    }
-
-    return {
-      'categoryCounts': categoryCounts,
-      'categoryRevenue': categoryRevenue,
-      'period': {
-        'start': startDate.toIso8601String(),
-        'end': endDate.toIso8601String(),
-      },
-    };
-  }
-
-  /// Obtenir les revenus par période
   Future<Map<String, dynamic>> getRevenueAnalytics({
     required DateTime startDate,
     required DateTime endDate,
   }) async {
     try {
-      _setLoading(true);
-
-      // Ajouter une pause pour éviter les problèmes de concurrence lors de l'initialisation
-      await Future.delayed(const Duration(milliseconds: 100));
-
-      final response = await _supabase
-          .from('orders')
-          .select('total, created_at')
-          .eq('status', 'delivered')
-          .gte('created_at', startDate.toIso8601String())
-          .lte('created_at', endDate.toIso8601String());
-
-      double totalRevenue = 0.0;
-      final Map<String, double> dailyRevenue = {};
-
-      for (final order in response) {
-        final total = (order['total'] as num?)?.toDouble() ?? 0.0;
-        totalRevenue += total;
-
-        final date =
-            DateTime.parse(order['created_at']).toIso8601String().split('T')[0];
-        dailyRevenue[date] = (dailyRevenue[date] ?? 0.0) + total;
-      }
-
-      _setLoading(false);
-
-      return {
-        'totalRevenue': totalRevenue,
-        'dailyRevenue': dailyRevenue,
-        'period': {
-          'start': startDate.toIso8601String(),
-          'end': endDate.toIso8601String(),
-        },
-      };
-    } catch (e) {
-      debugPrint('Error getting revenue analytics: $e');
-      _setLoading(false);
-      return {
-        'totalRevenue': 0.0,
-        'dailyRevenue': <String, double>{},
-        'period': {
-          'start': startDate.toIso8601String(),
-          'end': endDate.toIso8601String(),
-        },
-      };
+      return _serieRevenus(
+        await _reports.revenue(start: startDate, end: endDate),
+      );
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Analytics : chiffre d\'affaires indisponible — ${e.code}');
+      return _serieRevenus(const []);
     }
   }
 
-  /// Obtenir les statistiques des commandes
   Future<Map<String, dynamic>> getOrderAnalytics({
     required DateTime startDate,
     required DateTime endDate,
   }) async {
     try {
-      _setLoading(true);
-
-      // Pause pour décaler l'appel réseau
-      await Future.delayed(const Duration(milliseconds: 300));
-
-      final response = await _supabase
-          .from('orders')
-          .select('status, created_at')
-          .gte('created_at', startDate.toIso8601String())
-          .lte('created_at', endDate.toIso8601String());
-
-      final Map<String, int> statusCounts = {};
-      final Map<String, int> dailyOrders = {};
-
-      for (final order in response) {
-        final status = order['status'] as String;
-        statusCounts[status] = (statusCounts[status] ?? 0) + 1;
-
-        final date =
-            DateTime.parse(order['created_at']).toIso8601String().split('T')[0];
-        dailyOrders[date] = (dailyOrders[date] ?? 0) + 1;
-      }
-
-      _setLoading(false);
-
-      return {
-        'totalOrders': response.length,
-        'statusCounts': statusCounts,
-        'dailyOrders': dailyOrders,
-        'period': {
-          'start': startDate.toIso8601String(),
-          'end': endDate.toIso8601String(),
-        },
-      };
-    } catch (e) {
-      debugPrint('Error getting order analytics: $e');
-      _setLoading(false);
-      return {
-        'totalOrders': 0,
-        'statusCounts': <String, int>{},
-        'dailyOrders': <String, int>{},
-        'period': {
-          'start': startDate.toIso8601String(),
-          'end': endDate.toIso8601String(),
-        },
-      };
+      final revenus = await _reports.revenue(start: startDate, end: endDate);
+      final statuts = await _reports.ordersByStatus(
+        start: startDate,
+        end: endDate,
+      );
+      return _serieCommandes(revenus, statuts);
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Analytics : commandes indisponibles — ${e.code}');
+      return _serieCommandes(const [], const []);
     }
   }
 
-  /// Obtenir les statistiques des catégories
   Future<Map<String, dynamic>> getCategoryAnalytics({
     required DateTime startDate,
     required DateTime endDate,
   }) async {
     try {
-      _setLoading(true);
-
-      // Pause pour décaler l'appel réseau
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      final response = await _supabase
-          .from('order_items')
-          .select('quantity, menu_items(category_id, menu_categories(name))')
-          .gte('created_at', startDate.toIso8601String())
-          .lte('created_at', endDate.toIso8601String());
-
-      final Map<String, int> categoryCounts = {};
-      final Map<String, double> categoryRevenue = {};
-
-      for (final item in response) {
-        final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
-        final menuItem = item['menu_items'] as Map<String, dynamic>?;
-        final category = menuItem?['menu_categories'] as Map<String, dynamic>?;
-        final categoryName = category?['name'] as String? ?? 'Inconnue';
-
-        categoryCounts[categoryName] =
-            (categoryCounts[categoryName] ?? 0) + quantity;
-        // Note: Pour le revenu par catégorie, il faudrait récupérer le prix des items
-        categoryRevenue[categoryName] =
-            (categoryRevenue[categoryName] ?? 0.0) + 0.0;
-      }
-
-      _setLoading(false);
-
-      return {
-        'categoryCounts': categoryCounts,
-        'categoryRevenue': categoryRevenue,
-        'period': {
-          'start': startDate.toIso8601String(),
-          'end': endDate.toIso8601String(),
-        },
-      };
-    } catch (e) {
-      debugPrint('Error getting category analytics: $e');
-      _setLoading(false);
-      return {
-        'categoryCounts': <String, int>{},
-        'categoryRevenue': <String, double>{},
-        'period': {
-          'start': startDate.toIso8601String(),
-          'end': endDate.toIso8601String(),
-        },
-      };
+      return _serieCategories(
+        await _reports.categories(start: startDate, end: endDate),
+      );
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Analytics : catégories indisponibles — ${e.code}');
+      return _serieCategories(const []);
     }
   }
 
-  /// Obtenir les statistiques des livreurs
+  /// Articles les plus vendus sur la période.
+  ///
+  /// L'agrégation est côté serveur : l'ancienne version passait par une
+  /// fonction de base de données appelée depuis le navigateur, avec les mêmes
+  /// clés que ci-dessous — elles sont conservées pour l'écran, mais remplies
+  /// par `/analytics/reports/top-products/`.
+  Future<List<Map<String, dynamic>>> getTopSellingItems({
+    DateTime? startDate,
+    DateTime? endDate,
+    int limit = 5,
+  }) async {
+    final fin = endDate ?? DateTime.now();
+    final debut = startDate ?? fin.subtract(const Duration(days: 30));
+
+    try {
+      final lignes = await _reports.topProducts(
+        start: debut,
+        end: fin,
+        limit: limit,
+      );
+      return [
+        for (final ligne in lignes)
+          {
+            'menu_item_id': ligne.menuItemId,
+            'menu_item_name': ligne.itemName,
+            'total_quantity': ligne.quantitySold,
+            'total_revenue': _majeur(ligne.revenueMinor),
+          },
+      ];
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Analytics : top ventes indisponible — ${e.code}');
+      return const [];
+    }
+  }
+
+  /// Livraisons et gains par livreur.
+  ///
+  /// La note moyenne n'y figure plus : l'ancienne version la lisait sur la
+  /// **commande**, où elle n'a jamais existé, et rendait donc toujours zéro.
+  /// Elle vit sur le dossier du livreur, que l'écran de la flotte affiche.
   Future<Map<String, dynamic>> getDriverAnalytics({
     required DateTime startDate,
     required DateTime endDate,
   }) async {
     try {
-      _setLoading(true);
-
-      final response = await _supabase
-          .from('orders')
-          .select(
-              'delivery_person_id, users!orders_delivery_person_id_fkey(name, email), status')
-          .gte('created_at', startDate.toIso8601String())
-          .lte('created_at', endDate.toIso8601String())
-          .not('delivery_person_id', 'is', null);
-
-      final Map<String, int> driverDeliveries = {};
-      final Map<String, double> driverRatings = {};
-
-      for (final order in response) {
-        final deliveryPersonId = order['delivery_person_id'] as String?;
-        final user = order['users'] as Map<String, dynamic>?;
-        final driverName = user?['name'] as String? ?? 'Livreur inconnu';
-        // Note: rating n'est pas disponible dans la table users, on utilise 0.0 par défaut
-        final rating = 0.0;
-
-        if (deliveryPersonId != null) {
-          driverDeliveries[driverName] =
-              (driverDeliveries[driverName] ?? 0) + 1;
-          driverRatings[driverName] = rating;
-        }
-      }
-
-      _setLoading(false);
-
+      final lignes = await _reports.couriers(start: startDate, end: endDate);
       return {
-        'driverDeliveries': driverDeliveries,
-        'driverRatings': driverRatings,
-        'period': {
-          'start': startDate.toIso8601String(),
-          'end': endDate.toIso8601String(),
+        'driverDeliveries': <String, int>{
+          for (final ligne in lignes) ligne.courierName: ligne.deliveries,
+        },
+        'driverEarnings': <String, double>{
+          for (final ligne in lignes)
+            ligne.courierName: _majeur(ligne.earningsMinor),
         },
       };
-    } catch (e) {
-      debugPrint('Error getting driver analytics: $e');
-      _setLoading(false);
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Analytics : livreurs indisponibles — ${e.code}');
       return {
         'driverDeliveries': <String, int>{},
-        'driverRatings': <String, double>{},
-        'period': {
-          'start': startDate.toIso8601String(),
-          'end': endDate.toIso8601String(),
-        },
+        'driverEarnings': <String, double>{},
       };
     }
   }
 
-  /// Obtenir les statistiques générales
-  Future<Map<String, dynamic>> getGeneralStats() async {
-    try {
-      _setLoading(true);
+  // --------------------------------------------------------- mise en forme
 
-      // Statistiques des commandes
-      final ordersResponse =
-          await _supabase.from('orders').select('status, total, created_at');
-
-      // Statistiques des utilisateurs
-      final usersResponse = await _supabase.from('users').select('role');
-
-      // Statistiques des produits
-      final productsResponse =
-          await _supabase.from('menu_items').select('is_available');
-
-      // Statistiques des livreurs
-      // Il existe deux relations drivers → users (user_id et verified_by),
-      // on précise la bonne clé de relation pour éviter l'erreur PGRST201.
-      final driversResponse = await _supabase
-          .from('drivers')
-          .select('status, users!drivers_user_id_fkey(is_active)');
-
-      // Calculer les statistiques
-      final totalOrders = ordersResponse.length;
-      final completedOrders =
-          ordersResponse.where((o) => o['status'] == 'delivered').length;
-      final totalRevenue = ordersResponse
-          .where((o) => o['status'] == 'delivered')
-          .fold(
-              0.0,
-              (sum, order) =>
-                  sum + ((order['total'] as num?)?.toDouble() ?? 0.0));
-
-      final totalUsers = usersResponse.length;
-      final adminUsers =
-          usersResponse.where((u) => u['role'] == 'admin').length;
-      final customerUsers =
-          usersResponse.where((u) => u['role'] == 'customer').length;
-
-      final totalProducts = productsResponse.length;
-      final availableProducts =
-          productsResponse.where((p) => p['is_available'] == true).length;
-
-      final totalDrivers = driversResponse.length;
-      final activeDrivers =
-          driversResponse.where((d) => (d['users'] as Map<String, dynamic>)['is_active'] == true).length;
-      final availableDrivers =
-          driversResponse.where((d) => d['status'] == 'available').length;
-
-      _setLoading(false);
-
-      return {
-        'orders': {
-          'total': totalOrders,
-          'completed': completedOrders,
-          'completionRate':
-              totalOrders > 0 ? (completedOrders / totalOrders) * 100 : 0.0,
-        },
-        'revenue': {
-          'total': totalRevenue,
-          'averageOrderValue':
-              completedOrders > 0 ? totalRevenue / completedOrders : 0.0,
-        },
-        'users': {
-          'total': totalUsers,
-          'admins': adminUsers,
-          'customers': customerUsers,
-        },
-        'products': {
-          'total': totalProducts,
-          'available': availableProducts,
-          'availabilityRate': totalProducts > 0
-              ? (availableProducts / totalProducts) * 100
-              : 0.0,
-        },
-        'drivers': {
-          'total': totalDrivers,
-          'active': activeDrivers,
-          'available': availableDrivers,
-        },
-      };
-    } catch (e) {
-      debugPrint('Error getting general stats: $e');
-      _setLoading(false);
-      return {
-        'orders': {'total': 0, 'completed': 0, 'completionRate': 0.0},
-        'revenue': {'total': 0.0, 'averageOrderValue': 0.0},
-        'users': {'total': 0, 'admins': 0, 'customers': 0},
-        'products': {'total': 0, 'available': 0, 'availabilityRate': 0.0},
-        'drivers': {'total': 0, 'active': 0, 'available': 0},
-      };
-    }
+  Map<String, dynamic> _serieRevenus(List<eccore.RevenueRow> lignes) {
+    return {
+      'totalRevenue': lignes.fold<double>(
+        0,
+        (somme, ligne) => somme + _majeur(ligne.revenueMinor),
+      ),
+      'dailyRevenue': <String, double>{
+        for (final ligne in lignes)
+          _jour(ligne.day): _majeur(ligne.revenueMinor),
+      },
+    };
   }
+
+  /// `dailyOrders` compte les commandes **livrées** par jour, comme le chiffre
+  /// d'affaires qu'il accompagne : les deux courbes se lisent l'une sous
+  /// l'autre, et elles porteraient sur des ensembles différents si l'une
+  /// comptait aussi ce qui a été annulé. La répartition complète, annulations
+  /// comprises, est dans `statusCounts`.
+  Map<String, dynamic> _serieCommandes(
+    List<eccore.RevenueRow> revenus,
+    List<eccore.StatusRow> statuts,
+  ) {
+    return {
+      'totalOrders': statuts.fold<int>(
+        0,
+        (somme, ligne) => somme + ligne.ordersCount,
+      ),
+      'statusCounts': <String, int>{
+        for (final ligne in statuts) ligne.status: ligne.ordersCount,
+      },
+      'dailyOrders': <String, int>{
+        for (final ligne in revenus) _jour(ligne.day): ligne.ordersCount,
+      },
+    };
+  }
+
+  Map<String, dynamic> _serieCategories(List<eccore.CategoryRow> lignes) {
+    return {
+      'categoryCounts': <String, int>{
+        for (final ligne in lignes) ligne.categoryName: ligne.quantitySold,
+      },
+      'categoryRevenue': <String, double>{
+        for (final ligne in lignes)
+          ligne.categoryName: _majeur(ligne.revenueMinor),
+      },
+    };
+  }
+
+  Map<String, dynamic> _apercuVide() => {
+    'orders': {
+      'total': 0,
+      'completed': 0,
+      'cancelled': 0,
+      'completionRate': 0.0,
+    },
+    'revenue': {'total': 0.0, 'averageOrderValue': 0.0},
+    'users': {'total': 0},
+    'products': {'total': 0, 'available': 0, 'availabilityRate': 0.0},
+    'drivers': {'active': 0},
+  };
+
+  /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
+  double _majeur(int mineur) => mineur.toDouble();
+
+  String _jour(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
 }

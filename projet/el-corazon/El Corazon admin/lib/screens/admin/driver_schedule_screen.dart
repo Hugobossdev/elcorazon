@@ -72,13 +72,10 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                       final schedule = schedules.firstWhere(
                         (s) => s.dayOfWeek == dayOfWeek,
                         orElse: () => DriverSchedule(
-                          id: '${widget.driver.id}_$dayOfWeek',
                           driverId: widget.driver.id,
                           dayOfWeek: dayOfWeek,
                           startTime: const TimeOfDay(hour: 9, minute: 0),
                           endTime: const TimeOfDay(hour: 21, minute: 0),
-                          isAvailable: true,
-                          createdAt: DateTime.now(),
                         ),
                       );
 
@@ -277,16 +274,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                     value: isAvailable,
                     activeThumbColor: theme.colorScheme.primary,
                     onChanged: (value) {
-                      final updated = DriverSchedule(
-                        id: schedule.id,
-                        driverId: schedule.driverId,
-                        dayOfWeek: schedule.dayOfWeek,
-                        startTime: schedule.startTime,
-                        endTime: schedule.endTime,
-                        isAvailable: value,
-                        createdAt: schedule.createdAt,
-                        updatedAt: DateTime.now(),
-                      );
+                      final updated = schedule.copyWith(isAvailable: value);
                       scheduleService.saveSchedule(updated);
                     },
                   ),
@@ -304,15 +292,9 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                         icon: Icons.wb_sunny_outlined,
                         color: Colors.orange,
                         onTimeSelected: (time) {
-                          final updated = DriverSchedule(
-                            id: schedule.id,
-                            driverId: schedule.driverId,
-                            dayOfWeek: schedule.dayOfWeek,
+                          final updated = schedule.copyWith(
                             startTime: time,
-                            endTime: schedule.endTime,
                             isAvailable: true,
-                            createdAt: schedule.createdAt,
-                            updatedAt: DateTime.now(),
                           );
                           scheduleService.saveSchedule(updated);
                         },
@@ -336,15 +318,9 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                         icon: Icons.nightlight_round,
                         color: Colors.indigo,
                         onTimeSelected: (time) {
-                          final updated = DriverSchedule(
-                            id: schedule.id,
-                            driverId: schedule.driverId,
-                            dayOfWeek: schedule.dayOfWeek,
-                            startTime: schedule.startTime,
+                          final updated = schedule.copyWith(
                             endTime: time,
                             isAvailable: true,
-                            createdAt: schedule.createdAt,
-                            updatedAt: DateTime.now(),
                           );
                           scheduleService.saveSchedule(updated);
                         },
@@ -464,13 +440,10 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
       orElse: () => schedules.isNotEmpty
           ? schedules.first
           : DriverSchedule(
-              id: '${widget.driver.id}_1',
               driverId: widget.driver.id,
               dayOfWeek: 1,
               startTime: const TimeOfDay(hour: 9, minute: 0),
               endTime: const TimeOfDay(hour: 21, minute: 0),
-              isAvailable: true,
-              createdAt: DateTime.now(),
             ),
     );
 
@@ -491,16 +464,26 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
             onPressed: () {
               Navigator.pop(context);
               for (int day = 1; day <= 7; day++) {
-                final updated = DriverSchedule(
-                  id: '${widget.driver.id}_$day',
-                  driverId: widget.driver.id,
-                  dayOfWeek: day,
-                  startTime: sourceSchedule.startTime,
-                  endTime: sourceSchedule.endTime,
-                  isAvailable: sourceSchedule.isAvailable,
-                  createdAt: DateTime.now(),
-                  updatedAt: DateTime.now(),
-                );
+                // On repart de la ligne déjà enregistrée pour ce jour quand
+                // elle existe : sans cela, uniformiser créerait un doublon que
+                // le serveur refuse (un seul créneau par jour et heure de
+                // début).
+                final existante = schedules
+                    .where((ligne) => ligne.dayOfWeek == day)
+                    .firstOrNull;
+                final updated =
+                    (existante ??
+                            DriverSchedule(
+                              driverId: widget.driver.id,
+                              dayOfWeek: day,
+                              startTime: sourceSchedule.startTime,
+                              endTime: sourceSchedule.endTime,
+                            ))
+                        .copyWith(
+                          startTime: sourceSchedule.startTime,
+                          endTime: sourceSchedule.endTime,
+                          isAvailable: sourceSchedule.isAvailable,
+                        );
                 scheduleService.saveSchedule(updated);
               }
 

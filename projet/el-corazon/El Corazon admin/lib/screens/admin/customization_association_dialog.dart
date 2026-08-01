@@ -264,9 +264,8 @@ class _CustomizationAssociationDialogState
 
     final success = await service.associateOptionToMenuItem(
       menuItemId: _selectedMenuItemId!,
-      optionId: widget.optionId,
+      templateId: widget.optionId,
       isRequired: _isRequired,
-      sortOrder: _sortOrder,
     );
 
     if (!mounted) return;

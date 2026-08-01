@@ -711,7 +711,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        adminAuth.currentRole?.name ?? 'Rôle',
+                        adminAuth.roleLabel,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -997,7 +997,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             accountEmail: Text(
-              adminAuth.currentRole?.name ?? 'Rôle',
+              adminAuth.roleLabel,
             ),
           ),
           Expanded(

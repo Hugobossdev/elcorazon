@@ -23,7 +23,6 @@ class QuickCustomizationDialog extends StatefulWidget {
 class _QuickCustomizationDialogState extends State<QuickCustomizationDialog> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _descriptionController = TextEditingController();
   final _priceController = TextEditingController();
   bool _isRequired = false;
   bool _isDefault = false;
@@ -35,7 +34,6 @@ class _QuickCustomizationDialogState extends State<QuickCustomizationDialog> {
     if (widget.existingOption != null) {
       final option = widget.existingOption!;
       _nameController.text = option.name;
-      _descriptionController.text = option.description ?? '';
       _priceController.text = option.priceModifier.toStringAsFixed(0);
       _isDefault = option.isDefault;
     } else {
@@ -49,7 +47,6 @@ class _QuickCustomizationDialogState extends State<QuickCustomizationDialog> {
   @override
   void dispose() {
     _nameController.dispose();
-    _descriptionController.dispose();
     _priceController.dispose();
     super.dispose();
   }
@@ -150,17 +147,6 @@ class _QuickCustomizationDialogState extends State<QuickCustomizationDialog> {
                           }
                           return null;
                         },
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _descriptionController,
-                        decoration: InputDecoration(
-                          labelText: 'Description',
-                          hintText: widget.category == 'size'
-                              ? 'Ex: Portion standard'
-                              : 'Description de l\'option',
-                        ),
-                        maxLines: 2,
                       ),
                       const SizedBox(height: 16),
                       Row(
@@ -329,9 +315,6 @@ class _QuickCustomizationDialogState extends State<QuickCustomizationDialog> {
         // Modifier l'option existante
         final updated = widget.existingOption!.copyWith(
           name: _nameController.text.trim(),
-          description: _descriptionController.text.trim().isEmpty
-              ? null
-              : _descriptionController.text.trim(),
           priceModifier: price,
           isDefault: _isDefault,
         );
@@ -362,10 +345,6 @@ class _QuickCustomizationDialogState extends State<QuickCustomizationDialog> {
           category: widget.category,
           priceModifier: price,
           isDefault: _isDefault,
-          maxQuantity: widget.category == 'size' ? 1 : 1,
-          description: _descriptionController.text.trim().isEmpty
-              ? null
-              : _descriptionController.text.trim(),
         );
 
         if (!mounted) return;
@@ -374,9 +353,8 @@ class _QuickCustomizationDialogState extends State<QuickCustomizationDialog> {
           // Associer automatiquement au produit
           final associationSuccess = await service.associateOptionToMenuItem(
             menuItemId: widget.menuItemId,
-            optionId: newOption.id,
+            templateId: newOption.id,
             isRequired: _isRequired,
-            sortOrder: 0,
           );
 
           if (!mounted) return;

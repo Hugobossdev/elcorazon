@@ -1,126 +1,65 @@
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
-import '../models/menu_models.dart';
 
+import '../models/menu_models.dart';
+import 'admin_auth_service.dart';
+
+/// Écriture du catalogue — `/api/v1/catalog/manage/*` (Phase 6).
+///
+/// C'est le seul endroit d'où un **prix** part vers le serveur (C1), et le
+/// serveur reste seul à le facturer : la note (`rating_average`) est en lecture
+/// seule côté contrat, sans quoi on pourrait fabriquer une réputation.
+///
+/// L'envoi d'image change de nature : l'app poussait le fichier dans un bucket
+/// Supabase **public** puis écrivait l'URL obtenue dans la table. Le stockage v2
+/// est privé et servi par URL signées — le fichier est joint à l'article, et le
+/// serveur rend l'URL. La méthode d'envoi direct disparaît donc ; le champ
+/// `image` d'un article s'écrit par un `multipart` que cet écran ne compose pas
+/// encore.
 class MenuService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
   bool _isLoading = false;
   String? _error;
 
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  /// Upload une image de produit vers Supabase Storage
+  /// Établissement supervisé — une seule enseigne pour l'instant.
+  static const String _restaurantSlug = 'el-corazon-lome';
+
+  eccore.ManagedCatalogRepository get _catalog =>
+      eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient);
+
+  /// L'envoi d'image n'est plus fait par le client.
   ///
-  /// [image] : Le fichier image à uploader
-  /// [productName] : Le nom du produit (utilisé pour générer le nom de fichier)
-  /// [oldImageUrl] : URL de l'ancienne image à supprimer (optionnel)
-  ///
-  /// Retourne l'URL publique de l'image uploadée, ou null en cas d'erreur
+  /// Rend `null` : le stockage v2 n'est pas public, il n'y a pas d'URL à
+  /// fabriquer côté navigateur. Conservée le temps que les formulaires
+  /// envoient l'article en `multipart/form-data` avec sa photo.
   Future<String?> uploadProductImage(
     XFile image,
     String productName, {
     String? oldImageUrl,
   }) async {
-    try {
+    debugPrint("MenuService: l'envoi d'image passera par le formulaire d'article");
+    return null;
+  }
+
+  Future<List<MenuItem>> getMenuItems(String? categoryId, {bool notify = true}) async {
+    if (notify) {
       _isLoading = true;
       _error = null;
       notifyListeners();
-
-      // Lire les bytes de l'image
-      final bytes = await image.readAsBytes();
-
-      // Vérifier la taille (max 5MB)
-      const maxSize = 5 * 1024 * 1024; // 5MB
-      if (bytes.length > maxSize) {
-        _error = 'L\'image est trop grande (max 5MB)';
-        return null;
-      }
-
-      // Générer un nom de fichier unique
-      final fileExt = image.path.split('.').last.toLowerCase();
-      final sanitizedName = productName
-          .replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), '_')
-          .replaceAll(RegExp(r'\s+'), '_')
-          .toLowerCase();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = '${timestamp}_$sanitizedName.$fileExt';
-      final filePath = 'products/$fileName';
-
-      // Upload vers Supabase Storage
-      await _supabase.storage.from('product-images').uploadBinary(
-            filePath,
-            bytes,
-            fileOptions: const FileOptions(
-              cacheControl: '3600',
-              upsert: true, // Permet de remplacer si le fichier existe déjà
-            ),
-          );
-
-      // Obtenir l'URL publique
-      final imageUrl =
-          _supabase.storage.from('product-images').getPublicUrl(filePath);
-
-      // Supprimer l'ancienne image si fournie
-      if (oldImageUrl != null && oldImageUrl.isNotEmpty) {
-        try {
-          // Extraire le chemin du fichier depuis l'URL
-          final uri = Uri.parse(oldImageUrl);
-          final pathSegments = uri.pathSegments;
-          if (pathSegments.isNotEmpty) {
-            // Le chemin est généralement après '/storage/v1/object/public/product-images/'
-            final oldFilePath = pathSegments.last;
-            if (oldFilePath != fileName) {
-              // Ne supprimer que si c'est un fichier différent
-              await _supabase.storage
-                  .from('product-images')
-                  .remove([oldFilePath]);
-            }
-          }
-        } catch (e) {
-          // Ignorer les erreurs de suppression (fichier peut ne plus exister)
-          debugPrint('Warning: Could not delete old image: $e');
-        }
-      }
-
-      debugPrint('✅ Image uploadée avec succès: $imageUrl');
-      return imageUrl;
-    } catch (e) {
-      _error = 'Erreur lors de l\'upload: ${e.toString()}';
-      debugPrint('❌ Error uploading product image: $e');
-      return null;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
-  }
 
-  // --- Menu Items ---
-
-  Future<List<MenuItem>> getMenuItems(
-    String? categoryId, {
-    bool notify = true,
-  }) async {
     try {
-      if (notify) {
-        _isLoading = true;
-        _error = null;
-        notifyListeners();
-      }
-
-      var query = _supabase.from('menu_items').select();
-
-      if (categoryId != null) {
-        query = query.eq('category_id', categoryId);
-      }
-
-      final response = await query.order('sort_order', ascending: true);
-
-      return (response as List).map((e) => MenuItem.fromMap(e)).toList();
-    } catch (e) {
-      _error = e.toString();
-      debugPrint('Error fetching menu items: $e');
+      final remote = await _catalog.menuItems(
+        restaurantSlug: _restaurantSlug,
+        categoryId: categoryId,
+      );
+      return remote.map(_toLocalItem).toList();
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('MenuService: chargement impossible — ${e.code}');
       return [];
     } finally {
       if (notify) {
@@ -130,180 +69,233 @@ class MenuService extends ChangeNotifier {
     }
   }
 
+  /// Un article avec ses groupes d'options — le détail les porte.
   Future<MenuItem?> getMenuItem(String id) async {
     try {
-      final response = await _supabase
-          .from('menu_items')
-          .select('*, menu_option_groups(*, menu_options(*))')
-          .eq('id', id)
-          .single();
-
-      // Sort groups and options manually since nested ordering in select is tricky
-      final item = MenuItem.fromMap(response);
-      item.optionGroups.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-      for (var group in item.optionGroups) {
-        group.options.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-      }
-      return item;
-    } catch (e) {
-      debugPrint('Error fetching menu item: $e');
+      final remote = await _catalog.getMenuItem(id);
+      return _toLocalItem(remote);
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('MenuService: article introuvable — ${e.code}');
       return null;
     }
   }
 
   Future<MenuItem?> createMenuItem(MenuItem item) async {
     try {
-      _isLoading = true;
-      notifyListeners();
-
-      final data = item.toMap();
-      data.remove('id'); // Let DB generate ID
-      data.remove('created_at');
-      data.remove('updated_at');
-      data.remove(
-        'option_groups',
-      ); // Handle separately if needed, but usually empty on create
-
-      final response =
-          await _supabase.from('menu_items').insert(data).select().single();
-
-      return MenuItem.fromMap(response);
-    } catch (e) {
-      _error = e.toString();
-      debugPrint('Error creating menu item: $e');
+      final created = await _catalog.createMenuItem(
+        restaurantSlug: _restaurantSlug,
+        categoryId: item.categoryId,
+        name: item.name,
+        slug: _slugifier(item.name),
+        price: _versMoney(item.basePrice),
+        description: item.description ?? '',
+        isAvailable: item.isAvailable,
+        isPopular: item.isPopular,
+        dietaryTags: _regimes(item),
+        sortOrder: item.sortOrder,
+      );
+      return _toLocalItem(created);
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('MenuService: création refusée — ${e.code}');
       return null;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
   }
 
   Future<bool> updateMenuItem(MenuItem item) async {
     try {
-      _isLoading = true;
-      notifyListeners();
-
-      final data = item.toMap();
-      data.remove('id');
-      data.remove('created_at');
-      data['updated_at'] = DateTime.now().toIso8601String();
-      data.remove('option_groups');
-
-      await _supabase.from('menu_items').update(data).eq('id', item.id);
+      await _catalog.updateMenuItem(
+        menuItemId: item.id,
+        name: item.name,
+        description: item.description ?? '',
+        categoryId: item.categoryId,
+        price: _versMoney(item.basePrice),
+        isAvailable: item.isAvailable,
+        isPopular: item.isPopular,
+        dietaryTags: _regimes(item),
+        sortOrder: item.sortOrder,
+      );
       return true;
-    } catch (e) {
-      _error = e.toString();
-      debugPrint('Error updating menu item: $e');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('MenuService: mise à jour refusée — ${e.code}');
       return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
   }
 
+  /// Retire un article de la carte — suppression **logique** côté serveur :
+  /// il reste lisible depuis les commandes passées, qui en gardent une copie.
   Future<bool> deleteMenuItem(String id) async {
     try {
-      _isLoading = true;
-      notifyListeners();
-      await _supabase.from('menu_items').delete().eq('id', id);
+      await _catalog.deleteMenuItem(id);
       return true;
-    } catch (e) {
-      _error = e.toString();
-      debugPrint('Error deleting menu item: $e');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('MenuService: suppression refusée — ${e.code}');
       return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
   }
 
-  // --- Option Groups ---
+  // ------------------------------------------------------ groupes d'options
 
   Future<MenuOptionGroup?> createOptionGroup(MenuOptionGroup group) async {
     try {
-      final data = group.toMap();
-      data.remove('id');
-      data.remove('options');
-
-      final response = await _supabase
-          .from('menu_option_groups')
-          .insert(data)
-          .select()
-          .single();
-
-      return MenuOptionGroup.fromMap(response);
-    } catch (e) {
-      debugPrint('Error creating option group: $e');
+      final created = await _catalog.createOptionGroup(
+        menuItemId: group.menuItemId,
+        name: group.name,
+        minSelect: group.minSelection,
+        maxSelect: group.maxSelection,
+        sortOrder: group.sortOrder,
+      );
+      return _toLocalGroup(created, group.menuItemId);
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('MenuService: création de groupe refusée — ${e.code}');
       return null;
     }
   }
 
   Future<bool> updateOptionGroup(MenuOptionGroup group) async {
     try {
-      final data = group.toMap();
-      data.remove('id');
-      data.remove('menu_item_id'); // Should not change
-      data.remove('options');
-
-      await _supabase
-          .from('menu_option_groups')
-          .update(data)
-          .eq('id', group.id);
+      await _catalog.updateOptionGroup(
+        groupId: group.id,
+        name: group.name,
+        minSelect: group.minSelection,
+        maxSelect: group.maxSelection,
+        sortOrder: group.sortOrder,
+      );
       return true;
-    } catch (e) {
-      debugPrint('Error updating option group: $e');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
       return false;
     }
   }
 
   Future<bool> deleteOptionGroup(String id) async {
     try {
-      await _supabase.from('menu_option_groups').delete().eq('id', id);
+      await _catalog.deleteOptionGroup(id);
       return true;
-    } catch (e) {
-      debugPrint('Error deleting option group: $e');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
       return false;
     }
   }
 
-  // --- Options ---
+  // -------------------------------------------------------------- options
 
   Future<MenuOption?> createOption(MenuOption option) async {
     try {
-      final data = option.toMap();
-      data.remove('id');
-
-      final response =
-          await _supabase.from('menu_options').insert(data).select().single();
-
-      return MenuOption.fromMap(response);
-    } catch (e) {
-      debugPrint('Error creating option: $e');
+      final created = await _catalog.createOption(
+        groupId: option.groupId,
+        name: option.name,
+        priceDelta: _versMoney(option.priceModifier),
+        isAvailable: option.isAvailable,
+        sortOrder: option.sortOrder,
+      );
+      return _toLocalOption(created, option.groupId);
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint("MenuService: création d'option refusée — ${e.code}");
       return null;
     }
   }
 
   Future<bool> updateOption(MenuOption option) async {
     try {
-      final data = option.toMap();
-      data.remove('id');
-      data.remove('group_id'); // Should not change
-
-      await _supabase.from('menu_options').update(data).eq('id', option.id);
+      await _catalog.updateOption(
+        optionId: option.id,
+        name: option.name,
+        priceDelta: _versMoney(option.priceModifier),
+        isAvailable: option.isAvailable,
+        sortOrder: option.sortOrder,
+      );
       return true;
-    } catch (e) {
-      debugPrint('Error updating option: $e');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
       return false;
     }
   }
 
   Future<bool> deleteOption(String id) async {
     try {
-      await _supabase.from('menu_options').delete().eq('id', id);
+      await _catalog.deleteOption(id);
       return true;
-    } catch (e) {
-      debugPrint('Error deleting option: $e');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
       return false;
     }
+  }
+
+  // ------------------------------------------------------------- traduction
+
+  MenuItem _toLocalItem(eccore.MenuItem remote) {
+    return MenuItem(
+      id: remote.id,
+      categoryId: remote.categorySlug,
+      name: remote.name,
+      description: remote.description.isEmpty ? null : remote.description,
+      basePrice: remote.price.toMajorUnits(),
+      imageUrl: remote.image,
+      isPopular: remote.isPopular,
+      // Le contrat ne porte pas deux booléens de régime : ils sont dérivés de
+      // `dietary_tags`, une liste ouverte que l'exploitation enrichit sans
+      // migration.
+      isVegetarian: remote.dietaryTags.contains('vegetarian'),
+      isVegan: remote.dietaryTags.contains('vegan'),
+      isAvailable: remote.isAvailable,
+      sortOrder: remote.sortOrder,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      optionGroups: [
+        for (final groupe in remote.optionGroups) _toLocalGroup(groupe, remote.id),
+      ],
+    );
+  }
+
+  MenuOptionGroup _toLocalGroup(eccore.OptionGroup remote, String menuItemId) {
+    return MenuOptionGroup(
+      id: remote.id,
+      menuItemId: menuItemId,
+      name: remote.name,
+      minSelection: remote.minSelect,
+      maxSelection: remote.maxSelect,
+      isRequired: remote.isRequired,
+      sortOrder: remote.sortOrder,
+      options: [for (final option in remote.options) _toLocalOption(option, remote.id)],
+    );
+  }
+
+  MenuOption _toLocalOption(eccore.Option remote, String groupId) {
+    return MenuOption(
+      id: remote.id,
+      groupId: groupId,
+      name: remote.name,
+      priceModifier: remote.priceDelta.toMajorUnits(),
+      isAvailable: remote.isAvailable,
+      sortOrder: remote.sortOrder,
+    );
+  }
+
+  List<String> _regimes(MenuItem item) => [
+        if (item.isVegetarian) 'vegetarian',
+        if (item.isVegan) 'vegan',
+      ];
+
+  /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
+  eccore.Money _versMoney(double montant) =>
+      eccore.Money(amountMinor: montant.round(), currency: 'XOF');
+
+  static String _slugifier(String valeur) {
+    final base = valeur
+        .toLowerCase()
+        .replaceAll(RegExp('[àáâãäå]'), 'a')
+        .replaceAll(RegExp('[èéêë]'), 'e')
+        .replaceAll(RegExp('[ìíîï]'), 'i')
+        .replaceAll(RegExp('[òóôõö]'), 'o')
+        .replaceAll(RegExp('[ùúûü]'), 'u')
+        .replaceAll(RegExp('[ç]'), 'c')
+        .replaceAll(RegExp('[^a-z0-9]+'), '-');
+    return base.replaceAll(RegExp('^-+|-+\u0024'), '');
   }
 }

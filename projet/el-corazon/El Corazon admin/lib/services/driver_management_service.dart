@@ -1,17 +1,25 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/driver.dart';
-import '../models/driver_badge.dart';
-import 'socket_service.dart';
 
-/// Service de gestion des livreurs
+import '../models/driver.dart';
+import 'admin_auth_service.dart';
+
+/// Gestion de la flotte — `/api/v1/delivery/couriers/` (Phase 6).
 ///
-/// ⚠️ IMPORTANT: Ce service charge les livreurs directement depuis la table `users`
-/// avec `role = 'delivery'` au lieu de la table `drivers`.
-/// Les livreurs sont identifiés par leur `users.id` qui est utilisé comme `driver.id`.
+/// L'implémentation Supabase lisait la table `users` filtrée sur
+/// `role = 'delivery'` et **recomposait** un livreur à partir de champs
+/// d'authentification : ni véhicule, ni statut de dossier, ni compteurs — tout
+/// était à zéro, puis « enrichi » par une seconde passe sur les commandes. Le
+/// dossier livreur existe côté serveur (`CourierProfile`), avec ses pièces, son
+/// instruction et ses compteurs officiels : c'est lui qu'on lit.
+///
+/// Le statut affiché ne se déduit plus de deux booléens : `canAcceptOrders` est
+/// calculé par le serveur (L1 — en ligne **et** dossier validé **et** compte
+/// actif), et le recomposer ici en oubliant un terme est précisément ce que
+/// cette propriété évite.
 class DriverManagementService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
-  final SocketService _socketService = SocketService();
+  eccore.ManagedCourierRepository get _couriers =>
+      eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient);
   List<Driver> _drivers = [];
   bool _isLoading = false;
   DriverStatus? _statusFilter;
@@ -76,124 +84,19 @@ class DriverManagementService extends ChangeNotifier {
 
   DriverManagementService() {
     _loadDrivers();
-    _initSocketListeners();
   }
 
-  void _initSocketListeners() {
-    if (_socketService.isConnected) {
-      _socketService.onDriverLocation((data) {
-        _handleDriverLocationUpdate(data);
-      });
-    } else {
-      // Retry listener attachment if socket connects later
-      // Note: SocketService usually handles reconnection, but we need to ensure
-      // our callback is registered. Since SocketService is a singleton and init()
-      // is called in main, it should be ready or connecting.
-      // We can periodically check or rely on the fact that onDriverLocation
-      // registers the callback on the socket instance.
-      _socketService.onDriverLocation((data) {
-        _handleDriverLocationUpdate(data);
-      });
-    }
-  }
-
-  void _handleDriverLocationUpdate(dynamic data) {
-    if (data == null) return;
-
-    final String? driverId =
-        data['driverId']?.toString() ?? data['delivery_id']?.toString();
-    final double? lat = double.tryParse(
-        data['lat']?.toString() ?? data['latitude']?.toString() ?? '');
-    final double? lng = double.tryParse(
-        data['lng']?.toString() ?? data['longitude']?.toString() ?? '');
-
-    if (driverId != null && lat != null && lng != null) {
-      // Update local state without full reload
-      final index =
-          _drivers.indexWhere((d) => d.id == driverId || d.userId == driverId);
-      if (index != -1) {
-        _drivers[index] = _drivers[index].copyWith(
-          latitude: lat,
-          longitude: lng,
-        );
-        notifyListeners();
-        debugPrint('📍 Driver $driverId moved to $lat, $lng');
-      }
-    }
-  }
-
-  /// Charger tous les livreurs depuis la table users (role = 'delivery')
   Future<void> _loadDrivers() async {
     _isLoading = true;
     notifyListeners();
+
     try {
-      debugPrint(
-        '🔍 Chargement des livreurs depuis users (role = delivery)...',
-      );
-
-      // Charger directement depuis users avec role = 'delivery'
-      final response = await _supabase
-          .from('users')
-          .select(
-            'id, auth_user_id, name, email, phone, is_online, is_active, last_seen, created_at, profile_image',
-          )
-          .eq('role', 'delivery')
-          .order('name', ascending: true);
-
-      // Transformer les données users en format Driver
-      _drivers = response.map((userData) {
-        final userId = userData['id'] as String;
-        final isOnline = userData['is_online'] as bool? ?? false;
-
-        // Mapper le statut depuis is_online et is_active
-        DriverStatus status;
-        if (!(userData['is_active'] as bool? ?? true)) {
-          status = DriverStatus.unavailable;
-        } else if (isOnline) {
-          // Vérifier s'il a des livraisons actives pour déterminer le statut
-          // Pour l'instant, on suppose 'available' si en ligne
-          status = DriverStatus.available;
-        } else {
-          status = DriverStatus.offline;
-        }
-
-        // Créer un map compatible avec le modèle Driver
-        final driverMap = <String, dynamic>{
-          'id': userId, // Utiliser users.id comme identifiant
-          'auth_user_id': userData['auth_user_id'],
-          'user_id': userId, // user_id = users.id
-          'name': userData['name'] ?? '',
-          'email': userData['email'] ?? '',
-          'phone': userData['phone'] ?? '',
-          'status': status.toString().split('.').last,
-          'latitude':
-              null, // Pas stocké dans users, utiliser delivery_locations si nécessaire
-          'longitude': null,
-          'vehicle_type': null, // Pas dans users
-          'license_plate': null, // Pas dans users
-          'rating': 0.0, // À calculer depuis les commandes livrées
-          'total_deliveries': 0, // À calculer depuis les commandes
-          'total_earnings': 0.0, // À calculer depuis les commandes
-          'created_at': userData['created_at']?.toString() ??
-              DateTime.now().toIso8601String(),
-          'last_online': userData['last_seen']?.toString(),
-          'profile_image_url': userData['profile_image'],
-          'notes': null,
-          'is_active': userData['is_active'] ?? true,
-        };
-
-        return Driver.fromMap(driverMap);
-      }).toList();
-
-      debugPrint(
-        '✅ ${_drivers.length} livreur(s) chargé(s) depuis users (role = delivery)',
-      );
-
-      // Optionnel: Enrichir avec des statistiques depuis orders
-      await _enrichWithStatistics();
-    } catch (e, stackTrace) {
-      debugPrint('❌ Erreur lors du chargement des livreurs: $e');
-      debugPrint('Stack trace: $stackTrace');
+      final remote = await _couriers.list();
+      _drivers = remote.map(_toLocalDriver).toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+      debugPrint('DriverManagementService: ${_drivers.length} livreur(s)');
+    } on eccore.ApiException catch (e) {
+      debugPrint('DriverManagementService: chargement impossible — ${e.code}');
       _drivers = [];
     } finally {
       _isLoading = false;
@@ -201,165 +104,129 @@ class DriverManagementService extends ChangeNotifier {
     }
   }
 
-  /// Enrichit les livreurs avec des statistiques depuis orders
-  Future<void> _enrichWithStatistics() async {
-    try {
-      // Récupérer les statistiques pour chaque livreur
-      for (var driver in _drivers) {
-        if (driver.userId == null) continue;
-
-        // Compter les livraisons complétées
-        final deliveredOrders = await _supabase
-            .from('orders')
-            .select('id, total')
-            .eq('delivery_person_id', driver.userId!)
-            .eq('status', 'delivered');
-
-        final totalDeliveries = deliveredOrders.length;
-        final totalEarnings = deliveredOrders.fold<double>(
-          0.0,
-          (sum, order) => sum + ((order['total'] as num?)?.toDouble() ?? 0.0),
-        );
-
-        // Mettre à jour le driver avec les statistiques
-        final index = _drivers.indexWhere((d) => d.userId == driver.userId);
-        if (index != -1 && index < _drivers.length) {
-          _drivers[index] = _drivers[index].copyWith(
-            totalDeliveries: totalDeliveries,
-            totalEarnings: totalEarnings,
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('⚠️ Erreur lors de l\'enrichissement des statistiques: $e');
-    }
-  }
-
-  /// Ajouter un nouveau livreur
+  /// Dossier livreur du contrat → modèle local.
   ///
-  /// ⚠️ NOTE: Cette méthode utilise encore la table `drivers`.
-  /// Pour créer un livreur, utilisez plutôt la table `users` avec `role = 'delivery'`.
-  Future<bool> addDriver(Driver driver) async {
+  /// Les compteurs et la note viennent du dossier : ils étaient auparavant
+  /// recalculés à partir des commandes, à chaque chargement d'écran.
+  Driver _toLocalDriver(eccore.CourierProfile courier) {
+    return Driver(
+      id: courier.id,
+      userId: courier.id,
+      name: courier.fullName,
+      email: courier.email,
+      phone: '',
+      status: _toLocalStatus(courier),
+      latitude: courier.lastLatitude,
+      longitude: courier.lastLongitude,
+      vehicleType: courier.vehicleType,
+      licensePlate: courier.vehiclePlate,
+      rating: courier.ratingAverage,
+      totalDeliveries: courier.deliveriesCompleted,
+      totalEarnings: courier.totalEarnings?.toMajorUnits() ?? 0,
+      createdAt: courier.createdAt,
+      lastOnline: courier.lastLocationAt,
+      isActive: courier.verificationStatus == 'approved',
+    );
+  }
+
+  /// Statut d'affichage.
+  ///
+  /// `onDelivery` n'est pas déductible du dossier : une course en cours est une
+  /// information de `delivery/assignments/`, pas du profil. L'ancienne version
+  /// ne le déduisait pas davantage — elle mettait « disponible » dès que le
+  /// livreur était en ligne.
+  DriverStatus _toLocalStatus(eccore.CourierProfile courier) {
+    if (courier.verificationStatus == 'suspended' ||
+        courier.verificationStatus == 'rejected') {
+      return DriverStatus.unavailable;
+    }
+    if (courier.canAcceptOrders) return DriverStatus.available;
+    return courier.isOnline ? DriverStatus.unavailable : DriverStatus.offline;
+  }
+
+  /// Embauche un livreur : le compte **et** son dossier, en une requête
+  /// (permission `couriers.write`).
+  ///
+  /// [password] est obligatoire côté serveur — c'est un compte qui se crée. Les
+  /// pièces justificatives ne sont pas déposées ici : c'est le livreur qui les
+  /// fournit depuis son application, et c'est bien lui qui les a.
+  Future<bool> provisionDriver({
+    required String email,
+    required String password,
+    required String fullName,
+    required String restaurantSlug,
+    required String vehicleType,
+    String phone = '',
+    String vehiclePlate = '',
+  }) async {
     try {
-      _isLoading = true;
-      notifyListeners();
-
-      final response = await _supabase
-          .from('drivers')
-          .insert(driver.toMap())
-          .select()
-          .single();
-
-      _drivers.add(Driver.fromMap(response));
-      _drivers.sort((a, b) => a.name.compareTo(b.name));
-
-      _isLoading = false;
+      final created = await _couriers.provision(
+        email: email,
+        password: password,
+        fullName: fullName,
+        restaurantSlug: restaurantSlug,
+        vehicleType: vehicleType,
+        phone: phone,
+        vehiclePlate: vehiclePlate,
+      );
+      _drivers = [..._drivers, _toLocalDriver(created)]
+        ..sort((a, b) => a.name.compareTo(b.name));
       notifyListeners();
       return true;
-    } catch (e) {
-      debugPrint('Error adding driver: $e');
-      _isLoading = false;
-      notifyListeners();
+    } on eccore.ApiException catch (e) {
+      debugPrint('DriverManagementService: embauche refusée — ${e.code}');
       return false;
     }
   }
 
-  /// Mettre à jour un livreur
-  Future<bool> updateDriver(Driver driver) async {
+  /// Suspend un livreur — permission `couriers.suspend`, motif obligatoire.
+  ///
+  /// Distinct de l'instruction du dossier : suspendre retire du service
+  /// quelqu'un qui travaillait, et se décide un samedi soir après un incident.
+  /// Le serveur exige les deux permissions séparément.
+  Future<bool> suspendDriver(String driverId, String reason) async {
+    return _setVerification(driverId, 'suspended', reason);
+  }
+
+  /// Remet un dossier en service — permission `couriers.approve`.
+  Future<bool> reactivateDriver(String driverId) async {
+    return _setVerification(driverId, 'approved', '');
+  }
+
+  /// Valide ou rejette un dossier — permission `couriers.approve`.
+  Future<bool> setVerification(String driverId, String status, {String notes = ''}) {
+    return _setVerification(driverId, status, notes);
+  }
+
+  Future<bool> _setVerification(String driverId, String status, String notes) async {
     try {
-      _isLoading = true;
-      notifyListeners();
-
-      final response = await _supabase
-          .from('drivers')
-          .update(driver.toMap())
-          .eq('id', driver.id)
-          .select()
-          .single();
-
-      final index = _drivers.indexWhere((d) => d.id == driver.id);
+      final updated = await _couriers.setVerification(
+        courierId: driverId,
+        status: status,
+        notes: notes,
+      );
+      final index = _drivers.indexWhere((driver) => driver.id == driverId);
       if (index != -1) {
-        _drivers[index] = Driver.fromMap(response);
-        _drivers.sort((a, b) => a.name.compareTo(b.name));
-      }
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('Error updating driver: $e');
-      _isLoading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Supprimer un livreur
-  Future<bool> deleteDriver(String id) async {
-    try {
-      _isLoading = true;
-      notifyListeners();
-
-      await _supabase.from('drivers').delete().eq('id', id);
-
-      _drivers.removeWhere((driver) => driver.id == id);
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('Error deleting driver: $e');
-      _isLoading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Mettre à jour le statut d'un livreur
-  Future<bool> updateDriverStatus(String driverId, DriverStatus status) async {
-    try {
-      await _supabase.from('drivers').update(
-          {'status': status.toString().split('.').last}).eq('id', driverId);
-
-      final index = _drivers.indexWhere((d) => d.id == driverId);
-      if (index != -1) {
-        _drivers[index] = _drivers[index].copyWith(status: status);
+        _drivers[index] = _toLocalDriver(updated);
         notifyListeners();
       }
-
       return true;
-    } catch (e) {
-      debugPrint('Error updating driver status: $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('DriverManagementService: instruction refusée — ${e.code}');
       return false;
     }
   }
 
-  /// Mettre à jour la position d'un livreur
-  Future<bool> updateDriverLocation(
-    String driverId,
-    double latitude,
-    double longitude,
-  ) async {
+  /// Livreurs éligibles pour une commande, du plus proche au plus loin.
+  ///
+  /// L'éligibilité est calculée par le serveur : la liste ne se filtre pas ici.
+  Future<List<Driver>> availableForOrder(String orderId) async {
     try {
-      await _supabase.from('drivers').update({
-        'latitude': latitude,
-        'longitude': longitude,
-        'last_location_update': DateTime.now().toIso8601String(),
-      }).eq('id', driverId);
-
-      final index = _drivers.indexWhere((d) => d.id == driverId);
-      if (index != -1) {
-        _drivers[index] = _drivers[index].copyWith(
-          latitude: latitude,
-          longitude: longitude,
-        );
-        notifyListeners();
-      }
-
-      return true;
-    } catch (e) {
-      debugPrint('Error updating driver location: $e');
-      return false;
+      final remote = await _couriers.availableFor(orderId);
+      return remote.map(_toLocalDriver).toList();
+    } on eccore.ApiException catch (e) {
+      debugPrint('DriverManagementService: éligibles indisponibles — ${e.code}');
+      return [];
     }
   }
 
@@ -420,70 +287,6 @@ class DriverManagementService extends ChangeNotifier {
   void setSortOption(String sortKey) {
     _sortOption = sortKey;
     notifyListeners();
-  }
-
-  /// Suspendre un livreur
-  Future<bool> suspendDriver(String driverId, String reason) async {
-    try {
-      _isLoading = true;
-      notifyListeners();
-
-      await _supabase.from('drivers').update({
-        'status': DriverStatus.offline.toString().split('.').last,
-        'is_active': false,
-        'suspension_reason': reason,
-        'suspended_at': DateTime.now().toIso8601String(),
-      }).eq('id', driverId);
-
-      final index = _drivers.indexWhere((d) => d.id == driverId);
-      if (index != -1) {
-        _drivers[index] = _drivers[index].copyWith(
-          status: DriverStatus.offline,
-          isActive: false,
-        );
-      }
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('Error suspending driver: $e');
-      _isLoading = false;
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Réactiver un livreur
-  Future<bool> reactivateDriver(String driverId) async {
-    try {
-      _isLoading = true;
-      notifyListeners();
-
-      await _supabase.from('drivers').update({
-        'status': DriverStatus.available.toString().split('.').last,
-        'is_active': true,
-        'suspension_reason': null,
-        'suspended_at': null,
-      }).eq('id', driverId);
-
-      final index = _drivers.indexWhere((d) => d.id == driverId);
-      if (index != -1) {
-        _drivers[index] = _drivers[index].copyWith(
-          status: DriverStatus.available,
-          isActive: true,
-        );
-      }
-
-      _isLoading = false;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('Error reactivating driver: $e');
-      _isLoading = false;
-      notifyListeners();
-      return false;
-    }
   }
 
   /// Obtenir les livreurs les mieux notés
@@ -577,151 +380,29 @@ class DriverManagementService extends ChangeNotifier {
   // -----------------------------------------------------------------------------
 
   /// Ajouter une notation détaillée
-  Future<void> addDetailedRating({
-    required String driverId,
-    required String clientId,
-    required int timeRating,
-    required int serviceRating,
-    required int conditionRating,
-    String? comment,
-  }) async {
-    try {
-      final avg = (timeRating + serviceRating + conditionRating) / 3.0;
 
-      await _supabase.from('driver_ratings').insert({
-        'driver_id': driverId,
-        'client_id': clientId,
-        'rating_delivery_time': timeRating,
-        'rating_service': serviceRating,
-        'rating_condition': conditionRating,
-        'rating_average': avg,
-        'comment': comment,
-      });
-
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error adding rating: $e');
-    }
-  }
-
-  /// Récupérer les badges d'un livreur
-  Future<List<DriverBadge>> getDriverBadges(String driverId) async {
-    try {
-      final response = await _supabase
-          .from('driver_earned_badges')
-          .select('*, driver_badges(*)')
-          .eq('driver_id', driverId);
-
-      return (response as List)
-          .map((data) => DriverBadge.fromMap(data))
-          .toList();
-    } catch (e) {
-      debugPrint('Error getting badges: $e');
-      return [];
-    }
-  }
-
-  /// Récupérer toutes les définitions de badges disponibles
-  Future<List<Map<String, dynamic>>> getAllBadges() async {
-    try {
-      final response =
-          await _supabase.from('driver_badges').select('*').order('name');
-      return List<Map<String, dynamic>>.from(response);
-    } catch (e) {
-      debugPrint('Error getting all badges: $e');
-      return [];
-    }
-  }
-
-  /// Assigner un badge à un livreur
-  Future<bool> assignBadgeToDriver(String driverId, String badgeId) async {
-    try {
-      // Vérifier si le livreur a déjà ce badge
-      final existing = await _supabase
-          .from('driver_earned_badges')
-          .select('id')
-          .eq('driver_id', driverId)
-          .eq('badge_id', badgeId)
-          .maybeSingle();
-
-      if (existing != null) return false;
-
-      await _supabase.from('driver_earned_badges').insert({
-        'driver_id': driverId,
-        'badge_id': badgeId,
-        'earned_at': DateTime.now().toIso8601String(),
-      });
-
-      notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('Error assigning badge: $e');
-      return false;
-    }
-  }
-
-  /// Récupérer les statistiques détaillées d'un livreur
+  /// Statistiques détaillées d'un livreur — lues sur son dossier.
+  ///
+  /// Les notes par critère (ponctualité, service, soin du colis) et les badges
+  /// livreur n'existent pas au contrat v2 : la note est un **agrégat**
+  /// (`rating_average`, `rating_count`) alimenté par les notes des clients, et
+  /// la gamification est réservée aux comptes clients. L'ancienne version
+  /// lisait `driver_ratings`, `driver_badges` et `driver_earned_badges`, trois
+  /// tables sans contrepartie.
   Future<Map<String, dynamic>> getDriverDetailedStats(String driverId) async {
     try {
-      // Essayer d'utiliser la vue SQL si elle existe
-      try {
-        final response = await _supabase
-            .from('driver_detailed_stats_view')
-            .select()
-            .eq('driver_id', driverId)
-            .maybeSingle();
-
-        if (response != null) return response;
-      } catch (_) {
-        // La vue n'existe peut-être pas encore
-      }
-
-      // Fallback: Calculer manuellement depuis driver_ratings
-      final ratings = await _supabase
-          .from('driver_ratings')
-          .select()
-          .eq('driver_id', driverId);
-
-      if ((ratings as List).isEmpty) {
-        return {
-          'total_reviews': 0,
-          'avg_global_rating': 0.0,
-          'avg_time_rating': 0.0,
-          'avg_service_rating': 0.0,
-          'avg_condition_rating': 0.0,
-        };
-      }
-
-      double totalTime = 0;
-      double totalService = 0;
-      double totalCondition = 0;
-      double totalGlobal = 0;
-
-      for (var r in ratings) {
-        totalTime += (r['rating_delivery_time'] as num? ?? 0).toDouble();
-        totalService += (r['rating_service'] as num? ?? 0).toDouble();
-        totalCondition += (r['rating_condition'] as num? ?? 0).toDouble();
-        totalGlobal += (r['rating_average'] as num? ?? 0).toDouble();
-      }
-
-      final count = ratings.length;
-
+      final courier = await _couriers.getById(driverId);
       return {
-        'total_reviews': count,
-        'avg_global_rating': totalGlobal / count,
-        'avg_time_rating': totalTime / count,
-        'avg_service_rating': totalService / count,
-        'avg_condition_rating': totalCondition / count,
+        'deliveries_completed': courier.deliveriesCompleted,
+        'deliveries_cancelled': courier.deliveriesCancelled,
+        'rating_average': courier.ratingAverage,
+        'rating_count': courier.ratingCount,
+        'total_earnings': courier.totalEarnings?.toMajorUnits() ?? 0,
+        'verification_status': courier.verificationStatus,
       };
-    } catch (e) {
-      debugPrint('Error getting detailed stats: $e');
-      return {
-        'total_reviews': 0,
-        'avg_global_rating': 0.0,
-        'avg_time_rating': 0.0,
-        'avg_service_rating': 0.0,
-        'avg_condition_rating': 0.0,
-      };
+    } on eccore.ApiException catch (e) {
+      debugPrint('DriverManagementService: statistiques indisponibles — ${e.code}');
+      return {};
     }
   }
 }

@@ -21,6 +21,16 @@ class Order {
   final String? specialInstructions;
   final String? paymentTransactionId;
 
+  /// Destinataire de la livraison, porté par la commande elle-même.
+  ///
+  /// Ce n'est pas forcément le titulaire du compte : on commande pour un
+  /// collègue, pour ses parents. L'ancien écran allait chercher le nom et le
+  /// téléphone du **compte** dans une autre table, ce qui affichait la mauvaise
+  /// personne dès que la commande était passée pour un tiers — et faisait une
+  /// requête par ligne de liste.
+  final String recipientName;
+  final String recipientPhone;
+
   Order({
     required this.id,
     required this.userId,
@@ -41,6 +51,8 @@ class Order {
     this.statusUpdates = const [],
     this.specialInstructions,
     this.paymentTransactionId,
+    this.recipientName = '',
+    this.recipientPhone = '',
   });
 
   Order copyWith({

@@ -21,6 +21,16 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
   final _phoneController = TextEditingController();
   final _vehicleNumberController = TextEditingController();
 
+  /// Embaucher crée un **compte** : le mot de passe initial est donc exigé par
+  /// le serveur. L'ancienne version insérait une ligne dans une table `drivers`
+  /// sans compte associé — le livreur ne pouvait pas se connecter.
+  final _passwordController = TextEditingController();
+
+  /// Établissement de rattachement. Le back-office ne gère qu'un établissement
+  /// pour l'instant ; le jour où il en gérera plusieurs, ce champ devient un
+  /// sélecteur alimenté par `/restaurants/`.
+  static const String _restaurantSlug = 'el-corazon-lome';
+
   DriverStatus _selectedStatus = DriverStatus.available;
   String? _selectedVehicleType;
   List<String> _selectedZones = [];
@@ -60,6 +70,7 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
     _emailController.dispose();
     _phoneController.dispose();
     _vehicleNumberController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -461,32 +472,26 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
       bool success;
 
       if (widget.driver == null) {
-        // Créer un nouveau livreur
-        final newDriver = Driver(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          name: _nameController.text,
-          email: _emailController.text,
-          phone: _phoneController.text,
-          vehicleType: _selectedVehicleType,
-          licensePlate: _vehicleNumberController.text.isEmpty
-              ? null
-              : _vehicleNumberController.text,
-          createdAt: DateTime.now(),
+        // Embauche : le compte et le dossier naissent ensemble, côté serveur.
+        success = await driverService.provisionDriver(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+          fullName: _nameController.text.trim(),
+          restaurantSlug: _restaurantSlug,
+          vehicleType: _selectedVehicleType ?? 'motorcycle',
+          phone: _phoneController.text.trim(),
+          vehiclePlate: _vehicleNumberController.text.trim(),
         );
-        success = await driverService.addDriver(newDriver);
       } else {
-        // Modifier le livreur existant
-        final updatedDriver = widget.driver!.copyWith(
-          name: _nameController.text,
-          email: _emailController.text,
-          phone: _phoneController.text,
-          status: _selectedStatus,
-          vehicleType: _selectedVehicleType,
-          licensePlate: _vehicleNumberController.text.isEmpty
-              ? null
-              : _vehicleNumberController.text,
+        // Le contrat v2 n'a pas de route « modifier un livreur » : le livreur
+        // tient son propre dossier (`/delivery/me/`), et le personnel en
+        // **instruit le statut**. Retirer quelqu'un du service ou l'y remettre
+        // sont les deux seuls gestes que l'exploitation exerce sur un dossier,
+        // et ils demandent des permissions distinctes.
+        success = await driverService.setVerification(
+          widget.driver!.id,
+          _selectedStatus == DriverStatus.unavailable ? 'suspended' : 'approved',
         );
-        success = await driverService.updateDriver(updatedDriver);
       }
 
       if (success && mounted) {

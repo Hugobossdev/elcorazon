@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../models/driver.dart';
-import '../../models/driver_badge.dart';
 import '../../models/order.dart'; // Import OrderStatus
 import '../../services/driver_management_service.dart';
 import '../../services/order_management_service.dart'; // Import Service
-import '../../widgets/driver_badge_widget.dart';
 import '../../widgets/custom_bar_chart.dart';
 
 class DriverDetailedStatsScreen extends StatefulWidget {
@@ -20,7 +18,6 @@ class DriverDetailedStatsScreen extends StatefulWidget {
 
 class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
   bool _isLoading = false;
-  List<DriverBadge> _badges = [];
   Map<String, dynamic> _detailedStats = {};
 
   @override
@@ -35,85 +32,14 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
     setState(() => _isLoading = true);
     try {
       final service = context.read<DriverManagementService>();
-      final results = await Future.wait([
-        service.getDriverBadges(widget.driver!.id),
-        service.getDriverDetailedStats(widget.driver!.id),
-      ]);
+      final stats = await service.getDriverDetailedStats(widget.driver!.id);
 
-      setState(() {
-        _badges = results[0] as List<DriverBadge>;
-        _detailedStats = results[1] as Map<String, dynamic>;
-      });
+      setState(() => _detailedStats = stats);
     } catch (e) {
       debugPrint('Erreur chargement détails: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
-  }
-
-  Future<void> _showAssignBadgeDialog() async {
-    final service = context.read<DriverManagementService>();
-    final allBadges = await service.getAllBadges();
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Attribuer un badge'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: allBadges.isEmpty
-              ? const Center(child: Text('Aucun badge disponible'))
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: allBadges.length,
-                  itemBuilder: (context, index) {
-                    final badge = allBadges[index];
-                    final isAssigned = _badges.any((b) => b.id == badge['id']);
-
-                    return ListTile(
-                      leading: Text(
-                        badge['icon'] ?? '🏅',
-                        style: const TextStyle(fontSize: 24),
-                      ),
-                      title: Text(badge['title'] ?? ''),
-                      subtitle: Text(badge['description'] ?? ''),
-                      trailing: isAssigned
-                          ? const Icon(Icons.check_circle, color: Colors.green)
-                          : ElevatedButton(
-                              onPressed: () async {
-                                Navigator.pop(context);
-                                  final success = await service.assignBadgeToDriver(
-                                    widget.driver!.id,
-                                    badge['id'],
-                                  );
-                                  if (success) {
-                                    _loadData();
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Badge attribué avec succès'),
-                                          backgroundColor: Colors.green,
-                                        ),
-                                      );
-                                    }
-                                  }
-                              },
-                              child: const Text('Attribuer'),
-                            ),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -218,57 +144,6 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                       ),
 
                       const SizedBox(height: 24),
-
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Badges & Récompenses',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          TextButton.icon(
-                            onPressed: _showAssignBadgeDialog,
-                            icon: const Icon(Icons.add_circle_outline),
-                            label: const Text('Attribuer un badge'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      if (_badges.isEmpty)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[100],
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.grey[300]!),
-                          ),
-                          child: const Column(
-                            children: [
-                              Icon(Icons.emoji_events_outlined,
-                                  size: 48, color: Colors.grey),
-                              SizedBox(height: 8),
-                              Text('Aucun badge pour le moment',
-                                  style: TextStyle(color: Colors.grey)),
-                            ],
-                          ),
-                        )
-                      else
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            childAspectRatio: 0.8,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
-                          ),
-                          itemCount: _badges.length,
-                          itemBuilder: (context, index) {
-                            return DriverBadgeWidget(badge: _badges[index]);
-                          },
-                        ),
 
                       const SizedBox(height: 24),
 

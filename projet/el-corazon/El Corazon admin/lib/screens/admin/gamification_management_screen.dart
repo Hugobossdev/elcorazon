@@ -85,16 +85,18 @@ class _GamificationManagementScreenState
     );
   }
 
-  void _showGlobalStats() async {
+  void _showGlobalStats() {
     final service = context.read<GamificationService>();
-    final stats = await service.getGlobalGamificationStats();
-
-    if (!mounted) return;
+    // Compteurs du catalogue : « combien de clients ont débloqué ceci »
+    // demandait de charger toutes les lignes de progression de tous les
+    // comptes sur un poste de travail. C'est un agrégat, il appartient aux
+    // rapports.
+    final stats = service.catalogueStats;
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Statistiques Globales'),
+        title: const Text('Catalogue de fidélisation'),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -125,28 +127,6 @@ class _GamificationManagementScreenState
               _buildStatRow(
                 'Récompenses actives',
                 '${stats['active_loyalty_rewards'] ?? 0}',
-              ),
-              const Divider(),
-              _buildStatRow(
-                'Utilisateurs avec achievements',
-                '${stats['users_with_achievements'] ?? 0}',
-              ),
-              _buildStatRow(
-                'Utilisateurs avec challenges',
-                '${stats['users_with_challenges'] ?? 0}',
-              ),
-              _buildStatRow(
-                'Utilisateurs avec badges',
-                '${stats['users_with_badges'] ?? 0}',
-              ),
-              const Divider(),
-              _buildStatRow(
-                'Transactions totales',
-                '${stats['total_transactions'] ?? 0}',
-              ),
-              _buildStatRow(
-                'Échanges totales',
-                '${stats['total_redemptions'] ?? 0}',
               ),
             ],
           ),
@@ -298,20 +278,10 @@ class _AchievementsTab extends StatelessWidget {
                   achievement['is_active'] == true ? 'Désactiver' : 'Activer',
                 ),
                 onTap: () {
-                  gamificationService.updateAchievement(achievement['id'], {
-                    'is_active': !(achievement['is_active'] ?? true),
-                  });
-                },
-              ),
-              PopupMenuItem(
-                child: const Text(
-                  'Supprimer',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  _confirmDelete(context, achievement['id'], () {
-                    gamificationService.deleteAchievement(achievement['id']);
-                  });
+                  gamificationService.updateAchievement(
+                    achievement['id'],
+                    isActive: !(achievement['is_active'] ?? true),
+                  );
                 },
               ),
             ],
@@ -331,30 +301,6 @@ class _AchievementsTab extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, String id, VoidCallback onConfirm) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmer la suppression'),
-        content: const Text(
-          'Êtes-vous sûr de vouloir supprimer cet achievement ?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          TextButton(
-            onPressed: () {
-              onConfirm();
-              Navigator.pop(context);
-            },
-            child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // =====================================================
@@ -473,17 +419,6 @@ class _ChallengesTab extends StatelessWidget {
                       }
                     }),
               ),
-              PopupMenuItem(
-                child: const Text(
-                  'Supprimer',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  _confirmDelete(context, challenge['id'], () {
-                    gamificationService.deleteChallenge(challenge['id']);
-                  });
-                },
-              ),
             ],
           ),
         ),
@@ -505,30 +440,6 @@ class _ChallengesTab extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, String id, VoidCallback onConfirm) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmer la suppression'),
-        content: const Text(
-          'Êtes-vous sûr de vouloir supprimer ce challenge ?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          TextButton(
-            onPressed: () {
-              onConfirm();
-              Navigator.pop(context);
-            },
-            child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // =====================================================
@@ -642,20 +553,10 @@ class _BadgesTab extends StatelessWidget {
                   badge['is_active'] == true ? 'Désactiver' : 'Activer',
                 ),
                 onTap: () {
-                  gamificationService.updateBadge(badge['id'], {
-                    'is_active': !(badge['is_active'] ?? true),
-                  });
-                },
-              ),
-              PopupMenuItem(
-                child: const Text(
-                  'Supprimer',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  _confirmDelete(context, badge['id'], () {
-                    gamificationService.deleteBadge(badge['id']);
-                  });
+                  gamificationService.updateBadge(
+                    badge['id'],
+                    isActive: !(badge['is_active'] ?? true),
+                  );
                 },
               ),
             ],
@@ -672,28 +573,6 @@ class _BadgesTab extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, String id, VoidCallback onConfirm) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmer la suppression'),
-        content: const Text('Êtes-vous sûr de vouloir supprimer ce badge ?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          TextButton(
-            onPressed: () {
-              onConfirm();
-              Navigator.pop(context);
-            },
-            child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // =====================================================
@@ -811,20 +690,10 @@ class _RewardsTab extends StatelessWidget {
                   reward['is_active'] == true ? 'Désactiver' : 'Activer',
                 ),
                 onTap: () {
-                  gamificationService.updateLoyaltyReward(reward['id'], {
-                    'is_active': !(reward['is_active'] ?? true),
-                  });
-                },
-              ),
-              PopupMenuItem(
-                child: const Text(
-                  'Supprimer',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () {
-                  _confirmDelete(context, reward['id'], () {
-                    gamificationService.deleteLoyaltyReward(reward['id']);
-                  });
+                  gamificationService.updateLoyaltyReward(
+                    reward['id'],
+                    isActive: !(reward['is_active'] ?? true),
+                  );
                 },
               ),
             ],
@@ -841,30 +710,6 @@ class _RewardsTab extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, String id, VoidCallback onConfirm) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmer la suppression'),
-        content: const Text(
-          'Êtes-vous sûr de vouloir supprimer cette récompense ?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          TextButton(
-            onPressed: () {
-              onConfirm();
-              Navigator.pop(context);
-            },
-            child: const Text('Supprimer', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // =====================================================
@@ -1116,26 +961,20 @@ class _AchievementFormDialogState extends State<_AchievementFormDialog> {
           description: _descController.text.trim(),
           icon: _iconController.text.trim(),
           pointsReward: int.parse(_pointsController.text),
-          badgeReward: _badgeRewardController.text.trim().isEmpty
-              ? null
-              : _badgeRewardController.text.trim(),
+          conditionType: _conditionType,
+          conditionValue: int.parse(_conditionValueController.text),
+        );
+      } else {
+        service.updateAchievement(
+          widget.achievement!['id'],
+          name: _nameController.text.trim(),
+          description: _descController.text.trim(),
+          icon: _iconController.text.trim(),
+          pointsReward: int.parse(_pointsController.text),
           conditionType: _conditionType,
           conditionValue: int.parse(_conditionValueController.text),
           isActive: _isActive,
         );
-      } else {
-        service.updateAchievement(widget.achievement!['id'], {
-          'name': _nameController.text.trim(),
-          'description': _descController.text.trim(),
-          'icon': _iconController.text.trim(),
-          'points_reward': int.parse(_pointsController.text),
-          'badge_reward': _badgeRewardController.text.trim().isEmpty
-              ? null
-              : _badgeRewardController.text.trim(),
-          'condition_type': _conditionType,
-          'condition_value': int.parse(_conditionValueController.text),
-          'is_active': _isActive,
-        });
       }
       Navigator.pop(context);
     }
@@ -1416,27 +1255,27 @@ class _ChallengeFormDialogState extends State<_ChallengeFormDialog> {
           title: _titleController.text.trim(),
           description: _descController.text.trim(),
           challengeType: _challengeType,
+          // Ce qui est compté. Le serveur ne sait mesurer que ce que déclare
+          // `AchievementCondition` : un critère inventé ici ne compterait
+          // jamais rien.
+          conditionType: 'orders_count',
           targetValue: int.parse(_targetValueController.text),
           rewardPoints: int.tryParse(_rewardPointsController.text) ?? 0,
-          rewardDiscount:
-              double.tryParse(_rewardDiscountController.text) ?? 0.0,
+          startDate: _startDate,
+          endDate: _endDate,
+        );
+      } else {
+        service.updateChallenge(
+          widget.challenge!['id'],
+          title: _titleController.text.trim(),
+          description: _descController.text.trim(),
+          challengeType: _challengeType,
+          targetValue: int.parse(_targetValueController.text),
+          rewardPoints: int.tryParse(_rewardPointsController.text) ?? 0,
           startDate: _startDate,
           endDate: _endDate,
           isActive: _isActive,
         );
-      } else {
-        service.updateChallenge(widget.challenge!['id'], {
-          'title': _titleController.text.trim(),
-          'description': _descController.text.trim(),
-          'challenge_type': _challengeType,
-          'target_value': int.parse(_targetValueController.text),
-          'reward_points': int.tryParse(_rewardPointsController.text) ?? 0,
-          'reward_discount':
-              double.tryParse(_rewardDiscountController.text) ?? 0.0,
-          'start_date': _startDate.toIso8601String(),
-          'end_date': _endDate.toIso8601String(),
-          'is_active': _isActive,
-        });
       }
       Navigator.pop(context);
     }
@@ -1647,25 +1486,19 @@ class _BadgeFormDialogState extends State<_BadgeFormDialog> {
       if (widget.badge == null) {
         service.createBadge(
           title: _titleController.text.trim(),
-          description: _descController.text.trim().isEmpty
-              ? null
-              : _descController.text.trim(),
+          description: _descController.text.trim(),
           icon: _iconController.text.trim(),
           pointsRequired: int.parse(_pointsRequiredController.text),
-          criteria: _criteria,
-          isActive: _isActive,
         );
       } else {
-        service.updateBadge(widget.badge!['id'], {
-          'title': _titleController.text.trim(),
-          'description': _descController.text.trim().isEmpty
-              ? null
-              : _descController.text.trim(),
-          'icon': _iconController.text.trim(),
-          'points_required': int.parse(_pointsRequiredController.text),
-          'criteria': _criteria,
-          'is_active': _isActive,
-        });
+        service.updateBadge(
+          widget.badge!['id'],
+          title: _titleController.text.trim(),
+          description: _descController.text.trim(),
+          icon: _iconController.text.trim(),
+          pointsRequired: int.parse(_pointsRequiredController.text),
+          isActive: _isActive,
+        );
       }
       Navigator.pop(context);
     }
@@ -1699,8 +1532,8 @@ class _RewardFormDialogState extends State<_RewardFormDialog> {
       _titleController.text = r['title'] ?? '';
       _descController.text = r['description'] ?? '';
       _costController.text = (r['cost'] ?? 0).toString();
-      _valueController.text = (r['value'] ?? 0.0).toString();
-      _rewardType = r['reward_type'] ?? 'discount';
+      _valueController.text = (r['discount'] ?? 0.0).toString();
+      _rewardType = r['kind'] ?? 'discount';
       _isActive = r['is_active'] ?? true;
     } else {
       _costController.text = '0';
@@ -1807,19 +1640,11 @@ class _RewardFormDialogState extends State<_RewardFormDialog> {
                               items: const [
                                 DropdownMenuItem(
                                   value: 'discount',
-                                  child: Text('Réduction'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'free_item',
-                                  child: Text('Article gratuit'),
+                                  child: Text('Remise sur une commande'),
                                 ),
                                 DropdownMenuItem(
                                   value: 'free_delivery',
-                                  child: Text('Livraison gratuite'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'points',
-                                  child: Text('Points bonus'),
+                                  child: Text('Livraison offerte'),
                                 ),
                               ],
                               onChanged: (v) =>
@@ -1829,35 +1654,25 @@ class _RewardFormDialogState extends State<_RewardFormDialog> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _valueController,
-                        decoration: InputDecoration(
-                          labelText: _rewardType == 'discount'
-                              ? 'Valeur de réduction (%) *'
-                              : _rewardType == 'free_item'
-                              ? 'ID de l\'article *'
-                              : _rewardType == 'points'
-                              ? 'Nombre de points *'
-                              : 'Valeur *',
-                          border: const OutlineInputBorder(),
+                      if (_rewardType == 'discount')
+                        TextFormField(
+                          controller: _valueController,
+                          decoration: const InputDecoration(
+                            labelText: 'Montant de la remise (FCFA) *',
+                            helperText:
+                                'Un montant, pas un pourcentage : le serveur '
+                                'le manie comme une somme.',
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: TextInputType.number,
+                          validator: (v) {
+                            final montant = double.tryParse(v ?? '');
+                            if (montant == null || montant <= 0) {
+                              return 'Une remise doit porter un montant';
+                            }
+                            return null;
+                          },
                         ),
-                        keyboardType: _rewardType == 'free_item'
-                            ? TextInputType.text
-                            : TextInputType.number,
-                        validator: (v) {
-                          if (_rewardType == 'free_item') {
-                            return v == null || v.isEmpty
-                                ? 'ID de l\'article requis'
-                                : null;
-                          }
-                          return v == null ||
-                                  (_rewardType == 'points'
-                                      ? int.tryParse(v) == null
-                                      : double.tryParse(v) == null)
-                              ? 'Valeur invalide'
-                              : null;
-                        },
-                      ),
                       const SizedBox(height: 16),
                       SwitchListTile(
                         title: const Text('Actif'),
@@ -1896,36 +1711,32 @@ class _RewardFormDialogState extends State<_RewardFormDialog> {
   void _submit() {
     if (_formKey.currentState!.validate()) {
       final service = context.read<GamificationService>();
+      // Le serveur ne connaît que deux natures de récompense — une remise, ou
+      // la livraison offerte. « Points » n'en était pas une : offrir des points
+      // contre des points ne fait que déplacer un solde, et « article offert »
+      // n'a jamais eu de champ pour désigner l'article.
+      final montant = _rewardType == 'discount'
+          ? double.tryParse(_valueController.text)
+          : null;
+
       if (widget.reward == null) {
         service.createLoyaltyReward(
-          title: _titleController.text.trim(),
-          description: _descController.text.trim().isEmpty
-              ? null
-              : _descController.text.trim(),
-          cost: int.parse(_costController.text),
-          rewardType: _rewardType,
-          value: _rewardType == 'free_item'
-              ? null
-              : (_rewardType == 'points'
-                    ? double.tryParse(_valueController.text)?.toDouble()
-                    : double.tryParse(_valueController.text)),
-          isActive: _isActive,
+          name: _titleController.text.trim(),
+          description: _descController.text.trim(),
+          kind: _rewardType,
+          pointsCost: int.parse(_costController.text),
+          discount: montant,
         );
       } else {
-        service.updateLoyaltyReward(widget.reward!['id'], {
-          'title': _titleController.text.trim(),
-          'description': _descController.text.trim().isEmpty
-              ? null
-              : _descController.text.trim(),
-          'cost': int.parse(_costController.text),
-          'reward_type': _rewardType,
-          'value': _rewardType == 'free_item'
-              ? null
-              : (_rewardType == 'points'
-                    ? double.tryParse(_valueController.text)?.toDouble()
-                    : double.tryParse(_valueController.text)),
-          'is_active': _isActive,
-        });
+        service.updateLoyaltyReward(
+          widget.reward!['id'],
+          name: _titleController.text.trim(),
+          description: _descController.text.trim(),
+          kind: _rewardType,
+          pointsCost: int.parse(_costController.text),
+          discount: montant,
+          isActive: _isActive,
+        );
       }
       Navigator.pop(context);
     }

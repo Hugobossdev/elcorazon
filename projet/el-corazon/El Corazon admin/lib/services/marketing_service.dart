@@ -1,862 +1,174 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' hide User;
-import '../models/order.dart';
-import '../models/user.dart';
-import '../models/menu_models.dart';
 
-class MarketingCampaign {
-  final String id;
-  final String name;
-  final String type; // 'personalized', 'seasonal', 'promotional', 'retention'
-  final String title;
-  final String message;
-  final List<String> targetUserIds;
-  final Map<String, dynamic> conditions;
-  final DateTime startDate;
-  final DateTime endDate;
-  final bool isActive;
-  final Map<String, dynamic> metrics;
+import 'admin_auth_service.dart';
 
-  MarketingCampaign({
-    required this.id,
-    required this.name,
-    required this.type,
-    required this.title,
-    required this.message,
-    required this.targetUserIds,
-    required this.conditions,
-    required this.startDate,
-    required this.endDate,
-    this.isActive = true,
-    this.metrics = const {},
-  });
-}
-
-class PredictiveAnalytics {
-  final String id;
-  final String
-  type; // 'sales_forecast', 'inventory_prediction', 'customer_behavior'
-  final Map<String, dynamic> predictions;
-  final double confidence;
-  final DateTime generatedAt;
-  final Map<String, dynamic> parameters;
-
-  PredictiveAnalytics({
-    required this.id,
-    required this.type,
-    required this.predictions,
-    required this.confidence,
-    required this.generatedAt,
-    required this.parameters,
-  });
-}
-
-class CustomerInsight {
-  final String userId;
-  final Map<String, dynamic> preferences;
-  final Map<String, dynamic> behaviorPatterns;
-  final double churnRisk;
-  final List<String> recommendedActions;
-  final DateTime lastUpdated;
-
-  CustomerInsight({
-    required this.userId,
-    required this.preferences,
-    required this.behaviorPatterns,
-    required this.churnRisk,
-    required this.recommendedActions,
-    required this.lastUpdated,
-  });
-}
-
+/// Campagnes de notifications — `/notifications/campaigns/` (Phase 6).
+///
+/// Le service a perdu les deux tiers de sa surface, et ce n'est pas une
+/// simplification d'écriture : ce qui a disparu ne pouvait pas fonctionner.
+///
+/// * **La « prévision de ventes », la « prédiction de stock » et le « risque
+///   d'attrition »** étaient calculés dans le navigateur, par des moyennes
+///   pondérées à la main sur les lignes que Supabase avait bien voulu rendre.
+///   Ils annonçaient un « niveau de confiance » qui ne mesurait rien, et
+///   exigeaient que le back-office charge l'historique de commandes de tous les
+///   clients. On ne remplace pas une prédiction par une autre : les chiffres
+///   réels sont dans les rapports (`/analytics/reports/*`), et une vraie
+///   prévision est un travail de modèle, pas de boucle `for` ;
+/// * **le ciblage par liste d'identifiants** (`targetUserIds`) laissait l'écran
+///   décider qui reçoit un envoi de masse. Le serveur n'expose que des segments
+///   fermés — tous les clients, les livreurs, ceux qui ont commandé récemment,
+///   ceux qui ne l'ont plus fait — parce qu'un ciblage libre est une requête
+///   que personne n'a relue avant qu'elle ne parte à des milliers de gens ;
+/// * **les « métriques » écrites par le client** (`updateCampaignMetrics`)
+///   permettaient d'annoncer des ouvertures et des conversions inventées. Le
+///   seul chiffre est désormais `recipientCount`, écrit par l'envoi lui-même.
+///
+/// Reste ce qu'est vraiment une campagne : on rédige, on estime, on envoie une
+/// fois. Une campagne envoyée devient immuable — la corriger après coup ferait
+/// afficher à l'historique un texte que personne n'a reçu.
 class MarketingService extends ChangeNotifier {
-  static final MarketingService _instance = MarketingService._internal();
-  factory MarketingService() => _instance;
-  MarketingService._internal();
+  eccore.CampaignRepository get _campaignsApi =>
+      eccore.CampaignRepository(apiClient: AdminAuthService().apiClient);
 
-  final SupabaseClient _supabase = Supabase.instance.client;
-  List<MarketingCampaign> _campaigns = [];
-  final List<PredictiveAnalytics> _analytics = [];
-  final Map<String, CustomerInsight> _customerInsights = {};
+  List<eccore.Campaign> _campaigns = [];
+  final Map<String, int> _audienceEstimates = {};
+  bool _isLoading = false;
+  String? _error;
   bool _isInitialized = false;
 
-  List<MarketingCampaign> get campaigns => List.unmodifiable(_campaigns);
-  List<PredictiveAnalytics> get analytics => List.unmodifiable(_analytics);
-  Map<String, CustomerInsight> get customerInsights =>
-      Map.unmodifiable(_customerInsights);
-  bool get isInitialized => _isInitialized;
+  List<eccore.Campaign> get campaigns => _campaigns;
+  List<eccore.Campaign> get drafts =>
+      _campaigns.where((c) => c.isDraft).toList();
+  List<eccore.Campaign> get sent => _campaigns.where((c) => c.isSent).toList();
+  bool get isLoading => _isLoading;
+  String? get error => _error;
 
   Future<void> initialize() async {
     if (_isInitialized) return;
+    _isInitialized = true;
+    await refresh();
+  }
+
+  Future<void> refresh() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
 
     try {
-      await _loadMarketingData();
-      _isInitialized = true;
+      _campaigns = await _campaignsApi.list();
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Marketing : campagnes indisponibles — ${e.code}');
+    } finally {
+      _isLoading = false;
       notifyListeners();
-    } catch (e) {
-      debugPrint('Error initializing Marketing Service: $e');
     }
   }
 
-  Future<void> _loadMarketingData() async {
-    try {
-      // Charger les campagnes depuis Supabase
-      final response = await _supabase
-          .from('marketing_campaigns')
-          .select('*')
-          .order('created_at', ascending: false);
-
-      _campaigns = (response as List).map((data) {
-        return MarketingCampaign(
-          id: data['id'] as String,
-          name: data['name'] as String,
-          type: data['type'] as String,
-          title: data['title'] as String,
-          message: data['message'] as String,
-          targetUserIds:
-              (data['target_user_ids'] as List?)
-                  ?.map((e) => e.toString())
-                  .toList() ??
-              [],
-          conditions: data['conditions'] != null
-              ? Map<String, dynamic>.from(data['conditions'])
-              : {},
-          startDate: DateTime.parse(data['start_date'] as String),
-          endDate: DateTime.parse(data['end_date'] as String),
-          isActive: data['is_active'] as bool? ?? true,
-          metrics: data['metrics'] != null
-              ? Map<String, dynamic>.from(data['metrics'])
-              : {},
-        );
-      }).toList();
-
-      debugPrint('MarketingService: ${_campaigns.length} campagnes chargées');
-    } catch (e) {
-      debugPrint('MarketingService: Erreur chargement campagnes - $e');
-      _campaigns = [];
-    }
-  }
-
-  // Predictive Analytics Functions
-
-  /// Generate sales forecast
-  Future<PredictiveAnalytics> generateSalesForecast({
-    required List<Order> historicalOrders,
-    int forecastDays = 7,
-  }) async {
-    await Future.delayed(const Duration(seconds: 1));
-
-    // Analyze historical data
-    Map<String, dynamic> analysis = _analyzeHistoricalSales(historicalOrders);
-
-    // Generate predictions
-    Map<String, dynamic> predictions = {};
-    DateTime startDate = DateTime.now();
-
-    for (int i = 0; i < forecastDays; i++) {
-      DateTime date = startDate.add(Duration(days: i));
-      String dateKey =
-          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-
-      double baseSales = analysis['averageDailySales'];
-
-      // Apply day of week factor
-      double dayFactor = _getDayOfWeekFactor(date.weekday);
-
-      // Apply weather factor (simulated)
-      double weatherFactor = _getWeatherFactor(date);
-
-      // Apply trend factor
-      double trendFactor = analysis['trend'];
-
-      predictions[dateKey] = {
-        'expectedSales': (baseSales * dayFactor * weatherFactor * trendFactor)
-            .round(),
-        'expectedOrders':
-            ((baseSales * dayFactor * weatherFactor * trendFactor) /
-                    analysis['averageOrderValue'])
-                .round(),
-        'confidence': 0.75 + (i * -0.05), // Confidence decreases over time
-      };
-    }
-
-    PredictiveAnalytics analytics = PredictiveAnalytics(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      type: 'sales_forecast',
-      predictions: predictions,
-      confidence: 0.75,
-      generatedAt: DateTime.now(),
-      parameters: {
-        'forecastDays': forecastDays,
-        'dataPoints': historicalOrders.length,
-        'method': 'time_series_analysis',
-      },
-    );
-
-    _analytics.add(analytics);
-    notifyListeners();
-
-    return analytics;
-  }
-
-  Map<String, dynamic> _analyzeHistoricalSales(List<Order> orders) {
-    if (orders.isEmpty) {
-      return {
-        'averageDailySales': 50000.0,
-        'averageOrderValue': 7500.0,
-        'trend': 1.0,
-      };
-    }
-
-    double totalSales = orders.fold(0.0, (sum, order) => sum + order.total);
-    double averageOrderValue = totalSales / orders.length;
-
-    // Group orders by date
-    Map<String, double> dailySales = {};
-    for (var order in orders) {
-      String dateKey =
-          '${order.createdAt.year}-${order.createdAt.month}-${order.createdAt.day}';
-      dailySales[dateKey] = (dailySales[dateKey] ?? 0) + order.total;
-    }
-
-    double averageDailySales =
-        dailySales.values.fold(0.0, (sum, sales) => sum + sales) /
-        dailySales.length;
-
-    // Calculate trend (simplified)
-    double trend = 1.0;
-    if (dailySales.length > 1) {
-      List<double> salesList = dailySales.values.toList();
-      double firstHalf = salesList
-          .take(salesList.length ~/ 2)
-          .fold(0.0, (a, b) => a + b);
-      double secondHalf = salesList
-          .skip(salesList.length ~/ 2)
-          .fold(0.0, (a, b) => a + b);
-      trend = secondHalf / firstHalf;
-    }
-
-    return {
-      'averageDailySales': averageDailySales,
-      'averageOrderValue': averageOrderValue,
-      'trend': trend,
-    };
-  }
-
-  double _getDayOfWeekFactor(int weekday) {
-    // Monday = 1, Sunday = 7
-    const factors = {
-      1: 0.8, // Monday
-      2: 0.9, // Tuesday
-      3: 0.9, // Wednesday
-      4: 1.0, // Thursday
-      5: 1.2, // Friday
-      6: 1.3, // Saturday
-      7: 1.1, // Sunday
-    };
-    return factors[weekday] ?? 1.0;
-  }
-
-  double _getWeatherFactor(DateTime date) {
-    // Simulate weather impact
-    int seed = date.day + date.month;
-    double factor = 0.8 + (seed % 5) * 0.1; // 0.8 to 1.2
-    return factor;
-  }
-
-  /// Predict inventory needs
-  Future<PredictiveAnalytics> predictInventoryNeeds({
-    required List<MenuItem> menuItems,
-    required List<Order> recentOrders,
-    int predictionDays = 3,
-  }) async {
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    Map<String, dynamic> predictions = {};
-
-    for (var item in menuItems) {
-      // Count recent orders for this item
-      int recentCount = recentOrders
-          .expand((order) => order.items)
-          .where((orderItem) => orderItem.name == item.name)
-          .length;
-
-      // Calculate daily average
-      double dailyAverage = recentCount / 7.0; // Assuming 7 days of recent data
-
-      // Predict future need
-      int predictedNeed = (dailyAverage * predictionDays * 1.2)
-          .ceil(); // 20% buffer
-
-      predictions[item.name] = {
-        'currentStock': item/* .availableQuantity - REMOVED */.sortOrder,
-        'predictedNeed': predictedNeed,
-        'reorderSuggested': predictedNeed > item/* .availableQuantity - REMOVED */.sortOrder,
-        'suggestedOrderQuantity': predictedNeed > item/* .availableQuantity - REMOVED */.sortOrder
-            ? (predictedNeed - item/* .availableQuantity - REMOVED */.sortOrder + 10)
-            : 0,
-      };
-    }
-
-    PredictiveAnalytics analytics = PredictiveAnalytics(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      type: 'inventory_prediction',
-      predictions: predictions,
-      confidence: 0.65,
-      generatedAt: DateTime.now(),
-      parameters: {
-        'predictionDays': predictionDays,
-        'itemsAnalyzed': menuItems.length,
-      },
-    );
-
-    _analytics.add(analytics);
-    notifyListeners();
-
-    return analytics;
-  }
-
-  // Customer Behavior Analysis
-
-  /// Analyze customer behavior and generate insights
-  Future<CustomerInsight> analyzeCustomerBehavior({
-    required String userId,
-    required List<Order> userOrders,
-    required User user,
-  }) async {
-    await Future.delayed(const Duration(milliseconds: 600));
-
-    // Analyze preferences
-    Map<String, dynamic> preferences = _analyzePreferences(userOrders);
-
-    // Analyze behavior patterns
-    Map<String, dynamic> behaviorPatterns = _analyzeBehaviorPatterns(
-      userOrders,
-    );
-
-    // Calculate churn risk
-    double churnRisk = _calculateChurnRisk(userOrders, user);
-
-    // Generate recommended actions
-    List<String> recommendedActions = _generateRecommendedActions(
-      preferences,
-      behaviorPatterns,
-      churnRisk,
-    );
-
-    CustomerInsight insight = CustomerInsight(
-      userId: userId,
-      preferences: preferences,
-      behaviorPatterns: behaviorPatterns,
-      churnRisk: churnRisk,
-      recommendedActions: recommendedActions,
-      lastUpdated: DateTime.now(),
-    );
-
-    _customerInsights[userId] = insight;
-    notifyListeners();
-
-    return insight;
-  }
-
-  Map<String, dynamic> _analyzePreferences(List<Order> orders) {
-    if (orders.isEmpty) return {};
-
-    Map<String, int> categoryCount = {};
-    Map<String, int> itemCount = {};
-    List<double> orderValues = [];
-    Map<int, int> orderHours = {};
-
-    for (var order in orders) {
-      orderValues.add(order.total);
-      orderHours[order.createdAt.hour] =
-          (orderHours[order.createdAt.hour] ?? 0) + 1;
-
-      for (var item in order.items) {
-        categoryCount[item.categoryId] = (categoryCount[item.categoryId] ?? 0) + 1;
-        itemCount[item.name] = (itemCount[item.name] ?? 0) + 1;
-      }
-    }
-
-    String favoriteCategory = categoryCount.entries.isEmpty
-        ? 'Burgers'
-        : categoryCount.entries.reduce((a, b) => a.value > b.value ? a : b).key;
-
-    String favoriteItem = itemCount.entries.isEmpty
-        ? 'Burger Classic'
-        : itemCount.entries.reduce((a, b) => a.value > b.value ? a : b).key;
-
-    double averageOrderValue =
-        orderValues.fold(0.0, (sum, val) => sum + val) / orderValues.length;
-
-    int peakHour = orderHours.entries.isEmpty
-        ? 12
-        : orderHours.entries.reduce((a, b) => a.value > b.value ? a : b).key;
-
-    return {
-      'favoriteCategory': favoriteCategory,
-      'favoriteItem': favoriteItem,
-      'averageOrderValue': averageOrderValue,
-      'peakOrderHour': peakHour,
-      'preferredMealTime': _getMealTime(peakHour),
-    };
-  }
-
-  Map<String, dynamic> _analyzeBehaviorPatterns(List<Order> orders) {
-    if (orders.isEmpty) return {};
-
-    // Order frequency
-    DateTime now = DateTime.now();
-    int ordersLastMonth = orders
-        .where((order) => now.difference(order.createdAt).inDays <= 30)
-        .length;
-
-    double orderFrequency = ordersLastMonth / 4.0; // orders per week
-
-    // Loyalty score
-    double loyaltyScore = _calculateLoyaltyScore(orders);
-
-    // Order consistency
-    bool isConsistent =
-        orders.length > 3 &&
-        orders
-            .take(3)
-            .every(
-              (order) => orders.first.items.any(
-                (firstItem) => order.items.any(
-                  (orderItem) => orderItem.name == firstItem.name,
-                ),
-              ),
-            );
-
-    return {
-      'orderFrequency': orderFrequency,
-      'loyaltyScore': loyaltyScore,
-      'isConsistentOrderer': isConsistent,
-      'totalOrders': orders.length,
-      'lastOrderDays': orders.isEmpty
-          ? 999
-          : now.difference(orders.first.createdAt).inDays,
-    };
-  }
-
-  double _calculateChurnRisk(List<Order> orders, User user) {
-    if (orders.isEmpty) return 0.9;
-
-    DateTime now = DateTime.now();
-    int daysSinceLastOrder = orders.isEmpty
-        ? 999
-        : now.difference(orders.first.createdAt).inDays;
-
-    double churnRisk = 0.0;
-
-    // Days since last order factor
-    if (daysSinceLastOrder > 30) {
-      churnRisk += 0.4;
-    } else if (daysSinceLastOrder > 14) {
-      churnRisk += 0.2;
-    }
-
-    // Order frequency factor
-    int recentOrders = orders
-        .where((order) => now.difference(order.createdAt).inDays <= 30)
-        .length;
-    if (recentOrders == 0) {
-      churnRisk += 0.3;
-    } else if (recentOrders < 2) {
-      churnRisk += 0.2;
-    }
-
-    // Engagement factor
-    if (user.loyaltyPoints < 100) {
-      churnRisk += 0.1;
-    }
-
-    return churnRisk.clamp(0.0, 1.0);
-  }
-
-  double _calculateLoyaltyScore(List<Order> orders) {
-    double score = 0.0;
-
-    // Order count contribution
-    score += (orders.length * 0.1).clamp(0.0, 0.3);
-
-    // Consistency contribution
-    if (orders.length > 1) {
-      DateTime firstOrder = orders.last.createdAt;
-      DateTime lastOrder = orders.first.createdAt;
-      int daysBetween = lastOrder.difference(firstOrder).inDays;
-
-      if (daysBetween > 0) {
-        double consistency =
-            orders.length / (daysBetween / 7.0); // orders per week
-        score += (consistency * 0.05).clamp(0.0, 0.3);
-      }
-    }
-
-    // Recent activity contribution
-    DateTime now = DateTime.now();
-    int recentOrders = orders
-        .where((order) => now.difference(order.createdAt).inDays <= 30)
-        .length;
-    score += (recentOrders * 0.02).clamp(0.0, 0.4);
-
-    return score.clamp(0.0, 1.0);
-  }
-
-  List<String> _generateRecommendedActions(
-    Map<String, dynamic> preferences,
-    Map<String, dynamic> behaviorPatterns,
-    double churnRisk,
-  ) {
-    List<String> actions = [];
-
-    // High churn risk actions
-    if (churnRisk > 0.7) {
-      actions.add('Envoyer offre de reconquête personnalisée');
-      actions.add('Proposer une remise de 20% sur leur plat favori');
-    } else if (churnRisk > 0.4) {
-      actions.add('Envoyer notification de nouveautés');
-      actions.add('Proposer un programme de fidélité renforcé');
-    }
-
-    // Low order frequency actions
-    if (behaviorPatterns['orderFrequency'] != null &&
-        behaviorPatterns['orderFrequency'] < 1.0) {
-      actions.add('Envoyer rappel hebdomadaire personnalisé');
-      actions.add('Proposer un menu découverte');
-    }
-
-    // High value customer actions
-    if (preferences['averageOrderValue'] != null &&
-        preferences['averageOrderValue'] > 10000) {
-      actions.add('Inviter au programme VIP');
-      actions.add('Proposer des avant-premières de nouveaux produits');
-    }
-
-    // Consistent customer rewards
-    if (behaviorPatterns['isConsistentOrderer'] == true) {
-      actions.add('Proposer une commande récurrente automatique');
-      actions.add('Offrir des points de fidélité bonus');
-    }
-
-    return actions.isNotEmpty ? actions : ['Maintenir engagement actuel'];
-  }
-
-  String _getMealTime(int hour) {
-    if (hour < 11) {
-      return 'breakfast';
-    } else if (hour < 16) {
-      return 'lunch';
-    } else {
-      return 'dinner';
-    }
-  }
-
-  // Automated Marketing Campaigns
-
-  /// Create personalized marketing campaigns
-  Future<List<MarketingCampaign>> createPersonalizedCampaigns({
-    required List<User> users,
-    required Map<String, List<Order>> userOrders,
-  }) async {
-    await Future.delayed(const Duration(seconds: 1));
-
-    List<MarketingCampaign> campaigns = [];
-
-    // Win-back campaign for inactive users
-    List<String> inactiveUsers = [];
-    DateTime thirtyDaysAgo = DateTime.now().subtract(const Duration(days: 30));
-
-    for (var user in users) {
-      List<Order> orders = userOrders[user.id] ?? [];
-      bool hasRecentOrder = orders.any(
-        (order) => order.createdAt.isAfter(thirtyDaysAgo),
-      );
-
-      if (!hasRecentOrder && orders.isNotEmpty) {
-        inactiveUsers.add(user.id);
-      }
-    }
-
-    if (inactiveUsers.isNotEmpty) {
-      campaigns.add(
-        MarketingCampaign(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          name: 'Win-Back Campaign',
-          type: 'retention',
-          title: '🎯 On vous a manqué !',
-          message:
-              'Revenez chez FastFoodGo avec 25% de réduction sur votre prochaine commande !',
-          targetUserIds: inactiveUsers,
-          conditions: {'lastOrderDays': '>30'},
-          startDate: DateTime.now(),
-          endDate: DateTime.now().add(const Duration(days: 7)),
-        ),
-      );
-    }
-
-    // Loyalty reward campaign
-    List<String> loyalUsers = [];
-    for (var user in users) {
-      if (user.loyaltyPoints > 500) {
-        loyalUsers.add(user.id);
-      }
-    }
-
-    if (loyalUsers.isNotEmpty) {
-      campaigns.add(
-        MarketingCampaign(
-          id: (DateTime.now().millisecondsSinceEpoch + 1).toString(),
-          name: 'Loyalty Reward',
-          type: 'personalized',
-          title: '🏆 Merci pour votre fidélité !',
-          message:
-              'Profitez d\'un repas gratuit grâce à vos points de fidélité !',
-          targetUserIds: loyalUsers,
-          conditions: {'loyaltyPoints': '>500'},
-          startDate: DateTime.now(),
-          endDate: DateTime.now().add(const Duration(days: 14)),
-        ),
-      );
-    }
-
-    _campaigns.addAll(campaigns);
-    notifyListeners();
-
-    return campaigns;
-  }
-
-  /// Send targeted notification
-  Future<bool> sendTargetedNotification({
-    required String campaignId,
-    required List<String> userIds,
+  /// Rédige une campagne. Elle reste en brouillon : rien ne part ici.
+  Future<eccore.Campaign?> createCampaign({
     required String title,
-    required String message,
+    required String body,
+    required String audience,
+    int segmentDays = 30,
   }) async {
     try {
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Simulate sending notifications
-      debugPrint('Sending notification to ${userIds.length} users: $title');
-
-      // Update campaign metrics
-      int campaignIndex = _campaigns.indexWhere((c) => c.id == campaignId);
-      if (campaignIndex != -1) {
-        var campaign = _campaigns[campaignIndex];
-        Map<String, dynamic> newMetrics = Map.from(campaign.metrics);
-        newMetrics['sent'] = (newMetrics['sent'] ?? 0) + userIds.length;
-        newMetrics['lastSent'] = DateTime.now().toIso8601String();
-
-        MarketingCampaign updatedCampaign = MarketingCampaign(
-          id: campaign.id,
-          name: campaign.name,
-          type: campaign.type,
-          title: campaign.title,
-          message: campaign.message,
-          targetUserIds: campaign.targetUserIds,
-          conditions: campaign.conditions,
-          startDate: campaign.startDate,
-          endDate: campaign.endDate,
-          isActive: campaign.isActive,
-          metrics: newMetrics,
-        );
-
-        _campaigns[campaignIndex] = updatedCampaign;
-        notifyListeners();
-      }
-
-      return true;
-    } catch (e) {
-      debugPrint('Error sending targeted notification: $e');
-      return false;
-    }
-  }
-
-  /// Get marketing dashboard data
-  Map<String, dynamic> getMarketingDashboard() {
-    DateTime now = DateTime.now();
-
-    int activeCampaigns = _campaigns
-        .where((c) => c.isActive && c.endDate.isAfter(now))
-        .length;
-
-    num totalSent = _campaigns.fold(
-      0,
-      (sum, c) => sum + (c.metrics['sent'] ?? 0),
-    );
-
-    num totalClicks = _campaigns.fold(
-      0,
-      (sum, c) => sum + (c.metrics['clicks'] ?? 0),
-    );
-
-    double clickRate = totalSent > 0 ? (totalClicks / totalSent) * 100 : 0.0;
-
-    return {
-      'activeCampaigns': activeCampaigns,
-      'totalNotificationsSent': totalSent,
-      'clickThroughRate': clickRate,
-      'customersAnalyzed': _customerInsights.length,
-      'highChurnRiskCustomers': _customerInsights.values
-          .where((insight) => insight.churnRisk > 0.7)
-          .length,
-      'loyalCustomers': _customerInsights.values
-          .where(
-            (insight) =>
-                insight.behaviorPatterns['loyaltyScore'] != null &&
-                insight.behaviorPatterns['loyaltyScore'] > 0.7,
-          )
-          .length,
-      'pendingActions': _customerInsights.values
-          .expand((insight) => insight.recommendedActions)
-          .length,
-    };
-  }
-
-  /// Get campaign performance
-  Map<String, dynamic> getCampaignPerformance(String campaignId) {
-    var campaign = _campaigns.firstWhere((c) => c.id == campaignId);
-
-    int sent = campaign.metrics['sent'] ?? 0;
-    int clicks = campaign.metrics['clicks'] ?? 0;
-    int conversions = campaign.metrics['conversions'] ?? 0;
-
-    return {
-      'sent': sent,
-      'clicks': clicks,
-      'conversions': conversions,
-      'clickRate': sent > 0 ? (clicks / sent * 100).toStringAsFixed(1) : '0.0',
-      'conversionRate': clicks > 0
-          ? (conversions / clicks * 100).toStringAsFixed(1)
-          : '0.0',
-      'isActive': campaign.isActive,
-      'daysRemaining': campaign.endDate.difference(DateTime.now()).inDays,
-    };
-  }
-
-  /// Créer une nouvelle campagne marketing
-  Future<MarketingCampaign?> createCampaign({
-    required String name,
-    required String type,
-    required String title,
-    required String message,
-    required List<String> targetUserIds,
-    required Map<String, dynamic> conditions,
-    required DateTime startDate,
-    required DateTime endDate,
-    bool isActive = true,
-  }) async {
-    try {
-      final response = await _supabase
-          .from('marketing_campaigns')
-          .insert({
-            'name': name,
-            'type': type,
-            'title': title,
-            'message': message,
-            'target_user_ids': targetUserIds,
-            'conditions': conditions,
-            'start_date': startDate.toIso8601String(),
-            'end_date': endDate.toIso8601String(),
-            'is_active': isActive,
-            'metrics': {},
-          })
-          .select()
-          .single();
-
-      final campaign = MarketingCampaign(
-        id: response['id'] as String,
-        name: response['name'] as String,
-        type: response['type'] as String,
-        title: response['title'] as String,
-        message: response['message'] as String,
-        targetUserIds:
-            (response['target_user_ids'] as List?)
-                ?.map((e) => e.toString())
-                .toList() ??
-            [],
-        conditions: response['conditions'] != null
-            ? Map<String, dynamic>.from(response['conditions'])
-            : {},
-        startDate: DateTime.parse(response['start_date'] as String),
-        endDate: DateTime.parse(response['end_date'] as String),
-        isActive: response['is_active'] as bool? ?? true,
-        metrics: response['metrics'] != null
-            ? Map<String, dynamic>.from(response['metrics'])
-            : {},
+      final cree = await _campaignsApi.create(
+        title: title,
+        body: body,
+        audience: audience,
+        segmentDays: segmentDays,
       );
-
-      _campaigns.insert(0, campaign);
+      _campaigns = [cree, ..._campaigns];
       notifyListeners();
-      return campaign;
-    } catch (e) {
-      debugPrint('MarketingService: Erreur création campagne - $e');
+      return cree;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Marketing : rédaction refusée — ${e.code}');
+      notifyListeners();
       return null;
     }
   }
 
-  /// Mettre à jour une campagne marketing
-  Future<bool> updateCampaign(String id, Map<String, dynamic> updates) async {
+  /// Corrige un brouillon.
+  ///
+  /// Le serveur refuse une campagne déjà envoyée (403) — l'écran le dit avant
+  /// d'essayer, mais c'est lui qui tranche.
+  Future<bool> updateCampaign({
+    required String id,
+    String? title,
+    String? body,
+    String? audience,
+    int? segmentDays,
+  }) async {
     try {
-      updates['updated_at'] = DateTime.now().toIso8601String();
-
-      await _supabase.from('marketing_campaigns').update(updates).eq('id', id);
-
-      await _loadMarketingData();
-      notifyListeners();
+      final maj = await _campaignsApi.update(
+        campaignId: id,
+        title: title,
+        body: body,
+        audience: audience,
+        segmentDays: segmentDays,
+      );
+      _remplacer(maj);
+      // Le segment a pu changer : l'estimation d'audience ne vaut plus.
+      _audienceEstimates.remove(id);
       return true;
-    } catch (e) {
-      debugPrint('MarketingService: Erreur mise à jour campagne - $e');
-      return false;
-    }
-  }
-
-  /// Supprimer une campagne marketing
-  Future<bool> deleteCampaign(String id) async {
-    try {
-      await _supabase.from('marketing_campaigns').delete().eq('id', id);
-
-      _campaigns.removeWhere((c) => c.id == id);
+    } on eccore.ApiException catch (e) {
+      _error = e.status == 403
+          ? "Une campagne envoyée ne se modifie plus : l'historique afficherait "
+                "un texte que personne n'a reçu."
+          : e.detail;
+      debugPrint('Marketing : modification refusée — ${e.code}');
       notifyListeners();
-      return true;
-    } catch (e) {
-      debugPrint('MarketingService: Erreur suppression campagne - $e');
       return false;
     }
   }
 
-  /// Mettre à jour les métriques d'une campagne
-  Future<bool> updateCampaignMetrics(
-    String id,
-    Map<String, dynamic> metrics,
-  ) async {
+  /// Combien de personnes cette campagne viserait, si on l'envoyait.
+  ///
+  /// C'est un **majorant** : le serveur compte le segment, pas les envois
+  /// aboutis, puisque le consentement au marketing ne se vérifie qu'à
+  /// l'écriture de chaque notification. L'annoncer autrement ferait passer un
+  /// refus de consentement pour une erreur d'envoi.
+  Future<int?> estimateAudience(String id) async {
     try {
-      // Récupérer les métriques actuelles
-      final response = await _supabase
-          .from('marketing_campaigns')
-          .select('metrics')
-          .eq('id', id)
-          .single();
+      final compte = await _campaignsApi.estimateAudience(id);
+      _audienceEstimates[id] = compte;
+      notifyListeners();
+      return compte;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Marketing : estimation indisponible — ${e.code}');
+      notifyListeners();
+      return null;
+    }
+  }
 
-      final currentMetrics = response['metrics'] != null
-          ? Map<String, dynamic>.from(response['metrics'])
-          : <String, dynamic>{};
+  /// Dernière estimation connue pour cette campagne, sans appel réseau.
+  int? knownAudience(String id) => _audienceEstimates[id];
 
-      // Fusionner avec les nouvelles métriques
-      currentMetrics.addAll(metrics);
-
-      return await updateCampaign(id, {'metrics': currentMetrics});
-    } catch (e) {
-      debugPrint('MarketingService: Erreur mise à jour métriques - $e');
+  /// Envoie la campagne, une seule fois.
+  ///
+  /// Le rejeu est absorbé par le serveur plutôt que refusé : un double clic
+  /// renvoie la campagne telle qu'elle est partie, au lieu d'une erreur qui
+  /// ferait croire à un échec — et inviterait à réessayer.
+  Future<bool> sendCampaign(String id) async {
+    try {
+      _remplacer(await _campaignsApi.send(id));
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('Marketing : envoi refusé — ${e.code}');
+      notifyListeners();
       return false;
     }
   }
 
-  void clearMarketingData() {
-    _campaigns.clear();
-    _analytics.clear();
-    _customerInsights.clear();
+  void _remplacer(eccore.Campaign campagne) {
+    final index = _campaigns.indexWhere((c) => c.id == campagne.id);
+    if (index != -1) _campaigns[index] = campagne;
     notifyListeners();
   }
 }

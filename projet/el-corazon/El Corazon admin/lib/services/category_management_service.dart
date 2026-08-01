@@ -1,13 +1,29 @@
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/category.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:flutter/foundation.dart' hide Category;
 
+import '../models/category.dart';
+import 'admin_auth_service.dart';
+
+/// Catégories du catalogue — `/api/v1/catalog/manage/categories/` (Phase 6).
+///
+/// Deux vérifications que l'app faisait elle-même disparaissent, et c'est un
+/// gain : l'unicité du nom et le refus de supprimer une catégorie qui contient
+/// des articles. Toutes deux se faisaient par une requête de lecture suivie
+/// d'une écriture — entre les deux, un autre opérateur pouvait créer le doublon
+/// ou ajouter l'article. Le serveur les tient sous contrainte, et rend un 400
+/// ou un 409 que cet écran affiche.
+///
 class CategoryManagementService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  /// Établissement supervisé. Le jour où le back-office en gérera plusieurs,
+  /// ce champ devient une sélection alimentée par `/restaurants/`.
+  static const String _restaurantSlug = 'el-corazon-lome';
+
+  eccore.ManagedCatalogRepository get _catalog =>
+      eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient);
+
   List<Category> _categories = [];
   bool _isLoading = false;
   String? _error;
-  RealtimeChannel? _categoriesChannel;
 
   List<Category> get categories => _categories;
   bool get isLoading => _isLoading;
@@ -15,113 +31,38 @@ class CategoryManagementService extends ChangeNotifier {
 
   CategoryManagementService() {
     _loadCategories();
-    _subscribeToCategoriesRealtime();
   }
 
-  @override
-  void dispose() {
-    _categoriesChannel?.unsubscribe();
-    super.dispose();
-  }
-
-  /// S'abonner aux mises à jour en temps réel
-  void _subscribeToCategoriesRealtime() {
-    try {
-      _categoriesChannel = _supabase
-          .channel('admin_categories_realtime')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.insert,
-            schema: 'public',
-            table: 'menu_categories',
-            callback: (payload) {
-              final data = Map<String, dynamic>.from(payload.newRecord);
-              final category = Category.fromMap(data);
-              _categories.add(category);
-              _sortCategories();
-              notifyListeners();
-            },
-          )
-          .onPostgresChanges(
-            event: PostgresChangeEvent.update,
-            schema: 'public',
-            table: 'menu_categories',
-            callback: (payload) {
-              final data = Map<String, dynamic>.from(payload.newRecord);
-              final category = Category.fromMap(data);
-              final index = _categories.indexWhere((c) => c.id == category.id);
-              if (index != -1) {
-                _categories[index] = category;
-                _sortCategories();
-                notifyListeners();
-              }
-            },
-          )
-          .onPostgresChanges(
-            event: PostgresChangeEvent.delete,
-            schema: 'public',
-            table: 'menu_categories',
-            callback: (payload) {
-              final oldData = Map<String, dynamic>.from(payload.oldRecord);
-              final id = oldData['id'] as String?;
-              if (id != null) {
-                _categories.removeWhere((c) => c.id == id);
-                notifyListeners();
-              }
-            },
-          )
-          .subscribe();
-    } catch (e) {
-      debugPrint('Error subscribing to realtime categories: $e');
-    }
-  }
-
-  /// Charger toutes les catégories avec mécanisme de retry
   Future<void> _loadCategories() async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
-    int retryCount = 0;
-    const maxRetries = 3;
-
-    while (retryCount < maxRetries) {
-      try {
-        // Délai progressif pour laisser la connexion respirer en cas d'échec précédent
-        if (retryCount > 0) {
-          await Future.delayed(Duration(milliseconds: 500 * retryCount));
-        }
-
-        final response = await _supabase
-            .from('menu_categories')
-            .select('*')
-            .order('sort_order', ascending: true);
-
-        _categories =
-            (response as List).map((data) => Category.fromMap(data)).toList();
-
-        debugPrint(
-          'CategoryManagementService: ${_categories.length} catégories chargées',
-        );
-        break; // Succès, sortir de la boucle
-      } catch (e) {
-        retryCount++;
-        debugPrint(
-          'CategoryManagementService: Tentative $retryCount/$maxRetries échouée - $e',
-        );
-
-        if (retryCount >= maxRetries) {
-          _error =
-              'Impossible de charger les catégories après plusieurs tentatives. Vérifiez votre connexion.';
-          _categories = [];
-          debugPrint(
-            'CategoryManagementService: Erreur fatale chargement catégories - $e',
-          );
-        }
-      }
+    try {
+      final remote = await _catalog.categories(restaurantSlug: _restaurantSlug);
+      _categories = remote.map(_toLocal).toList();
+      debugPrint('CategoryManagementService: ${_categories.length} catégorie(s)');
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      _categories = [];
+      debugPrint('CategoryManagementService: chargement impossible — ${e.code}');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
+  }
 
-    _isLoading = false;
-    notifyListeners();
+  Category _toLocal(eccore.Category remote) {
+    return Category(
+      id: remote.id,
+      name: remote.name,
+      description: remote.description.isEmpty ? null : remote.description,
+      displayOrder: remote.sortOrder,
+      isActive: true,
+      emoji: remote.emoji,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
   }
 
   /// Rafraîchir les catégories
@@ -137,181 +78,136 @@ class CategoryManagementService extends ChangeNotifier {
     String? description,
     int? sortOrder,
   }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
+      // L'unicité du slug est une contrainte de base : la vérifier ici par une
+      // lecture préalable laissait passer le doublon créé entre-temps.
+      final created = await _catalog.createCategory(
+        restaurantSlug: _restaurantSlug,
+        name: displayName.isEmpty ? name : displayName,
+        slug: _slugifier(name),
+        emoji: emoji,
+        description: description ?? '',
+        sortOrder: sortOrder ?? _categories.length + 1,
+      );
 
-      // Vérifier que le nom n'existe pas déjà
-      final existing = await _supabase
-          .from('menu_categories')
-          .select('id')
-          .eq('name', name)
-          .maybeSingle();
-
-      if (existing != null) {
-        _error = 'Une catégorie avec ce nom existe déjà';
-        _isLoading = false;
-        notifyListeners();
-        return null;
-      }
-
-      final newOrder = sortOrder ?? (_categories.length + 1);
-
-      final response = await _supabase
-          .from('menu_categories')
-          .insert({
-            'name': name,
-            'display_name': displayName,
-            'emoji': emoji,
-            'description': description,
-            'sort_order': newOrder,
-            'is_active': true,
-          })
-          .select()
-          .single();
-
-      final newCategory = Category.fromMap(response);
-      _categories.add(newCategory);
+      final locale = _toLocal(created);
+      _categories.add(locale);
       _sortCategories();
-
-      _isLoading = false;
-      notifyListeners();
-      return newCategory;
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      debugPrint('CategoryManagementService: Erreur création catégorie - $e');
+      return locale;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('CategoryManagementService: création refusée — ${e.code}');
       return null;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
+  }
+
+  /// Identifiant lisible dérivé du nom — le serveur exige un slug.
+  static String _slugifier(String valeur) {
+    final base = valeur
+        .toLowerCase()
+        .replaceAll(RegExp('[àáâãäå]'), 'a')
+        .replaceAll(RegExp('[èéêë]'), 'e')
+        .replaceAll(RegExp('[ìíîï]'), 'i')
+        .replaceAll(RegExp('[òóôõö]'), 'o')
+        .replaceAll(RegExp('[ùúûü]'), 'u')
+        .replaceAll(RegExp('[ç]'), 'c')
+        .replaceAll(RegExp('[^a-z0-9]+'), '-');
+    return base.replaceAll(RegExp('^-+|-+\u0024'), '');
   }
 
   /// Mettre à jour une catégorie
   Future<bool> updateCategory(Category category) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      // Vérifier l'unicité du nom si modifié
-      final existing = await _supabase
-          .from('menu_categories')
-          .select('id')
-          .eq('name', category.name)
-          .neq('id', category.id)
-          .maybeSingle();
-
-      if (existing != null) {
-        _error = 'Une catégorie avec ce nom existe déjà';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
-
-      await _supabase.from('menu_categories').update({
-        'name': category.name,
-        'display_name': category.name,
-        'emoji': '🍽️',
-        'description': category.description,
-        'sort_order': category.displayOrder,
-        'is_active': category.isActive,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', category.id);
+      final updated = await _catalog.updateCategory(
+        categoryId: category.id,
+        name: category.name,
+        emoji: category.emoji,
+        description: category.description ?? '',
+        sortOrder: category.displayOrder,
+        isActive: category.isActive,
+      );
 
       final index = _categories.indexWhere((c) => c.id == category.id);
       if (index != -1) {
-        _categories[index] = category;
+        _categories[index] = _toLocal(updated);
         _sortCategories();
       }
-
-      _isLoading = false;
-      notifyListeners();
       return true;
-    } catch (e) {
-      _error = e.toString();
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint('CategoryManagementService: mise à jour refusée — ${e.code}');
+      return false;
+    } finally {
       _isLoading = false;
       notifyListeners();
-      debugPrint(
-        'CategoryManagementService: Erreur mise à jour catégorie - $e',
-      );
-      return false;
     }
   }
 
   /// Supprimer une catégorie
+  /// Supprime une catégorie.
+  ///
+  /// Le refus de supprimer une catégorie encore utilisée vient du serveur
+  /// (`on_delete=PROTECT` sur les articles) : le vérifier ici par une lecture
+  /// préalable laissait passer l'article ajouté entre la vérification et la
+  /// suppression.
   Future<bool> deleteCategory(String categoryId) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
-      // Vérifier qu'il n'y a pas d'éléments de menu dans cette catégorie
-      final menuItems = await _supabase
-          .from('menu_items')
-          .select('id')
-          .eq('category_id', categoryId)
-          .limit(1);
-
-      if ((menuItems as List).isNotEmpty) {
-        _error =
-            'Impossible de supprimer une catégorie contenant des éléments de menu';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
-
-      await _supabase.from('menu_categories').delete().eq('id', categoryId);
+      await _catalog.deleteCategory(categoryId);
       _categories.removeWhere((c) => c.id == categoryId);
-
-      _isLoading = false;
-      notifyListeners();
       return true;
-    } catch (e) {
-      _error = e.toString();
+    } on eccore.ApiException catch (e) {
+      _error = e.status == 409
+          ? 'Cette catégorie contient encore des articles.'
+          : e.detail;
+      debugPrint('CategoryManagementService: suppression refusée — ${e.code}');
+      return false;
+    } finally {
       _isLoading = false;
       notifyListeners();
-      debugPrint(
-        'CategoryManagementService: Erreur suppression catégorie - $e',
-      );
-      return false;
     }
   }
 
   /// Réorganiser les catégories
+  /// Réordonne les catégories.
+  ///
+  /// Un `PATCH` par catégorie déplacée : le contrat n'a pas de route de
+  /// réordonnancement en lot, et l'ordre est une simple valeur (`sort_order`).
   Future<bool> reorderCategories(List<Category> reorderedCategories) async {
+    final avant = List<Category>.from(_categories);
+    _categories = List.from(reorderedCategories);
+    notifyListeners();
+
     try {
-      // Mise à jour optimiste locale
-      // On met à jour les sort_order (displayOrder) des objets en mémoire
-      for (int i = 0; i < reorderedCategories.length; i++) {
-        reorderedCategories[i] =
-            reorderedCategories[i].copyWith(displayOrder: i + 1);
+      for (var i = 0; i < _categories.length; i++) {
+        await _catalog.updateCategory(
+          categoryId: _categories[i].id,
+          sortOrder: i + 1,
+        );
       }
-
-      // On remplace la liste locale immédiatement pour refléter le changement dans l'UI
-      _categories = List.from(reorderedCategories);
-      notifyListeners();
-
-      // Mettre à jour en base de données en parallèle
-      final updates = <Future>[];
-      for (int i = 0; i < _categories.length; i++) {
-        updates.add(_supabase.from('menu_categories').update({
-          'sort_order': i + 1,
-          'updated_at': DateTime.now().toIso8601String(),
-        }).eq('id', _categories[i].id));
-      }
-
-      await Future.wait(updates);
-
       return true;
-    } catch (e) {
-      _error = e.toString();
+    } on eccore.ApiException catch (e) {
+      // Remettre l'ordre affiché tel qu'il est réellement en base : laisser
+      // l'écran montrer un ordre que le serveur a refusé induirait l'opérateur
+      // en erreur au prochain chargement.
+      _categories = avant;
+      _error = e.detail;
       notifyListeners();
-      debugPrint(
-        'CategoryManagementService: Erreur réorganisation catégories - $e',
-      );
-      // En cas d'erreur, on recharge pour rétablir la vérité
-      await _loadCategories();
+      debugPrint('CategoryManagementService: réordonnancement refusé — ${e.code}');
       return false;
     }
   }
@@ -330,61 +226,24 @@ class CategoryManagementService extends ChangeNotifier {
     }
   }
 
-  /// Obtenir les statistiques d'une catégorie
+  /// Statistiques d'une catégorie : nombre d'articles et disponibilité.
+  ///
+  /// Le chiffre d'affaires et la note moyenne par catégorie ne sont plus
+  /// calculés ici. Ils l'étaient par deux requêtes croisant `order_items` et
+  /// `menu_items` depuis le navigateur — un agrégat métier reconstruit côté
+  /// client, sur des lignes de commande que le back-office n'a aucune raison de
+  /// parcourir. Les rapports de chiffre d'affaires vivent dans
+  /// `/analytics/reports/`.
   Future<Map<String, dynamic>> getCategoryStats(String categoryId) async {
     try {
-      // Compter les éléments de menu dans cette catégorie
-      final menuItems = await _supabase
-          .from('menu_items')
-          .select('id, is_available')
-          .eq('category_id', categoryId);
-
-      final items = menuItems as List;
-      final totalItems = items.length;
-      final activeItems =
-          items.where((item) => item['is_available'] == true).length;
-
-      // Calculer le revenu total de la catégorie
-      final revenueResponse = await _supabase
-          .from('order_items')
-          .select('total_price, orders!inner(status)')
-          .eq('menu_items.category_id', categoryId);
-
-      final revenue = (revenueResponse as List)
-          .where((item) => item['orders']?['status'] == 'delivered')
-          .fold<double>(
-            0.0,
-            (sum, item) =>
-                sum + ((item['total_price'] as num?)?.toDouble() ?? 0.0),
-          );
-
-      // Calculer la note moyenne
-      final ratingResponse = await _supabase
-          .from('menu_items')
-          .select('rating')
-          .eq('category_id', categoryId)
-          .gt('rating', 0);
-
-      final ratings = (ratingResponse as List)
-          .map((item) => (item['rating'] as num?)?.toDouble() ?? 0.0)
-          .toList();
-
-      final avgRating = ratings.isNotEmpty
-          ? ratings.reduce((a, b) => a + b) / ratings.length
-          : 0.0;
-
+      final articles = await _catalog.menuItems(categoryId: categoryId);
       return {
-        'total_items': totalItems,
-        'active_items': activeItems,
-        'inactive_items': totalItems - activeItems,
-        'total_revenue': revenue,
-        'average_rating': avgRating,
-        'popularity_score':
-            totalItems > 0 ? (activeItems / totalItems) * 100 : 0.0,
+        'total_items': articles.length,
+        'active_items': articles.where((item) => item.isAvailable).length,
       };
-    } catch (e) {
-      debugPrint('CategoryManagementService: Erreur stats catégorie - $e');
-      return {};
+    } on eccore.ApiException catch (e) {
+      debugPrint('CategoryManagementService: statistiques indisponibles — ${e.code}');
+      return {'total_items': 0, 'active_items': 0};
     }
   }
 

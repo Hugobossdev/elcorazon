@@ -259,11 +259,10 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
           child: const Icon(Icons.shopping_cart, color: Colors.blue),
         ),
         title: Text(result.title),
-        subtitle: Text(
-          result.createdAt != null
-              ? '${result.subtitle} • ${_formatDate(result.createdAt!)}'
-              : result.subtitle,
-        ),
+        // La date de la commande n'est plus accolée ici : le sous-titre que
+        // rend le serveur porte déjà ce qui identifie la ligne (destinataire et
+        // statut), et la fiche complète s'ouvre d'un clic.
+        subtitle: Text(result.subtitle),
         onTap: () {
           Navigator.push(
             context,
@@ -356,7 +355,4 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     }
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
 }

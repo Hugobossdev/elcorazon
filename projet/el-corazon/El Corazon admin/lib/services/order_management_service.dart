@@ -1,12 +1,21 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../models/order.dart';
-import '../utils/price_formatter.dart';
-import 'socket_service.dart';
 
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:flutter/material.dart';
+
+import '../models/order.dart';
+import '../repositories/django_order_mapper.dart';
+import 'admin_auth_service.dart';
+
+/// Supervision des commandes — `/api/v1/orders/manage/` (Phase 6).
+///
+/// Le périmètre visible n'est plus décidé ici : le serveur ne rend que les
+/// commandes des établissements auxquels le compte est rattaché, et refuse les
+/// gestes dont il n'a pas la permission. L'implémentation Supabase lisait la
+/// table `orders` en entier et se contentait de masquer des boutons.
 class OrderManagementService extends ChangeNotifier {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  eccore.ManagedOrderRepository get _orders =>
+      eccore.ManagedOrderRepository(apiClient: AdminAuthService().apiClient);
   List<Order> _allOrders = [];
   bool _isLoading = false;
 
@@ -15,25 +24,12 @@ class OrderManagementService extends ChangeNotifier {
 
   OrderManagementService() {
     // Defer initial load until after first frame to avoid notifying during build
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadAllOrders();
-      _setupSocketListeners();
-    });
-  }
-
-  void _setupSocketListeners() {
-    final socketService = SocketService();
-
-    socketService.onNewOrder((data) {
-      debugPrint('🔔 OrderManagementService: New order received via socket');
-      refresh();
-    });
-
-    socketService.onOrderUpdate((data) {
-      debugPrint('🔔 OrderManagementService: Order update received via socket');
-      // If data contains ID, we could optimize, but refresh() is safer for now
-      refresh();
-    });
+    // Rafraîchissement manuel pour l'instant : le canal temps réel du
+    // back-office est `ws/restaurants/{id}/dashboard/`, qui demande
+    // l'identifiant de l'établissement supervisé — la sélection
+    // d'établissement n'existe pas encore dans cet écran. L'ancien canal
+    // Socket.IO visait le backend Node, retiré.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadAllOrders());
   }
 
   void _setLoading(bool value) {
@@ -46,168 +42,52 @@ class OrderManagementService extends ChangeNotifier {
   Future<void> _loadAllOrders() async {
     _setLoading(true);
     try {
-      debugPrint('🔍 OrderManagementService: Chargement des commandes...');
-
-      // Essayer d'abord avec la relation foreign key
-      PostgrestList response;
-      try {
-        response = await _supabase
-            .from('orders')
-            .select('*, order_items(*), users!orders_user_id_fkey(name, email)')
-            .order('created_at', ascending: false);
-
-        debugPrint(
-            '📦 OrderManagementService: ${response.length} commande(s) récupérée(s) de la base (avec relation users)');
-      } catch (e) {
-        // Si la relation échoue, essayer sans la relation users
-        debugPrint(
-            '⚠️ Erreur avec relation users, tentative sans relation: $e');
-        try {
-          response = await _supabase
-              .from('orders')
-              .select('*, order_items(*)')
-              .order('created_at', ascending: false);
-
-          debugPrint(
-              '📦 OrderManagementService: ${response.length} commande(s) récupérée(s) de la base (sans relation users)');
-        } catch (e2) {
-          debugPrint('❌ Erreur lors de la récupération des commandes: $e2');
-          rethrow;
-        }
-      }
-
-      if (response.isEmpty) {
-        debugPrint('⚠️ Aucune commande trouvée dans la base de données');
-        _allOrders = [];
-        Future.microtask(() => notifyListeners());
-        return;
-      }
-
-      final List<Order> parsedOrders = [];
-
-      for (var orderData in response) {
-        try {
-          // Log les order_items avant parsing (mode debug uniquement)
-          if (orderData['order_items'] != null) {
-            final items = orderData['order_items'];
-            if (items is List && items.isNotEmpty) {
-              final firstItem = items.first;
-              if (firstItem is Map<String, dynamic>) {
-                final itemName = firstItem['name']?.toString() ??
-                    firstItem['menu_item_name']?.toString() ??
-                    'Inconnu';
-                final itemId = firstItem['id']?.toString() ??
-                    firstItem['menu_item_id']?.toString() ??
-                    'N/A';
-                debugPrint(
-                    '📋 Commande ${orderData['id']?.toString().substring(0, 8) ?? 'unknown'}: ${items.length} article(s) - Premier: $itemName (ID: ${itemId.substring(0, 8)}...)');
-              } else {
-                debugPrint(
-                    '📋 Commande ${orderData['id']?.toString().substring(0, 8) ?? 'unknown'}: ${items.length} article(s) trouvé(s)');
-              }
-            } else {
-              debugPrint(
-                  '⚠️ Commande ${orderData['id']?.toString().substring(0, 8) ?? 'unknown'}: order_items n\'est pas une liste valide');
-            }
-          } else {
-            debugPrint(
-                '⚠️ Commande ${orderData['id']?.toString().substring(0, 8) ?? 'unknown'}: Aucun order_items trouvé');
-          }
-
-          final order = Order.fromMap(orderData);
-          parsedOrders.add(order);
-          debugPrint(
-              '✅ Commande parsée: ${order.id.substring(0, 8)} - ${order.status.displayName} - ${order.items.length} article(s)');
-        } catch (e) {
-          debugPrint(
-              '❌ Erreur parsing commande ${orderData['id'] ?? 'unknown'}: $e');
-          debugPrint(
-              '   Données: ${orderData.toString().substring(0, 300)}...');
-          // Continuer avec les autres commandes au lieu de tout échouer
-        }
-      }
-
-      _allOrders = parsedOrders;
-      debugPrint(
-          '📊 OrderManagementService: ${_allOrders.length}/${response.length} commande(s) chargée(s) avec succès');
-
-      // Notifier les listeners
-      Future.microtask(() => notifyListeners());
-    } catch (e) {
-      debugPrint('❌ OrderManagementService: Erreur chargement commandes: $e');
-      debugPrint('Stack trace: ${StackTrace.current}');
+      final remote = await _orders.list();
+      _allOrders = remote.map(DjangoOrderMapper.toLocal).toList();
+      debugPrint('OrderManagementService: ${_allOrders.length} commande(s)');
+    } on eccore.ApiException catch (e) {
+      debugPrint('OrderManagementService: chargement impossible — ${e.code}');
       _allOrders = [];
-      Future.microtask(() => notifyListeners());
     } finally {
       _setLoading(false);
     }
   }
 
-  /// Mettre à jour le statut d'une commande
+  /// Fait avancer le statut d'une commande.
+  ///
+  /// La machine à états est côté serveur : une transition impossible sort en
+  /// 409 **avec les cibles autorisées**. Elle n'est pas rejouée ici — deux
+  /// graphes finiraient par diverger, et c'est l'écran qui afficherait des
+  /// boutons menant à un refus.
+  ///
+  /// L'annulation ne passe pas par ici : voir [cancelOrder], qui exige une
+  /// permission distincte et un motif.
   Future<bool> updateOrderStatus(String orderId, OrderStatus newStatus) async {
+    if (newStatus == OrderStatus.cancelled) {
+      return cancelOrder(orderId, 'Annulée depuis la supervision');
+    }
+
     try {
-      debugPrint(
-          '🔄 Mise à jour du statut de la commande $orderId vers ${newStatus.displayName}');
-
-      // Mettre à jour dans la base de données
-      final statusString = newStatus.dbValue;
-      await _supabase.from('orders').update({
-        'status': statusString,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', orderId);
-
-      debugPrint('✅ Statut mis à jour dans la base de données: $statusString');
-
-      // Mettre à jour l'état local immédiatement pour feedback rapide
-      final index = _allOrders.indexWhere((order) => order.id == orderId);
-      if (index != -1) {
-        _allOrders[index] = _allOrders[index].copyWith(status: newStatus);
-        debugPrint(
-            '✅ État local mis à jour pour la commande à l\'index $index');
-      } else {
-        debugPrint('⚠️ Commande $orderId non trouvée dans la liste locale');
-      }
-
-      // Notifier les listeners IMMÉDIATEMENT pour rafraîchir l'interface
-      Future.microtask(() => notifyListeners());
-      debugPrint('✅ Listeners notifiés (microtask)');
-
-      // Recharger la commande spécifique depuis la base de données en arrière-plan
-      // pour s'assurer de la cohérence (sans bloquer l'interface)
-      _refreshSingleOrder(orderId).catchError((e) {
-        debugPrint('⚠️ Erreur lors du rechargement de la commande: $e');
-      });
-
+      final updated = await _orders.updateStatus(
+        orderId: orderId,
+        status: DjangoOrderMapper.toRemoteStatus(newStatus),
+      );
+      _replaceLocally(DjangoOrderMapper.toLocal(updated));
       return true;
-    } catch (e) {
-      debugPrint('❌ Erreur lors de la mise à jour du statut: $e');
-      debugPrint('Stack trace: ${StackTrace.current}');
+    } on eccore.ApiException catch (e) {
+      debugPrint('OrderManagementService: transition refusée — ${e.code}');
       return false;
     }
   }
 
-  /// Recharger une commande spécifique depuis la base de données
-  Future<void> _refreshSingleOrder(String orderId) async {
-    try {
-      final response = await _supabase
-          .from('orders')
-          .select('*, order_items(*), users!orders_user_id_fkey(name, email)')
-          .eq('id', orderId)
-          .single();
-
-      final updatedOrder = Order.fromMap(response);
-
-      final index = _allOrders.indexWhere((order) => order.id == orderId);
-      if (index != -1) {
-        _allOrders[index] = updatedOrder;
-        debugPrint('✅ Commande rechargée depuis la base de données');
-        Future.microtask(() => notifyListeners());
-      }
-    } catch (e) {
-      debugPrint('⚠️ Erreur lors du rechargement de la commande $orderId: $e');
-      // En cas d'erreur, on recharge toutes les commandes
-      await _loadAllOrders();
+  void _replaceLocally(Order order) {
+    final index = _allOrders.indexWhere((existing) => existing.id == order.id);
+    if (index != -1) {
+      _allOrders[index] = order;
+    } else {
+      _allOrders.insert(0, order);
     }
+    Future.microtask(notifyListeners);
   }
 
   /// Confirmer une commande
@@ -256,191 +136,65 @@ class OrderManagementService extends ChangeNotifier {
   }
 
   /// Refuser une commande
+  /// Refuse une commande : c'est une annulation, avec son motif.
   Future<bool> rejectOrder(String orderId, {String? reason}) async {
-    try {
-      _setLoading(true);
-
-      // Mettre à jour le statut
-      await updateOrderStatus(orderId, OrderStatus.cancelled);
-
-      // Ajouter une note si une raison est fournie
-      if (reason != null && reason.isNotEmpty) {
-        await addInternalNote(orderId, 'Commande refusée: $reason');
-      }
-
-      _setLoading(false);
-      return true;
-    } catch (e) {
-      debugPrint('Error rejecting order: $e');
-      _setLoading(false);
-      return false;
-    }
+    final motif = reason?.trim();
+    return cancelOrder(
+      orderId,
+      motif == null || motif.isEmpty ? 'Commande refusée' : motif,
+    );
   }
 
-  /// Rembourser une commande
-  Future<bool> refundOrder(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.refunded);
-  }
-
-  /// Traiter un remboursement
+  /// Rembourse une commande — `POST /payments/{id}/refund/`,
+  /// permission `orders.refund`.
+  ///
+  /// Le remboursement est un **mouvement de paiement**, pas un statut de
+  /// commande : l'ancienne version écrivait `status = refunded` sur la
+  /// commande, plus `is_refunded` et `refund_amount`, sans qu'aucun encaissement
+  /// ne soit contrôlé. Le serveur plafonne au montant réellement encaissé,
+  /// déduction faite de ce qui a déjà été remboursé.
+  ///
+  /// Non branché tant que l'écran ne collecte pas la transaction à rembourser
+  /// ni le motif, tous deux exigés par le contrat : envoyer un appel incomplet
+  /// échouerait en 400 sous les yeux de l'opérateur.
   Future<bool> processRefund(String orderId, double amount) async {
-    try {
-      _setLoading(true);
-
-      // Dans une vraie application, cela impliquerait l'appel à une API de passerelle de paiement
-      // Pour l'instant, on va juste logger et mettre à jour le statut dans la DB
-      debugPrint(
-          'Processing refund of ${PriceFormatter.format(amount)} for order $orderId');
-
-      await _supabase.from('orders').update({
-        'is_refunded': true,
-        'refund_amount': amount,
-        'refunded_at': DateTime.now().toIso8601String(),
-      }).eq('id', orderId);
-
-      // Mise à jour locale des commandes (les propriétés isRefunded et refundAmount ne sont pas définies dans le modèle Order)
-      // final index = _allOrders.indexWhere((order) => order.id == orderId);
-      // if (index != -1) {
-      //   _allOrders[index] = _allOrders[index].copyWith(
-      //     isRefunded: true,
-      //     refundAmount: amount,
-      //   );
-      // }
-
-      _setLoading(false);
-      return true;
-    } catch (e) {
-      debugPrint('Error processing refund: $e');
-      _setLoading(false);
-      return false;
-    }
+    debugPrint('OrderManagementService: remboursement non branché ($orderId)');
+    return false;
   }
 
-  /// Annuler une commande
+  /// Annule une commande — permission `orders.cancel`, motif obligatoire.
+  ///
+  /// Le motif n'est pas décoratif : l'opérateur annule la commande d'un tiers,
+  /// qui sera remboursé et rappellera pour savoir pourquoi.
   Future<bool> cancelOrder(String orderId, String reason) async {
     try {
-      _setLoading(true);
-
-      await _supabase.from('orders').update({
-        'status': OrderStatus.cancelled.dbValue,
-        'cancellation_reason': reason,
-        'cancelled_at': DateTime.now().toIso8601String(),
-      }).eq('id', orderId);
-
-      // Mise à jour locale des commandes (la propriété cancellationReason n'est pas définie dans le modèle Order)
-      // final index = _allOrders.indexWhere((order) => order.id == orderId);
-      // if (index != -1) {
-      //   _allOrders[index] = _allOrders[index].copyWith(
-      //     status: OrderStatus.cancelled,
-      //     cancellationReason: reason,
-      //   );
-      // }
-
-      _setLoading(false);
+      final updated = await _orders.cancel(orderId: orderId, reason: reason);
+      _replaceLocally(DjangoOrderMapper.toLocal(updated));
       return true;
-    } catch (e) {
-      debugPrint('Error cancelling order: $e');
-      _setLoading(false);
+    } on eccore.ApiException catch (e) {
+      debugPrint('OrderManagementService: annulation refusée — ${e.code}');
       return false;
     }
   }
 
-  /// Assigner un livreur à une commande
-  /// IMPORTANT: driverId doit être le user_id depuis la table users, pas l'id du driver
-  Future<bool> assignDriver(String orderId, String driverId) async {
+  /// Propose la course d'une commande à un livreur — permission
+  /// `orders.assign_courier`.
+  ///
+  /// « Proposer » et non « assigner » : le livreur accepte ou refuse. L'ancienne
+  /// version écrivait `delivery_person_id` sur la commande, ce qui affectait
+  /// quelqu'un sans lui demander — et sans vérifier qu'il était en ligne ni son
+  /// dossier validé.
+  ///
+  /// [courierId] est l'identifiant du **dossier livreur**, celui que rend
+  /// `/delivery/couriers/`.
+  Future<bool> assignDriver(String orderId, String courierId) async {
     try {
-      _setLoading(true);
-
-      // Vérifier que driverId est un user_id valide dans users
-      // Si driverId est l'id du driver (depuis la table drivers), récupérer le user_id correspondant
-      String? userId;
-
-      // Si driverId ressemble à un UUID de driver (pas de user_id), récupérer le user_id
-      try {
-        // Chercher le driver par id pour obtenir user_id
-        final driverResponse = await _supabase
-            .from('drivers')
-            .select('user_id')
-            .eq('id', driverId)
-            .maybeSingle();
-
-        if (driverResponse != null && driverResponse['user_id'] != null) {
-          // Si on a trouvé le driver, son user_id correspond à l'id dans la table users
-          userId = driverResponse['user_id'] as String;
-          debugPrint('🔄 Driver ID $driverId -> User ID $userId');
-        } else {
-          // Vérifier que driverId est un user_id valide dans users
-          final userCheck = await _supabase
-              .from('users')
-              .select('id, role')
-              .eq('id', driverId)
-              .maybeSingle();
-
-          if (userCheck == null) {
-            throw Exception(
-                'L\'ID fourni ($driverId) n\'existe ni dans la table drivers ni dans la table users.');
-          }
-
-          final userRole = userCheck['role'] as String?;
-          if (userRole != 'delivery') {
-            debugPrint(
-                '⚠️ L\'utilisateur $driverId n\'a pas le rôle \'delivery\', mais est: $userRole');
-          }
-
-          userId = userCheck['id'] as String;
-          debugPrint('✅ User ID $userId validé (role: $userRole)');
-        }
-      } catch (e) {
-        debugPrint('❌ Erreur lors de la récupération du user_id: $e');
-        _setLoading(false);
-        rethrow;
-      }
-
-      // userId devrait toujours être défini à ce stade (sinon une exception aurait été levée)
-      // Dart peut analyser que userId n'est jamais null ici grâce au flux de contrôle
-      final finalUserId = userId;
-
-      // Utiliser userId (qui devrait être le user_id de la table users)
-      await _supabase.from('orders').update({
-        'delivery_person_id': finalUserId,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', orderId);
-
-      // Mettre à jour l'état local immédiatement
-      final index = _allOrders.indexWhere((order) => order.id == orderId);
-      if (index != -1) {
-        _allOrders[index] = _allOrders[index].copyWith(
-          deliveryPersonId: finalUserId,
-        );
-        Future.microtask(() => notifyListeners());
-      }
-
-      debugPrint(
-          '✅ Livreur (user_id: $finalUserId) assigné à la commande $orderId');
-
-      _setLoading(false);
-      notifyListeners();
+      await eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient)
+          .offer(orderId: orderId, courierId: courierId);
+      await refresh();
       return true;
-    } catch (e) {
-      debugPrint('❌ Error assigning driver: $e');
-      _setLoading(false);
-      return false;
-    }
-  }
-
-  /// Ajouter une note interne à une commande
-  Future<bool> addInternalNote(String orderId, String note) async {
-    try {
-      await _supabase.from('order_status_updates').insert({
-        'order_id': orderId,
-        'status': 'note',
-        'notes': note,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      return true;
-    } catch (e) {
-      debugPrint('Error adding internal note: $e');
+    } on eccore.ApiException catch (e) {
+      debugPrint('OrderManagementService: affectation refusée — ${e.code}');
       return false;
     }
   }
@@ -466,64 +220,24 @@ class OrderManagementService extends ChangeNotifier {
     return _allOrders.where((order) => order.status == status).toList();
   }
 
-  /// Charger les commandes par statut directement depuis la base de données
-  /// Utilise la valeur dbValue (snake_case) pour garantir la cohérence avec la DB
+  /// Commandes d'un statut donné, filtrées **par le serveur**.
   Future<List<Order>> loadOrdersByStatusFromDB(OrderStatus status) async {
     try {
-      final statusDbValue = status.dbValue;
-      debugPrint('🔍 Chargement des commandes avec statut: $statusDbValue');
-
-      final response = await _supabase
-          .from('orders')
-          .select('*, order_items(*), users!orders_user_id_fkey(name, email)')
-          .eq('status', statusDbValue)
-          .order('created_at', ascending: false);
-
-      final List<Order> orders = [];
-      for (var orderData in response) {
-        try {
-          final order = Order.fromMap(orderData);
-          orders.add(order);
-        } catch (e) {
-          debugPrint('❌ Erreur parsing commande ${orderData['id']}: $e');
-        }
-      }
-
-      debugPrint(
-          '✅ ${orders.length} commande(s) chargée(s) avec statut $statusDbValue');
-      return orders;
-    } catch (e) {
-      debugPrint('❌ Erreur lors du chargement des commandes par statut: $e');
+      final remote = await _orders.list(status: DjangoOrderMapper.toRemoteStatus(status));
+      return remote.map(DjangoOrderMapper.toLocal).toList();
+    } on eccore.ApiException catch (e) {
+      debugPrint('OrderManagementService: filtre par statut impossible — ${e.code}');
       return [];
     }
   }
 
-  /// Charger les commandes récentes directement depuis la base de données
-  /// Limite le nombre de commandes retournées
+  /// Les [limit] commandes les plus récentes.
   Future<List<Order>> loadRecentOrdersFromDB({int limit = 5}) async {
     try {
-      debugPrint('🔍 Chargement des $limit commandes les plus récentes...');
-
-      final response = await _supabase
-          .from('orders')
-          .select('*, order_items(*), users!orders_user_id_fkey(name, email)')
-          .order('created_at', ascending: false)
-          .limit(limit);
-
-      final List<Order> orders = [];
-      for (var orderData in response) {
-        try {
-          final order = Order.fromMap(orderData);
-          orders.add(order);
-        } catch (e) {
-          debugPrint('❌ Erreur parsing commande ${orderData['id']}: $e');
-        }
-      }
-
-      debugPrint('✅ ${orders.length} commande(s) récente(s) chargée(s)');
-      return orders;
-    } catch (e) {
-      debugPrint('❌ Erreur lors du chargement des commandes récentes: $e');
+      final remote = await _orders.list();
+      return remote.take(limit).map(DjangoOrderMapper.toLocal).toList();
+    } on eccore.ApiException catch (e) {
+      debugPrint('OrderManagementService: commandes récentes indisponibles — ${e.code}');
       return [];
     }
   }
@@ -639,48 +353,6 @@ class OrderManagementService extends ChangeNotifier {
     await _loadAllOrders();
   }
 
-  /// Mettre à jour une commande
-  Future<bool> updateOrder(String orderId, Map<String, dynamic> updates) async {
-    try {
-      _setLoading(true);
-
-      updates['updated_at'] = DateTime.now().toIso8601String();
-      await _supabase.from('orders').update(updates).eq('id', orderId);
-
-      // Recharger les données
-      await refresh();
-
-      _setLoading(false);
-      return true;
-    } catch (e) {
-      debugPrint('Error updating order: $e');
-      _setLoading(false);
-      return false;
-    }
-  }
-
-  /// Envoyer une notification à un client
-  Future<bool> sendNotificationToCustomer(
-      String orderId, String message) async {
-    try {
-      final order = _allOrders.firstWhere((o) => o.id == orderId);
-
-      await _supabase.from('notifications').insert({
-        'user_id': order.userId,
-        'title': 'Mise à jour de commande',
-        'message': message,
-        'type': 'order_update',
-        'data': {'order_id': orderId},
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
-      return true;
-    } catch (e) {
-      debugPrint('Error sending notification: $e');
-      return false;
-    }
-  }
-
   /// Obtenir les commandes nécessitant une attention
   List<Order> getOrdersNeedingAttention() {
     final now = DateTime.now();
@@ -720,38 +392,6 @@ class OrderManagementService extends ChangeNotifier {
 
       return now.isAfter(order.estimatedDeliveryTime!);
     }).toList();
-  }
-
-  /// Cloner une commande pour une nouvelle commande
-  Future<bool> cloneOrder(String orderId) async {
-    try {
-      final originalOrder = _allOrders.firstWhere((o) => o.id == orderId);
-
-      // Créer une nouvelle commande basée sur l'originale
-      final newOrderData = {
-        'user_id': originalOrder.userId,
-        'subtotal': originalOrder.subtotal,
-        'delivery_fee': originalOrder.deliveryFee,
-        'total': originalOrder.total,
-        'status': 'pending',
-        'delivery_address': originalOrder.deliveryAddress,
-        'delivery_notes': originalOrder.deliveryNotes,
-        'promo_code': originalOrder.promoCode,
-        'discount': originalOrder.discount,
-        'payment_method':
-            originalOrder.paymentMethod.toString().split('.').last,
-        'special_instructions': originalOrder.specialInstructions,
-        'created_at': DateTime.now().toIso8601String(),
-      };
-
-      await _supabase.from('orders').insert(newOrderData).select().single();
-
-      await refresh();
-      return true;
-    } catch (e) {
-      debugPrint('Error cloning order: $e');
-      return false;
-    }
   }
 
   /// Archiver les anciennes commandes
@@ -920,86 +560,6 @@ class OrderManagementService extends ChangeNotifier {
               })
           .toList(),
     };
-  }
-
-  /// Marquer une commande comme importante
-  Future<bool> markOrderAsImportant(String orderId, bool important) async {
-    try {
-      await addInternalNote(
-          orderId,
-          important
-              ? 'Commande marquée comme importante'
-              : 'Commande non importante');
-      return true;
-    } catch (e) {
-      debugPrint('Error marking order as important: $e');
-      return false;
-    }
-  }
-
-  /// Obtenir les prévisions de revenus
-  Map<String, dynamic> getRevenueForecast({int daysAhead = 30}) {
-    final stats = getOrderStats();
-    final currentDailyAvg = stats['average_order_value'] as double;
-
-    // Estimer les revenus futurs basés sur la moyenne actuelle
-    final forecastedRevenue = currentDailyAvg * daysAhead;
-
-    final growthRate = 0.05; // 5% de croissance estimée
-    final optimistic = forecastedRevenue * (1 + growthRate);
-    final pessimistic = forecastedRevenue * (1 - growthRate);
-
-    return {
-      'forecasted_revenue': forecastedRevenue,
-      'optimistic_revenue': optimistic,
-      'pessimistic_revenue': pessimistic,
-      'days_ahead': daysAhead,
-      'growth_rate': growthRate,
-    };
-  }
-
-  /// Vérifier les anomalies dans les commandes
-  List<Map<String, dynamic>> detectAnomalies() {
-    final anomalies = <Map<String, dynamic>>[];
-
-    // Vérifier les commandes avec des montants anormalement élevés
-    final avgOrderValue = _allOrders.isNotEmpty
-        ? _allOrders.fold(0.0, (sum, order) => sum + order.total) /
-            _allOrders.length
-        : 0.0;
-
-    final highThreshold = avgOrderValue * 5; // 5x la moyenne
-
-    for (final order in _allOrders) {
-      if (order.total > highThreshold) {
-        anomalies.add({
-          'order_id': order.id,
-          'type': 'high_amount',
-          'message':
-              'Montant anormalement élevé: ${PriceFormatter.format(order.total)}',
-          'severity': 'medium',
-        });
-      }
-
-      // Vérifier les commandes en attente depuis trop longtemps
-      final timeDiff = DateTime.now().difference(order.orderTime);
-      if (order.status == OrderStatus.pending && timeDiff.inHours > 2) {
-        anomalies.add({
-          'order_id': order.id,
-          'type': 'stuck_order',
-          'message': 'Commande en attente depuis ${timeDiff.inHours} heures',
-          'severity': 'high',
-        });
-      }
-    }
-
-    return anomalies;
-  }
-
-  /// Synchroniser avec la base de données
-  Future<void> syncWithDatabase() async {
-    await refresh();
-    debugPrint('Order data synchronized with database');
   }
 
   /// Obtenir les statistiques de livraison
