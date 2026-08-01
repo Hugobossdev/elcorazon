@@ -50,6 +50,9 @@ class CourierProfile {
     required this.email,
     required this.restaurantSlug,
     required this.verificationStatus,
+    this.idDocument,
+    this.licenceDocument,
+    this.vehicleDocument,
     required this.vehicleType,
     required this.isOnline,
     required this.canAcceptOrders,
@@ -77,6 +80,9 @@ class CourierProfile {
       email: json['email'] as String,
       restaurantSlug: json['restaurant'] as String,
       verificationStatus: json['verification_status'] as String,
+      idDocument: json['id_document'] as String?,
+      licenceDocument: json['licence_document'] as String?,
+      vehicleDocument: json['vehicle_document'] as String?,
       verificationNotes: json['verification_notes'] as String? ?? '',
       verifiedAt: _parseDate(json['verified_at']),
       vehicleType: json['vehicle_type'] as String,
@@ -106,6 +112,23 @@ class CourierProfile {
   /// `pending` | `approved` | `rejected` | `suspended` (`VerificationStatus`).
   final String verificationStatus;
   final String verificationNotes;
+
+  /// Pièces justificatives — URL **signées**, qui expirent.
+  ///
+  /// Le stockage est privé : ces adresses ne se mettent ni en cache ni en
+  /// favori. L'implémentation précédente les déposait dans un compartiment
+  /// public, où une pièce d'identité restait lisible indéfiniment par
+  /// quiconque connaissait l'adresse.
+  ///
+  /// Elles ne s'écrivent pas depuis le back-office : c'est le livreur qui
+  /// dépose ses pièces, et tout dépôt repasse le dossier en attente (L5).
+  final String? idDocument;
+  final String? licenceDocument;
+  final String? vehicleDocument;
+
+  /// Le dossier porte-t-il ses trois pièces ?
+  bool get hasAllDocuments =>
+      idDocument != null && licenceDocument != null && vehicleDocument != null;
   final DateTime? verifiedAt;
   final String vehicleType;
   final String vehiclePlate;

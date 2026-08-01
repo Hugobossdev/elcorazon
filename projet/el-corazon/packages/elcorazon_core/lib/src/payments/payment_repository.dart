@@ -34,6 +34,65 @@ class PaymentRepository {
     return transactions;
   }
 
+  /// Encaissements du périmètre, sans filtre de commande.
+  ///
+  /// Le serveur applique le sien : pour un compte du personnel, les
+  /// transactions des établissements auxquels il est rattaché ; pour un client,
+  /// celles de ses propres commandes.
+  Future<List<Transaction>> listTransactions({String? status}) async {
+    final transactions = <Transaction>[];
+    String? path = '/payments/transactions/';
+    Map<String, dynamic>? queryParameters = {
+      if (status != null) 'status': status,
+    };
+
+    while (path != null) {
+      final response = await apiClient.get(path, queryParameters: queryParameters);
+      final body = response.data as Map<String, dynamic>;
+      transactions.addAll(
+        (body['results'] as List<dynamic>).map(
+          (json) => Transaction.fromJson(json as Map<String, dynamic>),
+        ),
+      );
+      path = body['next'] as String?;
+      queryParameters = null;
+    }
+
+    return transactions;
+  }
+
+  // --------------------------------------------------------- remboursement
+
+  /// Rembourse tout ou partie d'une commande — permission `orders.refund`.
+  ///
+  /// **Le remboursement n'est pas un appel au prestataire depuis l'écran.**
+  /// L'ancien back-office joignait PayDunya directement, avec les clés
+  /// marchandes embarquées dans l'application : quiconque ouvrait le bundle
+  /// pouvait déclencher des remboursements. Ici, le serveur détient les clés,
+  /// vérifie le rattachement de la commande — un opérateur de Kara ne rembourse
+  /// pas une commande de Lomé, avec l'argent de Lomé — et applique le plafond
+  /// P3 : la somme des remboursements ne dépasse jamais l'encaissement.
+  ///
+  /// [transactionId] désigne l'encaissement à rembourser : une commande peut en
+  /// porter plusieurs (paiement partagé), et rembourser « la commande » sans
+  /// dire lequel ne voudrait rien dire.
+  Future<Refund> refund({
+    required String orderId,
+    required String transactionId,
+    required Money amount,
+    required String reason,
+  }) async {
+    final response = await apiClient.post(
+      '/payments/$orderId/refund/',
+      data: {
+        'transaction': transactionId,
+        'amount': amount.toJson(),
+        'reason': reason,
+      },
+    );
+    return Refund.fromJson(response.data as Map<String, dynamic>);
+  }
+
   // ------------------------------------------------------------- partage
 
   /// Ouvre un partage sur une commande. Le total est celui de la commande ;

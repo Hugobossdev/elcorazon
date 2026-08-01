@@ -22,6 +22,12 @@ class _FakeServer implements HttpClientAdapter {
   // c'est ce décalage qui simule un jeton expiré côté serveur.
   String currentToken = 'server-side-valid-token';
 
+  /// En-tête `Authorization` vu sur le dernier appel à `/auth/login/`, et
+  /// nombre de fois que la route a été appelée. `null` signifie « aucun
+  /// en-tête », ce que le test attend.
+  String? lastLoginAuthorization;
+  int loginCalls = 0;
+
   @override
   void close({bool force = false}) {}
 
@@ -45,6 +51,19 @@ class _FakeServer implements HttpClientAdapter {
       return ResponseBody.fromString(
         jsonEncode({'access': currentToken, 'refresh': 'refresh-token-$refreshCalls'}),
         200,
+        headers: _jsonHeaders,
+      );
+    }
+
+    // Le serveur réel répond 401 à des identifiants faux (`AuthenticationFailed`,
+    // `backend/apps/accounts/views.py`) — c'est ce 401-là que l'intercepteur ne
+    // doit pas confondre avec un jeton d'accès expiré.
+    if (options.path.contains('/auth/login/')) {
+      loginCalls++;
+      lastLoginAuthorization = options.headers['Authorization'] as String?;
+      return ResponseBody.fromString(
+        jsonEncode({'code': 'authentication_failed', 'detail': 'Identifiants invalides.'}),
+        401,
         headers: _jsonHeaders,
       );
     }
@@ -132,6 +151,39 @@ void main() {
 
       expect(await tokenStorage.getAccessToken(), isNull);
       expect(await tokenStorage.getRefreshToken(), isNull);
+    });
+  });
+
+  group('ApiClient — routes ouvertes', () {
+    test('un échec de connexion remonte son vrai motif, pas session_expired', () async {
+      // Le piège : `/auth/login/` répond 401 pour des identifiants faux. Traité
+      // comme un jeton expiré, il déclenchait un rafraîchissement et masquait
+      // « Identifiants invalides » derrière « Votre session a expiré ».
+      await expectLater(
+        apiClient.post('/auth/login/', data: {'email': 'a@b.c', 'password': 'faux'}),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.code, 'code', 'authentication_failed')
+              .having((e) => e.status, 'status', 401),
+        ),
+      );
+
+      expect(server.refreshCalls, 0);
+      expect(server.loginCalls, 1, reason: 'la requête ne doit pas être rejouée');
+      // Un mot de passe mal saisi ne doit pas coûter la session en cours.
+      expect(await tokenStorage.getRefreshToken(), 'refresh-token-0');
+    });
+
+    test('aucun jeton stocké n\'est joint à la connexion', () async {
+      // Django authentifie avant d'appliquer `AllowAny` : un jeton périmé
+      // présenté ici ferait répondre 401 avant même que la vue ne lise les
+      // identifiants — la reconnexion deviendrait impossible.
+      await expectLater(
+        apiClient.post('/auth/login/', data: {'email': 'a@b.c', 'password': 'faux'}),
+        throwsA(isA<ApiException>()),
+      );
+
+      expect(server.lastLoginAuthorization, isNull);
     });
   });
 }

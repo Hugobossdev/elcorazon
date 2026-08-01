@@ -41,6 +41,29 @@ class ApiClient {
 
   Future<String>? _refreshInFlight;
 
+  /// Routes qui s'ouvrent sans session (`AllowAny` côté serveur).
+  ///
+  /// Elles sont exclues des deux traitements de l'intercepteur, et pour deux
+  /// raisons distinctes :
+  ///
+  /// * **Aucun jeton n'y est joint.** Django authentifie avant d'appliquer
+  ///   `AllowAny` : un jeton d'accès périmé présenté à `/auth/login/` fait
+  ///   répondre 401 *avant* que la vue ne voie les identifiants. La connexion
+  ///   deviendrait impossible tant que le stockage n'est pas vidé — c'est-à-dire
+  ///   précisément quand l'utilisateur cherche à se reconnecter.
+  /// * **Leur 401 ne se rejoue pas.** Il signifie « identifiants refusés », pas
+  ///   « jeton expiré » ; le confondre avec le second remonte `session_expired`
+  ///   à l'écran de connexion au lieu du vrai motif, et consomme au passage un
+  ///   refresh token encore valide pour rien.
+  static const _publicAuthPaths = {
+    '/auth/login/',
+    '/auth/register/',
+    '/auth/token/refresh/',
+  };
+
+  static bool _isPublicAuthPath(String path) =>
+      _publicAuthPaths.any(path.contains);
+
   Future<Response<dynamic>> get(String path, {Map<String, dynamic>? queryParameters}) =>
       _send(() => dio.get<dynamic>(path, queryParameters: queryParameters));
 
@@ -68,6 +91,11 @@ class ApiClient {
   }
 
   Future<void> _attachToken(RequestOptions options, RequestInterceptorHandler handler) async {
+    if (_isPublicAuthPath(options.path)) {
+      handler.next(options);
+      return;
+    }
+
     final token = await tokenStorage.getAccessToken();
     if (token != null && token.isNotEmpty) {
       options.headers['Authorization'] = 'Bearer $token';
@@ -77,10 +105,11 @@ class ApiClient {
 
   Future<void> _handleError(DioException error, ErrorInterceptorHandler handler) async {
     final request = error.requestOptions;
-    final isRefreshCall = request.path.contains('/auth/token/refresh/');
     final alreadyRetried = request.extra['retried'] == true;
 
-    if (error.response?.statusCode != 401 || isRefreshCall || alreadyRetried) {
+    if (error.response?.statusCode != 401 ||
+        _isPublicAuthPath(request.path) ||
+        alreadyRetried) {
       handler.next(error);
       return;
     }
