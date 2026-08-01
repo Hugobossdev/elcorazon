@@ -1,6 +1,6 @@
 # Phase 6 — Migration Flutter vers l'architecture Django v2
 
-**Statut** : en cours (`fastfood` migré sauf social/commande groupée — **backend désormais complet des deux côtés**, reste la réécriture Flutter ; `dely` migré ; `admin` : rien) · **Date** : 2026-07-30 · **Entrée** : [02 — Architecture générale](02-architecture-generale.md), [ADR-009](adr/009-contrat-d-api.md)
+**Statut** : **Supabase retiré des trois applications** (2026-08-01) — `fastfood`, `dely` et `admin` ne parlent plus qu'au backend Django ; `supabase_flutter` a quitté les trois `pubspec.yaml`. Reste le déploiement réel (§3.6) et la validation de bout en bout (§3.7). · **Entrée** : [02 — Architecture générale](02-architecture-generale.md), [ADR-009](adr/009-contrat-d-api.md)
 
 ---
 
@@ -379,17 +379,57 @@ groupe » de `SocialService` contre ces endpoints, puis retirer le code Supabase
 5. [x] Clés Supabase codées en dur retirées de `api_config.dart` (2026-07-27) — la clé Google Maps,
    elle, reste (toujours utilisée par 3 services non liés à Supabase).
 
-**`admin` (back-office)**
-1. Auth + permissions (fait en 3.2, ADR-005) — **pas encore fait**, patron identique à `dely`
-   (`allowedUserType = UserType.staff`).
-   ⚠️ Ne pas couper l'accès à `Supabase.instance.client.auth.admin.createUser(...)`
-   (`admin_auth_service.dart:508`, provisioning de comptes tiers) même une fois le login de l'admin
-   migré — aucun endpoint Django équivalent n'existe.
-2. Gestion établissements / catalogue / personnel (`restaurants`, `catalog`, `accounts` scoping)
-3. Supervision commandes / livraison (lecture des mêmes endpoints que `fastfood`/`dely`, vues
-   agrégées)
-4. Analytics / rapports (`analytics`)
-5. Notifications push (absentes aujourd'hui — à construire)
+**`admin` (back-office)** — **migré** (2026-08-01)
+
+1. [x] Auth + permissions sur `sessionProvider` (`expectedUserTypeProvider = staff`). Le
+   provisioning de comptes tiers passe par `POST /delivery/couriers/` et
+   `/restaurants/staff/` : `auth.admin.createUser(...)` n'avait aucune garde de permission.
+2. [x] Catalogue — articles, catégories, groupes d'options, stock (`/catalog/manage/*`).
+3. [x] Supervision commandes et flotte (`/orders/manage/`, `/delivery/couriers/`).
+4. [x] Clients, rôles et permissions (`/administration/*`), promotions (`/promotions/`).
+5. [x] Analytics et rapports (`/analytics/reports/*`), campagnes (`/notifications/campaigns/`),
+   fidélisation (`/gamification/manage/*`, `/loyalty/manage/rewards/`).
+6. [x] Zones (`/geography/manage/zones/`), planning et dossiers livreurs (`/delivery/shifts/`,
+   `/delivery/couriers/`), recherche transverse (`/search/`), paiements et remboursements
+   (`/payments/`).
+
+**Neuf trous fermés au passage.** Ils ne sont pas des détails d'implémentation : chacun était
+exploitable depuis un poste de travail.
+
+| Ce que faisait l'app | Conséquence |
+| --- | --- |
+| Quatre **clés marchandes PayDunya** dans `SharedPreferences`, appels directs au prestataire | Un remboursement déclenchable sans permission, sans rattachement, sans trace, sans plafond |
+| **Recherche globale** sur quatre tables, sans permission ni cloisonnement | Un opérateur de Kara lisait les commandes de Lomé ; un compte privé de `customers.read` lisait des téléphones clients |
+| **Documents livreurs** dans un compartiment de stockage **public** | Une pièce d'identité lisible indéfiniment par qui connaissait l'URL |
+| **Rôles admin** appliqués côté interface seulement | Un « Opérateur » privé du module marketing appelait l'API marketing sans obstacle |
+| **Crédit de points de fidélité** depuis le back-office | Le back-office frappait monnaie ; le journal des points ne disait plus d'où venait un solde |
+| **Édition du profil client** par dictionnaire libre | `email` y passait — chemin de reprise de compte par « mot de passe oublié » |
+| **`used_count` d'un code promo** inscriptible | Un quota épuisé se rouvrait sans que rien n'en garde trace |
+| **Barème de livraison** en dur dans le client, deux constantes contradictoires | Les frais annoncés dépendaient du fichier consulté |
+| **Notification de masse** ajoutée à une liste en mémoire | « Notification envoyée » s'affichait ; personne ne recevait rien |
+
+**Sept endpoints construits** pour ce que le back-office faisait sans serveur : fiche client
+agrégée (`/analytics/reports/customers/{id}/`), rapports du tableau de bord (statuts, catégories,
+chiffres de tête), catalogues de fidélisation (succès, badges, défis, récompenses), planning
+livreur (`CourierShift` — **indicatif**, L1 inchangé), recherche transverse (app `apps/search`),
+bibliothèque d'options réutilisables (`OptionTemplate`, qui **copie** au lieu de référencer), et
+`option_groups` sur la forme back-office d'un article.
+
+**Ce qui a été retiré faute d'équivalent, et parce que ça ne tenait pas** : la validation
+document par document (on approuvait le permis et rejetait la carte grise — le compte restait
+dans un état illisible), les dates d'expiration de pièces (saisies à la main, vérifiées seulement
+si quelqu'un ouvrait le bon écran), l'historique de validation (écrit depuis le navigateur, avec
+l'auteur que le client déclarait), les prévisions de vente et le « risque d'attrition » (moyennes
+pondérées calculées dans le navigateur, avec un « niveau de confiance » qui ne mesurait rien), le
+filtre VIP (croisant des badges et des commandes de deux moments différents) et le calcul de
+remise côté client (C1 : le serveur est seul à chiffrer une remise).
+
+**Beaucoup de code injoignable** est parti avec : `main_web.dart` (second point d'entrée
+qu'aucune configuration de build ne référence), les écrans client restés dans le back-office
+(`auth_screen`, `home_screen`, `splash_screen`, `screens/client/`), les deux widgets de suivi
+temps réel, et six services sans appelant. `app_service.dart` est passé de 600 à 140 lignes : il
+portait la connexion et l'inscription de **clients**, un panier et le passage de commande — et
+fabriquait un administrateur fictif (UUID nul) quand aucune session n'était trouvée.
 
 Pour chaque domaine : (a) consulter le schéma OpenAPI du domaine, (b) écrire le repository Dart
 contre ce contrat, (c) remplacer l'appel Supabase existant dans les providers/services, (d)
@@ -406,11 +446,9 @@ le parcours manuellement.
 
 ### 3.5 Nettoyage Supabase
 
-- [ ] Retirer `supabase_flutter`, `lib/supabase/`, toute clé/URL Supabase des 3 `pubspec.yaml` et
-      fichiers `.env`. ⚠️ Toujours bloqué côté `fastfood`, mais **plus pour la même raison** : le
-      backend de la commande groupée existe (§3.3), il reste à réécrire `group_order_screen.dart`
-      contre lui. Et par `DatabaseService`, volontairement intact tant que des domaines non migrés
-      s'appuient dessus.
+- [x] **Terminé (2026-08-01).** `supabase_flutter`, `lib/supabase/` et toute clé/URL Supabase
+      ont quitté les trois `pubspec.yaml` et les trois `.env`. Vérification : `grep -rn
+      "package:supabase" */lib` ne rend plus rien.
 - [x] Code Supabase devenu mort supprimé au fil des tranches : `supabase_menu_repository.dart`,
       `supabase_order_repository.dart`, `secure_token_storage_service.dart`,
       `social_features_service.dart` (672 lignes, aucun appelant),
@@ -593,7 +631,7 @@ le parcours manuellement.
 - [ ] 3.0 — Prérequis backend (reste : validation FCM avec un vrai projet Firebase)
 - [x] 3.1 — Fondations Flutter partagées (`packages/elcorazon_core`, un module par domaine migré,
   87 tests)
-- [ ] 3.2 — Authentification commune (`dely` et `fastfood` faits, `admin` à répliquer)
+- [x] 3.2 — Authentification commune (les trois apps)
 - [ ] 3.3 — Migration `fastfood` — auth, catalogue, panier, commandes, paiements, suivi temps réel,
   fidélité, gamification, support, avis et notifications (historique + push FCM) faits. **Reste :
   social et commande groupée** — le backend des deux existe désormais (`apps/groupcarts`,
@@ -605,8 +643,11 @@ le parcours manuellement.
   réservé au personnel (§3.2), donc c'est un écran de back-office à construire, pas un écran
   d'inscription dans `dely`. Plus les domaines que `dely` partage avec `fastfood` sans écran migré
   (portefeuille, promotions, social).
-- [ ] 3.3 — Migration `admin`
+- [x] 3.3 — Migration `admin` — auth et permissions, catalogue, commandes, flotte, clients,
+  rôles, promotions, analytics, campagnes, fidélisation, zones, planning et dossiers livreurs,
+  recherche transverse, paiements et remboursements. Neuf trous de sécurité fermés (§3.3), sept
+  endpoints construits, ~9 000 lignes de code Supabase ou injoignable supprimées.
 - [ ] 3.4 — Flux externes (Agora, stockage)
-- [ ] 3.5 — Nettoyage Supabase
+- [x] 3.5 — Nettoyage Supabase — **les trois applications sont sorties de Supabase**
 - [ ] 3.6 — Infrastructure de déploiement réelle
 - [ ] 3.7 — Validation de bout en bout et bascule finale

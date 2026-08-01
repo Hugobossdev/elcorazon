@@ -32,7 +32,9 @@
 
 ## 🌍 Vue d'ensemble
 
-**El Corazón** est un écosystème complet de livraison de repas composé de **3 applications Flutter** interconnectées via une base de données Supabase commune. Le projet offre une expérience utilisateur complète pour les clients, les livreurs et les administrateurs.
+**El Corazón** est un écosystème complet de livraison de repas : **3 applications Flutter** (client, livreur, back-office) et un **backend Django** qui porte l'intégralité des règles métier.
+
+> **Le serveur décide, les applications affichent.** Prix, remises, statuts de commande, éligibilité d'un livreur, points de fidélité, remboursements : tout est établi côté serveur. Les applications n'accèdent à aucune base de données et ne détiennent aucune clé de prestataire.
 
 ### 🎯 Objectif
 
@@ -47,23 +49,43 @@ Créer une plateforme de livraison de repas moderne, intuitive et riche en fonct
 
 ## 🏗️ Architecture
 
-Le projet suit une architecture modulaire avec **3 applications distinctes** partageant une infrastructure backend unifiée :
+Trois applications distinctes, un socle Dart partagé, un backend commun :
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│              Infrastructure Commune (Supabase)           │
-│  • Base de données PostgreSQL                          │
-│  • Authentification                                     │
-│  • Stockage de fichiers                                 │
-│  • Realtime subscriptions                              │
-└─────────────────────────────────────────────────────────┘
-           │              │              │
-           ▼              ▼              ▼
     ┌──────────┐    ┌──────────┐    ┌──────────┐
     │  Client  │    │ Livreur  │    │  Admin   │
-    │   App    │    │   App    │    │  Panel   │
-    └──────────┘    └──────────┘    └──────────┘
+    │(fastfood)│    │  (dely)  │    │(back-off)│
+    └────┬─────┘    └────┬─────┘    └────┬─────┘
+         └───────────────┼───────────────┘
+                         ▼
+         ┌───────────────────────────────┐
+         │  packages/elcorazon_core      │
+         │  client HTTP · session ·      │
+         │  dépôts par domaine           │
+         └───────────────┬───────────────┘
+                         ▼  HTTPS + WebSocket
+    ┌─────────────────────────────────────────────┐
+    │        Backend Django (ASGI) — backend/     │
+    │  DRF /api/v1/*  ·  Channels /ws/*  ·  Celery│
+    │  18 apps métier · invariants en contraintes │
+    └─────────────────────┬───────────────────────┘
+                          ▼
+    ┌─────────────────────────────────────────────┐
+    │  PostgreSQL 17 + PostGIS · Redis · MinIO    │
+    └─────────────────────────────────────────────┘
+                          ▼
+    Services externes (serveur uniquement) :
+    PayDunya · Agora RTC · Firebase · Google Maps
 ```
+
+Les applications ne parlent **qu'**à l'API. Aucune n'ouvre de connexion à une
+base de données, et aucune ne détient de secret de prestataire : le certificat
+Agora signe les jetons d'appel côté serveur, les clés marchandes PayDunya ne
+quittent pas le backend.
+
+📖 Détail : [`docs/architecture/`](./docs/architecture/) — analyse
+fonctionnelle, architecture générale, modèle de données, plan de migration, et
+les ADR qui justifient les choix structurants.
 
 ---
 
@@ -128,10 +150,14 @@ Tableau de bord complet pour gérer toute l'activité de la plateforme.
 
 ### Prérequis
 
-- **Flutter SDK** : ^3.5.0 (pour elcora_fast) ou >=3.0.0 (pour admin/elcora_dely)
-- **Dart SDK** : Compatible avec la version Flutter
-- **Compte Supabase** : Pour la base de données
-- **Clés API** : Google Maps, PayDunya (optionnel), Agora (optionnel)
+- **Flutter SDK** : ^3.5.0
+- **Dart SDK** : compatible avec la version Flutter
+- **Docker + Docker Compose** : pour le backend (PostgreSQL + PostGIS, Redis,
+  API, workers)
+- **Clé Google Maps** : cartes et géocodage côté application
+
+Les clés PayDunya, Agora et Firebase se configurent **côté backend**
+(`backend/.env`) : elles n'ont rien à faire dans une application distribuée.
 
 ### Étapes d'installation
 
@@ -171,82 +197,55 @@ Tableau de bord complet pour gérer toute l'activité de la plateforme.
 
 Chaque application nécessite un fichier `.env` à sa racine avec les clés de configuration.
 
-#### 📱 `elcora_fast/.env`
+#### 📱 Les trois applications
+
+Chaque application n'a besoin que de l'adresse de l'API et, pour les cartes,
+d'une clé Google Maps :
 
 ```env
-# Supabase
-SUPABASE_URL=https://vsdmcqldshttrbilcvle.supabase.co
-SUPABASE_ANON_KEY=votre_cle_anon
+# Backend Django — la seule source de données de l'application
+API_BASE_URL=http://localhost:8000/api/v1
 
-# Google Maps
-GOOGLE_MAPS_API_KEY=votre_cle_google_maps
-
-# PayDunya (Paiements)
-PAYDUNYA_MASTER_KEY=votre_cle_master
-PAYDUNYA_PRIVATE_KEY=votre_cle_private
-PAYDUNYA_TOKEN=votre_token
-PAYDUNYA_IS_SANDBOX=true
-
-# Firebase (Notifications - optionnel)
-FIREBASE_API_KEY=votre_cle_firebase
-FIREBASE_AUTH_DOMAIN=votre_domaine
-FIREBASE_PROJECT_ID=votre_project_id
-FIREBASE_STORAGE_BUCKET=votre_bucket
-FIREBASE_MESSAGING_SENDER_ID=votre_sender_id
-FIREBASE_APP_ID=votre_app_id
-
-# Agora RTC (Appels vidéo - optionnel)
-AGORA_APP_ID=votre_app_id_agora
-
-# Backend
-BACKEND_URL=http://localhost:3000
-ENVIRONMENT=development
-```
-
-#### 🚚 `elcora_dely/.env`
-
-```env
-# Supabase
-SUPABASE_URL=https://vsdmcqldshttrbilcvle.supabase.co
-SUPABASE_ANON_KEY=votre_cle_anon
-
-# Google Maps
-GOOGLE_MAPS_API_KEY=votre_cle_google_maps
-
-# Agora RTC (optionnel)
-AGORA_APP_ID=votre_app_id_agora
-
-# PayDunya (optionnel)
-PAYDUNYA_MASTER_KEY=votre_cle_master
-PAYDUNYA_PRIVATE_KEY=votre_cle_private
-PAYDUNYA_TOKEN=votre_token
-```
-
-#### 💻 `admin/.env`
-
-```env
-# Supabase
-SUPABASE_URL=https://vsdmcqldshttrbilcvle.supabase.co
-SUPABASE_ANON_KEY=votre_cle_anon
-
-# Google Maps
+# Cartes et géocodage
 GOOGLE_MAPS_API_KEY=votre_cle_google_maps
 ```
 
-### Configuration de la Base de Données
+> **Ce qui n'y est plus, et pourquoi.** Les versions précédentes demandaient d'y
+> placer les clés Supabase, le certificat Agora et les **quatre clés marchandes
+> PayDunya**. Une clé dans un `.env` d'application est une clé dans le binaire
+> distribué : l'extraire suffisait à fabriquer ses propres jetons d'appel, ou à
+> déclencher un remboursement sans permission, sans rattachement, sans trace et
+> sans plafond. Ces secrets vivent désormais dans `backend/.env`.
 
-1. **Créer un projet Supabase** : https://supabase.com
-2. **Exécuter le script SQL** : `database_setup_complete.sql` dans le SQL Editor de Supabase
-3. **Configurer les RLS (Row Level Security)** selon vos besoins
+#### 🖥️ Backend (`backend/.env`)
+
+C'est là que se configurent la base, Redis, les jetons JWT et **tous** les
+prestataires. Voir [`docs/env/`](./docs/env/) et
+`backend/config/settings/base.py`.
+
+### Démarrer le backend
+
+```bash
+cd backend
+docker compose up          # PostgreSQL + PostGIS, Redis, API, workers
+docker compose exec api python manage.py migrate
+docker compose exec api python manage.py seed_demo   # jeu de données de démonstration
+```
+
+L'API écoute sur `http://localhost:8000/api/v1/`, son schéma OpenAPI sur
+`/api/v1/schema/` et sa documentation interactive sur `/api/v1/docs/` (en mode
+`DEBUG`).
 
 ### Obtention des Clés API
 
-- **Google Maps** : https://console.cloud.google.com/apis/credentials
-- **PayDunya** : https://app.paydunya.com/developers
-- **Firebase** : https://console.firebase.google.com
-- **Agora RTC** : https://console.agora.io
+| Service | Où l'obtenir | Où la clé se configure |
+| --- | --- | --- |
+| Google Maps | https://console.cloud.google.com/apis/credentials | Application **et** serveur |
+| PayDunya | https://app.paydunya.com/developers | **Serveur uniquement** |
+| Firebase | https://console.firebase.google.com | **Serveur uniquement** |
+| Agora RTC | https://console.agora.io | **Serveur uniquement** — l'app reçoit un jeton borné à un canal et à une durée |
 
-> ⚠️ **Important** : Ne commitez jamais les fichiers `.env` dans Git. Ils sont déjà dans `.gitignore`.
+> ⚠️ Ne commitez jamais les fichiers `.env`. Ils sont dans `.gitignore`.
 
 ---
 
@@ -305,7 +304,11 @@ GOOGLE_MAPS_API_KEY=votre_cle_google_maps
 - **Riverpod** : State management (elcora_fast)
 
 ### Backend & Services
-- **Supabase** : Base de données, authentification, stockage, realtime
+- **Django 5.2 + DRF + Channels** : API REST, WebSockets, authentification JWT
+- **PostgreSQL 17 + PostGIS** : données et géospatial ; les invariants métier
+  sont défendus par des contraintes de base
+- **Redis** : cache, courtier Celery, couche de canaux
+- **MinIO** : stockage privé, URL signées expirantes
 - **Firebase** : Notifications push (elcora_dely)
 - **Google Maps** : Géolocalisation et cartes
 - **PayDunya** : Paiements Mobile Money
@@ -365,7 +368,7 @@ projet/
 - **[DOCUMENTATION_GLOBALE.md](./DOCUMENTATION_GLOBALE.md)** : Vue d'ensemble technique complète
 - **[ETAT_FONCTIONNALITES.md](./ETAT_FONCTIONNALITES.md)** : État détaillé de toutes les fonctionnalités
 - **[FONCTIONNALITES_DETAILLEES.md](./FONCTIONNALITES_DETAILLEES.md)** : Détails techniques et logique métier
-- **[SUPABASE_CONFIG_UPDATE.md](./SUPABASE_CONFIG_UPDATE.md)** : Guide de configuration Supabase
+- **[docs/architecture/](./docs/architecture/)** : architecture, modèle de données, ADR et plan de migration
 - **[SCHEMA_BDD_COMPLET.md](./SCHEMA_BDD_COMPLET.md)** : Schéma complet de la base de données
 
 ### Documentation par Application
@@ -415,10 +418,11 @@ Chaque application suit une architecture modulaire avec :
 
 ### Problèmes Courants
 
-#### Erreur : "Supabase not initialized"
-- Vérifier que le fichier `.env` existe
-- Vérifier que les clés Supabase sont correctes
-- Vérifier la connexion internet
+#### L'application affiche des listes vides
+- Vérifier que le backend tourne (`cd backend && docker compose ps`)
+- Vérifier `API_BASE_URL` dans le `.env` de l'application
+- Regarder la réponse de l'API : un `403` signale une **permission manquante**
+  sur le compte, pas une panne (voir ADR-005)
 
 #### Erreur : "Invalid API key" (Google Maps)
 - Vérifier que la clé API est valide

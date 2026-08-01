@@ -35,8 +35,12 @@ El Corazón est une plateforme complète de livraison de repas composée de troi
 
 Le projet comprend :
 - 3 applications mobiles/web (Client, Livreur, Admin)
-- 1 infrastructure backend commune (Supabase)
-- Intégrations avec services externes (Google Maps, PayDunya, Agora, Firebase)
+- 1 backend commun : **Django 5.2 + DRF + Channels**, PostgreSQL 17 + PostGIS,
+  Redis, Celery, MinIO (`backend/`)
+- 1 socle Dart partagé par les trois applications (`packages/elcorazon_core`)
+- Intégrations avec services externes (Google Maps, PayDunya, Agora, Firebase),
+  **toutes rattachées côté serveur** : aucune clé de prestataire ne voyage dans
+  une application
 
 ### 1.4 Public cible
 
@@ -349,8 +353,10 @@ Application mobile destinée aux clients finaux pour parcourir le menu, personna
 
 - **Framework** : Flutter SDK ^3.5.0
 - **State Management** : Provider & Riverpod
-- **Base de données** : Supabase (PostgreSQL)
-- **Stockage local** : SQLite (sqflite), SharedPreferences
+- **Accès aux données** : `elcorazon_core` (client HTTP, session, dépôts par
+  domaine) contre l'API Django `/api/v1/*` — jamais d'accès direct à une base
+- **Stockage local** : SQLite (sqflite), SharedPreferences — **cache
+  uniquement**, jamais source de vérité
 - **Cartes** : Google Maps Flutter
 - **Géolocalisation** : Geolocator
 - **Paiements** : PayDunya SDK
@@ -509,7 +515,8 @@ Application mobile dédiée aux livreurs pour recevoir, gérer et effectuer les 
 
 - **Framework** : Flutter SDK ^3.9.2
 - **State Management** : Provider
-- **Base de données** : Supabase, Firebase (Messaging)
+- **Accès aux données** : `elcorazon_core` contre l'API Django `/api/v1/*` ;
+  Firebase Cloud Messaging pour le push
 - **Navigation** : Google Maps Flutter
 - **Géolocalisation** : Geolocator
 - **Communication** : Agora RTC Engine
@@ -688,8 +695,9 @@ Application web/desktop pour administrateurs et restaurateurs permettant la gest
 ### 4.3 Exigences techniques
 
 - **Framework** : Flutter SDK >=3.0.0 <4.0.0
-- **State Management** : Provider, BLoC
-- **Base de données** : Supabase
+- **State Management** : Provider, Riverpod (session)
+- **Accès aux données** : `elcorazon_core`, routes `/manage/*` et
+  `/administration/*` de l'API Django, sous permissions nommées (ADR-005)
 - **Graphiques** : Fl_chart, Syncfusion Flutter Charts
 - **Rapports** : PDF, Printing
 - **UI** : Flex Color Scheme, Animations
@@ -708,12 +716,23 @@ Application web/desktop pour administrateurs et restaurateurs permettant la gest
 
 ### 5.1 Infrastructure backend
 
-**Supabase (PostgreSQL)**
-- Base de données principale
-- Authentification
-- Stockage de fichiers
-- Realtime subscriptions
-- Row Level Security (RLS)
+**Backend Django (`backend/`)**
+- **API REST** `/api/v1/*` (DRF) — contrat versionné et documenté en OpenAPI,
+  erreurs au format RFC 9457 (ADR-009)
+- **Authentification JWT** (ADR-004) : le type de compte est porté par le
+  jeton, les permissions par des rôles cumulables (ADR-005)
+- **WebSockets** (Channels) `/ws/*` — suivi de course, file du livreur, appels
+- **Tâches de fond** (Celery) — notifications, agrégats, expirations
+- **PostgreSQL 17 + PostGIS** — les invariants métier sont défendus par des
+  contraintes de base, pas seulement par du code applicatif
+- **Redis** — cache, courtier Celery, couche de canaux
+- **MinIO** — stockage **privé** ; les pièces justificatives et les images
+  sortent en URL signées qui expirent
+
+> **Le client ne décide de rien qui engage l'enseigne.** Prix, remises, statuts
+> de commande, éligibilité d'un livreur, points de fidélité et remboursements
+> sont établis par le serveur. C'est le principe qui a guidé la migration : voir
+> [docs/architecture/04-migration-flutter.md](docs/architecture/04-migration-flutter.md).
 
 **Tables principales :**
 - `users` : Utilisateurs (clients, livreurs, admins)
@@ -750,9 +769,10 @@ Application web/desktop pour administrateurs et restaurateurs permettant la gest
 
 ### 5.3 Sécurité
 
-- Authentification sécurisée (Supabase Auth)
+- Authentification sécurisée (JWT, ADR-004 — rotation et révocation des jetons)
 - Chiffrement des données sensibles
-- Row Level Security (RLS) sur Supabase
+- Autorisation à trois étages (ADR-005) : type de compte, permission nommée
+  (`domaine.action`), et cloisonnement par établissement dans les requêtes
 - Validation des entrées
 - Protection CSRF
 - HTTPS obligatoire
@@ -813,7 +833,8 @@ Application web/desktop pour administrateurs et restaurateurs permettant la gest
 
 ### 7.1 Contraintes techniques
 
-- Dépendance à Supabase pour le backend
+- Dépendance à un backend auto-hébergé (Django, PostgreSQL, Redis) : la
+  disponibilité de la plateforme dépend de son exploitation
 - Nécessité de clés API (Google Maps, PayDunya, Agora)
 - Connexion internet requise pour la plupart des fonctionnalités
 - Permissions GPS pour la géolocalisation
@@ -827,7 +848,7 @@ Application web/desktop pour administrateurs et restaurateurs permettant la gest
 
 ### 7.3 Dépendances externes
 
-- Services tiers (Supabase, Google Maps, PayDunya, Agora, Firebase)
+- Services tiers (Google Maps, PayDunya, Agora, Firebase)
 - Mises à jour des SDK Flutter
 - Disponibilité des services cloud
 

@@ -59,7 +59,7 @@ try {
 - `TimeoutException` → "Le serveur met trop de temps à répondre. Veuillez réessayer."
 - `HttpException` → "Erreur de communication avec le serveur. Veuillez réessayer."
 
-**Erreurs Supabase :**
+**Erreurs de l'API (RFC 9457, ADR-009) :**
 - `PostgrestException` avec code `PGRST116` → "Aucun résultat trouvé."
 - `PostgrestException` avec code `42501` → "Vous n'avez pas la permission d'effectuer cette action."
 - `PostgrestException` avec code `23505` → "Cette information existe déjà."

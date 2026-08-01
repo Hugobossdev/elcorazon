@@ -1,5 +1,13 @@
 # 🛡️ Guide de Validation et Sécurité des Formulaires
 
+> ⚠️ **Document antérieur à la migration Django (1er août 2026).**
+> Les exemples ci-dessous montrent des dépôts Supabase qui n'existent plus.
+> L'accès aux données passe désormais par `packages/elcorazon_core`, dont les
+> dépôts parlent à l'API Django `/api/v1/*`. Le **patron** décrit ici reste
+> valable — c'est son implémentation qui a changé.
+>
+> Référence : [`docs/architecture/04-migration-flutter.md`](../../../docs/architecture/04-migration-flutter.md).
+
 ## Vue d'ensemble
 
 Ce système de validation protège contre :
@@ -88,7 +96,7 @@ final sanitizedData = SecurityHelper.sanitizeData(
   strict: true,
 );
 
-await supabase.from('table').insert(sanitizedData);
+await apiClient.post('/domaine/ressource/', data: sanitizedData);
 ```
 
 ## Messages d'erreur clairs
@@ -186,7 +194,7 @@ class _MyFormScreenState extends State<MyFormScreen> {
       });
 
       // Insérer en base
-      await supabase.from('users').insert(sanitizedData);
+      await apiClient.post('/domaine/ressource/', data: sanitizedData);
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Formulaire soumis avec succès')),

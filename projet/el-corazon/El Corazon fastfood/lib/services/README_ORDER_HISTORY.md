@@ -1,5 +1,13 @@
 # 📋 Guide de l'Historique des Commandes Amélioré
 
+> ⚠️ **Document antérieur à la migration Django (1er août 2026).**
+> Les exemples ci-dessous montrent des dépôts Supabase qui n'existent plus.
+> L'accès aux données passe désormais par `packages/elcorazon_core`, dont les
+> dépôts parlent à l'API Django `/api/v1/*`. Le **patron** décrit ici reste
+> valable — c'est son implémentation qui a changé.
+>
+> Référence : [`docs/architecture/04-migration-flutter.md`](../../../docs/architecture/04-migration-flutter.md).
+
 ## Vue d'ensemble
 
 L'amélioration #16 implémente un historique des commandes amélioré avec :
@@ -49,9 +57,9 @@ Le service fournit des statistiques :
 
 ```dart
 import 'lib/services/order_history_service.dart';
-import 'lib/repositories/supabase_order_repository.dart';
+import 'package:elcorazon_core/elcorazon_core.dart';
 
-final orderRepository = SupabaseOrderRepository();
+final orderRepository = OrderRepository(apiClient: apiClient);
 final orderHistoryService = OrderHistoryService(orderRepository);
 ```
 
@@ -131,7 +139,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen> {
   @override
   void initState() {
     super.initState();
-    final orderRepository = SupabaseOrderRepository();
+    final orderRepository = OrderRepository(apiClient: apiClient);
     _orderHistoryService = OrderHistoryService(orderRepository);
   }
 

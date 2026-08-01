@@ -1,8 +1,47 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Date de mise à jour** : Décembre 2024
+**Dernière révision** : 1er août 2026
 
-Ce document présente l'état d'implémentation de toutes les fonctionnalités des 3 applications de l'écosystème El Corazón.
+> ⚠️ **Inventaire fonctionnel daté.** Le corps de ce document a été écrit en
+> décembre 2024, quand les trois applications parlaient directement à Supabase.
+> Les fonctionnalités listées existent toujours pour la plupart, mais **leur
+> mise en œuvre a changé de fond en comble** : elles passent désormais par le
+> backend Django (`backend/`), et plusieurs ont été retirées parce qu'elles ne
+> tenaient pas — voir la liste plus bas.
+>
+> La référence à jour est **[docs/architecture/04-migration-flutter.md](docs/architecture/04-migration-flutter.md)**,
+> qui trace domaine par domaine ce qui a été migré, construit ou supprimé.
+
+## 🏗️ Ce qui a changé depuis cet inventaire
+
+**Supabase a été retiré des trois applications** (1er août 2026). Elles ne
+parlent plus qu'au backend Django : `supabase_flutter` a quitté les trois
+`pubspec.yaml`, et `grep -rn "package:supabase" */lib` ne rend plus rien.
+
+Le déplacement n'était pas cosmétique. Ce que le client décidait, le serveur le
+décide :
+
+- **les prix et les remises** (invariant C1) — le catalogue et les codes
+  promotionnels ne se calculent plus à l'écran ;
+- **les permissions** (ADR-005) — les rôles du back-office n'étaient appliqués
+  que côté interface ; un « Opérateur » privé d'un module appelait quand même
+  son API ;
+- **le cloisonnement par établissement** — un opérateur de Kara lisait les
+  commandes de Lomé ;
+- **les secrets** — clés marchandes PayDunya, certificat Agora et clés Supabase
+  vivaient dans des binaires distribués ; ils sont côté serveur.
+
+**Fonctionnalités retirées**, faute d'équivalent et parce qu'elles ne
+fonctionnaient pas comme annoncé : le portefeuille client, la validation
+document par document des dossiers livreurs, les dates d'expiration de pièces,
+les prévisions de vente et le « risque d'attrition » calculés dans le
+navigateur, et l'auto-inscription des livreurs (un livreur s'embauche, il ne
+s'inscrit pas).
+
+---
+
+Ce document présente l'état d'implémentation des fonctionnalités des 3
+applications de l'écosystème El Corazón.
 
 ---
 
@@ -270,7 +309,7 @@ Ce document présente l'état d'implémentation de toutes les fonctionnalités d
 - ✅ Gestion des stocks
 - ✅ Personnalisations de produits
 - ✅ Groupes d'options
-- ⚠️ **TODO** : Compléter l'upload d'images Supabase Storage
+- ⚠️ **TODO** : Compléter l'upload d'images (stockage serveur, URL signées)
 
 #### 🚚 Gestion des Livreurs
 - ✅ Liste des livreurs
@@ -339,7 +378,7 @@ Ce document présente l'état d'implémentation de toutes les fonctionnalités d
    - ✅ PieChart pour les catégories
 
 2. ~~**Upload d'Images Produits**~~ ✅ **COMPLÉTÉ**
-   - ✅ Upload vers Supabase Storage implémenté
+   - ✅ Upload vers le stockage serveur implémenté (privé, URL signées)
    - ✅ Sélection depuis galerie ou caméra
    - ✅ Aperçu de l'image avant upload
    - ✅ Compression automatique (85% qualité, max 1920px)
@@ -366,16 +405,19 @@ Ce document présente l'état d'implémentation de toutes les fonctionnalités d
 
 ### 🚨 CRITIQUE (Application ne démarre pas sans)
 
-1. **Fichiers `.env` manquants**
-   - `elcora_fast/.env`
-   - `elcora_dely/.env`
-   - `admin/.env`
-   - **Action** : Créer ces fichiers avec les clés Supabase
+1. **Backend Django démarré**
+   - `cd backend && docker compose up` — PostgreSQL + PostGIS, Redis, l'API et
+     les workers.
+   - Sans lui, les trois applications démarrent mais n'affichent rien : elles
+     n'ont plus aucune source de données locale.
 
-2. **Clés Supabase**
-   - URL : `https://vsdmcqldshttrbilcvle.supabase.co`
-   - Anon Key : Déjà dans la documentation
-   - **Action** : Ajouter dans les fichiers `.env`
+2. **Fichiers `.env` des applications**
+   - `El Corazon fastfood/.env`, `El corazon dely/.env`, `El Corazon admin/.env`
+   - Une seule variable indispensable : `API_BASE_URL`
+     (`http://localhost:8000/api/v1` en développement).
+   - **Plus aucune clé Supabase, ni clé marchande PayDunya, ni certificat
+     Agora** : ces secrets vivent côté serveur. Les avoir dans une application
+     revenait à les distribuer avec le binaire.
 
 ### ⚠️ IMPORTANT (Fonctionnalités essentielles)
 
@@ -416,7 +458,8 @@ Ce document présente l'état d'implémentation de toutes les fonctionnalités d
 
 1. **Architecture solide** - Services bien structurés et modulaires
 2. **Couverture fonctionnelle** - Toutes les fonctionnalités principales présentes
-3. **Base de données complète** - Schéma Supabase exhaustif
+3. **Base de données complète** - Schéma PostgreSQL + PostGIS, invariants
+   défendus par des contraintes (voir `docs/architecture/03-modele-de-donnees.md`)
 4. **Multi-plateforme** - Support mobile et web
 5. **Gestion d'erreurs** - Services d'erreur et validation présents
 6. **Performance** - Optimisations et cache implémentés
@@ -425,7 +468,7 @@ Ce document présente l'état d'implémentation de toutes les fonctionnalités d
 
 1. **Configuration** - Fichiers `.env` à créer
 2. **Graphiques** - Compléter les graphiques fl_chart dans admin
-3. **Upload d'images** - Finaliser l'implémentation Supabase Storage
+3. **Upload d'images** - Stockage privé côté serveur, URL signées expirantes
 4. **Carte interactive** - Intégrer Google Maps dans admin
 5. **Tests** - Ajouter des tests unitaires et d'intégration
 6. **Documentation** - Documenter les APIs des services
@@ -435,9 +478,10 @@ Ce document présente l'état d'implémentation de toutes les fonctionnalités d
 ## 🎯 Priorités pour Finalisation
 
 ### 🔴 PRIORITÉ 1 (Blocage)
-- [ ] Créer les fichiers `.env` pour les 3 applications
-- [ ] Configurer les clés Supabase
-- [ ] Configurer Google Maps API Key
+- [x] Créer les fichiers `.env` pour les 3 applications (`API_BASE_URL`)
+- [x] ~~Configurer les clés Supabase~~ — Supabase retiré
+- [ ] Configurer Google Maps API Key (géocodage, cartes)
+- [ ] Déploiement réel : Nginx, TLS, MinIO, Celery beat (§3.6 du plan de migration)
 
 ### 🟡 PRIORITÉ 2 (Fonctionnalités essentielles)
 - [ ] Configurer PayDunya pour les paiements
@@ -472,11 +516,14 @@ Ce document présente l'état d'implémentation de toutes les fonctionnalités d
 - AdminAuthService, OrderManagementService
 - MenuService, DriverManagementService
 - AnalyticsService, RoleManagementService
-- ReportService, MarketingService
+- MarketingService, PaymentsService, GlobalSearchService
+- (`ReportService` et `AuditLogService` ont été supprimés : aucun écran ne les
+  atteignait)
 
 ### Technologies Utilisées
 
-- **Backend** : Supabase (Auth, Database, Realtime, Storage)
+- **Backend** : Django 5.2 + DRF + Channels (ASGI) — auth JWT, API REST,
+  WebSockets, Celery. PostgreSQL 17 + PostGIS, Redis, MinIO
 - **State Management** : Provider, Riverpod
 - **Maps** : Google Maps Flutter
 - **Paiements** : PayDunya
@@ -487,5 +534,5 @@ Ce document présente l'état d'implémentation de toutes les fonctionnalités d
 
 ---
 
-**Dernière mise à jour** : Décembre 2024
+**Corps de l'inventaire** : décembre 2024 · **Révision d'architecture** : 1er août 2026
 

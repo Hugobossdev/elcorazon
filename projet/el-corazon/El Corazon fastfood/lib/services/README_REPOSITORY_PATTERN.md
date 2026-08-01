@@ -1,5 +1,13 @@
 # 🏗️ Guide du Pattern Repository
 
+> ⚠️ **Document antérieur à la migration Django (1er août 2026).**
+> Les exemples ont été réécrits contre `packages/elcorazon_core`, dont les
+> dépôts parlent à l'API Django `/api/v1/*`. Le **patron** décrit ici n'a pas
+> bougé — c'est précisément ce qui a permis de changer de backend sans
+> réécrire les écrans.
+>
+> Référence : [`docs/architecture/04-migration-flutter.md`](../../../docs/architecture/04-migration-flutter.md).
+
 ## Vue d'ensemble
 
 L'amélioration #10 implémente le pattern Repository pour séparer la logique métier de l'accès aux données. Cela permet :
@@ -16,9 +24,9 @@ L'amélioration #10 implémente le pattern Repository pour séparer la logique m
 lib/
 ├── repositories/          # Couche d'accès aux données
 │   ├── menu_repository.dart          # Interface abstraite
-│   ├── supabase_menu_repository.dart # Implémentation Supabase
+│   ├── (implémentation : packages/elcorazon_core → API Django)
 │   ├── order_repository.dart
-│   └── supabase_order_repository.dart
+│
 └── services/             # Couche de logique métier
     ├── menu_service.dart # Utilise MenuRepository
     └── ...
@@ -28,7 +36,7 @@ lib/
 
 1. **Repository** : Accès aux données uniquement
    - Pas de logique métier
-   - Peut être remplacé facilement (Supabase, Firestore, REST API, etc.)
+   - Peut être remplacé facilement — c'est ce qui a permis de passer de Supabase à l'API Django sans réécrire les écrans
    - Facile à tester avec des mocks
 
 2. **Service** : Logique métier
@@ -58,21 +66,24 @@ abstract class MenuRepository {
 #### Implémentation
 
 ```dart
-// lib/repositories/supabase_menu_repository.dart
-class SupabaseMenuRepository implements MenuRepository {
-  final SupabaseClient _supabase;
+// packages/elcorazon_core/lib/src/catalog/catalog_repository.dart
+class CatalogRepository {
+  CatalogRepository({required this.apiClient});
 
-  SupabaseMenuRepository(this._supabase);
+  final ApiClient apiClient;
 
-  @override
-  Future<List<MenuItem>> getMenuItems({String? categoryId}) async {
-    // Implémentation spécifique à Supabase
-    final response = await _supabase
-        .from('menu_items')
-        .select('*')
-        .eq('is_available', true);
-    
-    return response.map((data) => MenuItem.fromMap(data)).toList();
+  Future<List<MenuItem>> getMenuItems({String? categorySlug}) async {
+    // Le serveur filtre : il connaît la disponibilité, le stock et le
+    // périmètre. Charger toute la carte pour la filtrer ici afficherait un
+    // article épuisé le temps que le cache tourne.
+    final response = await apiClient.get(
+      '/catalog/items/',
+      queryParameters: {if (categorySlug != null) 'category': categorySlug},
+    );
+
+    return (response.data['results'] as List<dynamic>)
+        .map((json) => MenuItem.fromJson(json as Map<String, dynamic>))
+        .toList();
   }
 }
 ```
@@ -112,7 +123,7 @@ class MenuService extends ChangeNotifier {
 
 ```dart
 // Dans main.dart
-final menuRepository = SupabaseMenuRepository(SupabaseConfig.client);
+final menuRepository = CatalogRepository(apiClient: apiClient);
 final menuService = MenuService(menuRepository);
 
 ChangeNotifierProvider(create: (_) => menuService),
@@ -168,7 +179,7 @@ void main() {
 ```dart
 // Facile de changer de backend
 final menuRepository = 
-  // SupabaseMenuRepository(SupabaseConfig.client);
+  // CatalogRepository(apiClient: apiClient);
   // FirestoreMenuRepository(FirebaseFirestore.instance);
   // RestMenuRepository(apiClient);
   MockMenuRepository(); // Pour les tests
@@ -232,13 +243,12 @@ class MenuService extends ChangeNotifier {
 ```dart
 import 'package:provider/provider.dart';
 import 'repositories/menu_repository.dart';
-import 'repositories/supabase_menu_repository.dart';
+import 'package:elcorazon_core/elcorazon_core.dart';
 import 'services/menu_service.dart';
-import 'supabase/supabase_config.dart';
 
 void main() {
   // Créer le repository
-  final menuRepository = SupabaseMenuRepository(SupabaseConfig.client);
+  final menuRepository = CatalogRepository(apiClient: apiClient);
   
   // Créer le service avec le repository
   final menuService = MenuService(menuRepository);
@@ -308,17 +318,17 @@ class _MenuScreenState extends State<MenuScreen> {
 
 ```dart
 // ✅ Bon - Repository fait uniquement l'accès aux données
-class SupabaseMenuRepository implements MenuRepository {
+class CatalogRepository {
   @override
   Future<List<MenuItem>> getMenuItems({String? categoryId}) async {
     // Juste la récupération des données
-    final response = await _supabase.from('menu_items').select('*');
+    final response = await apiClient.get('/catalog/items/');
     return response.map((data) => MenuItem.fromMap(data)).toList();
   }
 }
 
 // ❌ Éviter - Repository ne doit pas contenir de logique métier
-class SupabaseMenuRepository implements MenuRepository {
+class CatalogRepository {
   @override
   Future<List<MenuItem>> getMenuItems({String? categoryId}) async {
     // ❌ Logique métier dans le repository
@@ -410,10 +420,10 @@ class AppService extends ChangeNotifier {
 
 ```dart
 // Repository : Accès aux données
-class SupabaseMenuRepository implements MenuRepository {
+class CatalogRepository {
   @override
   Future<List<MenuItem>> getMenuItems() async {
-    final response = await _supabase.from('menu_items').select('*');
+    final response = await apiClient.get('/catalog/items/');
     return response.map((data) => MenuItem.fromMap(data)).toList();
   }
 }

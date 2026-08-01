@@ -1,5 +1,13 @@
 # 🚀 Guide de Riverpod pour la Gestion d'État
 
+> ⚠️ **Document antérieur à la migration Django (1er août 2026).**
+> Les exemples ci-dessous montrent des dépôts Supabase qui n'existent plus.
+> L'accès aux données passe désormais par `packages/elcorazon_core`, dont les
+> dépôts parlent à l'API Django `/api/v1/*`. Le **patron** décrit ici reste
+> valable — c'est son implémentation qui a changé.
+>
+> Référence : [`docs/architecture/04-migration-flutter.md`](../../../docs/architecture/04-migration-flutter.md).
+
 ## Vue d'ensemble
 
 L'amélioration #12 implémente Riverpod comme alternative (optionnelle) à Provider pour la gestion d'état. Riverpod offre :
@@ -145,7 +153,7 @@ import '../repositories/menu_repository.dart';
 
 // Provider du repository
 final menuRepositoryProvider = Provider<MenuRepository>((ref) {
-  return SupabaseMenuRepository();
+  return CatalogRepository(apiClient: ref.watch(apiClientProvider));
 });
 
 // Provider pour charger les menu items

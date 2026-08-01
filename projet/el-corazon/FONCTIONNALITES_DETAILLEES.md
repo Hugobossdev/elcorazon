@@ -86,7 +86,7 @@ Assure la continuité de service même sans connexion internet.
 ### 🔄 Synchronisation
 1.  **Détection** : Écoute les changements de connectivité via `connectivity_plus`.
 2.  **Queue de Sync** : Les opérations sont empilées dans les tables locales avec un statut `pending`.
-3.  **Reprise** : Dès que la connexion revient, le service dépile les files d'attente et envoie les requêtes à Supabase (Batch processing).
+3.  **Reprise** : Dès que la connexion revient, le service dépile les files d'attente et rejoue les requêtes contre l'API Django.
 4.  **Gestion d'erreurs** : Système de `retry` avec backoff exponentiel pour les échecs de sync.
 
 ---
@@ -104,7 +104,7 @@ Moteur d'analyse de données pour les administrateurs.
 
 ### 🛠️ Optimisation
 *   Les requêtes sont segmentées (Revenue, Orders, Categories) pour éviter les timeouts.
-*   Utilisation de filtres Supabase (`gte`, `lte`) pour les plages de dates.
+*   Filtres de plage transmis à l'API (`placed_at__gte`, `placed_at__lte`), appliqués côté serveur — et non sur une liste déjà chargée.
 
 ---
 
@@ -115,7 +115,7 @@ Cœur logistique de l'application permettant le suivi en temps réel.
 
 ### 📍 Fonctionnement
 *   **Mise à jour Position** : L'app livreur envoie sa position GPS toutes les 10 secondes via `Geolocator`.
-*   **Diffusion** : Supabase Realtime diffuse ces coordonnées aux clients abonnés au canal de leur commande.
+*   **Diffusion** : Django Channels diffuse ces coordonnées sur le canal de la course, après avoir vérifié le droit d'y accéder **avant** d'accepter la connexion (ADR-008).
 *   **Géocodage** : Conversion automatique des adresses textuelles en coordonnées Lat/Lng via Google Maps API (ou service interne `GeocodingService`) pour calculer les itinéraires et frais de livraison précis.
 *   **Estimation** : Calcul du temps de trajet estimé (`calculateTravelTime`) pour informer le client.
 

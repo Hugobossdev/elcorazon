@@ -99,7 +99,7 @@ Les services suivants sont configurés en lazy :
 - `AdvancedGamificationService`
 - `OfflineSyncService`
 - `PushNotificationService`
-- `SupabaseRealtimeService`
+- `RealtimeChannel` (`elcorazon_core`) — WebSocket Django Channels
 - `WalletService`
 
 ### Services système

@@ -8,7 +8,9 @@ Cette documentation détaille l'architecture et les fonctionnalités des 3 proje
 
 ## 🌍 Vue d'ensemble de l'écosystème
 
-Le projet est divisé en trois applications distinctes interconnectées via une base de données commune (Supabase) :
+Le projet est divisé en trois applications distinctes, adossées à un backend
+Django commun (`backend/`) et à un socle Dart partagé
+(`packages/elcorazon_core`) :
 
 1.  **📱 elcora_fast (Customer App)** : L'application client pour commander des repas.
 2.  **🚚 elcora_dely (Driver App)** : L'application pour les livreurs.
@@ -25,7 +27,7 @@ Une application Flutter riche en fonctionnalités permettant aux utilisateurs de
 
 ### 🛠️ Stack Technique
 *   **Framework** : Flutter (SDK ^3.5.0)
-*   **Base de Données** : Supabase (Auth, DB, Realtime)
+*   **Accès aux données** : `elcorazon_core` → API Django `/api/v1/*` (REST + WebSocket)
 *   **State Management** : Provider & Riverpod
 *   **Cartes & Localisation** : `google_maps_flutter`, `geolocator`
 *   **Temps Réel** : `socket_io_client`, `agora_rtc_engine` (Communication)
@@ -58,7 +60,7 @@ Une application Flutter (optimisée pour Desktop/Web) permettant la gestion comp
 
 ### 🛠️ Stack Technique
 *   **Framework** : Flutter (SDK >=3.0.0 <4.0.0)
-*   **Base de Données** : Supabase
+*   **Accès aux données** : `elcorazon_core` → API Django `/api/v1/*`
 *   **State Management** : Provider, BLoC
 *   **Graphiques** : `fl_chart`, `syncfusion_flutter_charts`
 *   **Rapports** : `pdf`, `printing`
@@ -88,7 +90,7 @@ Application dédiée aux livreurs pour recevoir, gérer et effectuer les livrais
 
 ### 🛠️ Stack Technique
 *   **Framework** : Flutter (SDK ^3.9.2) - *Note: Version plus récente spécifiée*
-*   **Base de Données** : Supabase & Firebase (Messaging)
+*   **Accès aux données** : `elcorazon_core` → API Django ; Firebase Cloud Messaging pour le push
 *   **Navigation** : `google_maps_flutter`, `geolocator`
 *   **Communication** : `agora_rtc_engine` (Appels), `speech_to_text` (Commandes vocales)
 *   **Notifications** : `firebase_messaging`, `flutter_local_notifications`
@@ -112,16 +114,27 @@ Application dédiée aux livreurs pour recevoir, gérer et effectuer les livrais
 
 Les trois projets partagent une infrastructure backend unifiée.
 
-### Base de Données (Supabase)
-*   **Tables Principales** :
-    *   `users` : Table unique pour tous les types d'utilisateurs (distinction par rôle).
-    *   `orders` : Centralisation des commandes.
-    *   `menu_items` : Catalogue produits unique.
-    *   `delivery_locations` : Suivi temps réel des positions.
-*   **Authentification** : Gérée par Supabase Auth (Email/Mot de passe, OAuth).
-*   **Stockage** : Supabase Storage pour les images des produits et avatars.
+### Backend Django (`backend/`)
+*   **API REST** `/api/v1/*` (DRF) — contrat versionné, schéma OpenAPI, erreurs
+    RFC 9457 (ADR-009). **Les applications n'accèdent à aucune base.**
+*   **WebSockets** `/ws/*` (Channels) — suivi de course, file du livreur,
+    signalisation d'appel.
+*   **18 applications métier** — un domaine par app, graphe de dépendances
+    acyclique vérifié en CI (ADR-002).
+*   **Authentification** : JWT (ADR-004). Le type de compte est porté par le
+    jeton ; les permissions du personnel par des rôles cumulables, nommés
+    `domaine.action` (ADR-005).
+*   **PostgreSQL 17 + PostGIS** — les invariants métier (prix, exclusivité
+    d'affectation, plafond de remboursement) sont défendus par des contraintes
+    de base, pas seulement par du code applicatif.
+*   **Redis** (cache, Celery, canaux) et **MinIO** (stockage privé, URL signées
+    qui expirent).
 
 ### Services Externes
+
+Tous rattachés **côté serveur** : aucune clé de prestataire ne voyage dans une
+application distribuée.
+
 *   **Google Maps Platform** : Pour la géolocalisation, le géocodage et les itinéraires.
 *   **Firebase Cloud Messaging (FCM)** : Pour les notifications push (commandes, statuts).
 *   **Agora** : Pour les fonctionnalités d'appel audio/vidéo.
@@ -133,8 +146,11 @@ Les trois projets partagent une infrastructure backend unifiée.
 
 ### Prérequis
 *   Flutter SDK installé.
-*   Compte Supabase configuré.
-*   Clés API (Google Maps, etc.) configurées dans les fichiers `.env`.
+*   Docker + Docker Compose, pour le backend (`cd backend && docker compose up`).
+*   `API_BASE_URL` renseignée dans le `.env` de chaque application.
+*   Clé Google Maps pour les cartes. Les clés PayDunya, Agora et Firebase se
+    configurent **côté backend** : elles n'ont rien à faire dans un binaire
+    distribué.
 
 ### Installation
 Pour chaque projet (`admin`, `elcora_fast`, `elcora_dely`) :

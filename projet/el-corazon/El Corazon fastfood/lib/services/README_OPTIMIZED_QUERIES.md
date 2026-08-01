@@ -1,8 +1,8 @@
-# ⚡ Guide des Requêtes Optimisées Supabase
+# ⚡ Guide des Requêtes Optimisées
 
 ## Vue d'ensemble
 
-L'amélioration #3 optimise les requêtes Supabase en :
+L'amélioration #3 optimise les requêtes en :
 - Sélectionnant uniquement les champs nécessaires (réduction de 40-50% de la taille)
 - Ajoutant la pagination pour les grandes listes
 - Améliorant le filtrage côté serveur

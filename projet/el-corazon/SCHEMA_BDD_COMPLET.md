@@ -1,8 +1,23 @@
 # 📊 Schéma Complet de la Base de Données - El Corazón FastGo
 
+> ⚠️ **Document périmé — conservé comme référence historique.**
+>
+> Il décrit le schéma **Supabase**, abandonné le 1er août 2026. Le modèle de
+> données en vigueur est celui du backend Django : voir
+> **[docs/architecture/03-modele-de-donnees.md](docs/architecture/03-modele-de-donnees.md)**
+> et les migrations de `backend/apps/*/migrations/`.
+>
+> Les deux schémas ne se correspondent pas table pour table. Les écarts ne sont
+> pas des renommages : les montants sont stockés en **unité mineure avec leur
+> devise** (ADR-007), les statuts sont contraints par des machines à états, et
+> plusieurs notions ont disparu faute de tenir — le portefeuille client, la
+> validation document par document des dossiers livreurs, les dates
+> d'expiration de pièces.
+
 ## 🎯 Vue d'ensemble
 
-Ce document présente le schéma complet de la base de données Supabase pour le système El Corazón FastGo, qui supporte trois applications :
+Ce document présente le schéma de la base de données Supabase **de l'ancienne
+architecture**, qui supportait trois applications :
 - **🛍️ elcora_fast** : Application client
 - **🚗 elcora_dely** : Application livreur
 - **⚙️ admin** : Panel d'administration
@@ -1240,7 +1255,7 @@ Pour toute question sur ce schéma :
 
 **Version** : 1.0  
 **Dernière mise à jour** : Décembre 2024  
-**Base de données** : Supabase (PostgreSQL 15+)
+**Base de données** : Supabase (PostgreSQL 15+) — *architecture abandonnée, voir l'avertissement en tête de document*
 
 
 
