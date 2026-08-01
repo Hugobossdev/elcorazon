@@ -22,7 +22,15 @@ from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
 from common.models import SoftDeleteModel, TimeStampedModel, UUIDModel
 
-__all__ = ["Category", "MenuItem", "Option", "OptionGroup", "Review", "VerifiedPurchase"]
+__all__ = [
+    "Category",
+    "MenuItem",
+    "Option",
+    "OptionGroup",
+    "OptionTemplate",
+    "Review",
+    "VerifiedPurchase",
+]
 
 
 class Category(UUIDModel, TimeStampedModel):
@@ -272,3 +280,53 @@ class Review(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.rating}/5 — {self.menu_item.name}"
+
+
+class OptionTemplate(UUIDModel, TimeStampedModel):
+    """Option réutilisable de l'établissement — « Sans oignon », « Extra fromage ».
+
+    Une **bibliothèque**, pas une option en service : appliquer un modèle à un
+    article y **copie** une `Option`, il ne l'y référence pas. Le prix facturé
+    reste donc celui porté par l'option de l'article (C1), et modifier un modèle
+    ne repricera jamais en silence les articles qui l'ont utilisé — ce qui
+    arriverait avec une simple clé étrangère, y compris sur des commandes en
+    cours de composition.
+
+    `group_name` est le groupe suggéré (« Cuisson »). Il évite de redemander à
+    chaque application dans quel groupe ranger l'option, sans l'imposer :
+    l'appel peut viser un autre groupe.
+    """
+
+    restaurant = models.ForeignKey(
+        Restaurant, on_delete=models.CASCADE, related_name="option_templates"
+    )
+    name = models.CharField(max_length=80)
+    group_name = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="Groupe suggéré à l'application — « Cuisson », « Suppléments ».",
+    )
+    price_delta = MoneyField()
+    is_default = models.BooleanField(
+        default=False,
+        help_text="Présélectionnée dans son groupe une fois appliquée — « à point ».",
+    )
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "modèle d'option"
+        verbose_name_plural = "modèles d'options"
+        ordering = ["sort_order", "name"]
+        constraints = [
+            # Deux modèles homonymes dans le même groupe d'un même établissement
+            # rendraient la bibliothèque inutilisable : l'opérateur ne saurait
+            # pas lequel il applique.
+            models.UniqueConstraint(
+                fields=["restaurant", "group_name", "name"],
+                name="option_template_unique_per_group",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.price_delta})"

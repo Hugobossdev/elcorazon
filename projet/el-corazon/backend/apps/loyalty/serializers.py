@@ -23,6 +23,7 @@ from apps.loyalty.models import (
     PointsAccount,
     PointsEntry,
     Reward,
+    RewardKind,
     RewardRedemption,
     Subscription,
     SubscriptionPlan,
@@ -31,6 +32,7 @@ from apps.promotions.serializers import PromotionSerializer
 from common.serializers import MoneyField
 
 __all__ = [
+    "ManagedRewardSerializer",
     "PointsAccountSerializer",
     "PointsEntrySerializer",
     "RedemptionResultSerializer",
@@ -183,3 +185,96 @@ class SubscriptionResultSerializer(serializers.Serializer[Any]):
     subscription = SubscriptionSerializer(read_only=True)
     checkout_url = serializers.CharField(read_only=True)
     instructions = serializers.CharField(read_only=True)
+
+
+class ManagedRewardSerializer(serializers.ModelSerializer[Reward]):
+    """Récompense vue du back-office — le catalogue, inactives comprises.
+
+    `discount` s'écrit ici, et c'est le seul endroit : une récompense « remise
+    de 500 F » engage l'enseigne à la hauteur de ce montant, comme un prix
+    (C1). Il reste un `Money` (ADR-007), pas un entier nu, sans quoi une remise
+    saisie en francs finirait un jour comparée à un total en centimes.
+
+    `restaurant` vide crée une récompense **nationale**, échangeable partout.
+    """
+
+    discount = MoneyField(required=False, allow_null=True)
+
+    class Meta:
+        model = Reward
+        fields = [
+            "id",
+            "name",
+            "description",
+            "kind",
+            "points_cost",
+            "discount",
+            "validity_days",
+            "restaurant",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_points_cost(self, value: int) -> int:
+        """Une récompense gratuite se prendrait en boucle.
+
+        La contrainte n'existe pas en base — `PositiveIntegerField` accepte
+        zéro — et c'est ici qu'elle a un sens lisible : à zéro point, l'échange
+        ne débite rien et la récompense se réclame autant de fois qu'on la
+        demande.
+        """
+        if value < 1:
+            raise serializers.ValidationError(
+                "Une récompense à zéro point ne débite rien : elle se réclamerait en boucle."
+            )
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Une remise sans montant serait refusée par la base, en 500.
+
+        La contrainte `reward_discount_is_set` reste la dernière ligne de
+        défense — elle vaut pour un script ou un import — mais le refus lisible
+        appartient ici : « il manque le montant » plutôt qu'une violation
+        d'intégrité, que l'exploitation lirait comme une panne.
+        """
+        instance = self.instance
+        genre = attrs.get("kind") or (instance.kind if instance else None)
+        remise = attrs.get("discount") or (instance.discount if instance else None)
+
+        if genre == RewardKind.DISCOUNT and (remise is None or remise.amount_minor <= 0):
+            raise serializers.ValidationError(
+                {"discount": "Une récompense de type remise doit porter un montant."}
+            )
+
+        return attrs
+
+    def _appliquer_remise(self, validated_data: dict[str, Any], instance: Reward) -> None:
+        """Répartit le `Money` sur les deux colonnes du modèle.
+
+        `Reward.discount` est une **propriété calculée** et non un `MoneyField`
+        composite : elle n'a pas de descripteur en écriture, et laisser DRF la
+        poser lèverait `property has no setter`. La séparation se fait donc
+        ici, au seul endroit où une remise s'écrit.
+        """
+        remise = validated_data.pop("discount", None)
+        if remise is not None:
+            instance.discount_minor = remise.amount_minor
+            instance.discount_currency = remise.currency
+
+    def create(self, validated_data: dict[str, Any]) -> Reward:
+        remise = validated_data.pop("discount", None)
+        reward = Reward(**validated_data)
+        if remise is not None:
+            reward.discount_minor = remise.amount_minor
+            reward.discount_currency = remise.currency
+        reward.save()
+        return reward
+
+    def update(self, instance: Reward, validated_data: dict[str, Any]) -> Reward:
+        self._appliquer_remise(validated_data, instance)
+        for champ, valeur in validated_data.items():
+            setattr(instance, champ, valeur)
+        instance.save()
+        return instance

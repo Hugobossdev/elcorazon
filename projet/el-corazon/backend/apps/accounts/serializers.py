@@ -13,11 +13,13 @@ from rest_framework import serializers
 
 from apps.accounts.models import Device, DevicePlatform, Role, User
 from apps.accounts.permissions import PERMISSIONS
+from common.serializers import MoneyField
 
 __all__ = [
     "BlockSerializer",
     "ChangePasswordSerializer",
     "CustomerSerializer",
+    "CustomerStatsSerializer",
     "DeviceSerializer",
     "LoginSerializer",
     "PermissionSerializer",
@@ -164,6 +166,32 @@ class CustomerSerializer(serializers.ModelSerializer[User]):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class CustomerStatsSerializer(serializers.Serializer[Any]):
+    """Fiche chiffrée d'un client — ce que le service client lit avant de parler.
+
+    Tout y est **calculé par le serveur**. L'implémentation Supabase demandait
+    au client d'aller chercher les commandes, les adresses et les points, puis
+    de faire les totaux lui-même : cinq requêtes depuis un poste de travail, et
+    surtout un panier moyen qui dépendait de ce que la pagination avait bien
+    voulu rendre.
+
+    Les montants restent des objets `Money` (ADR-007) : un « total dépensé »
+    rendu en nombre serait converti en `double` par le client, et l'exactitude
+    défendue jusqu'en base se perdrait au dernier mètre.
+    """
+
+    orders_count = serializers.IntegerField()
+    orders_delivered = serializers.IntegerField()
+    orders_cancelled = serializers.IntegerField()
+    total_spent = MoneyField()
+    average_basket = MoneyField()
+    first_order_at = serializers.DateTimeField(allow_null=True)
+    last_order_at = serializers.DateTimeField(allow_null=True)
+    addresses_count = serializers.IntegerField()
+    loyalty_balance = serializers.IntegerField()
+    loyalty_lifetime_earned = serializers.IntegerField()
 
 
 class BlockSerializer(serializers.Serializer[Any]):

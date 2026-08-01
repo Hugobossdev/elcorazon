@@ -5,13 +5,14 @@ from __future__ import annotations
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.delivery import views
+from apps.delivery import backoffice, views
 
 app_name = "delivery"
 
 router = DefaultRouter()
 router.register("assignments", views.AssignmentViewSet, basename="assignment")
 router.register("couriers", views.StaffCourierViewSet, basename="courier")
+router.register("shifts", backoffice.CourierShiftViewSet, basename="shift")
 
 urlpatterns = [
     # Le dossier du livreur s'adresse par `me/` et non par son identifiant :

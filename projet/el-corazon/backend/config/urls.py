@@ -53,6 +53,7 @@ api_v1 = [
     path("social/", include("apps.social.urls")),
     path("support/", include("apps.support.urls")),
     path("analytics/", include("apps.analytics.urls")),
+    path("search/", include("apps.search.urls")),
     # Renseigné au fil des phases — voir docs/architecture/README.md
 ]
 

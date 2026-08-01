@@ -30,7 +30,7 @@ from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
 from common.models import TimeStampedModel, UUIDModel, state_check_constraint
 
-__all__ = ["Assignment", "CourierProfile", "CourierRating", "VehicleType"]
+__all__ = ["Assignment", "CourierProfile", "CourierRating", "CourierShift", "VehicleType"]
 
 
 class VehicleType(models.TextChoices):
@@ -238,3 +238,67 @@ class CourierRating(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.score}/5 — {self.assignment.courier.user.full_name}"
+
+
+class CourierShift(UUIDModel, TimeStampedModel):
+    """Créneau planifié d'un livreur — jour de la semaine, heure de début, de fin.
+
+    **Indicatif, et non opposable.** L'éligibilité d'un livreur reste
+    `can_accept_orders` (L1) : en ligne, dossier validé, compte actif. Un
+    créneau ne s'y ajoute pas, et c'est délibéré — un livreur présent, en ligne,
+    à qui le serveur refuserait une course parce qu'il est 18 h 05 alors que son
+    créneau finissait à 18 h, verrait un refus qu'aucun écran ne sait expliquer,
+    et la commande resterait sans porteur. Le planning sert à l'exploitation :
+    savoir qui elle attend, et constater les écarts.
+
+    Le jour est un entier ISO — 1 lundi, 7 dimanche — plutôt qu'un nom : il se
+    trie, il s'indexe, et il ne dépend pas de la langue de l'interface.
+
+    Les heures sont **locales à l'établissement** et non horodatées : « le mardi
+    de 9 h à 17 h » se répète, et l'exprimer en instants UTC obligerait à
+    régénérer les lignes chaque semaine, avec un décalage à chaque changement
+    d'heure.
+    """
+
+    courier = models.ForeignKey(CourierProfile, on_delete=models.CASCADE, related_name="shifts")
+    day_of_week = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(7)],
+        help_text="Jour ISO : 1 = lundi, 7 = dimanche.",
+    )
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    is_available = models.BooleanField(
+        default=True,
+        help_text="Décoché plutôt que supprimé : une absence ponctuelle se lit dans le planning.",
+    )
+
+    class Meta:
+        verbose_name = "créneau de livreur"
+        verbose_name_plural = "créneaux de livreurs"
+        ordering = ["day_of_week", "start_time"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(day_of_week__gte=1) & models.Q(day_of_week__lte=7),
+                name="courier_shift_day_range",
+            ),
+            # Un créneau qui finit avant de commencer ne se lit pas : il
+            # afficherait une barre de longueur négative dans le planning, ou
+            # rien du tout. Pas de créneau à cheval sur minuit non plus — il
+            # s'exprime en deux lignes, sur deux jours, ce qui reste juste.
+            models.CheckConstraint(
+                condition=models.Q(end_time__gt=models.F("start_time")),
+                name="courier_shift_window_ordered",
+            ),
+            # Deux créneaux identiques le même jour sont une double saisie, pas
+            # une intention : ils s'afficheraient l'un sur l'autre.
+            models.UniqueConstraint(
+                fields=["courier", "day_of_week", "start_time"],
+                name="courier_shift_unique_start",
+            ),
+        ]
+        indexes = [models.Index(fields=["courier", "day_of_week"])]
+
+    def __str__(self) -> str:
+        return (
+            f"{self.courier.user.full_name} — J{self.day_of_week} {self.start_time}–{self.end_time}"
+        )

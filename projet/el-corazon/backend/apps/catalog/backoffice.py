@@ -26,26 +26,32 @@ from typing import Any, ClassVar
 
 from django.db.models import QuerySet
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.catalog.models import Category, MenuItem, Option, OptionGroup
+from apps.catalog.models import Category, MenuItem, Option, OptionGroup, OptionTemplate
 from apps.catalog.serializers import (
+    ApplyTemplateSerializer,
     ManagedCategorySerializer,
     ManagedMenuItemSerializer,
     ManagedOptionGroupSerializer,
     ManagedOptionSerializer,
+    ManagedOptionTemplateSerializer,
+    OptionGroupSerializer,
     StockSerializer,
 )
 from apps.restaurants.scoping import assert_in_scope, is_unscoped, staff_restaurant_ids
+from common.exceptions import BusinessRuleViolation
 from common.permissions import HasReadWritePermission, authenticated_user
 
 __all__ = [
     "ManagedCategoryViewSet",
     "ManagedMenuItemViewSet",
     "ManagedOptionGroupViewSet",
+    "ManagedOptionTemplateViewSet",
     "ManagedOptionViewSet",
 ]
 
@@ -53,7 +59,9 @@ __all__ = [
 CATALOG_PERMISSION = HasReadWritePermission.of(read="catalog.read", write="catalog.write")
 
 
-class _ScopedCatalogViewSet[Model: (Category, MenuItem, OptionGroup, Option)](ModelViewSet[Model]):
+class _ScopedCatalogViewSet[Model: (Category, MenuItem, OptionGroup, Option, OptionTemplate)](
+    ModelViewSet[Model]
+):
     """Facteur commun des quatre ressources : permissions et cloisonnement.
 
     Le chemin qui mène de l'objet à son établissement change d'une ressource à
@@ -131,7 +139,9 @@ class ManagedMenuItemViewSet(_ScopedCatalogViewSet[MenuItem]):
     """
 
     serializer_class = ManagedMenuItemSerializer
-    queryset = MenuItem.objects.select_related("restaurant", "category")
+    queryset = MenuItem.objects.select_related("restaurant", "category").prefetch_related(
+        "option_groups__options"
+    )
     filterset_fields: ClassVar[dict[str, list[str]]] = {
         "restaurant__slug": ["exact"],
         "category": ["exact"],
@@ -143,7 +153,9 @@ class ManagedMenuItemViewSet(_ScopedCatalogViewSet[MenuItem]):
     ordering: ClassVar[list[str]] = ["sort_order", "name"]
 
     def get_queryset(self) -> QuerySet[MenuItem]:
-        base = MenuItem.objects.select_related("restaurant", "category")
+        base = MenuItem.objects.select_related("restaurant", "category").prefetch_related(
+            "option_groups__options"
+        )
         # Le défaut est la carte vivante ; les archives se demandent. L'inverse
         # — tout rendre — ferait remonter dans l'écran de la carte des articles
         # retirés il y a deux ans, mêlés à ceux du jour.
@@ -197,6 +209,70 @@ class ManagedMenuItemViewSet(_ScopedCatalogViewSet[MenuItem]):
         item.deleted_at = None
         item.save(update_fields=["deleted_at", "updated_at"])
         return Response(ManagedMenuItemSerializer(item).data)
+
+    @extend_schema(
+        request=ApplyTemplateSerializer,
+        responses={201: OptionGroupSerializer},
+        tags=["catalog"],
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="apply-template",
+        permission_classes=[CATALOG_PERMISSION],
+    )
+    def apply_template(self, request: Request, pk: str) -> Response:
+        """Applique un modèle de la bibliothèque à cet article.
+
+        **Copie, ne référence pas.** L'option créée porte le nom et le prix du
+        modèle *au moment de l'application*, et vit ensuite sa propre vie :
+        corriger le modèle ne repricera aucun article déjà en vitrine, ni aucun
+        panier en cours de composition. C'est ce qui permet d'avoir une
+        bibliothèque sans faire du prix une donnée partagée (C1).
+
+        Le groupe est créé s'il n'existe pas encore sur l'article — le nom seul
+        le désigne, puisque c'est ainsi que l'exploitation le nomme.
+        """
+        serializer = ApplyTemplateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        item = self.get_object()
+        template = serializer.validated_data["template"]
+
+        # Le modèle et l'article doivent appartenir au même établissement :
+        # sans ce contrôle, un opérateur appliquerait la bibliothèque d'une
+        # enseigne à la carte d'une autre.
+        if template.restaurant_id != item.restaurant_id:
+            raise BusinessRuleViolation(
+                "Ce modèle appartient à un autre établissement.",
+                template_restaurant=template.restaurant.slug,
+            )
+
+        nom_groupe = serializer.validated_data["group_name"] or template.group_name or "Options"
+        group, _ = OptionGroup.objects.get_or_create(
+            menu_item=item, name=nom_groupe, defaults={"min_select": 0, "max_select": 1}
+        )
+
+        if group.options.filter(name=template.name).exists():
+            raise BusinessRuleViolation(
+                "Cette option figure déjà dans ce groupe.",
+                option_name=template.name,
+            )
+
+        # `MoneyField` est composite (`contribute_to_class`) : django-stubs ne
+        # le voit pas comme un attribut de modèle, comme ailleurs dans le projet.
+        Option.objects.create(  # type: ignore[misc]
+            group=group,
+            name=template.name,
+            price_delta=template.price_delta,
+            is_default=template.is_default,
+            sort_order=template.sort_order,
+        )
+
+        group.refresh_from_db()
+        # Forme de lecture — elle porte les options du groupe : l'appelant vient
+        # d'en ajouter une, la lui renvoyer lui évite un aller-retour.
+        return Response(OptionGroupSerializer(group).data, status=status.HTTP_201_CREATED)
 
 
 class ManagedOptionGroupViewSet(_ScopedCatalogViewSet[OptionGroup]):
@@ -254,4 +330,38 @@ class ManagedOptionViewSet(_ScopedCatalogViewSet[Option]):
         group = serializer.validated_data.get("group")
         if group is not None:
             assert_in_scope(authenticated_user(self.request), group.menu_item.restaurant_id)
+        serializer.save()
+
+
+class ManagedOptionTemplateViewSet(_ScopedCatalogViewSet[OptionTemplate]):
+    """Bibliothèque d'options réutilisables — `/catalog/manage/option-templates/`.
+
+    Une bibliothèque, pas des options en service : ce que l'exploitation range
+    ici ne coûte rien tant qu'il n'est pas appliqué à un article. L'application
+    **copie** (voir `ManagedMenuItemViewSet.apply_template`), si bien que
+    corriger un modèle ne change aucun prix déjà en vitrine.
+    """
+
+    serializer_class = ManagedOptionTemplateSerializer
+    queryset = OptionTemplate.objects.select_related("restaurant")
+    filterset_fields: ClassVar[dict[str, list[str]]] = {
+        "restaurant__slug": ["exact"],
+        "group_name": ["exact"],
+        "is_active": ["exact"],
+    }
+    search_fields: ClassVar[list[str]] = ["name", "group_name"]
+
+    def get_queryset(self) -> QuerySet[OptionTemplate]:
+        return self.filter_queryset_by_scope(OptionTemplate.objects.select_related("restaurant"))
+
+    def perform_create(self, serializer: Any) -> None:
+        assert_in_scope(
+            authenticated_user(self.request), serializer.validated_data["restaurant"].pk
+        )
+        serializer.save()
+
+    def perform_update(self, serializer: Any) -> None:
+        restaurant = serializer.validated_data.get("restaurant")
+        if restaurant is not None:
+            assert_in_scope(authenticated_user(self.request), restaurant.pk)
         serializer.save()

@@ -65,6 +65,9 @@ LOCAL_APPS: list[str] = [
     "apps.social",
     "apps.support",
     "apps.analytics",
+    # Lit quatre domaines et n'écrit nulle part — déclarée en dernier,
+    # comme le sont les modules qui n'ont aucun dépendant.
+    "apps.search",
     #
     # Second temps
     # "apps.inventory",
@@ -290,6 +293,9 @@ SPECTACULAR_SETTINGS = {
         "ComplaintKindEnum": "apps.support.models.ComplaintKind.choices",
         "DiscountKindEnum": "apps.promotions.models.DiscountKind.choices",
         "SubscriptionStatusEnum": "apps.loyalty.models.SubscriptionStatus.choices",
+        "RewardKindEnum": "apps.loyalty.models.RewardKind.choices",
+        "AchievementConditionEnum": "apps.gamification.models.AchievementCondition.choices",
+        "ChallengeKindEnum": "apps.gamification.models.ChallengeKind.choices",
     },
 }
 

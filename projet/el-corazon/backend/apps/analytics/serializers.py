@@ -14,10 +14,13 @@ from typing import Any
 from rest_framework import serializers
 
 __all__ = [
+    "CategoryRowSerializer",
     "CourierPerformanceRowSerializer",
     "EventWriteSerializer",
+    "OverviewSerializer",
     "ReportQuerySerializer",
     "RevenueRowSerializer",
+    "StatusRowSerializer",
     "TopProductRowSerializer",
 ]
 
@@ -61,3 +64,36 @@ class CourierPerformanceRowSerializer(serializers.Serializer[Any]):
     courier_name = serializers.CharField(read_only=True)
     deliveries = serializers.IntegerField(read_only=True)
     earnings_minor = serializers.IntegerField(read_only=True)
+
+
+class StatusRowSerializer(serializers.Serializer[Any]):
+    status = serializers.CharField(read_only=True)
+    orders_count = serializers.IntegerField(read_only=True)
+    revenue_minor = serializers.IntegerField(read_only=True)
+
+
+class CategoryRowSerializer(serializers.Serializer[Any]):
+    category_id = serializers.CharField(read_only=True)
+    category_name = serializers.CharField(read_only=True)
+    quantity_sold = serializers.IntegerField(read_only=True)
+    revenue_minor = serializers.IntegerField(read_only=True)
+
+
+class OverviewSerializer(serializers.Serializer[Any]):
+    """Chiffres de tête du tableau de bord.
+
+    Les montants sortent en unité mineure, comme les autres rapports, et non en
+    objet `Money` : une ligne de rapport est un nombre à tracer sur un
+    graphique, pas une somme à facturer. La devise est celle du marché et
+    n'appartient pas à la ligne.
+    """
+
+    orders_count = serializers.IntegerField(read_only=True)
+    orders_delivered = serializers.IntegerField(read_only=True)
+    orders_cancelled = serializers.IntegerField(read_only=True)
+    revenue_minor = serializers.IntegerField(read_only=True)
+    average_basket_minor = serializers.IntegerField(read_only=True)
+    customers_count = serializers.IntegerField(read_only=True)
+    couriers_online = serializers.IntegerField(read_only=True)
+    menu_items_available = serializers.IntegerField(read_only=True)
+    menu_items_total = serializers.IntegerField(read_only=True)

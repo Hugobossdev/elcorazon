@@ -43,6 +43,13 @@ PERMISSIONS: Final[dict[str, str]] = {
     "promotions.read": "Consulter les promotions",
     "promotions.write": "Créer et modifier des promotions",
     "notifications.send": "Envoyer une notification ciblée",
+    # Fidélisation — le catalogue de ce qui se gagne et de ce qui s'échange.
+    # Distinct des promotions : un code promotionnel remise une commande, une
+    # récompense se paie en points, qu'un client a accumulés.
+    "loyalty.read": "Consulter le catalogue de récompenses",
+    "loyalty.write": "Créer et modifier des récompenses",
+    "gamification.read": "Consulter succès, badges et défis",
+    "gamification.write": "Créer et modifier succès, badges et défis",
     # Exploitation
     "restaurants.read": "Consulter les établissements et leurs zones",
     "restaurants.write": "Créer et modifier établissements et zones",
@@ -75,6 +82,10 @@ SYSTEM_ROLES: Final[dict[str, tuple[str, ...]]] = {
         "promotions.read",
         "promotions.write",
         "notifications.send",
+        "loyalty.read",
+        "loyalty.write",
+        "gamification.read",
+        "gamification.write",
         "restaurants.read",
         "analytics.read",
     ),

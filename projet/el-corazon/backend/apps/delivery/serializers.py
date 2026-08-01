@@ -15,7 +15,13 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from apps.accounts.models import User
-from apps.delivery.models import Assignment, CourierProfile, CourierRating, VehicleType
+from apps.delivery.models import (
+    Assignment,
+    CourierProfile,
+    CourierRating,
+    CourierShift,
+    VehicleType,
+)
 from apps.delivery.states import DELIVERY_MACHINE, VERIFICATION_MACHINE
 from apps.restaurants.models import Restaurant
 from common.serializers import LocationField, MoneyField
@@ -27,6 +33,7 @@ __all__ = [
     "CourierPublicSerializer",
     "CourierRatingSerializer",
     "CourierRatingWriteSerializer",
+    "CourierShiftSerializer",
     "DeclineSerializer",
     "DeliveryTransitionSerializer",
     "DocumentsSerializer",
@@ -55,7 +62,19 @@ class CourierPublicSerializer(serializers.ModelSerializer[CourierProfile]):
 
 
 class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
-    """Dossier complet — lisible par son titulaire et par le personnel."""
+    """Dossier complet — lisible par son titulaire et par le personnel.
+
+    Les trois pièces justificatives y figurent, en **lecture seule** : c'est ce
+    que l'écran de validation doit montrer avant de trancher, et l'instruire
+    sans les voir n'aurait pas de sens. Elles sortent en URL signées, qui
+    expirent — le stockage est privé. L'implémentation précédente les déposait
+    dans un compartiment **public** (`getPublicUrl`) : une pièce d'identité y
+    restait lisible par quiconque connaissait l'adresse, indéfiniment.
+
+    Elles ne s'écrivent pas ici : c'est le livreur qui dépose ses pièces, depuis
+    son application (`DocumentsSerializer`), et tout dépôt repasse le dossier en
+    attente (L5).
+    """
 
     full_name = serializers.CharField(source="user.full_name", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
@@ -74,6 +93,9 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
             "verification_status",
             "verification_notes",
             "verified_at",
+            "id_document",
+            "licence_document",
+            "vehicle_document",
             "vehicle_type",
             "vehicle_plate",
             "is_online",
@@ -280,3 +302,54 @@ class CourierRatingWriteSerializer(serializers.Serializer[Any]):
 
     score = serializers.IntegerField(min_value=1, max_value=5)
     comment = serializers.CharField(required=False, allow_blank=True, max_length=1000)
+
+
+class CourierShiftSerializer(serializers.ModelSerializer[CourierShift]):
+    """Créneau planifié — indicatif, jamais opposable (voir `backoffice.py`).
+
+    `courier_name` est rendu à côté de l'identifiant : un planning se lit par
+    nom, et l'écran aurait sinon à charger la flotte entière pour afficher une
+    ligne.
+    """
+
+    courier_name = serializers.CharField(source="courier.user.full_name", read_only=True)
+
+    class Meta:
+        model = CourierShift
+        fields = [
+            "id",
+            "courier",
+            "courier_name",
+            "day_of_week",
+            "start_time",
+            "end_time",
+            "is_available",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "courier_name", "created_at", "updated_at"]
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Traduit en 400 ce que la contrainte `CHECK` refuserait en 500.
+
+        Un créneau à cheval sur minuit n'est pas accepté : il s'écrit en deux
+        lignes, sur deux jours, ce qui reste juste et se trie. L'accepter
+        obligerait chaque lecture du planning à traiter le cas « fin < début »
+        comme un débordement, et une seule oubliée afficherait une barre de
+        longueur négative.
+        """
+        instance = self.instance
+        debut = attrs.get("start_time") or (instance.start_time if instance else None)
+        fin = attrs.get("end_time") or (instance.end_time if instance else None)
+
+        if debut is not None and fin is not None and fin <= debut:
+            raise serializers.ValidationError(
+                {
+                    "end_time": (
+                        "La fin doit suivre le début. Un créneau qui passe minuit "
+                        "s'écrit en deux lignes, sur deux jours."
+                    )
+                }
+            )
+
+        return attrs

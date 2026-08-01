@@ -13,7 +13,14 @@ from typing import Any
 from rest_framework import serializers
 
 from apps.accounts.models import User
-from apps.catalog.models import Category, MenuItem, Option, OptionGroup, Review
+from apps.catalog.models import (
+    Category,
+    MenuItem,
+    Option,
+    OptionGroup,
+    OptionTemplate,
+    Review,
+)
 from apps.restaurants.models import Restaurant
 from common.serializers import MoneyField
 
@@ -197,6 +204,12 @@ class ManagedMenuItemSerializer(serializers.ModelSerializer[MenuItem]):
     category = serializers.PrimaryKeyRelatedField[Category](queryset=Category.objects.all())
     price = MoneyField()
     is_deleted = serializers.BooleanField(read_only=True)
+    # Contrairement à la forme publique, qui les omet pour ne pas alourdir une
+    # carte de vingt articles sur un réseau mobile : le back-office travaille sur
+    # un seul établissement, depuis un poste fixe, et l'écran des personnalisations
+    # a besoin de savoir quelles options portent quels articles. Les lire ici
+    # évite d'enchaîner une requête par article.
+    option_groups = OptionGroupSerializer(many=True, read_only=True)
 
     class Meta:
         model = MenuItem
@@ -222,6 +235,7 @@ class ManagedMenuItemSerializer(serializers.ModelSerializer[MenuItem]):
             "rating_average",
             "rating_count",
             "sort_order",
+            "option_groups",
             "is_deleted",
             "created_at",
             "updated_at",
@@ -230,6 +244,7 @@ class ManagedMenuItemSerializer(serializers.ModelSerializer[MenuItem]):
             "id",
             "rating_average",
             "rating_count",
+            "option_groups",
             "is_deleted",
             "created_at",
             "updated_at",
@@ -336,3 +351,43 @@ class ReviewWriteSerializer(serializers.Serializer[Any]):
     rating = serializers.IntegerField(min_value=1, max_value=5)
     title = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
     comment = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class ManagedOptionTemplateSerializer(serializers.ModelSerializer[OptionTemplate]):
+    """Modèle d'option réutilisable de l'établissement."""
+
+    restaurant = serializers.SlugRelatedField[Restaurant](
+        slug_field="slug", queryset=Restaurant.objects.all()
+    )
+    price_delta = MoneyField()
+
+    class Meta:
+        model = OptionTemplate
+        fields = [
+            "id",
+            "restaurant",
+            "name",
+            "group_name",
+            "price_delta",
+            "is_default",
+            "is_active",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class ApplyTemplateSerializer(serializers.Serializer[Any]):
+    """Application d'un modèle à un article.
+
+    `group_name` est facultatif : à défaut, celui du modèle. Ni le prix ni le
+    nom de l'option ne s'écrivent ici — ils viennent du modèle, sans quoi
+    « appliquer un modèle » deviendrait « créer une option quelconque », et la
+    bibliothèque ne garantirait plus rien.
+    """
+
+    template = serializers.PrimaryKeyRelatedField[OptionTemplate](
+        queryset=OptionTemplate.objects.filter(is_active=True)
+    )
+    group_name = serializers.CharField(max_length=80, required=False, allow_blank=True, default="")

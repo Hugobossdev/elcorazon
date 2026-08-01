@@ -93,7 +93,21 @@ ALLOWED: dict[str, set[str]] = {
     # Écoute `orders` par signal, comme `loyalty` et `gamification` ; ses
     # rapports agrègent directement les commandes, leurs lignes et les
     # courses — la source de vérité, plutôt qu'une table dupliquée.
-    "analytics": {"accounts", "orders", "delivery"},
+    #
+    # `loyalty` et `profiles` s'y ajoutent pour la fiche client, qui croise
+    # commandes, points et adresses ; `catalog` pour les ventes par catégorie et
+    # l'état de la carte. Ces agrégats ne pouvaient pas vivre dans `accounts`,
+    # qui ne dépend de personne : le socle d'identité y serait devenu le module
+    # qui connaît tout le reste. La lecture est à sens unique — aucun de ces
+    # modules ne connaît `analytics`, ce que garantit l'acyclicité du graphe.
+    "analytics": {"accounts", "catalog", "delivery", "loyalty", "orders", "profiles"},
+    # Le champ de recherche du back-office traverse quatre domaines et n'écrit
+    # nulle part. C'est ce qui rend l'arête acceptable : toutes les flèches
+    # entrent, aucune ne sort, et le graphe reste acyclique. L'alternative —
+    # une recherche par domaine agrégée dans le client — a été écartée parce
+    # que c'est exactement ce que faisait l'implémentation précédente, sans
+    # jamais appliquer les permissions ni le cloisonnement.
+    "search": {"accounts", "catalog", "delivery", "orders", "restaurants"},
 }
 
 

@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from django.http import HttpResponse
+from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
@@ -22,20 +23,29 @@ from rest_framework.response import Response
 from rest_framework.serializers import Serializer
 from rest_framework.views import APIView
 
+from apps.accounts.models import User, UserType
+from apps.accounts.serializers import CustomerStatsSerializer
 from apps.analytics.reports import ReportingService
 from apps.analytics.serializers import (
+    CategoryRowSerializer,
     CourierPerformanceRowSerializer,
     EventWriteSerializer,
+    OverviewSerializer,
     ReportQuerySerializer,
     RevenueRowSerializer,
+    StatusRowSerializer,
     TopProductRowSerializer,
 )
 from apps.analytics.services import AnalyticsService
 from common.permissions import HasPermission, active_user
 
 __all__ = [
+    "CategoryReportView",
     "CourierPerformanceReportView",
+    "CustomerStatsView",
     "EventIngestView",
+    "OrderStatusReportView",
+    "OverviewView",
     "RevenueReportView",
     "TopProductsReportView",
 ]
@@ -146,6 +156,29 @@ class TopProductsReportView(APIView):
         return _rendu(request, rows, TopProductRowSerializer, f"top-produits-{start}-{end}")
 
 
+class CustomerStatsView(APIView):
+    """`GET /analytics/reports/customers/{id}/` — fiche chiffrée d'un client.
+
+    Sous `customers.read` et non `analytics.read` : ce n'est pas un chiffre
+    d'exploitation mais le dossier d'une personne, que lit le service client
+    avant de répondre au téléphone. La permission suit la donnée, pas le module
+    qui l'héberge.
+
+    Elle vit ici parce que l'agrégat croise les commandes, les adresses et la
+    fidélité, et qu'`accounts` — où se trouve la fiche client — ne dépend de
+    personne (ADR-002). L'y écrire ferait du socle d'identité un module qui
+    connaît tout le reste.
+    """
+
+    permission_classes = [HasPermission.of("customers.read")]
+
+    @extend_schema(responses={200: CustomerStatsSerializer}, tags=["analytics"])
+    def get(self, request: Request, pk: str) -> Response:
+        customer = get_object_or_404(User, pk=pk, user_type=UserType.CUSTOMER)
+        stats = ReportingService.customer_stats(customer)
+        return Response(CustomerStatsSerializer(stats).data)
+
+
 class CourierPerformanceReportView(APIView):
     """`GET /analytics/reports/couriers/?start=&end=` — livraisons et gains par livreur."""
 
@@ -160,3 +193,46 @@ class CourierPerformanceReportView(APIView):
         start, end, _ = _period(request)
         rows = ReportingService.courier_performance(start=start, end=end)
         return _rendu(request, rows, CourierPerformanceRowSerializer, f"livreurs-{start}-{end}")
+
+
+class OrderStatusReportView(APIView):
+    """`GET /analytics/reports/orders/?start=&end=` — commandes par statut."""
+
+    permission_classes = [HasPermission.of("analytics.read")]
+
+    @extend_schema(
+        responses={200: StatusRowSerializer(many=True)}, parameters=[EXPORT], tags=["analytics"]
+    )
+    def get(self, request: Request) -> Response | HttpResponse:
+        start, end, _ = _period(request)
+        rows = ReportingService.orders_by_status(start=start, end=end)
+        return _rendu(request, rows, StatusRowSerializer, f"commandes-{start}-{end}")
+
+
+class CategoryReportView(APIView):
+    """`GET /analytics/reports/categories/?start=&end=` — ventes par catégorie."""
+
+    permission_classes = [HasPermission.of("analytics.read")]
+
+    @extend_schema(
+        responses={200: CategoryRowSerializer(many=True)}, parameters=[EXPORT], tags=["analytics"]
+    )
+    def get(self, request: Request) -> Response | HttpResponse:
+        start, end, _ = _period(request)
+        rows = ReportingService.sales_by_category(start=start, end=end)
+        return _rendu(request, rows, CategoryRowSerializer, f"categories-{start}-{end}")
+
+
+class OverviewView(APIView):
+    """`GET /analytics/reports/overview/?start=&end=` — chiffres de tête.
+
+    Pas d'export CSV : une ligne unique de compteurs n'a rien à reprendre dans
+    un tableur, et les rapports qui la détaillent, eux, s'exportent.
+    """
+
+    permission_classes = [HasPermission.of("analytics.read")]
+
+    @extend_schema(responses={200: OverviewSerializer}, tags=["analytics"])
+    def get(self, request: Request) -> Response:
+        start, end, _ = _period(request)
+        return Response(OverviewSerializer(ReportingService.overview(start=start, end=end)).data)
