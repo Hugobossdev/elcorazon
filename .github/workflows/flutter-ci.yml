@@ -5,11 +5,18 @@
 # réponses, en-têtes d'idempotence, ce que le client s'interdit d'envoyer), et
 # rien ne le vérifiait automatiquement.
 #
-# Le vrai filet est le paquet partagé `packages/elcorazon_core` : c'est lui qui
-# porte les tests. Les trois applications ne sont qu'analysées — elles n'ont pas
-# de suite de tests, par choix (voir docs/architecture/04-migration-flutter.md
-# §3.1 : le contrat est testé une fois, dans le paquet, pas trois fois dans les
-# apps qui le consomment).
+# Deux filets, et ils ne couvrent pas la même chose.
+#
+# Le paquet partagé `packages/elcorazon_core` teste le **contrat** : ce que le
+# client envoie, ce qu'il sait lire, ce qu'il s'interdit. Il est testé une fois,
+# là, pas trois fois dans les apps qui le consomment.
+#
+# Les trois applications testent ce que le paquet ne peut pas voir : la logique
+# d'écran et les propriétés qu'on refuse de perdre. C'est là, par exemple, que
+# vit la garde contre le retour d'une saisie de carte bancaire dans
+# l'application du livreur (constat S-1 de l'audit du 2 août 2026).
+#
+# **`flutter test` est bloquant partout.** Un test rouge arrête la CI.
 
 name: Flutter CI
 
@@ -114,6 +121,12 @@ jobs:
         # `curly_braces_in_flow_control_structures`) sur des écrans que la
         # migration n'a pas encore touchés. Les traiter comme bloquantes
         # rendrait la CI rouge dès sa création, donc inutile. Erreurs et
-        # avertissements, eux, restent fatals — c'est ce qui compte : les deux
-        # apps migrées en sont à zéro et doivent y rester.
+        # avertissements, eux, restent fatals — c'est ce qui compte : les trois
+        # apps en sont à zéro et doivent y rester.
         run: flutter analyze --no-fatal-infos
+
+      - name: Tests
+        # Bloquant, sans exception. L'analyseur attrape ce qui ne compile pas ;
+        # il ne dit rien d'un écran qui affiche le mauvais prix, ni d'une saisie
+        # de carte bancaire qui reviendrait dans l'application du livreur.
+        run: flutter test
