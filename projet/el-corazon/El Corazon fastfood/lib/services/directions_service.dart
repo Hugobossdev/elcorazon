@@ -50,10 +50,8 @@ class DirectionsService extends ChangeNotifier {
         throw Exception('Clé API Google Maps non configurée');
       }
 
-      final base = kIsWeb
-          ? Uri.parse('${ApiConfig.backendUrl}/api/google/directions')
-          : Uri.https('maps.googleapis.com', '/maps/api/directions/json');
-      final qp = <String, String>{
+      final base = Uri.https('maps.googleapis.com', '/maps/api/directions/json');
+final qp = <String, String>{
         'origin': '${origin.latitude},${origin.longitude}',
         'destination': '${destination.latitude},${destination.longitude}',
         'mode': mode,
@@ -160,10 +158,8 @@ class DirectionsService extends ChangeNotifier {
         throw Exception('Clé API Google Maps non configurée');
       }
 
-      final base = kIsWeb
-          ? Uri.parse('${ApiConfig.backendUrl}/api/google/distance-matrix')
-          : Uri.https('maps.googleapis.com', '/maps/api/distancematrix/json');
-      final qp = <String, String>{
+      final base = Uri.https('maps.googleapis.com', '/maps/api/distancematrix/json');
+final qp = <String, String>{
         'origins': '${origin.latitude},${origin.longitude}',
         'destinations': '${destination.latitude},${destination.longitude}',
         'mode': mode,

@@ -4,22 +4,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 /// Configuration centralisée des clés API
 /// Les valeurs sont chargées depuis le fichier .env pour la sécurité
 class ApiConfig {
-  // Configuration PayDunya (Mode Test)
-  static String get payDunyaMasterKey =>
-      dotenv.env['PAYDUNYA_MASTER_KEY'] ?? '';
-  static String get payDunyaPrivateKey =>
-      dotenv.env['PAYDUNYA_PRIVATE_KEY'] ?? '';
-  static String get payDunyaToken => dotenv.env['PAYDUNYA_TOKEN'] ?? '';
-  static bool get payDunyaIsSandbox =>
-      dotenv.env['PAYDUNYA_IS_SANDBOX']?.toLowerCase() == 'true';
-
-  // Configuration PayDunya (Mode Production)
-  static String get payDunyaProductionMasterKey =>
-      dotenv.env['PAYDUNYA_PRODUCTION_MASTER_KEY'] ?? '';
-  static String get payDunyaProductionPrivateKey =>
-      dotenv.env['PAYDUNYA_PRODUCTION_PRIVATE_KEY'] ?? '';
-  static String get payDunyaProductionToken =>
-      dotenv.env['PAYDUNYA_PRODUCTION_TOKEN'] ?? '';
+  // Aucune clé de prestataire de paiement ici, ni test ni production.
+  //
+  // L'encaissement est une affaire de serveur : l'application ouvre une
+  // demande (`POST /payments/{commande}/initiate/`), reçoit une adresse de
+  // règlement, et lit ensuite l'état que le webhook signé a écrit. Elle ne
+  // décide jamais qu'un paiement a abouti, et n'a donc aucune raison de
+  // détenir de quoi encaisser.
 
   // Configuration Google Maps
   static String get googleMapsApiKey => dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
@@ -44,29 +35,20 @@ class ApiConfig {
   // des jetons pour n'importe quel canal.
   static String get agoraAppId => dotenv.env['AGORA_APP_ID'] ?? '';
 
-  /// Mandataire HTTP des API Google, **uniquement sur le web**.
-  ///
-  /// Reliquat de l'ancien backend Node : `geocoding_service`,
-  /// `directions_service` et `places_service` passent par lui pour contourner
-  /// CORS, et `paydunya_service` y garde un chemin de paiement client. Sur
-  /// mobile, ces services appellent Google directement et ce réglage ne sert
-  /// pas. Aucun équivalent Django n'existe encore — c'est le dernier lien vers
-  /// un backend retiré, à traiter avec ces quatre services.
-  static String get backendUrl =>
-      dotenv.env['LEGACY_PROXY_URL'] ?? 'http://localhost:3000';
-
   // Configuration de l'environnement
   static String get environment => dotenv.env['ENVIRONMENT'] ?? 'development';
   static const bool debugMode = kDebugMode;
 
   /// Vérifie si toutes les clés API sont configurées
   static bool get isFullyConfigured {
+    // Les clés de paiement ne figurent plus ici : l'encaissement passe par le
+    // serveur, qui détient les siennes. Une application n'a pas à savoir si
+    // elles sont configurées — elle appelle `/payments/{id}/initiate/` et lit
+    // la réponse.
     return googleMapsApiKey.isNotEmpty &&
         googleMapsApiKey != 'your-google-maps-api-key' &&
         firebaseApiKey.isNotEmpty &&
-        firebaseApiKey != 'your-api-key' &&
-        payDunyaMasterKey.isNotEmpty &&
-        payDunyaMasterKey != 'your-paydunya-master-key';
+        firebaseApiKey != 'your-api-key';
   }
 
   /// Retourne les clés manquantes
@@ -79,10 +61,6 @@ class ApiConfig {
     }
     if (firebaseApiKey.isEmpty || firebaseApiKey == 'your-api-key') {
       missing.add('Firebase API Key');
-    }
-    if (payDunyaMasterKey.isEmpty ||
-        payDunyaMasterKey == 'your-paydunya-master-key') {
-      missing.add('PayDunya Master Key');
     }
 
     return missing;

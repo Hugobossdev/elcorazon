@@ -27,8 +27,11 @@ class AgoraCallService extends ChangeNotifier {
   int? _remoteUid;
   CallType _currentCallType = CallType.voice;
 
-  // Agora App ID - À configurer dans votre projet Agora
-  static const String agoraAppId = ApiConfig.agoraAppId;
+  // Identifiant d'application Agora, lu depuis `.env` au démarrage.
+  //
+  // Ce n'est plus une constante de compilation : la clé se configure par
+  // environnement, elle ne se recompile pas.
+  static String get agoraAppId => ApiConfig.agoraAppId;
 
   // Streams pour les événements d'appel
   final StreamController<CallEvent> _callEventController =

@@ -8,7 +8,6 @@ import 'package:elcora_fast/services/group_cart_service.dart';
 import 'package:elcora_fast/services/voice_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
-import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
@@ -50,8 +49,6 @@ class ServiceInitializer {
       final groupCartService = Provider.of<GroupCartService>(context, listen: false);
       final promoCodeService =
           Provider.of<PromoCodeService>(context, listen: false);
-      final payDunyaService =
-          Provider.of<PayDunyaService>(context, listen: false);
       final addressService =
           Provider.of<AddressService>(context, listen: false);
       final offlineSyncService =
@@ -80,7 +77,6 @@ class ServiceInitializer {
       await _initializeOptionalServices(
         groupCartService: groupCartService,
         promoCodeService: promoCodeService,
-        payDunyaService: payDunyaService,
         addressService: addressService,
         offlineSyncService: offlineSyncService,
         pushNotificationService: pushNotificationService,
@@ -147,7 +143,6 @@ class ServiceInitializer {
   Future<void> _initializeOptionalServices({
     required GroupCartService groupCartService,
     required PromoCodeService promoCodeService,
-    required PayDunyaService payDunyaService,
     required AddressService addressService,
     required OfflineSyncService offlineSyncService,
     required PushNotificationService pushNotificationService,
@@ -168,14 +163,10 @@ class ServiceInitializer {
     // Services de suivi et temps réel (initialisés plus tard avec l'utilisateur)
     // Ces services nécessitent un utilisateur, donc ils sont initialisés dans initializeUserServices
 
-    // Services de paiement et adresses
-    await _initializeServiceWithoutContext(
-      () => payDunyaService.initialize(
-        masterKey: 'test_master_key',
-        privateKey: 'test_private_key',
-        token: 'test_token',
-      ),
-    );
+    // Aucune initialisation de paiement ici : l'encaissement passe par le
+    // serveur, qui détient les clés du prestataire. Le bloc retiré injectait
+    // des clés en dur (`test_master_key`) dans un service qui appelait
+    // PayDunya depuis l'appareil.
     await _initializeServiceWithoutContext(
       () => addressService.initialize(),
     );

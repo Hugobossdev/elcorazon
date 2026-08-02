@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/app_service.dart';
 import '../../utils/price_formatter.dart';
-import '../../services/paydunya_service.dart';
 import '../../services/address_service.dart';
 import '../../services/promo_code_service.dart';
 import '../../services/error_handler_service.dart';
@@ -136,19 +135,9 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         debugPrint('⚠️ PromoCodeService initialization failed: $e');
       }
 
-      try {
-        // Initialiser PayDunya avec des clés de test
-        await Provider.of<PayDunyaService>(context, listen: false)
-            .initialize(
-              masterKey: 'test_master_key',
-              privateKey: 'test_private_key',
-              token: 'test_token',
-              isSandbox: true,
-            )
-            .timeout(const Duration(seconds: 5));
-      } catch (e) {
-        debugPrint('⚠️ PayDunyaService initialization failed: $e');
-      }
+      // Aucune initialisation de paiement : l'encaissement passe par le
+      // serveur, qui détient les clés du prestataire. Le bloc retiré ici
+      // injectait des clés marchandes dans le téléphone du livreur.
 
       // Load available orders from database (essentiel)
       try {

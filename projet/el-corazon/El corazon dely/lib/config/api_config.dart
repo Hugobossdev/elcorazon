@@ -1,28 +1,41 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-/// Configuration centralisée des clés API pour l'application livreur.
+/// Configuration des clés API de l'application livreur.
+///
+/// Elles sont lues depuis `.env`, comme dans les deux autres applications. La
+/// clé Google Maps se trouvait auparavant **en dur dans ce fichier** : elle
+/// partait donc dans l'historique Git en plus du binaire, et changer de clé
+/// demandait un déploiement.
+///
+/// Ces valeurs restent publiques par construction — une clé Maps côté client
+/// part dans l'APK et dans le HTML servi. Ce qui les protège n'est pas leur
+/// discrétion mais leur **restriction** côté console (empreinte d'application,
+/// référent, quotas) : voir `docs/security/google_maps.md`.
+///
+/// Aucune clé de prestataire de paiement ici. L'encaissement est une affaire de
+/// serveur, et le livreur ne fait que constater ce qu'il doit percevoir.
 class ApiConfig {
-  // Configuration Google Maps
-  static const String googleMapsApiKey =
-      'AIzaSyCtSGHbgwiNKhblSK7NpU7aVUvuxz-w-tM';
+  /// Cartes et navigation.
+  static String get googleMapsApiKey => dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
 
-  // Configuration Agora
-  static const String agoraAppId = 'YOUR_AGORA_APP_ID';
+  /// Identifiant d'application Agora — public par nature.
+  ///
+  /// Le **certificat** signe les jetons d'appel et reste côté serveur : le
+  /// placer ici reviendrait à laisser fabriquer des jetons pour n'importe quel
+  /// canal.
+  static String get agoraAppId => dotenv.env['AGORA_APP_ID'] ?? '';
 
-  // Configuration PayDunya
-  static const String payDunyaMasterKey = 'YOUR_PAYDUNYA_MASTER_KEY';
-  static const String payDunyaPrivateKey = 'YOUR_PAYDUNYA_PRIVATE_KEY';
-  static const String payDunyaToken = 'YOUR_PAYDUNYA_TOKEN';
-
-  // Configuration de l'environnement
-  static const String environment = 'development';
+  static String get environment => dotenv.env['ENVIRONMENT'] ?? 'development';
   static const bool debugMode = kDebugMode;
 
-  /// Vérifie si toutes les clés API sont configurées
-  static bool get isFullyConfigured {
-    return googleMapsApiKey != 'YOUR_GOOGLE_MAPS_API_KEY' &&
-        googleMapsApiKey.isNotEmpty &&
-        agoraAppId != 'YOUR_AGORA_APP_ID' &&
-        payDunyaMasterKey != 'YOUR_PAYDUNYA_MASTER_KEY';
-  }
+  /// Les clés nécessaires au fonctionnement sont-elles renseignées ?
+  static bool get isFullyConfigured =>
+      googleMapsApiKey.isNotEmpty && agoraAppId.isNotEmpty;
+
+  /// Ce qui manque, pour un message de diagnostic lisible au démarrage.
+  static List<String> get missingKeys => [
+    if (googleMapsApiKey.isEmpty) 'GOOGLE_MAPS_API_KEY',
+    if (agoraAppId.isEmpty) 'AGORA_APP_ID',
+  ];
 }

@@ -13,7 +13,6 @@ import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/notification_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
-import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/services/error_handler_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
 import 'package:elcora_fast/services/address_service.dart';
@@ -89,7 +88,6 @@ class AppService extends ChangeNotifier {
   final LocationService _locationService = LocationService();
   final NotificationService _notificationService = NotificationService();
   final GamificationService _gamificationService = GamificationService();
-  final PayDunyaService _payDunyaService = PayDunyaService();
   final ErrorHandlerService _errorHandler = ErrorHandlerService();
   final OfflineSyncService _offlineSyncService = OfflineSyncService();
 
@@ -118,7 +116,6 @@ class AppService extends ChangeNotifier {
   NotificationService get notificationService => _notificationService;
   GamificationService get gamificationService => _gamificationService;
   RealtimeTrackingService get trackingService => RealtimeTrackingService();
-  PayDunyaService get payDunyaService => _payDunyaService;
   ErrorHandlerService get errorHandler => _errorHandler;
   bool get isClient => _currentUser?.role == UserRole.client;
 
@@ -511,148 +508,4 @@ class AppService extends ChangeNotifier {
       )
       .toList();
 
-  // Payment methods
-  Future<PaymentRequestResult> processPayment({
-    required String orderId,
-    required double amount,
-    required String customerName,
-    required String customerEmail,
-    required String customerPhone,
-    required String paymentMethod,
-    String? cardNumber,
-    String? cardHolderName,
-    String? expiryMonth,
-    String? expiryYear,
-    String? cvv,
-    String? operator,
-  }) async {
-    try {
-      if (paymentMethod == 'mobile_money') {
-        final result = await _payDunyaService.processMobileMoneyPayment(
-          orderId: orderId,
-          amount: amount,
-          phoneNumber: customerPhone,
-          operator: operator ?? 'mtn',
-          customerName: customerName,
-          customerEmail: customerEmail,
-        );
-
-        return PaymentRequestResult(
-          success: result.success,
-          invoiceToken: result.invoiceToken,
-          invoiceUrl: result.invoiceUrl,
-          error: result.error,
-          orderId: orderId,
-        );
-      } else if (paymentMethod == 'card') {
-        final result = await _payDunyaService.processCardPayment(
-          orderId: orderId,
-          amount: amount,
-          cardNumber: cardNumber!,
-          cardHolderName: cardHolderName!,
-          expiryMonth: expiryMonth!,
-          expiryYear: expiryYear!,
-          cvv: cvv!,
-          customerName: customerName,
-          customerEmail: customerEmail,
-        );
-
-        return PaymentRequestResult(
-          success: result.success,
-          invoiceToken: result.invoiceToken,
-          invoiceUrl: result.invoiceUrl,
-          error: result.error,
-          orderId: orderId,
-        );
-      }
-
-      return PaymentRequestResult(
-        success: false,
-        error: 'Méthode de paiement non supportée',
-        orderId: orderId,
-      );
-    } catch (e) {
-      debugPrint('Error processing payment: $e');
-      return PaymentRequestResult(
-        success: false,
-        error: e.toString(),
-        orderId: orderId,
-      );
-    }
-  }
-
-  Future<SharedPaymentResult> processSharedPayment({
-    required String groupId,
-    required String orderId,
-    required double totalAmount,
-    required List<PaymentParticipant> participants,
-    required String organizerName,
-    required String organizerEmail,
-  }) async {
-    try {
-      return await _payDunyaService.processSharedPayment(
-        orderId: orderId,
-        totalAmount: totalAmount,
-        participants: participants,
-        organizerName: organizerName,
-        organizerEmail: organizerEmail,
-      );
-    } catch (e) {
-      debugPrint('Error processing shared payment: $e');
-      return SharedPaymentResult(
-        success: false,
-        totalAmount: totalAmount,
-        paidAmount: 0.0,
-        participants: participants,
-        results: [],
-        orderId: orderId,
-        error: e.toString(),
-      );
-    }
-  }
-
-  Future<bool> cancelPayment(String invoiceToken) async {
-    try {
-      return await _payDunyaService.cancelPayment(invoiceToken);
-    } catch (e) {
-      debugPrint('Error cancelling payment: $e');
-      return false;
-    }
-  }
-
-  Future<bool> processRefund({
-    required String transactionId,
-    required double amount,
-    required String reason,
-  }) async {
-    try {
-      return await _payDunyaService.processRefund(
-        transactionId: transactionId,
-        amount: amount,
-        reason: reason,
-      );
-    } catch (e) {
-      debugPrint('Error processing refund: $e');
-      return false;
-    }
-  }
-
-  Future<List<PaymentHistoryItem>> getPaymentHistory({
-    int page = 1,
-    int limit = 20,
-    DateTime? startDate,
-    DateTime? endDate,
-  }) async {
-    try {
-      return await _payDunyaService.getPaymentHistory(
-        page: page,
-        limit: limit,
-        startDate: startDate,
-        endDate: endDate,
-      );
-    } catch (e) {
-      debugPrint('Error getting payment history: $e');
-      return [];
-    }
-  }
 }

@@ -7,9 +7,6 @@ import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/repositories/django_menu_repository.dart';
-import 'package:http/http.dart' as http;
-import 'package:elcora_fast/config/api_config.dart';
-import 'dart:convert';
 
 class AIRecommendationService extends ChangeNotifier {
   static final AIRecommendationService _instance =
@@ -160,49 +157,13 @@ class AIRecommendationService extends ChangeNotifier {
     final menuItems = await _getAvailableMenuItems();
     final recommendations = <MenuItem>[];
 
-    try {
-      // Call Node.js backend for AI recommendations
-      final backendUrl = ApiConfig.backendUrl;
-      final url =
-          Uri.parse('$backendUrl/api/ai/recommendations?userId=$userId');
-
-      debugPrint('AIRecommendationService: Calling backend at $url');
-
-      final response = await http.get(url);
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true && data['recommendations'] != null) {
-          final recList = data['recommendations'] as List;
-          // Map backend recommendations to local MenuItems
-          // Assuming backend returns { id, name, category, score }
-          // We need to find matching items in our local menuItems list
-
-          for (final rec in recList) {
-            final recId = rec['id'];
-            // Find in available items
-            final matchingItem = menuItems.firstWhere(
-              (item) => item.id == recId,
-              orElse: () => MenuItem.empty(), // Placeholder if not found
-            );
-
-            if (matchingItem.id.isNotEmpty) {
-              recommendations.add(matchingItem);
-            }
-          }
-          debugPrint(
-            'AIRecommendationService: Loaded ${recommendations.length} recommendations from backend',
-          );
-        }
-      } else {
-        debugPrint(
-          'AIRecommendationService: Backend returned ${response.statusCode}',
-        );
-      }
-    } catch (e) {
-      debugPrint('AIRecommendationService: Backend error $e');
-    }
-
+    // Les recommandations sont calculées localement.
+    //
+    // L'appel qui se trouvait ici visait l'ancien backend Node
+    // (`/api/ai/recommendations`), retiré depuis. Il n'a pas d'équivalent
+    // Django : le classement ci-dessous, fondé sur les préférences déjà
+    // observées, est ce que le service sait faire honnêtement. Une vraie
+    // recommandation est un travail de modèle, côté serveur.
     // Recommandations basées sur l'historique
     final historyRecommendations =
         _getHistoryBasedRecommendations(userId, menuItems);

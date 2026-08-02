@@ -28,18 +28,10 @@ class GeocodingService extends ChangeNotifier {
 
       // Utiliser l'API de géocodage de Google
       final String apiKey = ApiConfig.googleMapsApiKey;
-      final uri = kIsWeb
-          ? Uri.parse('${ApiConfig.backendUrl}/api/google/geocode').replace(
-              queryParameters: {
-                // Ne pas pré-encoder quand on utilise queryParameters
-                'address': raw,
-                'key': apiKey,
-              },
-            )
-          : Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
-              'address': raw,
-              'key': apiKey,
-            });
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
+        'address': raw,
+        'key': apiKey,
+      });
 
       final data = await _rest.getJson(uri);
 
@@ -148,17 +140,10 @@ class GeocodingService extends ChangeNotifier {
   Future<String?> reverseGeocode(LatLng coordinates) async {
     try {
       final String apiKey = ApiConfig.googleMapsApiKey;
-      final uri = kIsWeb
-          ? Uri.parse('${ApiConfig.backendUrl}/api/google/geocode').replace(
-              queryParameters: {
-                'latlng': '${coordinates.latitude},${coordinates.longitude}',
-                'key': apiKey,
-              },
-            )
-          : Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
-              'latlng': '${coordinates.latitude},${coordinates.longitude}',
-              'key': apiKey,
-            });
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
+    'latlng': '${coordinates.latitude},${coordinates.longitude}',
+    'key': apiKey,
+  });
 
       final data = await _rest.getJson(uri);
 
@@ -207,24 +192,13 @@ class GeocodingService extends ChangeNotifier {
   Future<int?> calculateTravelTime(LatLng origin, LatLng destination) async {
     try {
       final String apiKey = ApiConfig.googleMapsApiKey;
-      final uri = kIsWeb
-          ? Uri.parse('${ApiConfig.backendUrl}/api/google/distance-matrix')
-              .replace(
-              queryParameters: {
-                'origins': '${origin.latitude},${origin.longitude}',
-                'destinations':
-                    '${destination.latitude},${destination.longitude}',
-                'mode': 'driving',
-                'key': apiKey,
-              },
-            )
-          : Uri.https('maps.googleapis.com', '/maps/api/distancematrix/json', {
-              'origins': '${origin.latitude},${origin.longitude}',
-              'destinations':
-                  '${destination.latitude},${destination.longitude}',
-              'mode': 'driving',
-              'key': apiKey,
-            });
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/distancematrix/json', {
+    'origins': '${origin.latitude},${origin.longitude}',
+    'destinations':
+        '${destination.latitude},${destination.longitude}',
+    'mode': 'driving',
+    'key': apiKey,
+  });
 
       final data = await _rest.getJson(uri);
 
@@ -257,20 +231,11 @@ class GeocodingService extends ChangeNotifier {
   Future<List<LatLng>?> getDirections(LatLng origin, LatLng destination) async {
     try {
       final String apiKey = ApiConfig.googleMapsApiKey;
-      final uri = kIsWeb
-          ? Uri.parse('${ApiConfig.backendUrl}/api/google/directions').replace(
-              queryParameters: {
-                'origin': '${origin.latitude},${origin.longitude}',
-                'destination':
-                    '${destination.latitude},${destination.longitude}',
-                'key': apiKey,
-              },
-            )
-          : Uri.https('maps.googleapis.com', '/maps/api/directions/json', {
-              'origin': '${origin.latitude},${origin.longitude}',
-              'destination': '${destination.latitude},${destination.longitude}',
-              'key': apiKey,
-            });
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/directions/json', {
+    'origin': '${origin.latitude},${origin.longitude}',
+    'destination': '${destination.latitude},${destination.longitude}',
+    'key': apiKey,
+  });
 
       final data = await _rest.getJson(uri);
 

@@ -6,7 +6,7 @@ import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/promo_code.dart';
-import 'package:elcora_fast/services/paydunya_service.dart';
+import 'package:elcora_fast/models/payment_participant.dart';
 
 /// Helper pour faciliter la navigation entre les écrans
 class NavigationHelper {

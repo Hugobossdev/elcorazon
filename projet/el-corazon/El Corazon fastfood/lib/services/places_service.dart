@@ -68,14 +68,11 @@ class PlacesService {
     }
 
     // ⚠️ Web: CORS bloquera maps.googleapis.com. On passe par un proxy backend.
-    final uri = kIsWeb
-        ? Uri.parse('${ApiConfig.backendUrl}/api/google/places/autocomplete')
-            .replace(queryParameters: params)
-        : Uri.https(
-            'maps.googleapis.com',
-            '/maps/api/place/autocomplete/json',
-            params,
-          );
+    final uri = Uri.https(
+    'maps.googleapis.com',
+    '/maps/api/place/autocomplete/json',
+    params,
+  );
 
     final resp = await http.get(uri);
     if (resp.statusCode != 200) return const [];
@@ -119,14 +116,11 @@ class PlacesService {
       params['language'] = language;
     }
 
-    final uri = kIsWeb
-        ? Uri.parse('${ApiConfig.backendUrl}/api/google/places/details')
-            .replace(queryParameters: params)
-        : Uri.https(
-            'maps.googleapis.com',
-            '/maps/api/place/details/json',
-            params,
-          );
+    final uri = Uri.https(
+    'maps.googleapis.com',
+    '/maps/api/place/details/json',
+    params,
+  );
 
     final resp = await http.get(uri);
     if (resp.statusCode != 200) return null;

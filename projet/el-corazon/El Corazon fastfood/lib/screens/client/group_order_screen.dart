@@ -11,7 +11,7 @@ import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcora_fast/services/paydunya_service.dart';
+import 'package:elcora_fast/models/payment_participant.dart';
 
 class GroupOrderScreen extends StatefulWidget {
   const GroupOrderScreen({super.key});

@@ -15,7 +15,6 @@ import 'services/ar_service.dart';
 import 'services/ai_service.dart';
 import 'services/group_delivery_service.dart';
 import 'services/realtime_tracking_service.dart';
-import 'services/paydunya_service.dart';
 import 'services/address_service.dart';
 import 'services/promo_code_service.dart';
 import 'services/advanced_gamification_service.dart';
@@ -136,7 +135,6 @@ class DeliverApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AIService()),
         ChangeNotifierProvider(create: (_) => GroupDeliveryService()),
         ChangeNotifierProvider(create: (_) => RealtimeTrackingService()),
-        ChangeNotifierProvider(create: (_) => PayDunyaService()),
         ChangeNotifierProvider(create: (_) => AddressService()),
         ChangeNotifierProvider(create: (_) => PromoCodeService()),
 

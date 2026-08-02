@@ -5,9 +5,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/group_payment.dart';
-import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/models/payment_participant.dart';
 
 /// Paiement partagé d'une commande — `/payments/{order}/split/` (Phase 6).
 ///

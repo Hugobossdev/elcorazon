@@ -6,7 +6,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
-import 'package:elcora_fast/services/paydunya_service.dart' show PaymentStatus;
+import 'package:elcora_fast/models/payment_status.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 

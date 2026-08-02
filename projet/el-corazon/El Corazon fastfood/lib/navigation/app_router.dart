@@ -3,7 +3,6 @@ import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/order.dart';
-import 'package:elcora_fast/services/paydunya_service.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/screens/splash_screen.dart';
 import 'package:elcora_fast/screens/auth_screen.dart';
@@ -32,6 +31,7 @@ import 'package:elcora_fast/screens/client/enhanced_orders_screen.dart';
 import 'package:elcora_fast/models/promo_code.dart';
 import 'package:elcora_fast/screens/client/driver_rating_screen.dart';
 import 'package:elcora_fast/screens/client/order_rating_screen.dart';
+import 'package:elcora_fast/models/payment_participant.dart';
 
 /// Routeur principal de l'application
 class AppRouter {

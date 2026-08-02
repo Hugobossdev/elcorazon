@@ -1,6 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/models/payment_participant.dart';
 
-import 'package:elcora_fast/services/paydunya_service.dart';
 
 enum GroupPaymentStatus {
   pending,

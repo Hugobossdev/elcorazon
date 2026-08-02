@@ -20,7 +20,6 @@ import 'services/client_management_service.dart';
 import 'services/gamification_service.dart';
 import 'services/driver_schedule_service.dart';
 import 'services/driver_document_service.dart';
-import 'services/socket_service.dart';
 import 'screens/admin/admin_navigation_screen.dart';
 import 'screens/auth/admin_auth_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart';
@@ -108,13 +107,12 @@ class AdminApp extends StatelessWidget {
           create: (_) => GamificationService()..initialize(),
         ),
         ChangeNotifierProvider(create: (_) => DriverScheduleService()),
-        ChangeNotifierProvider(create: (_) => DriverScheduleService()),
         ChangeNotifierProvider(create: (_) => DriverDocumentService()),
-        // Initialize SocketService immediately
-        Provider<SocketService>(
-          create: (_) => SocketService()..init(),
-          lazy: false,
-        ),
+        // Aucun socket ici : la position des livreurs arrive par les canaux
+        // WebSocket du serveur (`/ws/*`, Django Channels), dont l'autorisation
+        // précède l'acceptation. Le `SocketService` retiré ouvrait une
+        // connexion non authentifiée vers l'ancien backend Node, retiré depuis
+        // — il échouait donc en boucle au démarrage de l'application.
       ],
       child: MaterialApp(
         title: 'El Corazón - Admin',
