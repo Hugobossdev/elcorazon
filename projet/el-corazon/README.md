@@ -67,7 +67,7 @@ Trois applications distinctes, un socle Dart partagé, un backend commun :
     ┌─────────────────────────────────────────────┐
     │        Backend Django (ASGI) — backend/     │
     │  DRF /api/v1/*  ·  Channels /ws/*  ·  Celery│
-    │  18 apps métier · invariants en contraintes │
+    │  19 apps métier · invariants en contraintes │
     └─────────────────────┬───────────────────────┘
                           ▼
     ┌─────────────────────────────────────────────┐
@@ -99,13 +99,12 @@ Application mobile pour les clients finaux permettant de commander des repas, su
 - 🛒 Catalogue de produits avec recherche avancée
 - 🎨 Personnalisation avancée des produits (burgers, pizzas, gâteaux)
 - 👥 Commandes groupées avec partage des frais
-- 💰 Paiements multiples (PayDunya, Wallet, Paiement partagé)
+- 💰 Paiement mobile et paiement partagé entre convives — encaissement côté serveur
 - 📍 Suivi de livraison en temps réel
 - 🎮 Gamification (points, badges, niveaux)
 - 🌐 Mode hors-ligne
 - ⭐ Avis et notes
 
-**Taux de complétion : ~85%**
 
 ---
 
@@ -123,7 +122,6 @@ Application dédiée aux livreurs pour recevoir, gérer et effectuer les livrais
 - 📱 Notifications Firebase
 - 🎤 Commandes vocales
 
-**Taux de complétion : ~90%**
 
 ---
 
@@ -142,7 +140,6 @@ Tableau de bord complet pour gérer toute l'activité de la plateforme.
 - 🔐 Gestion des rôles et permissions
 - 📱 Notifications push
 
-**Taux de complétion : ~95%**
 
 ---
 
@@ -285,13 +282,24 @@ L'API écoute sur `http://localhost:8000/api/v1/`, son schéma OpenAPI sur
 
 ### 📊 État d'Implémentation
 
-| Application | Taux de Complétion | Services | Écrans |
-|------------|-------------------|----------|--------|
-| **elcora_fast** | ~85% | 60+ | 30+ |
-| **elcora_dely** | ~90% | 30+ | 15+ |
-| **admin** | ~95% | 50+ | 20+ |
+| Application | Services | Écrans | Tests | Analyse |
+|------------|---------:|-------:|------:|---------|
+| **elcora_fast** | 55 | 42 | 15 | 0 erreur, 0 avertissement |
+| **elcora_dely** | 25 | 15 | 9 | 0 erreur, 0 avertissement |
+| **admin** | 39 | 38 | 15 | 0 erreur, 0 avertissement |
+| **elcorazon_core** (socle) | 23 domaines | — | 121 | 0 erreur |
 
-> 📖 Pour plus de détails, consultez [ETAT_FONCTIONNALITES.md](./ETAT_FONCTIONNALITES.md)
+Le backend porte **1 230 tests** pour **95,4 %** de couverture (plancher CI :
+92 %), `ruff` et `mypy` sans écart. Les deux workflows GitHub Actions sont
+bloquants : un test rouge arrête la CI.
+
+> Les taux de complétion en pourcentage ont été retirés de ce tableau : ils
+> étaient invérifiables et n'ont jamais rien mesuré. Les colonnes ci-dessus se
+> recomptent en une commande.
+
+> 📖 Détail fonctionnel : [ETAT_FONCTIONNALITES.md](./ETAT_FONCTIONNALITES.md) ·
+> Mise en service : [docs/deploiement.md](./docs/deploiement.md) ·
+> Sécurité : [docs/security/](./docs/security/)
 
 ---
 
@@ -369,7 +377,9 @@ projet/
 - **[ETAT_FONCTIONNALITES.md](./ETAT_FONCTIONNALITES.md)** : État détaillé de toutes les fonctionnalités
 - **[FONCTIONNALITES_DETAILLEES.md](./FONCTIONNALITES_DETAILLEES.md)** : Détails techniques et logique métier
 - **[docs/architecture/](./docs/architecture/)** : architecture, modèle de données, ADR et plan de migration
-- **[SCHEMA_BDD_COMPLET.md](./SCHEMA_BDD_COMPLET.md)** : Schéma complet de la base de données
+- **[docs/deploiement.md](./docs/deploiement.md)** : mise en service — compose de production, TLS, sauvegarde et restauration
+- **[docs/security/](./docs/security/)** : rotation des clés du prestataire de paiement, restriction de la clé Google Maps
+- **[SCHEMA_BDD_COMPLET.md](./SCHEMA_BDD_COMPLET.md)** : schéma de la base — **document historique**, antérieur au backend Django
 
 ### Documentation par Application
 
@@ -469,14 +479,31 @@ Ce projet est privé et propriétaire. Tous droits réservés.
 
 ## 🎯 Roadmap
 
-### Prochaines Étapes
+### Fait
 
-- [ ] Finaliser l'intégration PayDunya
-- [ ] Compléter l'upload d'images produits
-- [ ] Intégrer la carte interactive des livreurs
-- [ ] Ajouter des tests unitaires
-- [ ] Optimiser les performances
-- [ ] Améliorer la documentation API
+- [x] Backend Django : 19 domaines, 343 routes, contrat OpenAPI, 1 230 tests
+- [x] Les trois applications sur le backend Django — Supabase et Node retirés
+- [x] Clés du prestataire de paiement sorties des applications
+- [x] Tests et analyse bloquants en CI sur les trois applications
+- [x] Domaines `social` et commande groupée branchés côté client
+- [x] Déploiement de production écrit (compose, Nginx TLS, sauvegarde)
+
+### Ce qui reste
+
+Rien de tout cela n'est de la construction : c'est de l'**éprouvement** et de
+l'exploitation.
+
+- [ ] **Exécuter un déploiement réel** — la procédure est écrite, elle n'a jamais
+      tourné sur une infrastructure. Voir [docs/deploiement.md](./docs/deploiement.md)
+- [ ] **Régénérer les clés PayDunya** — celles qui ont été publiées dans des
+      binaires sont compromises. Voir [docs/security/paydunya_rotation.md](./docs/security/paydunya_rotation.md)
+- [ ] **Restreindre la clé Google Maps** — empreinte Android, Bundle ID iOS,
+      référent HTTP, quotas. Voir [docs/security/google_maps.md](./docs/security/google_maps.md)
+- [ ] **Valider le push FCM** contre un vrai projet Firebase
+- [ ] **Sauvegarde hors site** — `backup.sh` écrit sur le serveur sauvegardé
+- [ ] **Supervision** — ni métriques, ni alertes, ni agrégation de journaux
+- [ ] Géocodage côté web : Google n'autorise pas l'appel navigateur (CORS), il
+      demande un relais serveur qui n'existe pas encore
 
 ---
 

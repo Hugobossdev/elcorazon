@@ -38,6 +38,42 @@ les prévisions de vente et le « risque d'attrition » calculés dans le
 navigateur, et l'auto-inscription des livreurs (un livreur s'embauche, il ne
 s'inscrit pas).
 
+## 🔄 Deuxième vague (3 août 2026)
+
+**PayDunya a quitté les applications.** Elles embarquaient encore les clés
+marchandes (`MASTER_KEY`, `PRIVATE_KEY`, `TOKEN`) et appelaient
+`app.paydunya.com` depuis l'appareil : extraire ces clés d'un binaire distribué
+permettait d'encaisser et de rembourser au nom de l'enseigne, sans permission,
+sans trace et sans plafond. Le règlement passe maintenant par
+`POST /payments/{commande}/initiate/`, et **seul le webhook signé fait avancer
+une transaction** — le retour de l'utilisateur sur l'application n'écrit aucun
+état.
+
+> ⚠️ Les clés qui étaient dans les binaires publiés doivent être considérées
+> comme compromises. Procédure : [docs/security/paydunya_rotation.md](docs/security/paydunya_rotation.md).
+
+**Les reliquats de l'ancien backend Node ont disparu** : le mandataire
+`localhost:3000` des API Google, le socket `10.0.2.2:3000` du back-office et la
+dépendance `socket_io_client`.
+
+**Deux domaines servis mais inexploités sont branchés.** `social` et
+`group-carts` étaient complets et testés côté serveur depuis la Phase 4 sans
+qu'aucune application ne les appelle :
+
+- **Groupes** — création, adhésion par code d'invitation, sortie, fil de
+  publications, j'aime, commentaires. Le code d'invitation vient du serveur et
+  n'est servi qu'aux membres du groupe ;
+- **Commande groupée** — ouverture, invitation, ajout d'articles, verrouillage,
+  confirmation en commande, paiement partagé.
+
+**Les trois applications ont des tests, et la CI les exécute.** `flutter test`
+est bloquant sur `fastfood`, `dely` et `admin` en plus du socle partagé.
+
+**Le déploiement de production est écrit** — `docker-compose.prod.yml`, Nginx
+avec TLS et renouvellement Let's Encrypt, scripts `deploy.sh`, `backup.sh`,
+`restore.sh`. Il n'a pas encore tourné sur une infrastructure réelle : voir
+[docs/deploiement.md](docs/deploiement.md).
+
 ---
 
 Ce document présente l'état d'implémentation des fonctionnalités des 3
@@ -167,10 +203,12 @@ applications de l'écosystème El Corazón.
 
 ### ⚠️ Fonctionnalités Partiellement Implémentées
 
-1. **Paiements PayDunya**
-   - Structure complète présente
-   - API réelle non connectée (simulation)
-   - **Action requise** : Configurer les clés PayDunya dans `.env`
+1. **Paiements PayDunya** — *migré, voir la deuxième vague en tête de document*
+   - L'application appelle `POST /payments/{commande}/initiate/` et suit l'état
+     rendu par le serveur. Elle ne joint plus le prestataire et ne porte plus
+     ses clés.
+   - **Action requise** : les clés dans le `.env` du **backend**, jamais dans
+     celui d'une application.
 
 2. **Notifications Push**
    - Service présent
@@ -422,21 +460,31 @@ applications de l'écosystème El Corazón.
 ### ⚠️ IMPORTANT (Fonctionnalités essentielles)
 
 1. **Google Maps API Key**
-   - Nécessaire pour : Géolocalisation, cartes, itinéraires
+   - Nécessaire pour : géolocalisation, cartes, itinéraires
    - Où l'obtenir : https://console.cloud.google.com/apis/credentials
-   - **Action** : Ajouter dans tous les fichiers `.env`
+   - **Action** : dans le `.env` de chaque application. C'est une clé *cliente*,
+     elle est visible dans le binaire par construction — elle doit donc être
+     **restreinte** (empreinte Android, Bundle ID iOS, référent HTTP) et sous
+     quota. Voir [docs/security/google_maps.md](docs/security/google_maps.md).
 
 2. **PayDunya (Paiements)**
-   - Nécessaire pour : Paiements Mobile Money
+   - Nécessaire pour : paiements Mobile Money
    - Où l'obtenir : https://app.paydunya.com/developers
-   - **Action** : Configurer dans `elcora_fast/.env` et `elcora_dely/.env`
+   - **Action** : dans le `.env` du **backend uniquement**. Ces clés permettent
+     d'encaisser et de rembourser au nom de l'enseigne : dans un `.env`
+     d'application, elles sont dans un binaire distribué au public. Les
+     applications n'en ont pas besoin — elles appellent
+     `POST /payments/{commande}/initiate/` et lisent la réponse.
 
 ### 📌 OPTIONNEL (Fonctionnalités avancées)
 
 1. **Agora RTC (Appels vidéo)**
-   - Nécessaire pour : Communication client-livreur
+   - Nécessaire pour : communication client-livreur
    - Où l'obtenir : https://console.agora.io
-   - **Action** : Configurer dans `.env` si nécessaire
+   - **Action** : `AGORA_APP_ID` dans le `.env` des applications (identifiant
+     public), `AGORA_APP_CERTIFICATE` dans celui du **backend uniquement** —
+     c'est lui qui signe les jetons de canal. Le certificat dans une application
+     permettrait de rejoindre n'importe quel appel.
 
 2. **Firebase (Notifications push)**
    - Nécessaire pour : Notifications push

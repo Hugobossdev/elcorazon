@@ -53,10 +53,10 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
 - [x] Phase 5 — Temps réel
   - [x] 5a — WebSocket : suivi de commande, file du livreur, rattrapage par séquence
   - [x] 5b — Notifications, push par Celery, événements de domaine
-- [ ] Phase 6 — Flutter Clean Architecture ([plan détaillé](04-migration-flutter.md), rupture nette
-  avec Supabase — pas de coexistence transitoire) — en cours : fondations partagées
-  (`packages/elcorazon_core`), `fastfood` migré sauf social et commande groupée, `dely` migré
-  (auth, courses, suivi de position, file des courses), `admin` pas commencé
+- [x] Phase 6 — Flutter Clean Architecture ([plan détaillé](04-migration-flutter.md), rupture nette
+  avec Supabase — pas de coexistence transitoire) : socle partagé `packages/elcorazon_core`, les
+  trois applications migrées, Supabase et PayDunya retirés des clients, domaines `social` et
+  `group-carts` branchés
 - [x] Phase 7 — Tests et qualité (graphe vérifié, contrat vérifié, plancher de couverture)
 - [x] Fidélité par points (F1-F5) — solde, journal, catalogue de récompenses, expiration par
   inactivité, échange contre un code promotionnel nominatif
@@ -75,4 +75,9 @@ Une règle qu'on doit penser à appliquer sera oubliée ; une règle qu'on ne pe
 Ordre de construction retenu : **chemin critique d'abord** — identité, catalogue, panier, commandes,
 paiements, livraison, suivi. Promotions, fidélité, gamification, social, support, analytics et
 abonnements faits.
-Il ne reste que la Phase 6 (Flutter).
+
+Les huit phases sont terminées. Ce qui reste n'est pas de la construction mais de
+l'**éprouvement** : le déploiement de production est écrit (`docker-compose.prod.yml`, Nginx avec
+TLS, scripts de déploiement et de sauvegarde) mais n'a pas encore tourné sur une infrastructure
+réelle, et le push FCM n'a pas été validé contre un vrai projet Firebase. Voir
+[la procédure de déploiement](../deploiement.md).
