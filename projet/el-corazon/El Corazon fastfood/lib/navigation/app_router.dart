@@ -32,6 +32,7 @@ import 'package:elcora_fast/models/promo_code.dart';
 import 'package:elcora_fast/screens/client/driver_rating_screen.dart';
 import 'package:elcora_fast/screens/client/order_rating_screen.dart';
 import 'package:elcora_fast/models/payment_participant.dart';
+import 'package:elcora_fast/screens/client/social_groups_screen.dart';
 
 /// Routeur principal de l'application
 class AppRouter {
@@ -52,6 +53,7 @@ class AppRouter {
   static const String addressSelector = '/client/address-selector';
   static const String enhancedMenu = '/client/enhanced-menu';
   static const String groupOrder = '/client/group-order';
+  static const String socialGroups = '/client/social-groups';
   static const String itemCustomization = '/client/item-customization';
   static const String orderDetails = '/client/order-details';
   static const String payment = '/client/payment';
@@ -197,6 +199,12 @@ class AppRouter {
       case groupOrder:
         return MaterialPageRoute(
           builder: (_) => const GroupOrderScreen(),
+          settings: settings,
+        );
+
+      case socialGroups:
+        return MaterialPageRoute(
+          builder: (_) => const SocialGroupsScreen(),
           settings: settings,
         );
 

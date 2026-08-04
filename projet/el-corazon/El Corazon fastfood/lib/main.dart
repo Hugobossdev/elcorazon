@@ -43,6 +43,7 @@ import 'package:elcora_fast/widgets/error_boundary.dart';
 import 'package:elcora_fast/widgets/service_initialization_widget.dart';
 import 'package:elcora_fast/widgets/incoming_call_handler.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
+import 'package:elcora_fast/services/social_service.dart';
 
 /// Backend Django v2 (Phase 6). L'app n'a plus aucun accès direct à une base de
 /// données : tout passe par `/api/v1/` et les WebSockets `ws/`.
@@ -171,6 +172,7 @@ class ClientApp extends StatelessWidget {
           lazy: true,
         ),
         ChangeNotifierProvider(create: (_) => GroupCartService(), lazy: true),
+        ChangeNotifierProvider(create: (_) => SocialService(), lazy: true),
         ChangeNotifierProvider(create: (_) => VoiceService(), lazy: true),
         ChangeNotifierProvider(
           create: (_) => CustomizationService(),

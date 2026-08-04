@@ -17,6 +17,16 @@ class PostAuthor {
   final String? avatarUrl;
 }
 
+/// Natures de publication — valeurs de `PostKind` côté serveur.
+abstract final class PostKind {
+  static const orderShare = 'order_share';
+  static const photo = 'photo';
+  static const text = 'text';
+  static const event = 'event';
+
+  static const values = [orderShare, photo, text, event];
+}
+
 /// Publication — miroir de `PostSerializer`.
 ///
 /// Les compteurs et [isPublic] sont **calculés par le serveur** : une
@@ -71,6 +81,29 @@ class Post {
   final int commentsCount;
   final bool likedByMe;
   final DateTime createdAt;
+
+  /// Copie avec un commentaire de plus.
+  ///
+  /// Sans paramètre, contrairement à [withLike] : la création d'un commentaire
+  /// ne rend pas de compteur — un commentaire ajouté en vaut exactement un. Le
+  /// laisser passer en argument permettrait d'écrire n'importe quel nombre
+  /// sous une publication.
+  Post withCommentAdded() {
+    return Post(
+      id: id,
+      author: author,
+      groupId: groupId,
+      kind: kind,
+      content: content,
+      orderId: orderId,
+      imageUrl: imageUrl,
+      isPublic: isPublic,
+      likesCount: likesCount,
+      commentsCount: commentsCount + 1,
+      likedByMe: likedByMe,
+      createdAt: createdAt,
+    );
+  }
 
   /// Copie avec le résultat d'un `like` — le serveur renvoie l'état résultant
   /// et le nouveau compteur, qu'on applique au lieu de les incrémenter à

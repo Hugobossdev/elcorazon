@@ -116,9 +116,10 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   _MenuItem(
                     icon: Icons.people,
-                    title: 'Fonctionnalités sociales',
-                    subtitle: 'Groupes et événements',
-                    onTap: () => _showSocialFeaturesDialog(context),
+                    title: 'Mes groupes',
+                    subtitle: 'Partager avec vos proches',
+                    onTap: () =>
+                        Navigator.of(context).pushNamed(AppRouter.socialGroups),
                   ),
                   _MenuItem(
                     icon: Icons.help,
@@ -715,36 +716,6 @@ class ProfileScreen extends StatelessWidget {
               foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             child: const Text('Se déconnecter'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showSocialFeaturesDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Fonctionnalités Sociales'),
-        content: const Text(
-          'Découvrez nos fonctionnalités sociales :\n\n'
-          '• Créer des groupes de commande\n'
-          '• Partager des événements\n'
-          '• Suivre vos amis\n'
-          '• Participer à des défis\n\n'
-          'Ces fonctionnalités sont accessibles depuis l\'écran des commandes groupées.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fermer'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).pushNamed(AppRouter.groupOrder);
-            },
-            child: const Text('Essayer'),
           ),
         ],
       ),

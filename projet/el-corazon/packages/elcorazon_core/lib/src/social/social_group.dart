@@ -1,3 +1,17 @@
+/// Natures de groupe — valeurs de `GroupKind` côté serveur.
+///
+/// Chaînes brutes plutôt qu'un enum Dart : elles voyagent telles quelles dans
+/// le JSON, et un enum imposerait une correspondance à tenir des deux côtés.
+abstract final class GroupKind {
+  static const family = 'family';
+  static const friends = 'friends';
+  static const work = 'work';
+  static const neighborhood = 'neighborhood';
+  static const custom = 'custom';
+
+  static const values = [family, friends, work, neighborhood, custom];
+}
+
 /// Groupe social — miroir de `SocialGroupSerializer`
 /// (`backend/apps/social/serializers.py`).
 ///

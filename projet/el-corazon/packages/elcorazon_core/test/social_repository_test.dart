@@ -237,6 +237,17 @@ void main() {
       expect(after.likedByMe, isTrue);
     });
 
+    test('withCommentAdded avance le compteur d\'exactement un', () {
+      final avant = Post.fromJson(_postJson());
+      final apres = avant.withCommentAdded();
+
+      expect(apres.commentsCount, avant.commentsCount + 1);
+      // Le reste ne bouge pas : une publication ne s'édite pas.
+      expect(apres.content, avant.content);
+      expect(apres.likesCount, avant.likesCount);
+      expect(apres.likedByMe, avant.likedByMe);
+    });
+
     test('getComments mappe l\'auteur, avatar vide compris', () async {
       final comments = await repository.getComments('post-1');
 
