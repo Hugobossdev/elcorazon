@@ -96,10 +96,43 @@ déploiements ajouterait de l'exploitation sans gain. La séparation reste possi
 | **Celery beat** | Expiration des points, renouvellement d'abonnements, purge des positions GPS, snapshots analytics | — |
 | **PostgreSQL + PostGIS** | Vérité des données, invariants (contraintes), requêtes géospatiales | — |
 | **Redis** | Cache applicatif, broker Celery, *channel layer*, compteurs de limitation de débit | Stockage durable — tout y est perdable |
-| **S3 / MinIO** | Images produits, photos de profil, pièces d'identité livreurs, justificatifs | — |
+| **S3 / MinIO** | Images produits, bannières, avatars (compartiments **publics**) ; pièces d'identité livreurs, justificatifs, preuves de livraison (compartiment **privé**, URL signées) | Accès direct depuis le code métier — tout passe par `common/storage.py` (ADR-011) |
 
 **Règle d'or sur Redis** : aucune donnée dont la perte serait un incident métier. Un panier vit en
 base, pas en cache.
+
+**Règle d'or sur le stockage** (ADR-011) : la visibilité est portée par le **compartiment**, jamais
+par un contrôle applicatif. Un catalogue se met en cache, une pièce d'identité se signe — et le
+stockage par défaut est le privé, pour qu'un oubli ferme au lieu d'ouvrir.
+
+### Stockage objet — public et privé
+
+Quatre compartiments, décidés par l'environnement (`S3_BUCKET_*`), jamais nommés dans le code :
+
+| Alias | Visibilité | Contenu | Comment on y accède |
+|---|---|---|---|
+| `products` | publique | Images d'articles et de catégories | URL stable, sans signature, cachable |
+| `banners` | publique | Bannières, campagnes, couvertures d'établissement | idem |
+| `users` | publique | Avatars | idem |
+| `documents` | **privée** | Pièces d'identité, permis, cartes grises, preuves de livraison | URL signée émise par le serveur, expirant après `S3_SIGNED_URL_EXPIRE` |
+
+Les compartiments publics portent une politique de lecture anonyme limitée à `s3:GetObject` — ni
+inventaire (`ListBucket`), ni écriture. Le compartiment privé n'en porte aucune : sans politique, S3
+refuse tout ce qui n'est pas signé.
+
+**Dépôt d'un fichier** : l'API valide (type, taille), appelle `StorageService.save(alias, chemin,
+contenu)` — ou, pour un gros fichier, remet au client une URL d'envoi signée visant **un chemin
+précis** — puis conserve le chemin *réellement* écrit, qui peut différer de celui demandé (deux
+fichiers de même nom ne s'écrasent pas).
+
+**Lecture d'un fichier** : `StorageService.url(alias, chemin)` rend l'adresse qui convient à la
+visibilité du compartiment. L'appelant ne choisit pas : c'est ce qui empêche de rendre publique une
+pièce d'identité en oubliant un argument. Une lecture de document se fait après avoir vérifié le
+droit d'en connaître — la signature prouve que le serveur a accepté, pas que le demandeur est
+légitime.
+
+**Provisionnement** : `python manage.py ensure_storage_buckets`, appelée au démarrage de l'API.
+Idempotente.
 
 ---
 
@@ -348,8 +381,14 @@ déclaration de ses dépendances fait échouer la construction, et une arête ho
 | `api` | build local, `runserver` ASGI + rechargement | 8000 |
 | `worker` | build local, `celery worker` | — |
 | `beat` | build local, `celery beat` | — |
-| `minio` | `minio/minio` | 9000 / 9001 |
+| `minio` | `minio/minio` | 9000 (API S3) / 9001 (console) |
 | `nginx` | `nginx:alpine` | 80 |
+
+Le volume `miniodata` rend le stockage persistant entre deux `docker compose down`. Les
+compartiments sont créés au démarrage de l'API (`ensure_storage_buckets`), qui attend que MinIO
+réponde — sans quoi une installation neuve échouerait au premier lancement, celui où personne ne
+lit les journaux. La console d'administration est ouverte en développement et **fermée en
+production** (`MINIO_BROWSER=off`).
 
 > **Note d'exécution** : Docker Desktop et Compose sont installés sur le poste depuis le
 > 25/07/2026 ; PostGIS et Redis tournent en conteneur. La suite de tests s'exécute **dans l'image**
@@ -379,6 +418,7 @@ sont des services managés. Les migrations tournent en `initContainer`.
 | [008](adr/008-temps-reel-channels-vs-push.md) | Channels pour le flux, FCM pour le hors-application |
 | [009](adr/009-contrat-d-api.md) | Rupture assumée avec les clients Dart actuels |
 | [010](adr/010-machines-a-etats.md) | Transitions déclaratives, monotones, testables |
+| [011](adr/011-stockage-objet.md) | Stockage objet S3/MinIO, compartiments publics et privé |
 
 ---
 

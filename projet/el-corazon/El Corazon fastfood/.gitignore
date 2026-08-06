@@ -51,6 +51,12 @@ app.*.map.json
 .env.*
 !.env.example
 
+# Signature Android de production : ne jamais versionner. La perte du keystore
+# interdit toute mise à jour de l'app publiée — le sauvegarder hors du dépôt.
+**/key.properties
+*.jks
+*.keystore
+
 # Secrets and API keys
 **/secrets.dart
 **/api_keys.dart

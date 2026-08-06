@@ -8,7 +8,6 @@ import 'package:elcora_fast/services/group_cart_service.dart';
 import 'package:elcora_fast/services/voice_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
-import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
@@ -49,8 +48,6 @@ class ServiceInitializer {
       final groupCartService = Provider.of<GroupCartService>(context, listen: false);
       final promoCodeService =
           Provider.of<PromoCodeService>(context, listen: false);
-      final addressService =
-          Provider.of<AddressService>(context, listen: false);
       final offlineSyncService =
           Provider.of<OfflineSyncService>(context, listen: false);
       final pushNotificationService =
@@ -77,7 +74,6 @@ class ServiceInitializer {
       await _initializeOptionalServices(
         groupCartService: groupCartService,
         promoCodeService: promoCodeService,
-        addressService: addressService,
         offlineSyncService: offlineSyncService,
         pushNotificationService: pushNotificationService,
         aiRecommendationService: aiRecommendationService,
@@ -143,7 +139,6 @@ class ServiceInitializer {
   Future<void> _initializeOptionalServices({
     required GroupCartService groupCartService,
     required PromoCodeService promoCodeService,
-    required AddressService addressService,
     required OfflineSyncService offlineSyncService,
     required PushNotificationService pushNotificationService,
     required AIRecommendationService aiRecommendationService,
@@ -167,9 +162,11 @@ class ServiceInitializer {
     // serveur, qui détient les clés du prestataire. Le bloc retiré injectait
     // des clés en dur (`test_master_key`) dans un service qui appelait
     // PayDunya depuis l'appareil.
-    await _initializeServiceWithoutContext(
-      () => addressService.initialize(),
-    );
+    // Le carnet d'adresses n'est pas initialisé ici : il n'existe que pour un
+    // compte, et c'est la session qui l'ouvre et le ferme
+    // (`AppService._followSessionInAddressBook`). L'appel qui se trouvait à
+    // cette ligne ne lisait que le cache local, sans jamais joindre le serveur
+    // — c'est ce qui laissait croire que le carnet était chargé.
 
     // Services de synchronisation
     await _initializeServiceWithoutContext(

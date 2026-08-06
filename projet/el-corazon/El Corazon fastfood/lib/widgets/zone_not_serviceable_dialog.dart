@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
-import 'package:elcora_fast/config/delivery_config.dart';
 
-/// Dialog affiché lorsqu'une zone n'est pas desservie
+/// Dialogue affiché quand aucune zone ne couvre l'adresse choisie.
+///
+/// Il annonçait auparavant une distance et un maximum — tous deux calculés sur
+/// le téléphone, à vol d'oiseau, depuis une position de restaurant en dur. Le
+/// serveur ne refuse pas sur une distance : il refuse parce qu'aucun contour
+/// de zone ne couvre le point. Dire « 12,4 km, maximum 25 km » à un client
+/// qu'on vient de refuser était une explication fausse d'un refus juste.
 class ZoneNotServiceableDialog extends StatelessWidget {
-  final DeliveryFeeBreakdown breakdown;
   final VoidCallback? onChooseAnotherAddress;
   final VoidCallback? onViewServiceableZones;
 
   const ZoneNotServiceableDialog({
-    required this.breakdown,
     super.key,
     this.onChooseAnotherAddress,
     this.onViewServiceableZones,
@@ -53,35 +55,8 @@ class ZoneNotServiceableDialog extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            DeliveryConfig.notServiceableMessage,
+            'Désolé, nous ne livrons pas encore à cette adresse.',
             style: theme.textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade300),
-            ),
-            child: Column(
-              children: [
-                _buildInfoRow(
-                  context,
-                  icon: Icons.straighten,
-                  label: 'Distance',
-                  value: '${breakdown.distance.toStringAsFixed(1)} km',
-                ),
-                const SizedBox(height: 8),
-                _buildInfoRow(
-                  context,
-                  icon: Icons.location_on,
-                  label: 'Distance maximale',
-                  value: '${DeliveryConfig.maxDeliveryDistance.toInt()} km',
-                  valueColor: Colors.red,
-                ),
-              ],
-            ),
           ),
           const SizedBox(height: 16),
           Container(
@@ -135,38 +110,9 @@ class ZoneNotServiceableDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildInfoRow(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required String value,
-    Color? valueColor,
-  }) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: Colors.grey.shade600),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-        ),
-        Text(
-          value,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: valueColor,
-              ),
-        ),
-      ],
-    );
-  }
-
   /// Méthode statique pour afficher le dialog facilement
   static Future<void> show(
     BuildContext context, {
-    required DeliveryFeeBreakdown breakdown,
     VoidCallback? onChooseAnotherAddress,
     VoidCallback? onViewServiceableZones,
   }) {
@@ -174,7 +120,6 @@ class ZoneNotServiceableDialog extends StatelessWidget {
       context: context,
       barrierDismissible: false,
       builder: (context) => ZoneNotServiceableDialog(
-        breakdown: breakdown,
         onChooseAnotherAddress: onChooseAnotherAddress,
         onViewServiceableZones: onViewServiceableZones,
       ),

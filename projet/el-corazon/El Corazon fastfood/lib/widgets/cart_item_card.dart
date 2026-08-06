@@ -11,6 +11,21 @@ class CartItemCard extends StatelessWidget {
     required this.item, required this.onRemove, required this.onQuantityChanged, super.key,
   });
 
+  /// Résume la personnalisation d'une ligne.
+  ///
+  /// La clé `note` est ce que la ligne transmet au serveur en texte libre
+  /// (`CartItem.remoteNotes`) : sur un gâteau sur mesure elle reprend, pour la
+  /// pâtisserie, ce que les autres clés disent déjà au client — mode, créneau,
+  /// message, contact. L'afficher deux fois repoussait l'essentiel au-delà des
+  /// deux lignes visibles. Elle n'est donc montrée que lorsqu'elle est seule à
+  /// porter l'information.
+  static String _describe(Map<String, dynamic> customization) {
+    final entries = customization.entries.where(
+      (entry) => entry.key != 'note' || customization.length == 1,
+    );
+    return entries.map((entry) => '${entry.key}: ${entry.value}').join(', ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -77,9 +92,7 @@ class CartItemCard extends StatelessWidget {
                   if (item.customization != null &&
                       item.customization!.isNotEmpty) ...[
                     Text(
-                      item.customization!.entries
-                          .map((e) => '${e.key}: ${e.value}')
-                          .join(', '),
+                      _describe(item.customization!),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color:
                             theme.colorScheme.onSurface.withValues(alpha: 0.6),

@@ -21,6 +21,7 @@ from apps.accounts.models import User
 from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
 from common.models import SoftDeleteModel, TimeStampedModel, UUIDModel
+from common.storage import product_images
 
 __all__ = [
     "Category",
@@ -70,7 +71,11 @@ class MenuItem(UUIDModel, TimeStampedModel, SoftDeleteModel):
     name = models.CharField(max_length=120)
     slug = models.SlugField(max_length=120)
     description = models.TextField(blank=True)
-    image = models.ImageField(upload_to="menu/", null=True, blank=True)
+    # Compartiment public : une carte se regarde. Signer ces URL les ferait
+    # expirer en quinze minutes, donc aucun cache ni CDN ne pourrait s'y
+    # accrocher — et un menu mis en favori afficherait des cadres vides le
+    # lendemain (ADR-011).
+    image = models.ImageField(upload_to="menu/", storage=product_images, null=True, blank=True)
 
     # Seule source de vérité du prix (C1).
     price = MoneyField()

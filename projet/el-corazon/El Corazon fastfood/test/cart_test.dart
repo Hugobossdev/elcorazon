@@ -13,6 +13,7 @@ void main() {
     double prix = 2500,
     int quantite = 1,
     Map<String, dynamic> options = const {},
+    List<String> identifiantsOptions = const [],
   }) {
     return CartItem(
       id: 'ligne-1',
@@ -21,6 +22,7 @@ void main() {
       price: prix,
       quantity: quantite,
       customizations: options,
+      selectedOptionIds: identifiantsOptions,
     );
   }
 
@@ -64,6 +66,86 @@ void main() {
         options: {'supplément': 'fromage'},
       );
       expect(avec.totalPrice, sans.totalPrice);
+    });
+  });
+
+  group('Options structurées d’une ligne', () {
+    test('les identifiants d’options survivent à un aller-retour de stockage', () {
+      // Le panier est relu du stockage local au démarrage : perdre les
+      // options y ferait repartir un gâteau sur mesure avec sa seule recette
+      // de base, et facturer ce prix-là.
+      final compose = article(
+        options: {'Forme': 'Cœur', 'note': 'Pour Jade'},
+        identifiantsOptions: const ['opt-coeur', 'opt-vanille'],
+      );
+
+      final relu = CartItem.fromMap(compose.toMap());
+
+      expect(relu.selectedOptionIds, ['opt-coeur', 'opt-vanille']);
+      expect(relu, equals(compose));
+    });
+
+    test('un panier écrit avant les options se relit sans options', () {
+      // Compatibilité descendante : `selected_option_ids` est absent des
+      // paniers sérialisés par les versions antérieures.
+      final ancien = {
+        'id': 'ligne-1',
+        'menu_item_id': 'article-1',
+        'name': 'Cheeseburger',
+        'price': 2500.0,
+        'quantity': 1,
+        'image_url': null,
+        'customizations': <String, dynamic>{},
+      };
+
+      expect(CartItem.fromMap(ancien).selectedOptionIds, isEmpty);
+    });
+
+    test('deux lignes ne diffèrent que par leurs options', () {
+      final coeur = article(identifiantsOptions: const ['opt-coeur']);
+      final carre = article(identifiantsOptions: const ['opt-carre']);
+
+      expect(coeur, isNot(equals(carre)));
+    });
+  });
+
+  group('Note envoyée au serveur', () {
+    test('sans option structurée, tout est aplati et trié', () {
+      // Déterminisme : `CartService._identical_line` (serveur) compare les
+      // notes pour fusionner deux lignes identiques. Un ordre instable y
+      // créerait une ligne de plus à chaque resynchronisation.
+      final avec = article(options: {'cuisson': 'à point', 'boisson': 'cola'});
+
+      expect(avec.remoteNotes, 'boisson: cola, cuisson: à point');
+    });
+
+    test('avec options structurées, seul le texte libre part', () {
+      // Les libellés sont déjà stockés par le serveur sous forme d'options :
+      // les répéter faisait déborder les 500 caractères de `CartLine.notes`,
+      // et le refus emportait la ligne entière.
+      final gateau = article(
+        options: {
+          'Forme': 'Cœur',
+          'Saveur': 'Vanille',
+          'note': 'Retrait le 12/08 à 10:00',
+        },
+        identifiantsOptions: const ['opt-coeur', 'opt-vanille'],
+      );
+
+      expect(gateau.remoteNotes, 'Retrait le 12/08 à 10:00');
+    });
+
+    test('une note trop longue est tronquée, pas refusée', () {
+      final bavard = article(
+        options: {'note': 'a' * 900},
+        identifiantsOptions: const ['opt-coeur'],
+      );
+
+      expect(bavard.remoteNotes.length, CartItem.maxNotesLength);
+    });
+
+    test('une ligne sans personnalisation n’a pas de note', () {
+      expect(article().remoteNotes, isEmpty);
     });
   });
 

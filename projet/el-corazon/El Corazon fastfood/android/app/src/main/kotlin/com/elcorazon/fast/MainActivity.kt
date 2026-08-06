@@ -1,4 +1,4 @@
-package com.example.elcora_dely
+package com.elcorazon.fast
 
 import io.flutter.embedding.android.FlutterActivity
 

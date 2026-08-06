@@ -41,6 +41,7 @@ Map<String, dynamic> _orderJson({String id = 'order-1', String status = 'pending
 /// Simule `/orders/*`.
 class _FakeServer implements HttpClientAdapter {
   String? lastIdempotencyKey;
+  Object? lastPreviewBody;
   final List<String> requests = [];
 
   @override
@@ -53,6 +54,29 @@ class _FakeServer implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     requests.add('${options.method} ${options.path}');
+
+    if (options.path.endsWith('/orders/preview/')) {
+      lastPreviewBody = options.data;
+      final promo = (options.data as Map<String, dynamic>)['promo_code'] as String;
+      final remise = promo == 'BIENVENUE' ? 500 : 0;
+      return _jsonResponse({
+        'subtotal': {'amount': '2500', 'currency': 'XOF'},
+        'delivery_fee': {'amount': '700', 'currency': 'XOF'},
+        'discount': {'amount': '$remise', 'currency': 'XOF'},
+        'total': {'amount': '${3200 - remise}', 'currency': 'XOF'},
+        // Un code refusé ne rend pas de promotion : la remise est nulle *et*
+        // le code est absent, ce qui les distingue.
+        'promotion': remise == 0
+            ? null
+            : {
+                'id': 'promo-1',
+                'code': 'BIENVENUE',
+                'description': '500 F sur la première commande',
+                'kind': 'fixed',
+              },
+        'is_orderable': true,
+      }, 200);
+    }
 
     if (options.path.endsWith('/orders/') && options.method == 'POST') {
       lastIdempotencyKey = options.headers['Idempotency-Key'] as String?;
@@ -128,6 +152,36 @@ void main() {
       final order = await repository.getById('order-1');
 
       expect(order.id, 'order-1');
+    });
+
+    test('preview rend la décomposition du serveur sans transmettre de montant', () async {
+      final quote = await repository.preview(
+        restaurantSlug: 'el-corazon-lome',
+        addressId: 'addr-1',
+        promoCode: 'BIENVENUE',
+      );
+
+      expect(quote.deliveryFee.amountMinor, 700);
+      expect(quote.discount.amountMinor, 500);
+      expect(quote.total.amountMinor, 2700);
+      expect(quote.promotionCode, 'BIENVENUE');
+      expect(quote.isOrderable, isTrue);
+
+      // Le panier et ses montants ne montent pas : le serveur les relit
+      // (invariants C1/C2).
+      expect(server.lastPreviewBody, {
+        'restaurant': 'el-corazon-lome',
+        'address': 'addr-1',
+        'promo_code': 'BIENVENUE',
+      });
+    });
+
+    test('preview sans adresse n\'envoie pas de champ adresse', () async {
+      final quote = await repository.preview(restaurantSlug: 'el-corazon-lome');
+
+      expect((server.lastPreviewBody! as Map).containsKey('address'), isFalse);
+      expect(quote.hasPromotion, isFalse);
+      expect(quote.isDeliveryFree, isFalse);
     });
 
     test('cancel appelle POST .../cancel/', () async {

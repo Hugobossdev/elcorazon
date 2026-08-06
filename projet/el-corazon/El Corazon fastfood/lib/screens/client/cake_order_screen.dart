@@ -43,6 +43,16 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
   // Data loaded from Supabase
   List<MenuItem> _readyCakes = [];
   MenuItem? _customCakeItem;
+
+  /// Vrai quand [_customCakeItem] vient réellement du catalogue.
+  ///
+  /// Faux, l'article affiché est la maquette en mémoire : son identifiant
+  /// n'existe pas côté serveur, aucune commande ne peut en naître. L'écran
+  /// laisse alors composer — c'est une vitrine utile — mais refuse
+  /// explicitement l'ajout au panier, là où l'ancienne version y déposait une
+  /// ligne que la synchronisation rejetait ensuite en silence.
+  bool _customCakeIsFromCatalog = false;
+
   String? _dessertsCategoryId;
   bool _isLoading = true;
   String? _error;
@@ -154,11 +164,13 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
       if (customCake != null) {
         _customCakeItem = customCake;
+        _customCakeIsFromCatalog = true;
         debugPrint('✅ Gâteau personnalisé trouvé au catalogue : ${customCake.id}');
         return;
       }
 
       // Créer un item par défaut si la création en DB a échoué ou si pas de catégorie
+      _customCakeIsFromCatalog = false;
       _customCakeItem = MenuItem(
         id: 'cake-custom-${DateTime.now().millisecondsSinceEpoch}',
         name: 'Gâteau personnalisé',
@@ -175,6 +187,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     } catch (e) {
       debugPrint('❌ Error loading custom cake item: $e');
       // Fallback vers un item par défaut
+      _customCakeIsFromCatalog = false;
       _customCakeItem = MenuItem(
         id: 'cake-custom-default',
         name: 'Gâteau personnalisé',
@@ -302,7 +315,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
       if (match) {
         // Appliquer la sélection
-        final constraint = service.getCategoryConstraint(option.category);
+        final constraint = _constraintFor(service, option.category);
 
         // Pour les single choice, on remplace. Pour les multi, on ajoute.
         if (constraint.isSingleChoice) {
@@ -931,6 +944,15 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         final priceModifier = service.calculatePriceModifier(_customizationId);
         final finalPrice = _customCakeItem!.price + priceModifier;
 
+        // Commandable seulement si l'article **et** ses options viennent du
+        // catalogue : sans les deux, la ligne déposée au panier serait refusée
+        // par le serveur, et l'était en silence.
+        final isOrderable = _customCakeIsFromCatalog &&
+            service.hasRemoteOptions(
+              _customCakeItem!.id,
+              fallbackName: _customCakeItem!.name,
+            );
+
         // Organiser les catégories par ordre de priorité pour une meilleure UX
         final categoryOrder = [
           'shape',
@@ -969,8 +991,9 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
                 final selectedIds =
                     customization.selections[category] ?? <String>[];
 
-                // ✅ Utilisation dynamique des contraintes
-                final constraint = service.getCategoryConstraint(category);
+                // ✅ Contrainte de l'article : celle du groupe serveur quand il
+                // y en a un, la table locale sinon.
+                final constraint = _constraintFor(service, category);
 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 20),
@@ -989,10 +1012,14 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
               const SizedBox(height: 12),
               _buildDeliverySelectors(theme),
               const SizedBox(height: 20),
+              if (!isOrderable) ...[
+                _buildUnpublishedNotice(theme),
+                const SizedBox(height: 16),
+              ],
               CustomButton(
                 text: 'Ajouter au panier',
                 icon: Icons.check_circle_outline,
-                onPressed: _isSubmitting || _customCakeItem == null
+                onPressed: _isSubmitting || !isOrderable
                     ? null
                     : () => _confirmCustomCakeOrder(service),
                 isLoading: _isSubmitting,
@@ -1001,6 +1028,70 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
           ),
         );
       },
+    );
+  }
+
+  /// Contrainte de la catégorie pour l'article en cours de composition.
+  CategoryConstraint _constraintFor(
+    CustomizationService service,
+    String category,
+  ) {
+    return service.constraintFor(
+      _customCakeItem!.id,
+      category,
+      fallbackName: _customCakeItem!.name,
+    );
+  }
+
+  /// Dit pourquoi la composition ne peut pas être commandée : l'établissement
+  /// n'a pas publié l'article « Gâteau personnalisé » au catalogue.
+  ///
+  /// Le dire ici plutôt que d'échouer au panier — l'ancienne version acceptait
+  /// l'ajout, et la ligne disparaissait à la première synchronisation.
+  Widget _buildUnpublishedNotice(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: theme.colorScheme.error.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 20,
+            color: theme.colorScheme.error,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Commande sur mesure indisponible',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Le gâteau personnalisé n\'est pas encore publié à la carte. '
+                  'Les options ci-dessus sont un aperçu : contactez la '
+                  'boutique pour composer votre gâteau.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1238,8 +1329,12 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
+                            // « Estimé », parce qu'il l'est : ce cumul sert à
+                            // composer, le montant facturé est celui que le
+                            // serveur relit du catalogue au devis du panier
+                            // (invariant C1).
                             Text(
-                              'Total',
+                              'Total estimé',
                               style: theme.textTheme.labelSmall?.copyWith(
                                 color: Colors.white.withValues(alpha: 0.9),
                               ),
@@ -2136,6 +2231,17 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       return;
     }
 
+    // Garde de sécurité : le bouton est déjà désactivé dans ce cas, mais
+    // déposer un article hors catalogue produirait une ligne que le serveur
+    // refuse — autant le dire ici plutôt qu'à la synchronisation.
+    if (!_customCakeIsFromCatalog) {
+      _showError(
+        'Le gâteau personnalisé n\'est pas encore publié à la carte : '
+        'la commande sur mesure est indisponible.',
+      );
+      return;
+    }
+
     // Vérifier que la personnalisation existe
     final customization = service.getCurrentCustomization(_customizationId);
     if (customization == null) {
@@ -2230,6 +2336,21 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       }
     }
 
+    // Relevé **avant** `finishCustomization`, qui referme la session : ce sont
+    // ces identifiants que le panier transmet, et dont le serveur tire le prix.
+    final selectedOptionIds = service.selectedOptionIds(_customizationId);
+
+    // Refus **avant** de refermer la session, sinon l'écran perdrait la
+    // composition qu'il vient de refuser d'envoyer et resterait vide.
+    if (selectedOptionIds.isEmpty) {
+      setState(() => _isSubmitting = false);
+      _showError(
+        'Les options de ce gâteau ne sont pas publiées au catalogue : '
+        'la commande sur mesure est indisponible.',
+      );
+      return;
+    }
+
     final finishedCustomization = service.finishCustomization(_customizationId);
     if (finishedCustomization == null) {
       setState(() => _isSubmitting = false);
@@ -2237,9 +2358,9 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       return;
     }
 
-    final totalPrice =
-        _customCakeItem!.price + finishedCustomization.totalPriceModifier;
-
+    // Libellés des options, pour l'affichage du panier. Ils ne partent pas
+    // dans la note : le serveur stocke déjà les options retenues, et les y
+    // répéter faisait déborder les 500 caractères de `CartLine.notes`.
     final customizationsMap = <String, dynamic>{
       'Type': 'Gâteau personnalisé',
     };
@@ -2252,10 +2373,6 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       customizationsMap[translatedCategory] = labels.join(', ');
     });
 
-    if (finishedCustomization.specialInstructions?.isNotEmpty == true) {
-      customizationsMap['Message'] = finishedCustomization.specialInstructions;
-    }
-
     final deliveryDateIso = DateTime(
       _customDeliveryDate!.year,
       _customDeliveryDate!.month,
@@ -2264,33 +2381,50 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       _customDeliveryTime!.minute,
     );
 
-    customizationsMap['Mode'] = _deliveryMethod == CakeDeliveryMethod.delivery
+    final mode = _deliveryMethod == CakeDeliveryMethod.delivery
         ? 'Livraison'
         : 'Retrait en boutique';
-    if (mounted && context.mounted) {
-      customizationsMap['Livraison'] =
-          '${_formatDate(_customDeliveryDate!)} à ${_customDeliveryTime!.format(context)}';
-    } else {
-      customizationsMap['Livraison'] =
-          '${_formatDate(_customDeliveryDate!)} à ${_customDeliveryTime!.hour.toString().padLeft(2, '0')}:${_customDeliveryTime!.minute.toString().padLeft(2, '0')}';
+    final heure = mounted && context.mounted
+        ? _customDeliveryTime!.format(context)
+        : '${_customDeliveryTime!.hour.toString().padLeft(2, '0')}:${_customDeliveryTime!.minute.toString().padLeft(2, '0')}';
+
+    customizationsMap['Mode'] = mode;
+    customizationsMap['Livraison'] =
+        '${_formatDate(_customDeliveryDate!)} à $heure';
+    if (finishedCustomization.specialInstructions?.isNotEmpty == true) {
+      customizationsMap['Message'] = finishedCustomization.specialInstructions;
     }
-    customizationsMap['Date ISO'] = deliveryDateIso.toIso8601String();
     if (_contactController.text.trim().isNotEmpty) {
       customizationsMap['Contact'] = _contactController.text.trim();
     }
-    if (customization.totalPriceModifier != 0) {
-      customizationsMap['Supplément'] =
-          PriceFormatter.format(customization.totalPriceModifier);
-    }
+
+    // Ce que la pâtisserie doit lire et que les options ne disent pas : quand,
+    // comment, pour qui, et le message à écrire sur le gâteau. Seule cette clé
+    // rejoint `CartLine.notes` (voir `CartItem.remoteNotes`).
+    customizationsMap['note'] = [
+      'Gâteau sur mesure',
+      '$mode le ${_formatDate(_customDeliveryDate!)} à $heure',
+      'ISO ${deliveryDateIso.toIso8601String()}',
+      if (finishedCustomization.specialInstructions?.isNotEmpty == true)
+        'Message : ${finishedCustomization.specialInstructions}',
+      if (_contactController.text.trim().isNotEmpty)
+        'Contact : ${_contactController.text.trim()}',
+    ].join(' • ');
 
     final cartService = Provider.of<CartService>(context, listen: false);
     final offlineSyncService =
         Provider.of<OfflineSyncService>(context, listen: false);
 
     try {
+      // Le prix de la ligne reste celui du catalogue : les suppléments des
+      // options sont ajoutés par le serveur, qui les relit lui-même
+      // (invariant C1). L'ancienne version déposait ici un prix calculé dans
+      // l'app — que la synchronisation jetait, si bien que le client voyait
+      // un total dans le panier et en payait un autre.
       cartService.addItem(
-        _customCakeItem!.copyWith(price: totalPrice),
+        _customCakeItem!,
         customizations: customizationsMap,
+        optionIds: selectedOptionIds,
       );
 
       if (!mounted) return;
@@ -2451,7 +2585,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       final selectedCount = (customization?.selections[category] ?? []).length;
 
       // ✅ Utilisation de la contrainte dynamique
-      final constraint = service.getCategoryConstraint(category);
+      final constraint = _constraintFor(service, category);
       final maxSelections = constraint.maxSelections;
 
       if (selectedCount >= maxSelections && maxSelections < 99) {

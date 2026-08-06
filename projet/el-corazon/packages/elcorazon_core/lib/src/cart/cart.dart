@@ -1,9 +1,40 @@
 import '../models/money.dart';
 
+/// Option retenue sur une ligne de panier — miroir de
+/// `SelectedOptionSerializer` (`backend/apps/carts/serializers.py`).
+///
+/// [priceDelta] est le supplément que le **serveur** a retenu, pas celui que
+/// l'application avait affiché en composant la ligne : c'est ce qui permet de
+/// montrer le détail d'un prix sans jamais le recalculer (invariant C1).
+class CartLineOption {
+  const CartLineOption({
+    required this.id,
+    required this.name,
+    required this.priceDelta,
+    required this.groupName,
+  });
+
+  factory CartLineOption.fromJson(Map<String, dynamic> json) {
+    return CartLineOption(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      priceDelta: Money.fromJson(json['price_delta'] as Map<String, dynamic>),
+      groupName: json['group'] as String? ?? '',
+    );
+  }
+
+  final String id;
+  final String name;
+  final Money priceDelta;
+
+  /// Nom du groupe dont l'option est issue (« Forme », « Taille »...). Le
+  /// serveur groupe par `OptionGroup` et n'a pas d'étiquette libre : c'est ce
+  /// nom qui tient lieu de catégorie côté application.
+  final String groupName;
+}
+
 /// Ligne de panier valorisée — miroir de `PricedLineSerializer`
-/// (`backend/apps/carts/serializers.py`). Pas de champ `options` : cette
-/// tranche ne porte pas la personnalisation structurée (voir
-/// `docs/architecture/04-migration-flutter.md`).
+/// (`backend/apps/carts/serializers.py`).
 class CartLine {
   const CartLine({
     required this.id,
@@ -12,6 +43,7 @@ class CartLine {
     required this.image,
     required this.quantity,
     required this.notes,
+    required this.options,
     required this.unitPrice,
     required this.total,
     required this.isOrderable,
@@ -26,6 +58,9 @@ class CartLine {
       image: json['image'] as String?,
       quantity: json['quantity'] as int,
       notes: json['notes'] as String? ?? '',
+      options: (json['options'] as List<dynamic>? ?? const [])
+          .map((option) => CartLineOption.fromJson(option as Map<String, dynamic>))
+          .toList(),
       unitPrice: Money.fromJson(json['unit_price'] as Map<String, dynamic>),
       total: Money.fromJson(json['total'] as Map<String, dynamic>),
       isOrderable: json['is_orderable'] as bool,
@@ -39,6 +74,10 @@ class CartLine {
   final String? image;
   final int quantity;
   final String notes;
+
+  /// Options retenues, dans l'ordre d'affichage de leur groupe (le serveur les
+  /// trie dans `CartLine.selected_options`).
+  final List<CartLineOption> options;
   final Money unitPrice;
   final Money total;
   final bool isOrderable;

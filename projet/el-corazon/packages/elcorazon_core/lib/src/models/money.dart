@@ -40,6 +40,25 @@ class Money {
     return amountMinor / _pow10(exponent);
   }
 
+  /// Montant **saisi par un humain** dans un formulaire du back-office —
+  /// « 12,50 » en euros, « 1250 » en francs CFA.
+  ///
+  /// C'est le seul sens de conversion qu'une application a le droit de faire :
+  /// transformer une saisie en unité mineure avant de l'envoyer. Le serveur
+  /// n'accepte que l'unité mineure (ADR-007) et refuse « 12.50 » plutôt que de
+  /// deviner l'échelle.
+  ///
+  /// L'arrondi est explicite parce qu'un `double` ne représente pas 12,50 :
+  /// `12.50 * 100` vaut 1249,999… en virgule flottante, et une troncature
+  /// silencieuse ferait perdre un centime à chaque enregistrement.
+  factory Money.fromMajorUnits(double amount, String currency) {
+    final exponent = _exponents[currency] ?? 0;
+    return Money(
+      amountMinor: (amount * _pow10(exponent)).round(),
+      currency: currency,
+    );
+  }
+
   static int _pow10(int exponent) {
     var result = 1;
     for (var i = 0; i < exponent; i++) {

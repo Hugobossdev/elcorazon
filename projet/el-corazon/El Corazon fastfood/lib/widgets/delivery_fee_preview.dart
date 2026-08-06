@@ -4,19 +4,21 @@ import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 
-/// Widget pour prévisualiser les frais de livraison d'une adresse
+/// Livre-t-on à cette adresse, et à quel barème ?
+///
+/// La question est posée au serveur (`/geography/zones/resolve/`), pas
+/// résolue sur le téléphone. Ce qui est montré ici est le **forfait de base**
+/// de la zone : dans une liste d'adresses, aucun panier n'est en jeu, et le
+/// prix définitif dépend de la distance et du montant commandé. Le devis exact
+/// vient à la commande.
 class DeliveryFeePreview extends StatefulWidget {
   final Address address;
   final bool compact;
-  final double orderSubtotal;
-  final bool isVip;
 
   const DeliveryFeePreview({
     required this.address,
     super.key,
     this.compact = false,
-    this.orderSubtotal = 0.0,
-    this.isVip = false,
   });
 
   @override
@@ -36,37 +38,32 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
   @override
   void didUpdateWidget(DeliveryFeePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.address.id != widget.address.id ||
-        oldWidget.orderSubtotal != widget.orderSubtotal) {
+    if (oldWidget.address.id != widget.address.id) {
       _loadBreakdown();
     }
   }
 
   Future<void> _loadBreakdown() async {
-    if (widget.address.latitude == null || widget.address.longitude == null) {
-      return;
-    }
+    try {
+      final breakdown = await _deliveryFeeService.breakdownForPoint(
+        latitude: widget.address.latitude,
+        longitude: widget.address.longitude,
+      );
 
-    final breakdown =
-        await _deliveryFeeService.calculateDetailedDeliveryFeeFromAddress(
-      address: widget.address,
-      orderSubtotal: widget.orderSubtotal,
-      isVip: widget.isVip,
-    );
-
-    if (mounted) {
-      setState(() {
-        _cachedBreakdown = breakdown;
-      });
+      if (mounted) {
+        setState(() {
+          _cachedBreakdown = breakdown;
+        });
+      }
+    } catch (e) {
+      // Serveur injoignable : la vignette reste sur son indicateur de
+      // chargement plutôt que d'annoncer un prix qu'on ne connaît pas.
+      debugPrint('DeliveryFeePreview: barème indisponible — $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.address.latitude == null || widget.address.longitude == null) {
-      return _buildNoCoordinates();
-    }
-
     if (_cachedBreakdown == null) {
       return _buildLoading();
     }
@@ -74,7 +71,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
     final breakdown = _cachedBreakdown!;
 
     if (!breakdown.isInServiceableZone) {
-      return _buildNotServiceable(breakdown);
+      return _buildNotServiceable();
     }
 
     if (breakdown.isFreeDelivery) {
@@ -86,31 +83,8 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
         : _buildExpanded(breakdown);
   }
 
-  Widget _buildNoCoordinates() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.orange.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.orange.shade200),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.warning_amber, size: 16, color: Colors.orange.shade700),
-          const SizedBox(width: 6),
-          Text(
-            'Position GPS manquante',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.orange.shade900,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // L'état « Position GPS manquante » n'existe plus : une `Address` porte
+  // toujours son point.
 
   Widget _buildLoading() {
     return Container(
@@ -137,7 +111,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
     );
   }
 
-  Widget _buildNotServiceable(DeliveryFeeBreakdown breakdown) {
+  Widget _buildNotServiceable() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -152,7 +126,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
           const SizedBox(width: 6),
           Flexible(
             child: Text(
-              'Hors zone (${breakdown.distance.toStringAsFixed(1)} km)',
+              'Hors zone de livraison',
               style: TextStyle(
                 fontSize: 12,
                 color: Colors.red.shade900,
@@ -205,17 +179,10 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
         children: [
           Icon(Icons.check_circle, size: 16, color: Colors.green.shade700),
           const SizedBox(width: 6),
-          Icon(Icons.straighten, size: 14, color: theme.colorScheme.primary),
-          const SizedBox(width: 4),
-          Text(
-            '${breakdown.distance.toStringAsFixed(1)} km',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(width: 8),
           Icon(Icons.payments, size: 14, color: theme.colorScheme.primary),
           const SizedBox(width: 4),
           Text(
-            PriceFormatter.format(breakdown.totalFee),
+            'dès ${PriceFormatter.format(breakdown.totalFee)}',
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
@@ -254,16 +221,18 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
             ],
           ),
           const SizedBox(height: 8),
-          _buildInfoRow(
-            icon: Icons.straighten,
-            label: 'Distance',
-            value: '${breakdown.distance.toStringAsFixed(1)} km',
-            theme: theme,
-          ),
-          const SizedBox(height: 4),
+          if (breakdown.zoneName != null) ...[
+            _buildInfoRow(
+              icon: Icons.map_outlined,
+              label: 'Zone',
+              value: breakdown.zoneName!,
+              theme: theme,
+            ),
+            const SizedBox(height: 4),
+          ],
           _buildInfoRow(
             icon: Icons.payments,
-            label: 'Frais de livraison',
+            label: 'Livraison à partir de',
             value: PriceFormatter.format(breakdown.totalFee),
             theme: theme,
             bold: true,

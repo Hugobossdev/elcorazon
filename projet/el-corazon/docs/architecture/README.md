@@ -29,6 +29,7 @@ commit `56e0bec`).
 | [008](adr/008-temps-reel-channels-vs-push.md) | WebSocket au premier plan, FCM en arrière-plan | Ferme L3 (falsification de suivi) |
 | [009](adr/009-contrat-d-api.md) | Contrat propre, rupture coordonnée avec les clients Dart | Ne pas figer un plantage sur champ absent |
 | [010](adr/010-machines-a-etats.md) | Transitions déclaratives, monotones, verrouillées | Ferme C3, C4, C5, P1, L2 |
+| [011](adr/011-stockage-objet.md) | S3 servi par MinIO ; compartiments publics et privé séparés | Un catalogue se met en cache, une pièce d'identité se signe |
 
 ## Fil conducteur
 

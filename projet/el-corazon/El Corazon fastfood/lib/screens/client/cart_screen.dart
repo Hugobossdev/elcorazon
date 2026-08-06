@@ -291,7 +291,6 @@ class CartScreen extends StatelessWidget {
 
   Widget _buildPriceSummary(CartService cartService) {
     final subtotal = cartService.subtotal;
-    final deliveryFee = cartService.deliveryFee;
     final discount = cartService.discount;
     final total = cartService.total;
 
@@ -302,7 +301,14 @@ class CartScreen extends StatelessWidget {
           subtotal,
         ),
         const SizedBox(height: 8),
-        _buildPriceRow('Livraison', deliveryFee),
+        // Tant qu'aucune adresse n'est choisie, personne ne connaît le prix de
+        // la course : elle dépend de la zone d'arrivée. Le panier affichait
+        // « 500 F » par défaut — un montant que le serveur n'aurait presque
+        // jamais confirmé.
+        if (cartService.hasQuote)
+          _buildPriceRow('Livraison', cartService.deliveryFee)
+        else
+          _buildPendingRow('Livraison', 'calculée à la validation'),
         if (discount > 0) ...[
           const SizedBox(height: 8),
           _buildPriceRow(
@@ -313,7 +319,7 @@ class CartScreen extends StatelessWidget {
         ],
         const Divider(height: 20),
         _buildPriceRow(
-          'Total',
+          cartService.hasQuote ? 'Total' : 'Total (hors livraison)',
           total,
           isTotal: true,
         ),
@@ -341,6 +347,28 @@ class CartScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  /// Ligne dont le montant n'est pas encore connu du serveur. Dire « calculée
+  /// à la validation » vaut mieux qu'un zéro, qui se lit « offerte ».
+  Widget _buildPendingRow(String label, String note) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 16, color: AppColors.textSecondary),
+        ),
+        Text(
+          note,
+          style: const TextStyle(
+            fontSize: 14,
+            fontStyle: FontStyle.italic,
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 

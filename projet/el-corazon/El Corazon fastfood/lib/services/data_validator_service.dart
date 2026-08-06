@@ -200,16 +200,13 @@ class DataValidatorService {
       errors.add('Le code postal est invalide');
     }
 
-    // Valider les coordonnées si présentes
-    if (address.latitude == null || address.longitude == null) {
-      errors.add('Veuillez sélectionner une position sur la carte (coordonnées manquantes)');
-    } else {
-      if (address.latitude! < -90 || address.latitude! > 90) {
-        errors.add('La latitude est invalide');
-      }
-      if (address.longitude! < -180 || address.longitude! > 180) {
-        errors.add('La longitude est invalide');
-      }
+    // L'absence de point n'est plus vérifiée : une `Address` en porte
+    // toujours. Restent les bornes, qui attrapent un point aberrant.
+    if (address.latitude < -90 || address.latitude > 90) {
+      errors.add('La latitude est invalide');
+    }
+    if (address.longitude < -180 || address.longitude > 180) {
+      errors.add('La longitude est invalide');
     }
 
     return errors;

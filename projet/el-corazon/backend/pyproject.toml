@@ -187,6 +187,10 @@ ignore_errors = true
 # annotations, il suffit de retirer une ligne.
 [[tool.mypy.overrides]]
 module = [
+    "boto3",
+    "boto3.*",
+    "botocore",
+    "botocore.*",
     "celery",
     "celery.*",
     "channels",
@@ -197,8 +201,18 @@ module = [
     "django_filters.*",
     "pyogrio",
     "pyogrio.*",
+    "storages",
+    "storages.*",
 ]
 ignore_missing_imports = true
+
+# `django-storages` ne publie pas d'annotations : `S3Storage` est vu comme
+# `Any`, et en hériter est refusé en mode strict. Même traitement que pour les
+# consommateurs Channels, et même limite — l'assouplissement ne couvre que le
+# module qui touche à la bibliothèque, jamais ses appelants.
+[[tool.mypy.overrides]]
+module = ["common.storage"]
+disallow_subclassing_any = false
 
 # Les consommateurs WebSocket héritent et se décorent avec Channels, qui ne
 # publie pas d'annotations : la classe de base et `database_sync_to_async` sont

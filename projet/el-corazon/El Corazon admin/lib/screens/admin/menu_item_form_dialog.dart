@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -38,7 +40,33 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
   bool _isUploadingImage = false;
   List<MenuOptionGroup> _optionGroups = [];
 
+  /// Photo choisie pour un article **qui n'existe pas encore** — envoyée juste
+  /// après sa création, faute d'identifiant à qui l'attacher avant.
+  XFile? _pendingImage;
+  Uint8List? _pendingImageBytes;
+
   late TabController _tabController;
+
+  /// Vignette du cadre de photo.
+  ///
+  /// La photo en attente prime sur l'URL enregistrée : c'est le dernier choix
+  /// de l'exploitant, et il doit se voir avant même d'avoir été envoyé —
+  /// depuis les octets en mémoire, un fichier pas encore parti n'ayant pas
+  /// d'adresse.
+  DecorationImage? _apercu() {
+    if (_isUploadingImage) return null;
+
+    final octets = _pendingImageBytes;
+    if (octets != null) {
+      return DecorationImage(image: MemoryImage(octets), fit: BoxFit.cover);
+    }
+
+    if (_imageUrlController.text.isEmpty) return null;
+    return DecorationImage(
+      image: NetworkImage(_imageUrlController.text),
+      fit: BoxFit.cover,
+    );
+  }
 
   Future<void> _pickImage() async {
     final ImagePicker picker = ImagePicker();
@@ -76,6 +104,28 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
     );
 
     if (image != null) {
+      final existant = widget.menuItem?.id;
+
+      // Article pas encore créé : la photo attend son identifiant. Voir
+      // `_saveMenuItem`, qui l'envoie une fois la création aboutie.
+      if (existant == null || existant.isEmpty) {
+        final octets = await image.readAsBytes();
+        if (!mounted) return;
+
+        setState(() {
+          _pendingImage = image;
+          _pendingImageBytes = octets;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Photo retenue — elle sera envoyée à l’enregistrement du produit',
+            ),
+          ),
+        );
+        return;
+      }
+
       setState(() {
         _isUploadingImage = true;
       });
@@ -83,25 +133,21 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
       try {
         if (!mounted || !context.mounted) return;
         final menuService = Provider.of<MenuService>(context, listen: false);
-        final productName =
-            _nameController.text.isNotEmpty ? _nameController.text : 'product';
-
-        // Passer l'ancienne URL si on modifie un produit existant
-        final oldImageUrl = widget.menuItem?.imageUrl;
 
         final imageUrl = await menuService.uploadProductImage(
-          image,
-          productName,
-          oldImageUrl: oldImageUrl,
+          menuItemId: existant,
+          image: image,
         );
 
         if (imageUrl != null && mounted) {
           setState(() {
             _imageUrlController.text = imageUrl;
+            _pendingImage = null;
+            _pendingImageBytes = null;
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Image uploadée avec succès'),
+              content: Text('Image enregistrée'),
               backgroundColor: Colors.green,
             ),
           );
@@ -278,17 +324,11 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
                   decoration: BoxDecoration(
                     color: Colors.grey[200],
                     borderRadius: BorderRadius.circular(12),
-                    image: _imageUrlController.text.isNotEmpty &&
-                            !_isUploadingImage
-                        ? DecorationImage(
-                            image: NetworkImage(_imageUrlController.text),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
+                    image: _apercu(),
                   ),
                   child: _isUploadingImage
                       ? const Center(child: CircularProgressIndicator())
-                      : (_imageUrlController.text.isEmpty
+                      : (_apercu() == null
                           ? const Icon(Icons.add_photo_alternate,
                               size: 40, color: Colors.grey)
                           : null),
@@ -569,6 +609,18 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
       if (widget.menuItem == null) {
         final createdItem = await menuService.createMenuItem(newItem);
         success = createdItem != null;
+
+        // La photo choisie avant que l'article existe : c'est maintenant
+        // qu'elle trouve un article à qui s'attacher. Un échec ne défait pas la
+        // création — l'article est enregistré, il lui manque son image.
+        final enAttente = _pendingImage;
+        if (success && enAttente != null) {
+          await menuService.uploadProductImage(
+            menuItemId: createdItem.id,
+            image: enAttente,
+          );
+        }
+
         // Sauvegarder les optionGroups séparément car Supabase ne gère pas les nested writes complexes
         if (success && _optionGroups.isNotEmpty) {
           for (var group in _optionGroups) {

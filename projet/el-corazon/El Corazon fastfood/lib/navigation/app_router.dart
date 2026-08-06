@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/menu_item.dart';
@@ -183,9 +184,14 @@ class AppRouter {
 
       case addressSelector:
         final args = settings.arguments as Map<String, dynamic>?;
+        final onSelected = args?['onAddressSelected'] as void Function(Address)?;
         return MaterialPageRoute(
-          builder: (_) => AddressSelectorScreen(
-            onAddressSelected: args?['onAddressSelected'],
+          builder: (context) => AddressSelectorScreen(
+            // Sans argument, cette route passait `null` à un paramètre non
+            // nullable : ouvrir le sélecteur par son nom, sans rappel, faisait
+            // planter l'écran au lieu de simplement rendre l'adresse choisie.
+            onAddressSelected:
+                onSelected ?? (address) => Navigator.of(context).pop(address),
           ),
           settings: settings,
         );

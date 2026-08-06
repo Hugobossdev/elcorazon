@@ -3,704 +3,521 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
 
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/repositories/django_address_repository.dart';
-import 'package:elcora_fast/services/geocoding_service.dart';
 
+/// Levée par toute écriture tentée sans session.
+///
+/// Le carnet vit côté serveur, derrière `IsAuthenticated` : sans session il n'y
+/// a pas de carnet, et une adresse enregistrée « en attendant » ne pourrait
+/// jamais servir à commander. Dire non tout de suite vaut mieux que de laisser
+/// saisir une adresse que le paiement refusera.
+class AddressSessionRequired implements Exception {
+  const AddressSessionRequired();
+
+  @override
+  String toString() => 'Connectez-vous pour gérer vos adresses de livraison.';
+}
+
+/// Carnet d'adresses du client.
+///
+/// **Le serveur est la source de vérité, sans exception.** Le stockage local
+/// n'est qu'un cache de lecture : il permet d'afficher le carnet avant que le
+/// réseau réponde, et de continuer à l'afficher s'il ne répond pas. Il ne
+/// crée rien, ne numérote rien, et ne survit pas à une réponse du serveur qui
+/// le contredit.
+///
+/// Ce point était l'inverse auparavant, et c'est ce qui empêchait de commander.
+/// [initializeForUser] — seul endroit qui renseignait `_userId`, et donc seule
+/// condition qui activait les appels Django — n'était appelé par personne. Le
+/// service travaillait en permanence en mode « invité » : chaque adresse
+/// recevait un UUID fabriqué ici, était écrite dans `SharedPreferences`, et
+/// n'atteignait jamais `/profiles/addresses/`. Au paiement, cet identifiant
+/// partait comme `address` dans `POST /orders/`, où le serveur ne pouvait que
+/// le rejeter — il ne l'avait jamais émis. Le carnet s'affichait pourtant
+/// normalement, et rien n'indiquait au client que ses adresses n'existaient
+/// que sur son téléphone.
+///
+/// Les carnets ainsi constitués existent sur les appareils déjà installés :
+/// [_adoptLegacyBook] les reprend au premier démarrage muni d'une session,
+/// plutôt que de les laisser tomber.
 class AddressService extends ChangeNotifier {
-  static final AddressService _instance = AddressService._internal();
   factory AddressService() => _instance;
   AddressService._internal();
 
-  List<Address> _addresses = [];
-  Address? _selectedAddress;
-  bool _isInitialized = false;
+  /// Constructeur de test : une instance isolée, avec un dépôt substituable.
+  /// Le singleton reste le seul chemin utilisé par l'application.
+  @visibleForTesting
+  AddressService.forTest(AddressBookRepository repository) : _repository = repository;
+
+  static final AddressService _instance = AddressService._internal();
+
+  /// Construit à la première écriture, et non dans le constructeur : le dépôt
+  /// réel lit `apiClient` dans `main.dart`, ce qui déclencherait Firebase au
+  /// simple fait de nommer le service.
+  AddressBookRepository? _repository;
+  AddressBookRepository get _addresses => _repository ??= DjangoAddressRepository();
+
+  List<Address> _book = const [];
+  Set<String> _favoriteIds = <String>{};
+  String? _selectedId;
   String? _userId;
+  bool _isInitialized = false;
+  bool _isSyncing = false;
 
-  final DjangoAddressRepository _addressRepository = DjangoAddressRepository();
-  final Uuid _uuid = const Uuid();
-  final GeocodingService _geocodingService = GeocodingService();
+  /// Empêche deux synchronisations simultanées de se doubler — le geste
+  /// « tirer pour rafraîchir » pendant que l'ouverture de l'écran charge déjà.
+  Future<void>? _pendingSync;
 
-  bool _isMigratingCoordinates = false;
-  int _migrationTotal = 0;
-  int _migrationDone = 0;
-
-  bool get isMigratingCoordinates => _isMigratingCoordinates;
-  int get migrationTotal => _migrationTotal;
-  int get migrationDone => _migrationDone;
-
-  // Getters
-  List<Address> get addresses => List.unmodifiable(_addresses);
-  Address? get selectedAddress => _selectedAddress;
-  Address? get defaultAddress =>
-      _addresses.where((a) => a.isDefault).firstOrNull;
-  List<Address> get favoriteAddresses =>
-      _addresses.where((a) => a.isFavorite).toList();
+  List<Address> get addresses => List.unmodifiable(_book);
+  Address? get selectedAddress => _book.where((a) => a.id == _selectedId).firstOrNull;
+  Address? get defaultAddress => _book.where((a) => a.isDefault).firstOrNull;
+  List<Address> get favoriteAddresses => _book.where((a) => a.isFavorite).toList();
   bool get isInitialized => _isInitialized;
-  bool get hasAddresses => _addresses.isNotEmpty;
+  bool get hasAddresses => _book.isNotEmpty;
+  bool get isSyncing => _isSyncing;
 
-  String get _addressesStorageKey {
-    final key = _userId ?? 'guest';
-    return 'user_addresses_$key';
-  }
+  /// Vrai quand une session est ouverte — donc quand le carnet est modifiable.
+  /// Les écrans s'en servent pour proposer la connexion plutôt qu'un formulaire
+  /// dont l'enregistrement échouerait.
+  bool get canEdit => _userId != null;
 
-  String get _selectedAddressStorageKey {
-    final key = _userId ?? 'guest';
-    return 'selected_address_id_$key';
-  }
+  // ------------------------------------------------------------------ session
 
-  /// Initialise le service et charge les adresses depuis le stockage local
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-
-    try {
-      await _loadAddresses();
-      _isInitialized = true;
-      notifyListeners();
-      debugPrint(
-        'AddressService: Initialisé avec ${_addresses.length} adresses',
-      );
-    } catch (e) {
-      debugPrint('AddressService: Erreur d\'initialisation - $e');
-    }
-  }
-
-  Future<void> initializeForUser(String userId) async {
-    _userId = userId;
-    await _loadAddresses();
-    await _loadAddressesFromDatabase();
-
-    // Migration lat/lng en arrière-plan (ne pas bloquer l'UI)
-    unawaited(migrateMissingCoordinates());
-  }
-
-  Future<void> clearSession() async {
-    _addresses = [];
-    _selectedAddress = null;
-    _userId = null;
-    notifyListeners();
-  }
-
-  /// Charge les adresses depuis le stockage local
-  Future<void> _loadAddresses() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final addressesJson = prefs.getStringList(_addressesStorageKey) ?? [];
-
-      _addresses = addressesJson
-          .map((json) => Address.fromJson(jsonDecode(json)))
-          .toList();
-
-      // Charger l'adresse sélectionnée
-      final selectedAddressId = prefs.getString(_selectedAddressStorageKey);
-      if (selectedAddressId != null) {
-        _selectedAddress =
-            _addresses.where((a) => a.id == selectedAddressId).firstOrNull;
-      }
-
-      // Si aucune adresse sélectionnée, utiliser l'adresse par défaut
-      if (_selectedAddress == null && _addresses.isNotEmpty) {
-        _selectedAddress = defaultAddress ?? _addresses.first;
-      }
-    } catch (e) {
-      debugPrint('AddressService: Erreur de chargement des adresses - $e');
-    }
-  }
-
-  /// Sauvegarde les adresses dans le stockage local
-  Future<void> _saveAddresses() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final addressesJson =
-          _addresses.map((address) => jsonEncode(address.toJson())).toList();
-
-      if (addressesJson.isEmpty) {
-        await prefs.remove(_addressesStorageKey);
-      } else {
-        await prefs.setStringList(_addressesStorageKey, addressesJson);
-      }
-
-      if (_selectedAddress != null) {
-        await prefs.setString(
-          _selectedAddressStorageKey,
-          _selectedAddress!.id,
-        );
-      } else {
-        await prefs.remove(_selectedAddressStorageKey);
-      }
-    } catch (e) {
-      debugPrint('AddressService: Erreur de sauvegarde des adresses - $e');
-    }
-  }
-
-  Future<void> _loadAddressesFromDatabase() async {
-    if (_userId == null) return;
-
-    try {
-      final remoteAddresses = await _addressRepository.list(userId: _userId!);
-
-      // `isFavorite` n'existe pas côté Django (hors scope de cette tranche,
-      // reste un concept purement local) — préservé depuis l'état local
-      // existant plutôt que silencieusement réinitialisé à chaque rechargement.
-      final previousFavorites = {
-        for (final address in _addresses)
-          if (address.isFavorite) address.id: true,
-      };
-      _addresses = remoteAddresses
-          .map(
-            (address) => previousFavorites.containsKey(address.id)
-                ? address.copyWith(isFavorite: true)
-                : address,
-          )
-          .toList();
-
-      if (_addresses.isNotEmpty) {
-        _selectedAddress = defaultAddress ?? _addresses.first;
-      } else {
-        _selectedAddress = null;
-      }
-
-      await _saveAddresses();
-      notifyListeners();
-      debugPrint(
-        'AddressService: Synchronisation serveur (${_addresses.length} adresses)',
-      );
-    } catch (e) {
-      debugPrint('AddressService: Erreur de synchronisation - $e');
-    }
-  }
-
-  /// Migration: géocoder et remplir latitude/longitude si manquants.
+  /// Ouvre le carnet du client connecté.
   ///
-  /// - Met à jour Supabase (si user connecté) + cache local.
-  /// - Throttle pour éviter les quotas.
-  /// - N'échoue pas en bloc si une adresse échoue.
-  Future<void> migrateMissingCoordinates() async {
-    if (_isMigratingCoordinates) return;
-    if (_userId == null) return; // uniquement user connecté
+  /// Affiche d'abord le cache — instantané, et seul contenu disponible hors
+  /// ligne — puis se cale sur le serveur.
+  Future<void> initializeForUser(String userId) async {
+    if (_userId == userId && _isInitialized) {
+      await refresh();
+      return;
+    }
 
-    final missing = _addresses
-        .where((a) => a.latitude == null || a.longitude == null)
-        .toList();
+    _userId = userId;
+    await _loadFromCache();
+    _isInitialized = true;
+    notifyListeners();
 
-    if (missing.isEmpty) return;
+    await refresh();
+  }
 
-    _isMigratingCoordinates = true;
-    _migrationTotal = missing.length;
-    _migrationDone = 0;
+  /// Ferme le carnet. Le cache de ce compte reste sur l'appareil : il sera
+  /// relu à la reconnexion, et c'est ce qui permet d'afficher ses adresses
+  /// avant la première réponse du serveur.
+  Future<void> clearSession() async {
+    _userId = null;
+    _book = const [];
+    _favoriteIds = <String>{};
+    _selectedId = null;
+    _isInitialized = false;
+    notifyListeners();
+  }
+
+  /// Relit le carnet depuis le serveur.
+  ///
+  /// Un échec réseau **ne vide pas** l'affichage : le cache reste en place. Un
+  /// carnet vide et un carnet inconnu ne se ressemblent que sur l'écran de
+  /// celui qui les regarde, et confondre les deux ferait proposer « ajoutez
+  /// votre première adresse » à un client qui en a cinq.
+  Future<void> refresh() {
+    if (_userId == null) return Future<void>.value();
+    return _pendingSync ??= _pullFromServer().whenComplete(() {
+      _pendingSync = null;
+    });
+  }
+
+  Future<void> _pullFromServer() async {
+    final userId = _userId;
+    if (userId == null) return;
+
+    _isSyncing = true;
     notifyListeners();
 
     try {
-      for (final addr in missing) {
-        final query = addr.fullAddress.trim();
-        if (query.isEmpty) {
-          _migrationDone++;
-          notifyListeners();
-          continue;
-        }
-
-        try {
-          final coords = await _geocodingService.geocodeAddress(query);
-          if (coords == null) {
-            _migrationDone++;
-            notifyListeners();
-            continue;
-          }
-
-          // Update DB + local state
-          final updated = await updateAddress(
-            addressId: addr.id,
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-          );
-
-          // Si l'adresse sélectionnée était celle-ci, la mettre à jour
-          if (_selectedAddress?.id == updated.id) {
-            _selectedAddress = updated;
-          }
-        } catch (e) {
-          debugPrint(
-            'AddressService: migration coords failed for ${addr.id}: $e',
-          );
-        } finally {
-          _migrationDone++;
-          notifyListeners();
-          // petit délai pour throttling
-          await Future.delayed(const Duration(milliseconds: 250));
-        }
-      }
+      var remote = await _addresses.list(userId: userId);
+      remote = await _adoptLegacyBook(remote, userId: userId);
+      _book = _withFavorites(remote);
+      _repairSelection();
+      await _saveToCache();
+    } catch (e) {
+      debugPrint('AddressService: synchronisation impossible — $e');
     } finally {
-      _isMigratingCoordinates = false;
-      await _saveAddresses();
+      _isSyncing = false;
       notifyListeners();
     }
   }
 
-  /// Ajoute une nouvelle adresse
-  Future<Address> addAddress({
-    required String name,
-    required String address,
-    required String city,
-    required String postalCode,
-    AddressType type = AddressType.other,
-    double? latitude,
-    double? longitude,
-    bool isDefault = false,
-    bool isFavorite = false,
-  }) async {
-    try {
-      // Si les coordonnées ne sont pas fournies, géocoder l'adresse automatiquement
-      double? finalLatitude = latitude;
-      double? finalLongitude = longitude;
+  // ------------------------------------------------------------------ lecture
 
-      if (finalLatitude == null || finalLongitude == null) {
-        final fullAddress =
-            '$address, $city${postalCode.isNotEmpty ? ', $postalCode' : ''}';
-        debugPrint(
-          'AddressService: Géocodage automatique de l\'adresse: $fullAddress',
-        );
-
-        try {
-          final coords = await _geocodingService.geocodeAddress(fullAddress);
-          if (coords != null) {
-            finalLatitude = coords.latitude;
-            finalLongitude = coords.longitude;
-            debugPrint(
-              'AddressService: Coordonnées obtenues - lat: $finalLatitude, lng: $finalLongitude',
-            );
-          } else {
-            debugPrint(
-              '⚠️ AddressService: Impossible de géocoder l\'adresse: $fullAddress',
-            );
-            // On continue quand même, mais l'adresse n'aura pas de coordonnées
-          }
-        } catch (e) {
-          debugPrint('⚠️ AddressService: Erreur lors du géocodage: $e');
-          // On continue quand même
-        }
-      }
-
-      final shouldBeDefault = _addresses.isEmpty || isDefault;
-      Address newAddress;
-
-      // `location` est obligatoire côté serveur (`AddressSerializer`) : sans
-      // coordonnées géocodées, l'adresse reste locale même pour un compte
-      // connecté — `migrateMissingCoordinates` la créera côté Django dès que
-      // le géocodage aboutira (voir plus bas, même invariant : une adresse
-      // sans coordonnées n'existe pas encore côté serveur).
-      if (_userId != null && finalLatitude != null && finalLongitude != null) {
-        // Le serveur rétrograde lui-même l'ancien défaut
-        // (`AddressViewSet.perform_create`) — pas besoin de le faire ici.
-        newAddress = await _addressRepository.create(
-          Address(
-            id: '',
-            userId: _userId!,
-            name: name,
-            address: address,
-            city: city,
-            postalCode: postalCode,
-            latitude: finalLatitude,
-            longitude: finalLongitude,
-            type: type,
-            isDefault: shouldBeDefault,
-            isFavorite: isFavorite,
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          ),
-        );
-        if (shouldBeDefault) {
-          _addresses =
-              _addresses.map((a) => a.copyWith(isDefault: false)).toList();
-        }
-      } else {
-        newAddress = Address(
-          id: _uuid.v4(),
-          userId: _userId ?? 'guest',
-          name: name,
-          address: address,
-          city: city,
-          postalCode: postalCode,
-          latitude: finalLatitude,
-          longitude: finalLongitude,
-          type: type,
-          isDefault: shouldBeDefault,
-          isFavorite: isFavorite,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        );
-        if (shouldBeDefault) {
-          _addresses =
-              _addresses.map((a) => a.copyWith(isDefault: false)).toList();
-        }
-      }
-
-      _addresses.add(newAddress);
-
-      if (shouldBeDefault) {
-        _selectedAddress = newAddress;
-      } else if (_addresses.length == 1) {
-        _selectedAddress = newAddress;
-      }
-
-      await _saveAddresses();
-      notifyListeners();
-
-      debugPrint('AddressService: Adresse ajoutée - ${newAddress.name}');
-      return newAddress;
-    } catch (e) {
-      debugPrint('AddressService: Erreur d\'ajout d\'adresse - $e');
-      rethrow;
-    }
+  List<Address> _withFavorites(List<Address> addresses) {
+    return addresses.map((a) => a.copyWith(isFavorite: _favoriteIds.contains(a.id))).toList();
   }
 
-  /// Met à jour une adresse existante
-  Future<Address> updateAddress({
-    required String addressId,
-    String? name,
-    String? address,
-    String? city,
-    String? postalCode,
-    AddressType? type,
-    bool? isDefault,
-    bool? isFavorite,
-    double? latitude,
-    double? longitude,
-  }) async {
-    try {
-      final index = _addresses.indexWhere((a) => a.id == addressId);
-      if (index == -1) {
-        throw Exception('Adresse non trouvée');
-      }
-
-      final currentAddress = _addresses[index];
-
-      // Déterminer les valeurs finales
-      final finalAddress = address ?? currentAddress.address;
-      final finalCity = city ?? currentAddress.city;
-      final finalPostalCode = postalCode ?? currentAddress.postalCode;
-
-      // Si l'adresse a changé ou si les coordonnées sont manquantes, géocoder
-      double? finalLatitude = latitude;
-      double? finalLongitude = longitude;
-
-      final addressChanged =
-          (address != null && address != currentAddress.address) ||
-              (city != null && city != currentAddress.city) ||
-              (postalCode != null && postalCode != currentAddress.postalCode);
-
-      final coordinatesMissing = (finalLatitude == null ||
-              finalLongitude == null) &&
-          (currentAddress.latitude == null || currentAddress.longitude == null);
-
-      if ((addressChanged || coordinatesMissing) &&
-          (finalLatitude == null || finalLongitude == null)) {
-        final fullAddress =
-            '$finalAddress, $finalCity${finalPostalCode.isNotEmpty ? ', $finalPostalCode' : ''}';
-        debugPrint(
-          'AddressService: Géocodage automatique lors de la mise à jour: $fullAddress',
-        );
-
-        try {
-          final coords = await _geocodingService.geocodeAddress(fullAddress);
-          if (coords != null) {
-            finalLatitude = coords.latitude;
-            finalLongitude = coords.longitude;
-            debugPrint(
-              'AddressService: Coordonnées obtenues - lat: $finalLatitude, lng: $finalLongitude',
-            );
-          } else {
-            debugPrint(
-              '⚠️ AddressService: Impossible de géocoder l\'adresse: $fullAddress',
-            );
-            // Utiliser les coordonnées existantes si disponibles
-            finalLatitude ??= currentAddress.latitude;
-            finalLongitude ??= currentAddress.longitude;
-          }
-        } catch (e) {
-          debugPrint('⚠️ AddressService: Erreur lors du géocodage: $e');
-          // Utiliser les coordonnées existantes si disponibles
-          finalLatitude ??= currentAddress.latitude;
-          finalLongitude ??= currentAddress.longitude;
-        }
-      } else {
-        // Utiliser les coordonnées existantes si non fournies
-        finalLatitude ??= currentAddress.latitude;
-        finalLongitude ??= currentAddress.longitude;
-      }
-
-      Address updatedAddress;
-
-      // Une adresse sans coordonnées n'a jamais pu être créée côté Django
-      // (`location` obligatoire) — sa présence sur `currentAddress` est donc
-      // la preuve qu'elle existe déjà côté serveur (même invariant que dans
-      // `addAddress`). Sans coordonnées finales, elle reste locale, comme
-      // avant cette migration.
-      final wasAlreadyRemote =
-          currentAddress.latitude != null && currentAddress.longitude != null;
-
-      if (_userId != null && finalLatitude != null && finalLongitude != null) {
-        final mergedForRemote = currentAddress.copyWith(
-          name: name,
-          address: address,
-          city: city,
-          postalCode: postalCode,
-          type: type,
-          isDefault: isDefault,
-          latitude: finalLatitude,
-          longitude: finalLongitude,
-        );
-        updatedAddress = wasAlreadyRemote
-            ? await _addressRepository.update(currentAddress.id, mergedForRemote)
-            : await _addressRepository.create(mergedForRemote);
-        // Le serveur rétrograde lui-même l'ancien défaut
-        // (`AddressViewSet.perform_update`/`perform_create`).
-      } else {
-        updatedAddress = currentAddress.copyWith(
-          name: name,
-          address: address,
-          city: city,
-          postalCode: postalCode,
-          latitude: finalLatitude,
-          longitude: finalLongitude,
-          type: type,
-          isDefault: isDefault,
-          updatedAt: DateTime.now(),
-        );
-      }
-
-      if (isDefault == true) {
-        _addresses = _addresses
-            .map(
-              (a) => a.id == addressId
-                  ? updatedAddress.copyWith(isDefault: true)
-                  : a.copyWith(isDefault: false),
-            )
-            .toList();
-        _selectedAddress = updatedAddress;
-      } else {
-        _addresses[index] = updatedAddress;
-        if (_selectedAddress?.id == addressId) {
-          _selectedAddress = updatedAddress;
-        }
-      }
-
-      await _saveAddresses();
-      notifyListeners();
-
-      debugPrint(
-        'AddressService: Adresse mise à jour - ${updatedAddress.name}',
-      );
-      return updatedAddress;
-    } catch (e) {
-      debugPrint('AddressService: Erreur de mise à jour d\'adresse - $e');
-      rethrow;
-    }
+  /// Garde une sélection cohérente avec le carnet.
+  ///
+  /// Le choix du client survit à une synchronisation tant que l'adresse
+  /// choisie existe encore. Cette ligne la remplaçait auparavant sans
+  /// condition par l'adresse par défaut : un client qui s'était fait livrer au
+  /// bureau retrouvait « Maison » à la réouverture, et ne s'en apercevait qu'à
+  /// la commande.
+  void _repairSelection() {
+    if (_book.any((a) => a.id == _selectedId)) return;
+    _selectedId = (defaultAddress ?? _book.firstOrNull)?.id;
   }
 
-  /// Supprime une adresse
-  Future<void> deleteAddress(String addressId) async {
-    try {
-      final index = _addresses.indexWhere((a) => a.id == addressId);
-      if (index == -1) {
-        throw Exception('Adresse non trouvée');
-      }
-
-      final deletedAddress = _addresses[index];
-      _addresses.removeAt(index);
-
-      // N'existe côté Django que si elle a des coordonnées (même invariant
-      // que dans addAddress/updateAddress) — sinon rien à supprimer côté
-      // serveur.
-      if (_userId != null &&
-          deletedAddress.latitude != null &&
-          deletedAddress.longitude != null) {
-        await _addressRepository.delete(addressId);
-      }
-
-      // Si l'adresse supprimée était sélectionnée, sélectionner une autre
-      if (_selectedAddress?.id == addressId) {
-        _selectedAddress =
-            _addresses.isNotEmpty ? (defaultAddress ?? _addresses.first) : null;
-      }
-
-      // Si l'adresse supprimée était la défaut, définir une nouvelle adresse par défaut
-      if (deletedAddress.isDefault && _addresses.isNotEmpty) {
-        final newDefault = _addresses.first.copyWith(isDefault: true);
-        _addresses[0] = newDefault;
-      }
-
-      await _saveAddresses();
-      notifyListeners();
-
-      debugPrint('AddressService: Adresse supprimée - ${deletedAddress.name}');
-    } catch (e) {
-      debugPrint('AddressService: Erreur de suppression d\'adresse - $e');
-      rethrow;
-    }
-  }
-
-  /// Sélectionne une adresse
-  Future<void> selectAddress(String addressId) async {
-    try {
-      final address = _addresses.where((a) => a.id == addressId).firstOrNull;
-      if (address == null) {
-        throw Exception('Adresse non trouvée');
-      }
-
-      _selectedAddress = address;
-      await _saveAddresses();
-      notifyListeners();
-
-      debugPrint('AddressService: Adresse sélectionnée - ${address.name}');
-    } catch (e) {
-      debugPrint('AddressService: Erreur de sélection d\'adresse - $e');
-      rethrow;
-    }
-  }
-
-  /// Définit une adresse comme défaut
-  Future<void> setDefaultAddress(String addressId) async {
-    try {
-      await updateAddress(
-        addressId: addressId,
-        isDefault: true,
-      );
-
-      debugPrint('AddressService: Adresse définie comme défaut - $addressId');
-    } catch (e) {
-      debugPrint(
-        'AddressService: Erreur de définition d\'adresse par défaut - $e',
-      );
-      rethrow;
-    }
-  }
-
-  /// Bascule le statut favori d'une adresse
-  Future<void> toggleFavorite(String addressId) async {
-    try {
-      final address = _addresses.where((a) => a.id == addressId).firstOrNull;
-      if (address == null) {
-        throw Exception('Adresse non trouvée');
-      }
-
-      await updateAddress(
-        addressId: addressId,
-        isFavorite: !address.isFavorite,
-      );
-
-      debugPrint(
-        'AddressService: Favori basculé pour ${address.name} - ${!address.isFavorite}',
-      );
-    } catch (e) {
-      debugPrint('AddressService: Erreur bascule favori - $e');
-      rethrow;
-    }
-  }
-
-  /// Obtient les adresses par type
-  List<Address> getAddressesByType(AddressType type) {
-    return _addresses.where((a) => a.type == type).toList();
-  }
-
-  /// Recherche des adresses
+  /// Recherche sur les champs qu'un client retient réellement.
+  ///
+  /// Le repère est inclus : « en face de la pharmacie » est souvent le seul
+  /// terme dont il se souvienne, et le chercher sans lui ne renvoyait rien.
   List<Address> searchAddresses(String query) {
-    if (query.isEmpty) return _addresses;
+    final needle = query.trim().toLowerCase();
+    if (needle.isEmpty) return addresses;
 
-    final lowercaseQuery = query.toLowerCase();
-    return _addresses
+    return _book
         .where(
-          (address) =>
-              address.name.toLowerCase().contains(lowercaseQuery) ||
-              address.address.toLowerCase().contains(lowercaseQuery) ||
-              address.city.toLowerCase().contains(lowercaseQuery),
+          (address) => [
+            address.name,
+            address.address,
+            address.city,
+            address.landmark,
+          ].any((field) => field.toLowerCase().contains(needle)),
         )
         .toList();
   }
 
-  /// Obtient les statistiques des adresses
-  Map<String, dynamic> getAddressStats() {
-    final stats = <String, int>{};
+  // ----------------------------------------------------------------- écriture
 
-    for (final type in AddressType.values) {
-      stats[type.name] = _addresses.where((a) => a.type == type).length;
+  /// Crée l'adresse côté serveur, puis l'ajoute au carnet.
+  ///
+  /// Dans cet ordre, et jamais l'inverse : c'est le serveur qui attribue
+  /// l'identifiant, et une adresse affichée avant d'exister chez lui est une
+  /// adresse avec laquelle on ne peut pas commander.
+  Future<Address> addAddress(AddressDraft draft) async {
+    final userId = _requireSession();
+
+    // Le serveur promeut lui-même la première adresse du carnet
+    // (`AddressViewSet.perform_create`) ; l'annoncer ici évite que le carnet
+    // local reste sans défaut jusqu'à la synchronisation suivante.
+    final created = await _addresses.create(
+      _book.isEmpty ? draft.copyWith(isDefault: true) : draft,
+      userId: userId,
+    );
+
+    if (draft.isFavorite) _favoriteIds.add(created.id);
+
+    // Les autres ne sont rétrogradées que si celle-ci prend le défaut — c'est
+    // ce que fait le serveur (`_demote_current_default`). Rétrograder dans
+    // tous les cas, comme on le faisait, retirait son défaut au carnet dès
+    // qu'on y ajoutait une adresse ordinaire.
+    _book = [
+      ...(created.isDefault ? _applyDefault(_book, created.id) : _book),
+      created.copyWith(isFavorite: draft.isFavorite),
+    ];
+    if (created.isDefault || _book.length == 1) _selectedId = created.id;
+
+    await _saveToCache();
+    notifyListeners();
+    return created;
+  }
+
+  Future<Address> updateAddress(String id, AddressDraft draft) async {
+    final userId = _requireSession();
+    _requireKnown(id);
+
+    final updated = await _addresses.update(id, draft, userId: userId);
+
+    if (draft.isFavorite) {
+      _favoriteIds.add(id);
+    } else {
+      _favoriteIds.remove(id);
     }
 
-    return {
-      'total': _addresses.length,
-      'default': defaultAddress?.id,
-      'selected': _selectedAddress?.id,
-      'by_type': stats,
-    };
+    // Même règle qu'à l'ajout : les autres ne bougent que si celle-ci vient de
+    // prendre le défaut.
+    _book = (updated.isDefault ? _applyDefault(_book, id) : _book)
+        .map((a) => a.id == id ? updated.copyWith(isFavorite: draft.isFavorite) : a)
+        .toList();
+
+    await _saveToCache();
+    notifyListeners();
+    return updated;
   }
 
-  /// Valide une adresse
-  bool validateAddress({
-    required String name,
-    required String address,
-    required String city,
-    String? postalCode,
-    double? latitude,
-    double? longitude,
-  }) {
-    return name.isNotEmpty &&
-        address.isNotEmpty &&
-        city.isNotEmpty &&
-        latitude != null &&
-        longitude != null;
+  /// Supprime l'adresse — serveur d'abord, écran ensuite.
+  ///
+  /// Dans l'ordre inverse, un appel réseau qui échoue laissait l'adresse
+  /// disparue de l'écran mais toujours présente en base : elle revenait à la
+  /// synchronisation suivante, et le client la voyait ressusciter.
+  Future<void> deleteAddress(String id) async {
+    _requireSession();
+    final removed = _requireKnown(id);
+
+    await _addresses.delete(id);
+
+    _favoriteIds.remove(id);
+    _book = _book.where((a) => a.id != id).toList();
+    _repairSelection();
+
+    // Le serveur ne promeut personne après une suppression : sans cette
+    // reprise, le carnet reste sans adresse par défaut et l'écran de commande
+    // ne pré-remplit plus rien. La promotion n'était auparavant écrite qu'en
+    // mémoire — la base, elle, restait sans défaut.
+    if (removed.isDefault && _book.isNotEmpty) {
+      await _promoteToDefault(_book.first.id);
+    }
+
+    await _saveToCache();
+    notifyListeners();
   }
 
-  /// Obtient les suggestions d'adresses populaires (pour les tests)
-  List<Map<String, dynamic>> getPopularAddresses() {
-    return [
-      {
-        'name': 'Cocody',
-        'address': 'Cocody, Abidjan',
-        'city': 'Abidjan',
-        'postalCode': '00225',
-        'type': AddressType.other,
-      },
-      {
-        'name': 'Plateau',
-        'address': 'Plateau, Abidjan',
-        'city': 'Abidjan',
-        'postalCode': '00225',
-        'type': AddressType.work,
-      },
-      {
-        'name': 'Marcory',
-        'address': 'Marcory, Abidjan',
-        'city': 'Abidjan',
-        'postalCode': '00225',
-        'type': AddressType.home,
-      },
-      {
-        'name': 'Yopougon',
-        'address': 'Yopougon, Abidjan',
-        'city': 'Abidjan',
-        'postalCode': '00225',
-        'type': AddressType.home,
-      },
-    ];
+  Future<void> setDefaultAddress(String id) async {
+    _requireSession();
+    _requireKnown(id);
+    await _promoteToDefault(id);
+    _selectedId = id;
+    await _saveToCache();
+    notifyListeners();
   }
 
-  /// Ajoute une adresse depuis les suggestions populaires
-  Future<Address> addPopularAddress(Map<String, dynamic> popularAddress) async {
-    return await addAddress(
-      name: popularAddress['name'],
-      address: popularAddress['address'],
-      city: popularAddress['city'],
-      postalCode: popularAddress['postalCode'],
-      type: popularAddress['type'],
+  Future<void> _promoteToDefault(String id) async {
+    final userId = _userId;
+    if (userId == null) return;
+
+    final address = _book.firstWhere((a) => a.id == id);
+    final promoted = await _addresses.update(
+      id,
+      AddressDraft.from(address).copyWith(isDefault: true),
+      userId: userId,
+    );
+
+    // Le serveur rétrograde l'ancien défaut dans la même transaction
+    // (`_demote_current_default`) ; le carnet local s'aligne sans relire.
+    _book = _applyDefault(_book, id)
+        .map((a) => a.id == id ? promoted.copyWith(isFavorite: _favoriteIds.contains(id)) : a)
+        .toList();
+  }
+
+  /// Le choix de livraison. Purement local et volontairement : il désigne la
+  /// commande en cours, pas une préférence de compte — c'est `is_default` qui
+  /// porte celle-là, et elle, le serveur la connaît.
+  Future<void> selectAddress(String id) async {
+    _requireKnown(id);
+    _selectedId = id;
+    await _saveToCache();
+    notifyListeners();
+  }
+
+  /// Bascule le favori — local, et sans aller-retour réseau.
+  ///
+  /// Le serveur n'a pas ce champ. Passer par [updateAddress] déclenchait un
+  /// `PATCH` complet pour une étoile qui ne quitte jamais l'appareil, et
+  /// l'adresse rendue par le serveur écrasait au retour l'étoile qu'on venait
+  /// d'allumer.
+  Future<void> toggleFavorite(String id) async {
+    _requireKnown(id);
+
+    if (!_favoriteIds.add(id)) _favoriteIds.remove(id);
+    _book = _withFavorites(_book);
+
+    await _saveToCache();
+    notifyListeners();
+  }
+
+  /// Un seul défaut dans le carnet, comme dans la base — l'index unique partiel
+  /// `one_default_address_per_user` en fait une contrainte, pas une convention.
+  List<Address> _applyDefault(List<Address> book, String? defaultId) {
+    return book.map((a) => a.copyWith(isDefault: a.id == defaultId)).toList();
+  }
+
+  String _requireSession() {
+    final userId = _userId;
+    if (userId == null) throw const AddressSessionRequired();
+    return userId;
+  }
+
+  Address _requireKnown(String id) {
+    final address = _book.where((a) => a.id == id).firstOrNull;
+    if (address == null) {
+      throw StateError('Adresse $id absente du carnet.');
+    }
+    return address;
+  }
+
+  // -------------------------------------------------------------- persistance
+
+  String get _bookKey => 'address_book_$_userId';
+  String get _selectedKey => 'address_selected_$_userId';
+  String get _favoritesKey => 'address_favorites_$_userId';
+
+  Future<void> _loadFromCache() async {
+    _book = const [];
+    _favoriteIds = <String>{};
+    _selectedId = null;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _favoriteIds = (prefs.getStringList(_favoritesKey) ?? const []).toSet();
+      _selectedId = prefs.getString(_selectedKey);
+      _book = _withFavorites(
+        (prefs.getStringList(_bookKey) ?? const [])
+            .map((entry) => Address.fromJson(jsonDecode(entry) as Map<String, dynamic>))
+            .toList(),
+      );
+      _repairSelection();
+    } catch (e) {
+      // Cache illisible (format changé, écriture interrompue) : on repart d'un
+      // carnet vide, que la synchronisation remplira. Aucune raison de faire
+      // échouer l'ouverture de l'application pour un cache.
+      debugPrint('AddressService: cache illisible, ignoré — $e');
+      _book = const [];
+    }
+  }
+
+  Future<void> _saveToCache() async {
+    if (_userId == null) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final selectedId = _selectedId;
+
+      if (_book.isEmpty) {
+        await prefs.remove(_bookKey);
+      } else {
+        await prefs.setStringList(
+          _bookKey,
+          _book.map((a) => jsonEncode(a.toJson())).toList(),
+        );
+      }
+
+      if (_favoriteIds.isEmpty) {
+        await prefs.remove(_favoritesKey);
+      } else {
+        await prefs.setStringList(_favoritesKey, _favoriteIds.toList());
+      }
+
+      if (selectedId == null) {
+        await prefs.remove(_selectedKey);
+      } else {
+        await prefs.setString(_selectedKey, selectedId);
+      }
+    } catch (e) {
+      debugPrint('AddressService: cache non écrit — $e');
+    }
+  }
+
+  // ------------------------------------------------- reprise des carnets 2025
+
+  /// Clés du carnet purement local d'avant cette version.
+  ///
+  /// `guest` est la seule qui compte en pratique : `_userId` n'étant jamais
+  /// renseigné, tout y atterrissait, y compris pour un client connecté. La clé
+  /// nominative est reprise aussi, au cas où une version antérieure l'ait
+  /// alimentée.
+  List<String> get _legacyBookKeys => [
+        'user_addresses_guest',
+        'user_addresses_$_userId',
+      ];
+
+  /// Envoie au serveur les adresses restées locales, puis efface les clés.
+  ///
+  /// Sans cela, la bascule ferait disparaître d'un coup le carnet de chaque
+  /// appareil déjà installé — des adresses saisies à la main, avec leur repère,
+  /// que personne n'a ailleurs.
+  ///
+  /// Rend le carnet serveur augmenté des adresses reprises. Une reprise qui
+  /// échoue laisse les clés en place : elle sera retentée au prochain
+  /// démarrage, plutôt que de perdre l'adresse.
+  Future<List<Address>> _adoptLegacyBook(
+    List<Address> remote, {
+    required String userId,
+  }) async {
+    final SharedPreferences prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (e) {
+      debugPrint('AddressService: reprise impossible, stockage illisible — $e');
+      return remote;
+    }
+
+    final legacy = <Map<String, dynamic>>[];
+    for (final key in _legacyBookKeys) {
+      for (final entry in prefs.getStringList(key) ?? const <String>[]) {
+        try {
+          legacy.add(jsonDecode(entry) as Map<String, dynamic>);
+        } catch (_) {
+          // Entrée illisible : elle ne redeviendra pas lisible, on la laisse.
+        }
+      }
+    }
+    if (legacy.isEmpty) {
+      await _forgetLegacyKeys(prefs);
+      return remote;
+    }
+
+    final adopted = <Address>[];
+    var allAdopted = true;
+
+    for (final entry in legacy) {
+      final Address local;
+      try {
+        local = Address.fromJson(entry);
+      } on FormatException {
+        // Adresse sans coordonnées : le serveur la refuserait
+        // (`location` obligatoire), et rien ici ne peut inventer le point. Ces
+        // entrées ne pouvaient de toute façon servir à aucune commande.
+        debugPrint('AddressService: adresse locale sans point, non reprise.');
+        continue;
+      } catch (e) {
+        debugPrint('AddressService: adresse locale illisible, ignorée — $e');
+        continue;
+      }
+
+      if (_alreadyOnServer(local, [...remote, ...adopted])) continue;
+
+      try {
+        final created = await _addresses.create(
+          AddressDraft.from(local).copyWith(
+            // Le défaut se rejoue seulement si le carnet serveur n'en a pas :
+            // celui du serveur, plus récent, prime sur celui du cache.
+            isDefault: local.isDefault && remote.every((a) => !a.isDefault),
+          ),
+          userId: userId,
+        );
+        if (local.isFavorite) _favoriteIds.add(created.id);
+        adopted.add(created);
+      } catch (e) {
+        debugPrint('AddressService: reprise de "${local.name}" échouée — $e');
+        allAdopted = false;
+      }
+    }
+
+    if (allAdopted) await _forgetLegacyKeys(prefs);
+    if (adopted.isNotEmpty) {
+      debugPrint('AddressService: ${adopted.length} adresse(s) locale(s) reprise(s).');
+    }
+    return [...remote, ...adopted];
+  }
+
+  /// Une adresse est déjà là si son nom et son point coïncident. La comparaison
+  /// des coordonnées est tolérante d'environ dix mètres : le serveur reprojette
+  /// en `geography`, et exiger l'égalité stricte de deux `double` créerait un
+  /// doublon à chaque démarrage.
+  bool _alreadyOnServer(Address local, List<Address> book) {
+    return book.any(
+      (a) =>
+          a.name.trim().toLowerCase() == local.name.trim().toLowerCase() &&
+          (a.latitude - local.latitude).abs() < 0.0001 &&
+          (a.longitude - local.longitude).abs() < 0.0001,
     );
   }
 
-  /// Efface toutes les adresses (pour les tests)
-  Future<void> clearAllAddresses() async {
-    _addresses.clear();
-    _selectedAddress = null;
-    await _saveAddresses();
-    notifyListeners();
+  Future<void> _forgetLegacyKeys(SharedPreferences prefs) async {
+    for (final key in _legacyBookKeys) {
+      await prefs.remove(key);
+    }
+    await prefs.remove('selected_address_id_guest');
+    await prefs.remove('selected_address_id_$_userId');
   }
 }

@@ -29,6 +29,7 @@ from apps.orders.models import Order
 from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
 from common.models import TimeStampedModel, UUIDModel, state_check_constraint
+from common.storage import courier_documents
 
 __all__ = ["Assignment", "CourierProfile", "CourierRating", "CourierShift", "VehicleType"]
 
@@ -69,11 +70,21 @@ class CourierProfile(UUIDModel, TimeStampedModel):
     vehicle_type = models.CharField(max_length=16, choices=VehicleType.choices)
     vehicle_plate = models.CharField(max_length=32, blank=True)
 
-    # Pièces justificatives. Stockage privé, jamais public : les URL signées
-    # de `django-storages` expirent en quinze minutes (réglage `AWS_QUERYSTRING_EXPIRE`).
-    id_document = models.FileField(upload_to="couriers/id/", null=True, blank=True)
-    licence_document = models.FileField(upload_to="couriers/licence/", null=True, blank=True)
-    vehicle_document = models.FileField(upload_to="couriers/vehicle/", null=True, blank=True)
+    # Pièces justificatives. **Compartiment privé**, sans politique de lecture
+    # anonyme : S3 refuse toute requête non signée, et chaque URL est émise par
+    # le serveur pour une durée bornée (`S3_SIGNED_URL_EXPIRE`, ADR-011). Ces
+    # documents ont vécu dans un compartiment public dans l'implémentation
+    # précédente — une pièce d'identité y était lisible indéfiniment par qui
+    # connaissait l'adresse.
+    id_document = models.FileField(
+        upload_to="couriers/id/", storage=courier_documents, null=True, blank=True
+    )
+    licence_document = models.FileField(
+        upload_to="couriers/licence/", storage=courier_documents, null=True, blank=True
+    )
+    vehicle_document = models.FileField(
+        upload_to="couriers/vehicle/", storage=courier_documents, null=True, blank=True
+    )
 
     # --- Disponibilité et position ---------------------------------------
     is_online = models.BooleanField(
@@ -155,7 +166,12 @@ class Assignment(UUIDModel, TimeStampedModel):
     courier_fee = MoneyField(null=True)
 
     decline_reason = models.TextField(blank=True)
-    proof_of_delivery = models.ImageField(upload_to="deliveries/", null=True, blank=True)
+    # Privé également : une preuve de livraison montre une porte, une adresse,
+    # parfois la personne qui a reçu la commande. Elle sert à trancher un
+    # litige, pas à être vue.
+    proof_of_delivery = models.ImageField(
+        upload_to="deliveries/", storage=courier_documents, null=True, blank=True
+    )
 
     class Meta:
         verbose_name = "course"

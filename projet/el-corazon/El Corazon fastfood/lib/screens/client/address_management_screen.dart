@@ -1,18 +1,19 @@
 import 'dart:math';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart' show Position;
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/models/address.dart';
+import 'package:elcora_fast/utils/address_sorting.dart';
 import 'package:elcora_fast/widgets/address_card.dart';
 import 'package:elcora_fast/screens/client/address_detail_bottom_sheet.dart';
 
-enum AddressSortType {
-  name,
-  distance,
-  recent,
-  type,
-}
+// `AddressSortType` et l'ordre d'affichage vivent désormais dans
+// `utils/address_sorting.dart` — une fonction pure, donc testable, ce que le
+// tri ne pouvait pas être tant qu'il était enfermé dans l'état de cet écran.
+export 'package:elcora_fast/utils/address_sorting.dart' show AddressSortType;
 
 class AddressManagementScreen extends StatefulWidget {
   const AddressManagementScreen({super.key});
@@ -24,9 +25,29 @@ class AddressManagementScreen extends StatefulWidget {
 
 class _AddressManagementScreenState extends State<AddressManagementScreen> {
   final AddressService _addressService = AddressService();
+  final LocationService _locationService = LocationService();
+  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   AddressSortType _sortType = AddressSortType.recent;
   bool _favoritesOnly = false;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Efface la recherche — champ **et** filtre.
+  ///
+  /// Le `TextField` n'avait pas de contrôleur : la croix et la puce de filtre
+  /// remettaient `_searchQuery` à vide, mais le texte restait affiché. Le
+  /// client voyait sa recherche à l'écran et la liste complète en dessous.
+  void _clearSearch() {
+    setState(() {
+      _searchController.clear();
+      _searchQuery = '';
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +55,11 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
       appBar: _buildAppBar(),
       body: Consumer<AddressService>(
         builder: (context, addressService, child) {
+          // Le carnet vit côté serveur : sans session il n'y en a pas, et le
+          // formulaire d'ajout mènerait à un refus. Le dire ici évite de faire
+          // saisir une adresse pour rien.
+          if (!addressService.canEdit) return _buildSignedOutState();
+
           if (!addressService.hasAddresses) {
             return _buildEmptyState();
           }
@@ -44,12 +70,49 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddAddressSheet,
-        icon: const Icon(Icons.add_location),
-        label: const Text('Ajouter'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+      floatingActionButton: Consumer<AddressService>(
+        builder: (context, addressService, child) {
+          if (!addressService.canEdit) return const SizedBox.shrink();
+          return FloatingActionButton.extended(
+            onPressed: _showAddAddressSheet,
+            icon: const Icon(Icons.add_location),
+            label: const Text('Ajouter'),
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSignedOutState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 48),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.lock_outline, size: 80, color: Colors.grey.shade400),
+            const SizedBox(height: 24),
+            Text(
+              'Connectez-vous',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Vos adresses de livraison sont rattachées à votre compte : '
+              'elles vous suivent d\'un appareil à l\'autre.',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyLarge
+                  ?.copyWith(color: Colors.grey.shade500),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -151,8 +214,11 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
 
     return Column(
       children: [
-        // Barre de recherche
-        if (addressService.addresses.length > 3) _buildSearchBar(),
+        // Barre de recherche. Le seuil était de « plus de 3 adresses » : sous
+        // ce nombre, une recherche déjà saisie restait active sans plus aucun
+        // moyen de l'effacer, et la liste semblait vide sans raison visible.
+        if (addressService.addresses.length > 3 || _searchQuery.isNotEmpty)
+          _buildSearchBar(),
 
         // Stats card
         _buildStatsCard(addressService),
@@ -192,13 +258,14 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: TextField(
+        controller: _searchController,
         decoration: InputDecoration(
-          hintText: 'Rechercher une adresse...',
+          hintText: 'Nom, quartier, repère…',
           prefixIcon: const Icon(Icons.search),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
                   icon: const Icon(Icons.clear),
-                  onPressed: () => setState(() => _searchQuery = ''),
+                  onPressed: _clearSearch,
                 )
               : null,
           border: OutlineInputBorder(
@@ -317,7 +384,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
             Chip(
               avatar: const Icon(Icons.search, size: 18),
               label: Text('Recherche: "$_searchQuery"'),
-              onDeleted: () => setState(() => _searchQuery = ''),
+              onDeleted: _clearSearch,
               deleteIcon: const Icon(Icons.close, size: 18),
             ),
           if (_favoritesOnly)
@@ -415,77 +482,36 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
   }
 
   List<Address> _sortAddresses(List<Address> addresses) {
-    final sorted = [...addresses];
+    // `LocationService` est un singleton : cette position est celle relevée
+    // par le reste de l'application. L'écran en construisait auparavant une
+    // instance neuve, dont `currentPosition` valait toujours `null` — le tri
+    // par distance ne triait donc jamais.
+    final origin = _locationService.currentPosition;
 
-    switch (_sortType) {
-      case AddressSortType.name:
-        sorted.sort(
-          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-        );
-        break;
-      case AddressSortType.distance:
-        // Trier par distance depuis la position actuelle
-        try {
-          final locationService = LocationService();
-          if (locationService.currentPosition != null) {
-            final currentLat = locationService.currentPosition!.latitude;
-            final currentLng = locationService.currentPosition!.longitude;
-
-            sorted.sort((a, b) {
-              // Calculer la distance pour chaque adresse
-              final distanceA = a.latitude != null && a.longitude != null
-                  ? _calculateDistance(
-                      currentLat,
-                      currentLng,
-                      a.latitude!,
-                      a.longitude!,
-                    )
-                  : double.infinity;
-
-              final distanceB = b.latitude != null && b.longitude != null
-                  ? _calculateDistance(
-                      currentLat,
-                      currentLng,
-                      b.latitude!,
-                      b.longitude!,
-                    )
-                  : double.infinity;
-
-              return distanceA.compareTo(distanceB);
-            });
-          }
-        } catch (e) {
-          // Si on ne peut pas obtenir la position, ne pas trier
-          debugPrint('Erreur lors du tri par distance: $e');
-        }
-        break;
-      case AddressSortType.recent:
-        sorted.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-        break;
-      case AddressSortType.type:
-        sorted.sort((a, b) => a.type.index.compareTo(b.type.index));
-        break;
-    }
-
-    // Favoris toujours en premier
-    sorted.sort((a, b) {
-      if (a.isFavorite && !b.isFavorite) return -1;
-      if (!a.isFavorite && b.isFavorite) return 1;
-      return 0;
-    });
-
-    // Adresse par défaut en premier
-    sorted.sort((a, b) {
-      if (a.isDefault && !b.isDefault) return -1;
-      if (!a.isDefault && b.isDefault) return 1;
-      return 0;
-    });
-
-    return sorted;
+    return sortAddressesForDisplay(
+      addresses,
+      sortType: _sortType,
+      distanceFrom: origin == null ? null : (a) => _distanceFrom(origin, a),
+    );
   }
 
+  /// Distance à vol d'oiseau, en kilomètres.
+  double _distanceFrom(Position origin, Address address) {
+    return _calculateDistance(
+      origin.latitude,
+      origin.longitude,
+      address.latitude,
+      address.longitude,
+    );
+  }
+
+  /// Recharge le carnet depuis le serveur.
+  ///
+  /// Appelait `initialize()`, qui sort immédiatement une fois le service
+  /// initialisé : le geste « tirer pour rafraîchir » animait son indicateur
+  /// sans jamais rien recharger.
   Future<void> _refresh() async {
-    await _addressService.initialize();
+    await _addressService.refresh();
   }
 
   void _showAddAddressSheet() {
@@ -494,7 +520,10 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => AddressDetailBottomSheet(
-        onSave: (addressData) => _addAddress(addressData),
+        onSave: (draft) async {
+          await _addressService.addAddress(draft);
+          if (mounted) _showSnack('Adresse ajoutée', Colors.green);
+        },
       ),
     );
   }
@@ -506,141 +535,110 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
       backgroundColor: Colors.transparent,
       builder: (context) => AddressDetailBottomSheet(
         address: address,
-        onSave: (addressData) => _updateAddress(address.id, addressData),
+        onSave: (draft) async {
+          await _addressService.updateAddress(address.id, draft);
+          if (mounted) _showSnack('Adresse modifiée', Colors.green);
+        },
       ),
     );
   }
 
-  void _selectAddress(Address address) {
-    _addressService.selectAddress(address.id);
+  // Ces trois actions étaient lancées sans être attendues : leur échec
+  // remontait en exception non capturée, et le message de confirmation
+  // s'affichait de toute façon — y compris quand rien n'avait été enregistré.
+
+  Future<void> _selectAddress(Address address) async {
+    try {
+      await _addressService.selectAddress(address.id);
+      if (mounted) {
+        _showSnack('Adresse sélectionnée : ${address.name}', Colors.green);
+      }
+    } catch (e) {
+      if (mounted) _showSnack(_messageFor(e), Colors.red);
+    }
+  }
+
+  Future<void> _toggleFavorite(Address address) async {
+    try {
+      await _addressService.toggleFavorite(address.id);
+    } catch (e) {
+      if (mounted) _showSnack(_messageFor(e), Colors.red);
+    }
+  }
+
+  Future<void> _setDefault(Address address) async {
+    try {
+      await _addressService.setDefaultAddress(address.id);
+      if (mounted) {
+        _showSnack(
+          '${address.name} définie comme adresse par défaut',
+          Colors.blue,
+        );
+      }
+    } catch (e) {
+      if (mounted) _showSnack(_messageFor(e), Colors.red);
+    }
+  }
+
+  /// Message destiné au client.
+  ///
+  /// Les écrans affichaient `'Erreur : $e'`, ce qui met un `DioException` ou
+  /// une trace d'exception sous les yeux de quelqu'un qui voulait enregistrer
+  /// son adresse. Le serveur, lui, renvoie déjà une phrase utilisable
+  /// (RFC 9457, champ `detail`) — c'est elle qu'on montre.
+  String _messageFor(Object error) {
+    if (error is AddressSessionRequired) return error.toString();
+    if (error is eccore.ApiException) return error.detail;
+    return 'Opération impossible pour le moment. Réessayez.';
+  }
+
+  void _showSnack(String message, Color background) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Adresse sélectionnée : ${address.name}'),
-        backgroundColor: Colors.green,
+        content: Text(message),
+        backgroundColor: background,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
 
-  void _toggleFavorite(Address address) {
-    _addressService.toggleFavorite(address.id);
-  }
-
-  void _setDefault(Address address) {
-    _addressService.setDefaultAddress(address.id);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${address.name} définie comme adresse par défaut'),
-        backgroundColor: Colors.blue,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
-  }
-
+  /// Confirme avant de supprimer.
+  ///
+  /// Le geste était immédiat et sans retour en arrière : une adresse saisie
+  /// avec son repère disparaissait sur une pression, et la suppression est
+  /// dure côté serveur (droit à l'effacement — `AddressViewSet`), donc
+  /// définitive.
   Future<void> _deleteAddress(Address address) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.delete_outline, color: Colors.orange),
+        title: const Text('Supprimer cette adresse ?'),
+        content: Text('« ${address.name} » sera définitivement effacée.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
     try {
       await _addressService.deleteAddress(address.id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Adresse supprimée : ${address.name}'),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        );
+        _showSnack('Adresse supprimée : ${address.name}', Colors.orange);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur : $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _addAddress(Map<String, dynamic> addressData) async {
-    try {
-      await _addressService.addAddress(
-        name: addressData['name'],
-        address: addressData['address'],
-        city: addressData['city'],
-        postalCode: addressData['postalCode'] ?? '',
-        type: addressData['type'],
-        isDefault: addressData['isDefault'] ?? false,
-        isFavorite: addressData['isFavorite'] ?? false,
-        latitude: addressData['latitude'],
-        longitude: addressData['longitude'],
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Adresse ajoutée avec succès'),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur : $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _updateAddress(
-    String addressId,
-    Map<String, dynamic> addressData,
-  ) async {
-    try {
-      await _addressService.updateAddress(
-        addressId: addressId,
-        name: addressData['name'],
-        address: addressData['address'],
-        city: addressData['city'],
-        postalCode: addressData['postalCode'],
-        type: addressData['type'],
-        isDefault: addressData['isDefault'],
-        isFavorite: addressData['isFavorite'],
-        latitude: addressData['latitude'],
-        longitude: addressData['longitude'],
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Adresse modifiée avec succès'),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur : $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      if (mounted) _showSnack(_messageFor(e), Colors.red);
     }
   }
 

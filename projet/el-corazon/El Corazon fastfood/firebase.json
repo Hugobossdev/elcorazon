@@ -1,16 +1,1 @@
-{
-  "hosting": {
-    "public": "build/web",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
-  }
-}
+{"hosting":{"public":"build/web","ignore":["firebase.json","**/.*","**/node_modules/**"],"rewrites":[{"source":"**","destination":"/index.html"}]},"flutter":{"platforms":{"android":{"default":{"projectId":"elcorazon-9595","appId":"1:574529156682:android:c79d9121ba193d8a8458b3","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"elcorazon-9595","configurations":{"android":"1:574529156682:android:c79d9121ba193d8a8458b3","ios":"1:574529156682:ios:b552dde7d1b9e0e98458b3","macos":"1:574529156682:ios:ab0de5f23cd3f5dc8458b3","web":"1:574529156682:web:f5ebb766db3f851f8458b3","windows":"1:574529156682:web:47024d329f15b37c8458b3"}}}}}}

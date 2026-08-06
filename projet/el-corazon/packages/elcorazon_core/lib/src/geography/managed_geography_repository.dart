@@ -1,6 +1,7 @@
 import '../models/money.dart';
 import '../network/api_client.dart';
 import 'delivery_zone.dart';
+import 'managed_city.dart';
 
 /// Géographie du back-office — `/api/v1/geography/manage/*`
 /// (`backend/apps/geography/backoffice.py`), réservée au **siège**.
@@ -14,6 +15,35 @@ class ManagedGeographyRepository {
   ManagedGeographyRepository({required this.apiClient});
 
   final ApiClient apiClient;
+
+  /// Villes, **fermées comprises**, pour la même raison que [zones].
+  ///
+  /// Le back-office s'en sert pour **nommer** la ville d'une zone : la zone ne
+  /// porte que sa clé (`ManagedDeliveryZoneSerializer` sérialise `city` en
+  /// `PrimaryKeyRelatedField`), et un écran qui doit choisir les quartiers
+  /// desservis ne peut pas afficher un UUID à la place de « Lomé ».
+  Future<List<ManagedCity>> cities({String? countryIsoCode, bool? isActive}) async {
+    final villes = <ManagedCity>[];
+    String? path = '/geography/manage/cities/';
+    Map<String, dynamic>? queryParameters = {
+      if (countryIsoCode != null) 'country__iso_code': countryIsoCode,
+      if (isActive != null) 'is_active': isActive.toString(),
+    };
+
+    while (path != null) {
+      final response = await apiClient.get(path, queryParameters: queryParameters);
+      final body = response.data as Map<String, dynamic>;
+      villes.addAll(
+        (body['results'] as List<dynamic>).map(
+          (json) => ManagedCity.fromJson(json as Map<String, dynamic>),
+        ),
+      );
+      path = body['next'] as String?;
+      queryParameters = null;
+    }
+
+    return villes;
+  }
 
   /// Zones, **inactives comprises** : la liste publique les filtre, celle-ci
   /// les montre — sans quoi désactiver une zone la ferait disparaître de
@@ -74,6 +104,15 @@ class ManagedGeographyRepository {
     return DeliveryZone.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// Modification partielle d'une zone.
+  ///
+  /// Un paramètre omis n'est pas transmis : le `PATCH` ne touche que ce qu'on
+  /// lui donne. D'où [clearFreeDeliveryThreshold] et [clearMinOrderAmount],
+  /// qui n'ont l'air redondants que jusqu'à ce qu'on veuille **retirer** un
+  /// seuil : passer `null` à `freeDeliveryThreshold` se confond avec « ne pas
+  /// y toucher », si bien qu'une zone qui offrait la livraison au-dessus d'un
+  /// montant ne pouvait plus cesser de le faire. Ces deux drapeaux envoient un
+  /// `null` explicite, que le serveur accepte (`allow_null=True`).
   Future<DeliveryZone> updateZone({
     required String zoneId,
     String? name,
@@ -85,7 +124,20 @@ class ManagedGeographyRepository {
     double? maxDistanceKm,
     int? estimatedDeliveryMinutes,
     bool? isActive,
+    bool clearFreeDeliveryThreshold = false,
+    bool clearMinOrderAmount = false,
   }) async {
+    if (clearFreeDeliveryThreshold && freeDeliveryThreshold != null) {
+      throw ArgumentError(
+        'Un seuil de franco ne peut pas être posé et retiré dans le même appel.',
+      );
+    }
+    if (clearMinOrderAmount && minOrderAmount != null) {
+      throw ArgumentError(
+        'Un minimum de commande ne peut pas être posé et retiré dans le même appel.',
+      );
+    }
+
     final response = await apiClient.patch(
       '/geography/manage/zones/$zoneId/',
       data: {
@@ -94,8 +146,11 @@ class ManagedGeographyRepository {
         if (baseFee != null) 'base_fee': baseFee.toJson(),
         if (feePerKm != null) 'fee_per_km': feePerKm.toJson(),
         if (freeDeliveryThreshold != null)
-          'free_delivery_threshold': freeDeliveryThreshold.toJson(),
-        if (minOrderAmount != null) 'min_order_amount': minOrderAmount.toJson(),
+          'free_delivery_threshold': freeDeliveryThreshold.toJson()
+        else if (clearFreeDeliveryThreshold) 'free_delivery_threshold': null,
+        if (minOrderAmount != null)
+          'min_order_amount': minOrderAmount.toJson()
+        else if (clearMinOrderAmount) 'min_order_amount': null,
         if (maxDistanceKm != null) 'max_distance_km': maxDistanceKm,
         if (estimatedDeliveryMinutes != null)
           'estimated_delivery_minutes': estimatedDeliveryMinutes,

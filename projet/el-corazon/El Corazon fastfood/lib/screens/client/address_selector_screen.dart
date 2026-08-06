@@ -21,7 +21,14 @@ class AddressSelectorScreen extends StatefulWidget {
 }
 
 class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
+  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +54,9 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
           return Column(
             children: [
               // Barre de recherche
-              if (addressService.addresses.length > 2) _buildSearchBar(),
+              if (addressService.addresses.length > 2 ||
+                  _searchQuery.isNotEmpty)
+                _buildSearchBar(),
 
               // Aide contextuelle
               _buildHelpBanner(),
@@ -68,13 +77,19 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       child: TextField(
+        controller: _searchController,
         decoration: InputDecoration(
-          hintText: 'Rechercher une adresse...',
+          hintText: 'Nom, quartier, repère…',
           prefixIcon: const Icon(Icons.search),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
                   icon: const Icon(Icons.clear),
-                  onPressed: () => setState(() => _searchQuery = ''),
+                  // Le champ gardait son texte : seul le filtre était remis à
+                  // zéro, et l'écran paraissait ignorer le geste.
+                  onPressed: () => setState(() {
+                    _searchController.clear();
+                    _searchQuery = '';
+                  }),
                 )
               : null,
           border: OutlineInputBorder(
@@ -249,8 +264,16 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
     );
   }
 
-  void _selectAddress(Address address) {
-    widget.onAddressSelected(address);
+  Future<void> _selectAddress(Address address) async {
+    // Le choix est aussi retenu par le service, et non seulement remonté à
+    // l'écran appelant : sans cela, l'adresse choisie ici était oubliée dès
+    // qu'on quittait la commande en cours.
+    try {
+      await context.read<AddressService>().selectAddress(address.id);
+    } catch (e) {
+      debugPrint('Sélection non mémorisée : $e');
+    }
+    if (mounted) widget.onAddressSelected(address);
   }
 
   void _navigateToManagement() {

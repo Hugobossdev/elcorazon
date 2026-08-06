@@ -30,14 +30,14 @@ class DeliveryZone {
   factory DeliveryZone.fromJson(Map<String, dynamic> json) {
     return DeliveryZone(
       id: json['id'] as String,
-      cityId: json['city'].toString(),
+      cityId: _cityId(json['city']),
       name: json['name'] as String,
       boundary: json['boundary'] as Map<String, dynamic>?,
       baseFee: Money.fromJson(json['base_fee'] as Map<String, dynamic>),
       feePerKm: Money.fromJson(json['fee_per_km'] as Map<String, dynamic>),
       freeDeliveryThreshold: _money(json['free_delivery_threshold']),
       minOrderAmount: _money(json['min_order_amount']),
-      maxDistanceKm: (json['max_distance_km'] as num).toDouble(),
+      maxDistanceKm: _decimal(json['max_distance_km']),
       estimatedDeliveryMinutes: json['estimated_delivery_minutes'] as int,
       isActive: json['is_active'] as bool? ?? true,
     );
@@ -64,4 +64,17 @@ class DeliveryZone {
 
   static Money? _money(Object? value) =>
       value == null ? null : Money.fromJson(value as Map<String, dynamic>);
+
+  /// Un `DecimalField` de DRF voyage **en chaîne**
+  /// (`COERCE_DECIMAL_TO_STRING`, laissé à sa valeur par défaut) : lire
+  /// `max_distance_km` comme un nombre plantait à la première zone reçue.
+  static double _decimal(Object? value) => double.parse(value.toString());
+
+  /// La ville arrive sous deux formes selon le public de la route : une clé
+  /// pour le back-office (`ManagedDeliveryZoneSerializer`), la ville entière
+  /// pour un visiteur (`DeliveryZoneSerializer`, qui l'imbrique pour porter la
+  /// devise du pays avec elle). Les deux désignent la même ville ; seule sa
+  /// clé est retenue ici.
+  static String _cityId(Object? value) =>
+      value is Map ? value['id'].toString() : value.toString();
 }

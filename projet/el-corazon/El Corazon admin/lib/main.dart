@@ -20,6 +20,7 @@ import 'services/client_management_service.dart';
 import 'services/gamification_service.dart';
 import 'services/driver_schedule_service.dart';
 import 'services/driver_document_service.dart';
+import 'services/delivery_zone_service.dart';
 import 'screens/admin/admin_navigation_screen.dart';
 import 'screens/auth/admin_auth_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart';
@@ -108,6 +109,11 @@ class AdminApp extends StatelessWidget {
         ),
         ChangeNotifierProvider(create: (_) => DriverScheduleService()),
         ChangeNotifierProvider(create: (_) => DriverDocumentService()),
+        // Zones et barèmes. Fourni au-dessus du `Navigator` parce que le
+        // formulaire d'édition s'ouvre en `showDialog` : un fournisseur posé
+        // plus bas serait invisible depuis la boîte de dialogue, qui est
+        // rattachée au navigateur et non à l'écran qui l'a ouverte.
+        ChangeNotifierProvider(create: (_) => DeliveryZoneService()),
         // Aucun socket ici : la position des livreurs arrive par les canaux
         // WebSocket du serveur (`/ws/*`, Django Channels), dont l'autorisation
         // précède l'acceptation. Le `SocketService` retiré ouvrait une

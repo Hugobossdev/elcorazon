@@ -580,7 +580,9 @@ class _AddEditAddressScreenState extends State<AddEditAddressScreen> {
                       controller: _cityController,
                       decoration: const InputDecoration(
                         labelText: 'Ville',
-                        hintText: 'Ex: Abidjan',
+                        // L'exemple donnait « Abidjan », une ville d'un autre
+                        // pays que celui où l'on livre.
+                        hintText: 'Ex: Lomé',
                         border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.location_city),
                       ),

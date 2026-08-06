@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "574529156682",
+    "project_id": "elcorazon-9595",
+    "storage_bucket": "elcorazon-9595.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:574529156682:android:c79d9121ba193d8a8458b3",
+        "android_client_info": {
+          "package_name": "com.elcorazon.fast"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyByYPmtsEhRXWbmHQDtNLpHkw7IKpTwo10"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -24,9 +26,18 @@ class NotificationService extends ChangeNotifier {
   int _unreadCount = 0;
   String? _fcmToken;
 
+  /// Émet à chaque rotation du jeton d'appareil (FCM le renouvelle de son
+  /// propre chef, sans nous prévenir autrement). `AppService` s'y abonne pour
+  /// ré-enregistrer le nouveau jeton auprès de `/auth/devices/` : sans cela le
+  /// livreur cesse silencieusement de recevoir ses offres de course, et rien
+  /// dans l'application ne le signale.
+  final StreamController<String> _tokenRefreshController =
+      StreamController<String>.broadcast();
+
   List<Map<String, dynamic>> get notifications => _notifications;
   int get unreadCount => _unreadCount;
   String? get fcmToken => _fcmToken;
+  Stream<String> get tokenRefreshStream => _tokenRefreshController.stream;
 
   Future<void> initialize() async {
     // Initialize Local Notifications
@@ -110,8 +121,14 @@ class NotificationService extends ChangeNotifier {
   Future<void> _getToken() async {
     try {
       _fcmToken = await _firebaseMessaging.getToken();
-      debugPrint('FCM Token: $_fcmToken');
-      // Here you would typically send the token to your backend
+      debugPrint('FCM Token: ${_fcmToken == null ? 'indisponible' : 'obtenu'}');
+      // L'enregistrement auprès du backend (`/auth/devices/`) est fait par
+      // `AppService`, qui seul sait si une session est ouverte : ce service ne
+      // connaît que le jeton.
+      _firebaseMessaging.onTokenRefresh.listen((token) {
+        _fcmToken = token;
+        _tokenRefreshController.add(token);
+      });
     } catch (e) {
       debugPrint('Error getting FCM token: $e');
     }
@@ -354,5 +371,11 @@ class NotificationService extends ChangeNotifier {
       showOrderConfirmationNotification(
           orderId, 'N\'oubliez pas votre commande!');
     });
+  }
+
+  @override
+  void dispose() {
+    _tokenRefreshController.close();
+    super.dispose();
   }
 }

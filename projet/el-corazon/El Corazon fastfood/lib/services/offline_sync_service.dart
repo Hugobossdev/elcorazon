@@ -378,12 +378,19 @@ class OfflineSyncService extends ChangeNotifier {
           // Ni frais de livraison, ni remise, ni code promo ne sont rejoués :
           // le serveur les recalcule au devis de commande (C1). Les envoyer
           // reviendrait à laisser le client fixer ce qu'il paie.
+          //
+          // Les options retenues et la note, elles, sont rejouées : ce sont
+          // des **choix** du client, pas des montants. Les taire ferait
+          // repartir un gâteau sur mesure composé hors ligne avec sa seule
+          // recette de base.
           await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
           for (final item in items) {
             await _cartRepository.addLine(
               restaurantSlug: AppConstants.restaurantSlug,
               menuItemId: item.menuItemId,
               quantity: item.quantity,
+              optionIds: item.selectedOptionIds,
+              notes: item.remoteNotes,
             );
           }
         }

@@ -223,10 +223,9 @@ class ClientApp extends StatelessWidget {
           create: (_) => AlertService()..initialize(),
           lazy: true,
         ),
-        ChangeNotifierProvider(
-          create: (_) => DeliveryFeeService()..initialize(),
-          lazy: true,
-        ),
+        // Aucune initialisation : le service n'a plus d'état à préparer, il
+        // interroge le serveur à la demande.
+        ChangeNotifierProvider(create: (_) => DeliveryFeeService(), lazy: true),
         ChangeNotifierProvider(create: (_) => ThemeService(), lazy: true),
       ],
       child: Consumer<ThemeService>(

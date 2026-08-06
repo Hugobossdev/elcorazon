@@ -19,6 +19,7 @@ from django.utils import timezone
 
 from apps.accounts.permissions import PERMISSION_CHOICES, validate_permissions
 from common.models import TimeStampedModel, UUIDModel
+from common.storage import user_media
 
 __all__ = ["Device", "Role", "User", "UserType"]
 
@@ -116,7 +117,10 @@ class User(UUIDModel, AbstractBaseUser, TimeStampedModel):
         max_length=16, choices=UserType.choices, default=UserType.CUSTOMER, db_index=True
     )
 
-    avatar = models.ImageField(upload_to="avatars/", null=True, blank=True)
+    # Compartiment public : un avatar s'affiche dans une liste de commandes,
+    # aux côtés de dizaines d'autres. Le signer coûterait une signature par
+    # vignette et interdirait toute mise en cache (ADR-011).
+    avatar = models.ImageField(upload_to="avatars/", storage=user_media, null=True, blank=True)
 
     is_active = models.BooleanField(
         default=True,

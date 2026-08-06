@@ -293,6 +293,33 @@ class _AddressCardState extends State<AddressCard>
               ),
             ],
           ),
+          // Le repère, sous l'adresse : c'est lui que le client reconnaît, et
+          // lui que le livreur suit. Le collecter sans jamais le montrer
+          // laisserait croire qu'il s'est perdu.
+          if (widget.address.landmark.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(
+                  Icons.push_pin_outlined,
+                  size: 16,
+                  color: Colors.grey.shade600,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    widget.address.landmark,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.grey.shade600,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -322,15 +349,13 @@ class _AddressCardState extends State<AddressCard>
             const SizedBox(height: 12),
 
             // Informations détaillées
-            if (widget.address.latitude != null &&
-                widget.address.longitude != null)
-              _buildDetailRow(
-                icon: Icons.gps_fixed,
-                label: 'Coordonnées',
-                value:
-                    '${widget.address.latitude!.toStringAsFixed(5)}, ${widget.address.longitude!.toStringAsFixed(5)}',
-                theme: theme,
-              ),
+            _buildDetailRow(
+              icon: Icons.gps_fixed,
+              label: 'Coordonnées',
+              value:
+                  '${widget.address.latitude.toStringAsFixed(5)}, ${widget.address.longitude.toStringAsFixed(5)}',
+              theme: theme,
+            ),
 
             const SizedBox(height: 8),
             _buildDetailRow(

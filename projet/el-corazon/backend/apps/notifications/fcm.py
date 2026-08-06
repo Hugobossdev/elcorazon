@@ -1,11 +1,10 @@
 """Connecteur Firebase Cloud Messaging — API HTTP v1.
 
-**Avertissement, comme pour PayDunya.** Le contrat suivi ici est celui que
-Google documente pour l'API v1, mais il n'a pas pu être confronté au service
-réel depuis ce dépôt : aucun projet Firebase n'y est configuré. Avant la mise
-en service, envoyer une notification à un appareil de test et **comparer** la
-réponse d'erreur reçue à `_ERREURS_DEFINITIVES` — c'est la classification des
-erreurs qui compte, pas l'envoi lui-même.
+**Confronté au service réel le 5 août 2026** (projet `elcorazon-9595`) : le
+compte de service s'authentifie, l'API accepte les envois, et les codes de
+refus observés sont bien ceux que `ERREURS_DEFINITIVES` classe. Voir
+`docs/firebase.md` §5 pour le détail de ce qui a été exercé — et de ce qui
+demande encore un appareil physique.
 
 Trois choses distinguent cette intégration d'un simple POST :
 
@@ -26,10 +25,12 @@ Trois choses distinguent cette intégration d'un simple POST :
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
 from django.conf import settings
+from google.auth import transport as google_transport
 
 from apps.notifications.push import PushMessage, PushResult
 
@@ -48,6 +49,63 @@ SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
 #: ne fonctionnera jamais depuis celui-ci, et le garder ferait réessayer
 #: éternellement une erreur de configuration.
 ERREURS_DEFINITIVES = frozenset({"UNREGISTERED", "INVALID_ARGUMENT", "SENDER_ID_MISMATCH"})
+
+
+class _ReponseOAuth(google_transport.Response):
+    """Réponse HTTP telle que `google-auth` s'attend à la lire."""
+
+    def __init__(self, reponse: httpx.Response) -> None:
+        self._reponse = reponse
+
+    @property
+    def status(self) -> int:
+        return self._reponse.status_code
+
+    @property
+    def headers(self) -> Mapping[str, str]:
+        return self._reponse.headers
+
+    @property
+    def data(self) -> bytes:
+        return self._reponse.content
+
+
+class _TransportOAuth(google_transport.Request):
+    """Transport de `google-auth`, bâti sur **httpx**.
+
+    Sans lui, `credentials.refresh()` importe `google.auth.transport.requests`,
+    qui exige le paquet `requests` — absent des dépendances, et absent à
+    dessein : le projet a choisi `httpx` pour son transport simulable
+    (`MockTransport`), qui permet de tester un connecteur hors réseau.
+
+    Ce n'était pas une question de goût. L'import manquant levait une
+    `ImportError` à chaque rafraîchissement de jeton, donc **avant tout envoi**.
+    `send()` l'attrape, journalise `fcm.authentification` et rend tous les
+    appareils en échec passager : le push ne partait jamais, sans qu'aucune
+    erreur ne remonte à l'appelant. Le défaut a échappé aux tests parce qu'ils
+    court-circuitaient `_authorization` — la seule ligne qui échouait.
+
+    Le point d'extension est documenté par `google-auth` : n'importe quel
+    appelable respectant cette signature fait l'affaire.
+    """
+
+    def __call__(
+        self,
+        url: str,
+        method: str = "GET",
+        body: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        **kwargs: Any,
+    ) -> google_transport.Response:
+        with httpx.Client(timeout=timeout or settings.FCM_TIMEOUT_SECONDS) as client:
+            reponse = client.request(
+                method,
+                url,
+                content=body,
+                headers=dict(headers) if headers else None,
+            )
+        return _ReponseOAuth(reponse)
 
 
 class FirebaseCloudMessagingBackend:
@@ -96,9 +154,7 @@ class FirebaseCloudMessagingBackend:
         """
         credentials = _credentials()
         if not credentials.valid:
-            from google.auth.transport.requests import Request as GoogleRequest
-
-            credentials.refresh(GoogleRequest())
+            credentials.refresh(_TransportOAuth())
 
         return {
             "Authorization": f"Bearer {credentials.token}",
@@ -124,7 +180,25 @@ class FirebaseCloudMessagingBackend:
         if response.status_code == httpx.codes.OK:
             return "delivered"
 
-        return "unregistered" if self._definitif(response) else "failed"
+        code, definitif = self._cause(response)
+        # Le seul endroit où le refus de Google est lisible. Sans cette ligne,
+        # une erreur de configuration — mauvais `FCM_PROJECT_ID`, compte de
+        # service sans droit d'envoi — se présente comme une suite d'échecs
+        # muets, indiscernable d'une panne réseau. C'est aussi ce qu'on compare
+        # à `ERREURS_DEFINITIVES` lors de la validation d'avant mise en service.
+        logger.warning(
+            "fcm.rejet",
+            extra={
+                "status": response.status_code,
+                "code": code,
+                "definitif": definitif,
+                # Les huit derniers caractères suffisent à reconnaître un
+                # appareil dans une rafale ; le jeton entier n'a rien à faire
+                # dans un journal qui part chez un collecteur.
+                "device": token[-8:],
+            },
+        )
+        return "unregistered" if definitif else "failed"
 
     @staticmethod
     def _payload(token: str, message: PushMessage) -> dict[str, Any]:
@@ -147,27 +221,41 @@ class FirebaseCloudMessagingBackend:
         }
 
     @staticmethod
-    def _definitif(response: httpx.Response) -> bool:
-        """L'appareil est-il définitivement injoignable ?
+    def _cause(response: httpx.Response) -> tuple[str, bool]:
+        """Code d'erreur porté par la réponse, et son caractère définitif.
 
         La décision se lit dans `error.details[].errorCode` et **pas** dans le
         statut HTTP : un 400 peut signaler un jeton mort comme une charge utile
         mal formée, et purger sur le second effacerait des appareils sains à
         cause d'un défaut de notre côté.
+
+        Le code est rendu même quand il ne conclut à rien : c'est ce qui
+        distingue, dans le journal, un quota dépassé d'un projet mal configuré,
+        alors que les deux mènent à la même reprise.
         """
         try:
             corps: dict[str, Any] = response.json()
         except ValueError:
-            return False
+            return "", False
 
         erreur = corps.get("error", {})
-        for detail in erreur.get("details", []):
-            if isinstance(detail, dict) and detail.get("errorCode") in ERREURS_DEFINITIVES:
-                return True
+        codes = [
+            str(detail["errorCode"])
+            for detail in erreur.get("details", [])
+            if isinstance(detail, dict) and detail.get("errorCode")
+        ]
+        for code in codes:
+            if code in ERREURS_DEFINITIVES:
+                return code, True
+        if codes:
+            return codes[0], False
 
         # Certaines réponses ne portent que le statut canonique. `NOT_FOUND` y
-        # désigne un jeton qui n'existe plus ; le reste est passager.
-        return bool(erreur.get("status") == "NOT_FOUND")
+        # désigne un jeton qui n'existe plus ; le reste est passager — y
+        # compris un `INVALID_ARGUMENT` à ce niveau, qui parle de la requête et
+        # non du jeton.
+        statut = str(erreur.get("status", ""))
+        return statut, statut == "NOT_FOUND"
 
 
 _cache: dict[str, Any] = {}

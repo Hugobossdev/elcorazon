@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from decouple import Csv, config
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -73,7 +74,11 @@ LOCAL_APPS: list[str] = [
     # "apps.inventory",
 ]
 
-INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
+# `common` est déclaré comme application — non pour ses modèles, qui sont tous
+# abstraits, mais parce que Django ne découvre les commandes de gestion que
+# dans des applications installées. C'est ce qui rend `ensure_storage_buckets`
+# appelable.
+INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + ["common"] + LOCAL_APPS
 
 # --------------------------------------------------------------- géospatial
 
@@ -111,6 +116,23 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# --------------------------------------------------------------- CORS
+#
+# En-têtes que le navigateur a le droit d'envoyer. La liste par défaut de
+# `django-cors-headers` ne connaît que les en-têtes standards ; `Idempotency-Key`
+# est le nôtre (ADR-009, `apps.orders.views.IDEMPOTENCY_HEADER`), donc la
+# requête préalable le refusait et **la création de commande échouait depuis le
+# web** — seulement depuis le web, et seulement sur cette route, la seule qui
+# pose un en-tête personnalisé. Le navigateur ne remonte alors qu'une erreur
+# réseau nue : la vraie requête n'est jamais émise, rien n'atteint Django, et
+# ses journaux restent muets.
+#
+# Ici et non dans `dev.py` : l'en-tête fait partie du contrat de l'API, il ne
+# dépend pas de l'environnement — contrairement aux origines autorisées.
+# Les tests, qui passent par le client Django, n'émettent jamais de requête
+# préalable : c'est `tests/contract/test_cors.py` qui garde cette liste.
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
@@ -334,19 +356,59 @@ SIMPLE_JWT = {
 }
 
 # --------------------------------------------------------------- stockage
+#
+# Stockage objet **compatible S3** — MinIO en développement et en production,
+# AWS S3 le jour venu sans toucher au code (ADR-011). Rien n'est écrit en dur :
+# ni point d'accès, ni identifiants, ni nom de compartiment.
+#
+# Toute la mécanique vit dans `common/storage.py`, et **seulement là** : le
+# reste du projet n'importe ni `boto3` ni `django-storages`, ce qu'un test
+# d'architecture vérifie.
 
-STORAGES = {
-    "default": {"BACKEND": "storages.backends.s3.S3Storage"},
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+STORAGE_ENDPOINT_URL: str = config("S3_ENDPOINT_URL", default="")
+STORAGE_REGION: str = config("S3_REGION", default="us-east-1")
+STORAGE_ACCESS_KEY: str = config("S3_ACCESS_KEY", default="")
+STORAGE_SECRET_KEY: str = config("S3_SECRET_KEY", default="")
+STORAGE_USE_SSL: bool = config("S3_USE_SSL", default=False, cast=bool)
+
+# MinIO ne résout pas un compartiment en sous-domaine (`bucket.hôte`) : il lui
+# faut le chemin (`hôte/bucket`). AWS accepte les deux, donc `path` reste juste
+# des deux côtés — la variable existe pour un CDN qui exigerait l'autre forme.
+STORAGE_ADDRESSING_STYLE: str = config("S3_ADDRESSING_STYLE", default="path")
+
+# Un compartiment par domaine plutôt qu'un seul fourre-tout. Ce n'est pas du
+# rangement : la politique de lecture se pose **sur le compartiment**, donc
+# c'est lui qui porte la frontière entre ce qui est public (le catalogue) et ce
+# qui ne l'est jamais (les pièces d'identité des livreurs).
+STORAGE_BUCKETS: dict[str, str] = {
+    "products": config("S3_BUCKET_PRODUCTS", default="elcorazon-products"),
+    "banners": config("S3_BUCKET_BANNERS", default="elcorazon-banners"),
+    "users": config("S3_BUCKET_USERS", default="elcorazon-users"),
+    "documents": config("S3_BUCKET_DOCUMENTS", default="elcorazon-documents"),
 }
 
-AWS_S3_ENDPOINT_URL = config("S3_ENDPOINT_URL", default="")
-AWS_STORAGE_BUCKET_NAME = config("S3_BUCKET", default="elcorazon")
-AWS_S3_REGION_NAME = config("S3_REGION", default="us-east-1")
-AWS_ACCESS_KEY_ID = config("S3_ACCESS_KEY", default="")
-AWS_SECRET_ACCESS_KEY = config("S3_SECRET_KEY", default="")
-AWS_QUERYSTRING_AUTH = True  # les pièces d'identité livreurs ne sont jamais publiques
-AWS_QUERYSTRING_EXPIRE = 900
+# Adresse publique des compartiments publics — celle que verra un navigateur.
+# Distincte du point d'accès interne : en production, l'API parle à MinIO par
+# le réseau Docker (`http://minio:9000`), que personne d'autre n'atteint. Vide,
+# les URL publiques retombent sur le point d'accès, ce qui convient en
+# développement.
+STORAGE_PUBLIC_BASE_URL: str = config("S3_PUBLIC_URL", default="")
+
+# Durée de vie d'une URL signée. Assez pour ouvrir un document, trop peu pour
+# qu'un lien copié dans un courriel serve encore le lendemain.
+STORAGE_SIGNED_URL_EXPIRE: int = config("S3_SIGNED_URL_EXPIRE", default=900, cast=int)
+
+STORAGES = {
+    # Le stockage par défaut est **privé**. C'est le sens de la sécurité par
+    # défaut : un champ fichier ajouté demain sans stockage explicite atterrit
+    # dans le compartiment signé, pas en libre accès.
+    "default": {"BACKEND": "common.storage.CourierDocumentStorage"},
+    "products": {"BACKEND": "common.storage.ProductImageStorage"},
+    "banners": {"BACKEND": "common.storage.BannerStorage"},
+    "users": {"BACKEND": "common.storage.UserMediaStorage"},
+    "documents": {"BACKEND": "common.storage.CourierDocumentStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

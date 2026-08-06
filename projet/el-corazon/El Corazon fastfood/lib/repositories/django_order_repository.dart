@@ -48,10 +48,13 @@ class DjangoOrderRepository implements OrderRepository {
     String? instructions,
     String promoCode = '',
   }) async {
-    assert(
-      address.latitude != null && address.longitude != null,
-      'DjangoOrderRepository requiert une adresse déjà synchronisée côté serveur.',
-    );
+    // L'assertion qui se trouvait ici — « adresse déjà synchronisée côté
+    // serveur » — était doublement inutile : `assert` disparaît en production,
+    // donc elle ne protégeait que le mode debug, et elle vérifiait la présence
+    // d'un point, ce qui ne dit rien de la présence de l'adresse *chez le
+    // serveur*. C'est cette confusion qui laissait partir des identifiants
+    // locaux. Le carnet garantit désormais l'invariant à la source : toute
+    // `Address` vient de `/profiles/addresses/`.
     final remote = await _orders.create(
       restaurantSlug: AppConstants.restaurantSlug,
       addressId: address.id,

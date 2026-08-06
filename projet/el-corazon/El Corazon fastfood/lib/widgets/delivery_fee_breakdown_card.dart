@@ -2,7 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 
-/// Widget affichant la décomposition détaillée des frais de livraison
+/// Ce que le serveur dit de la livraison à l'adresse choisie.
+///
+/// Cette carte détaillait autrefois « frais de base » et « distance × 200 ».
+/// Ces deux lignes étaient une reconstitution faite sur le téléphone : le
+/// serveur rend le montant de la course, pas ses termes, et il ne facture pas
+/// 200 F du kilomètre partout — le tarif appartient à la zone, où
+/// l'exploitation le règle sans republier l'application. Deux lignes fausses
+/// dont la somme tombe juste valent moins qu'un montant seul.
 class DeliveryFeeBreakdownCard extends StatelessWidget {
   final DeliveryFeeBreakdown breakdown;
   final bool showTitle;
@@ -66,54 +73,24 @@ class DeliveryFeeBreakdownCard extends StatelessWidget {
               const SizedBox(height: 12),
             ],
 
-            // Distance
-            _buildInfoRow(
-              context,
-              icon: Icons.straighten,
-              label: 'Distance',
-              value: '${breakdown.distance.toStringAsFixed(1)} km',
-              iconColor: Colors.blue,
-            ),
-
-            const SizedBox(height: 8),
-
-            // Frais de base
-            _buildFeeRow(
-              context,
-              label: 'Frais de base',
-              amount: breakdown.baseFee,
-            ),
-
-            const SizedBox(height: 8),
-
-            // Frais de distance
-            _buildFeeRow(
-              context,
-              label:
-                  'Distance (${breakdown.distance.toStringAsFixed(1)} × 200)',
-              amount: breakdown.distanceFee,
-            ),
-
-            // Frais de zone si applicable
-            if (breakdown.zoneFee > 0) ...[
-              const SizedBox(height: 8),
-              _buildFeeRow(
+            // Zone desservante — c'est elle qui porte le barème appliqué.
+            if (breakdown.zoneName != null) ...[
+              _buildInfoRow(
                 context,
-                label: 'Zone ${breakdown.zoneName ?? "spéciale"}',
-                amount: breakdown.zoneFee,
+                icon: Icons.map_outlined,
+                label: 'Zone',
+                value: breakdown.zoneName!,
+                iconColor: Colors.blue,
               ),
+              const SizedBox(height: 12),
             ],
 
-            const SizedBox(height: 12),
-            Divider(height: 1, color: Colors.grey.shade300),
-            const SizedBox(height: 12),
-
-            // Total
+            // Frais facturés
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Total',
+                  'Frais de livraison',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -127,6 +104,19 @@ class DeliveryFeeBreakdownCard extends StatelessWidget {
                 ),
               ],
             ),
+
+            // Le seuil de franco, quand la zone en pose un : c'est la seule
+            // information qui permet au client de décider d'ajouter un article.
+            if (breakdown.freeDeliveryThreshold != null) ...[
+              const SizedBox(height: 12),
+              _buildInfoRow(
+                context,
+                icon: Icons.card_giftcard,
+                label: 'Livraison offerte dès',
+                value: PriceFormatter.format(breakdown.freeDeliveryThreshold!),
+                iconColor: Colors.green,
+              ),
+            ],
 
             // Temps estimé
             if (breakdown.estimatedDeliveryTime != null) ...[
@@ -244,7 +234,7 @@ class DeliveryFeeBreakdownCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Distance: ${breakdown.distance.toStringAsFixed(1)} km',
+                    'Aucune zone ne couvre cette adresse.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: Colors.red.shade700,
                     ),
@@ -255,30 +245,6 @@ class DeliveryFeeBreakdownCard extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildFeeRow(
-    BuildContext context, {
-    required String label,
-    required double amount,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.grey.shade700,
-              ),
-        ),
-        Text(
-          PriceFormatter.format(amount),
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-        ),
-      ],
     );
   }
 

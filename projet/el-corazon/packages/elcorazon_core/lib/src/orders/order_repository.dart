@@ -1,5 +1,6 @@
 import '../network/api_client.dart';
 import 'order.dart';
+import 'order_quote.dart';
 
 /// Accès à `/api/v1/orders/*` — voir
 /// `backend/apps/orders/{serializers,views,services}.py`. La commande est
@@ -35,6 +36,33 @@ class OrderRepository {
       },
     );
     return Order.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Combien coûterait cette commande — sans rien écrire.
+  ///
+  /// Le panier n'est pas transmis : il est lu côté serveur depuis le
+  /// restaurant désigné. Laisser l'application annoncer son sous-total
+  /// permettrait de franchir un minimum de commande avec un montant qui n'est
+  /// pas le sien.
+  ///
+  /// [addressId] est facultatif, et l'écart se paie en exactitude : avec, les
+  /// frais sont ceux de la zone qui couvre le point d'arrivée ; sans, ceux de
+  /// la zone de l'établissement, ce qui suffit à afficher un ordre de grandeur
+  /// tant qu'aucune adresse n'est choisie.
+  Future<OrderQuote> preview({
+    required String restaurantSlug,
+    String? addressId,
+    String promoCode = '',
+  }) async {
+    final response = await apiClient.post(
+      '/orders/preview/',
+      data: {
+        'restaurant': restaurantSlug,
+        if (addressId != null) 'address': addressId,
+        'promo_code': promoCode,
+      },
+    );
+    return OrderQuote.fromJson(response.data as Map<String, dynamic>);
   }
 
   Future<List<Order>> list({String? status}) async {

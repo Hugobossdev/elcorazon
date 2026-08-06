@@ -49,6 +49,15 @@ class _AdvancedOrderManagementScreenState
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
 
+  /// Recherche et tri sont **tenus par l'écran**, pas par le service.
+  ///
+  /// Ce sont des réglages d'affichage : deux écrans ouverts sur le même
+  /// service n'ont aucune raison de partager le tri de l'un ni la recherche de
+  /// l'autre. Les porter dans le service les rendrait globaux, et un filtre
+  /// posé ici resterait actif sur un écran qui ne le montre pas.
+  String _searchQuery = '';
+  OrderSortOption _sortOption = OrderSortOption.dateDesc;
+
   @override
   void initState() {
     super.initState();
@@ -114,7 +123,7 @@ class _AdvancedOrderManagementScreenState
                               icon: const Icon(Icons.clear),
                               onPressed: () {
                                 _searchController.clear();
-                                setState(() {});
+                                setState(() => _searchQuery = '');
                               },
                             )
                           : null,
@@ -125,11 +134,7 @@ class _AdvancedOrderManagementScreenState
                       filled: true,
                       fillColor: scheme.surfaceContainerHighest,
                     ),
-                    onChanged: (value) {
-                      context
-                          .read<OrderManagementService>()
-                          .searchOrders(value);
-                    },
+                    onChanged: (value) => setState(() => _searchQuery = value),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -314,10 +319,8 @@ class _AdvancedOrderManagementScreenState
   Widget _buildOverviewTab(
       BuildContext context, OrderManagementService orderService) {
     final stats = orderService.getOrderStats();
-    final urgentOrders =
-        <Order>[]; // orderService.getUrgentOrders(); // Méthode non implémentée
-    final overdueOrders =
-        <Order>[]; // orderService.getOverdueOrders(); // Méthode non implémentée
+    final urgentOrders = orderService.urgentOrders;
+    final overdueOrders = orderService.overdueOrders;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -1339,13 +1342,60 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
+  /// Recherche et tri s'appliquent **ici**, seul point par lequel passent les
+  /// cinq onglets de statut : les y poser une fois vaut mieux que cinq
+  /// applications qui finiraient par diverger.
+  ///
+  /// La recherche portait jusqu'ici sur un appel dont le résultat était jeté
+  /// (`service.searchOrders(value);`, valeur de retour ignorée) et le tri sur
+  /// une liste déroulante branchée sur rien : les deux contrôles étaient
+  /// visibles et sans effet.
+  List<Order> _appliquerRechercheEtTri(List<Order> orders) {
+    final terme = _searchQuery.trim().toLowerCase();
+
+    final retenues = terme.isEmpty
+        ? List<Order>.of(orders)
+        : orders
+            .where(
+              (order) =>
+                  order.id.toLowerCase().contains(terme) ||
+                  order.recipientName.toLowerCase().contains(terme) ||
+                  order.deliveryAddress.toLowerCase().contains(terme),
+            )
+            .toList();
+
+    switch (_sortOption) {
+      case OrderSortOption.dateAsc:
+        retenues.sort((a, b) => a.orderTime.compareTo(b.orderTime));
+      case OrderSortOption.dateDesc:
+        retenues.sort((a, b) => b.orderTime.compareTo(a.orderTime));
+      case OrderSortOption.totalAsc:
+        retenues.sort((a, b) => a.total.compareTo(b.total));
+      case OrderSortOption.totalDesc:
+        retenues.sort((a, b) => b.total.compareTo(a.total));
+      case OrderSortOption.status:
+        retenues.sort((a, b) => a.status.index.compareTo(b.status.index));
+    }
+
+    return retenues;
+  }
+
   Widget _buildOrdersList(BuildContext context, List<Order> orders,
       OrderManagementService orderService) {
+    final affichees = _appliquerRechercheEtTri(orders);
+
+    if (affichees.isEmpty) {
+      return _buildEmptyState(
+        context,
+        'Aucune commande ne correspond à « $_searchQuery »',
+      );
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: orders.length,
+      itemCount: affichees.length,
       itemBuilder: (context, index) {
-        final order = orders[index];
+        final order = affichees[index];
         return _buildOrderCard(context, order, orderService);
       },
     );
@@ -1756,40 +1806,27 @@ class _AdvancedOrderManagementScreenState
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(20),
-                  child: Consumer<OrderManagementService>(
-                    builder: (context, orderService, child) {
+                  // `StatefulBuilder` : le `setState` de l'écran ne redessine
+                  // pas le contenu d'une boîte de dialogue, qui vit dans une
+                  // autre route. Sans lui, le tri s'appliquerait à la liste
+                  // mais la liste déroulante afficherait encore l'ancien choix.
+                  child: StatefulBuilder(
+                    builder: (context, setDialogState) {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          DropdownButtonFormField<OrderStatus>(
-                            decoration: const InputDecoration(
-                              labelText: 'Statut',
-                              border: OutlineInputBorder(),
-                            ),
-                            initialValue:
-                                null, // orderService.statusFilter; // Propriété non implémentée
-                            items: [
-                              const DropdownMenuItem(
-                                  value: null, child: Text('Tous les statuts')),
-                              ...OrderStatus.values.map((status) {
-                                return DropdownMenuItem(
-                                  value: status,
-                                  child: Text(status.displayName),
-                                );
-                              }),
-                            ],
-                            onChanged: (status) {
-                              // orderService.filterByStatus(status); // Méthode non implémentée
-                            },
-                          ),
-                          const SizedBox(height: 16),
+                          // Le filtre par statut a été retiré : les cinq
+                          // onglets de cet écran *sont* le filtre par statut.
+                          // Un second filtre, global et invisible depuis
+                          // l'onglet courant, ne pouvait que le contredire —
+                          // choisir « Prêtes » depuis l'onglet « En attente »
+                          // vidait la liste sans expliquer pourquoi.
                           DropdownButtonFormField<OrderSortOption>(
                             decoration: const InputDecoration(
                               labelText: 'Trier par',
                               border: OutlineInputBorder(),
                             ),
-                            initialValue:
-                                null, // orderService.sortOption; // Propriété non implémentée
+                            initialValue: _sortOption,
                             items: OrderSortOption.values.map((option) {
                               return DropdownMenuItem<OrderSortOption>(
                                 value: option,
@@ -1797,10 +1834,21 @@ class _AdvancedOrderManagementScreenState
                               );
                             }).toList(),
                             onChanged: (option) {
-                              if (option != null) {
-                                // orderService.setSortOption(option); // Méthode non implémentée
-                              }
+                              if (option == null) return;
+                              setDialogState(() => _sortOption = option);
+                              setState(() {});
                             },
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Le tri s’applique aux commandes de chaque onglet. '
+                            'Pour filtrer par statut, changez d’onglet.',
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       );
@@ -1821,7 +1869,13 @@ class _AdvancedOrderManagementScreenState
                       ),
                       child: TextButton(
                         onPressed: () {
-                          // context.read<OrderManagementService>().filterByStatus(null); // Méthode non implémentée
+                          // Remet l'écran dans son état d'ouverture : tri par
+                          // date décroissante et recherche vide.
+                          _searchController.clear();
+                          setState(() {
+                            _searchQuery = '';
+                            _sortOption = OrderSortOption.dateDesc;
+                          });
                           Navigator.of(context).pop();
                         },
                         child: const Text('Effacer'),

@@ -144,12 +144,33 @@ c'est justement l'occasion actée par ADR-009 de lever les trois travers de l'an
       `ws/restaurants/<id>/dashboard/` (`RestaurantDashboardConsumer`, lecture seule, diffusé par
       `OrderService.transition_to` en plus du suivi client). Testés (autorisation à la connexion,
       relais, non-fuite entre établissements) ; suite complète (875 tests), ruff et mypy verts.
-- [ ] **Valider FCM en conditions réelles** : `apps/notifications/fcm.py` n'a jamais été exercé
-      contre un vrai projet Firebase. La commande `python manage.py send_test_push <jeton>`
-      (ajoutée le 2026-07-27, `apps/notifications/management/commands/send_test_push.py`) passe
-      par le `PUSH_BACKEND` configuré — il ne reste plus qu'à fournir un projet Firebase, des
-      credentials de service (`FCM_CREDENTIALS_PATH`, `FCM_PROJECT_ID`) et un jeton d'appareil de
-      test pour exécuter la validation réelle.
+- [x] **FCM validé contre un vrai projet Firebase** (2026-08-05, projet `elcorazon-9595`).
+      Le connecteur `apps/notifications/fcm.py` n'avait jamais été exercé contre le service réel.
+      Il l'est ; détail complet dans `docs/firebase.md` §5.
+      - **La validation a trouvé un défaut qui rendait le push totalement muet.** Le connecteur
+        importait `google.auth.transport.requests` pour rafraîchir son jeton OAuth, donc le paquet
+        `requests` — absent des dépendances, et absent **par choix** (`httpx` a été retenu pour son
+        transport simulable). L'`ImportError` se produit avant tout envoi : `send()` l'attrape,
+        journalise `fcm.authentification` et rend tous les appareils en échec passager. Aucune
+        notification ne serait jamais partie, l'historique se serait rempli normalement, et le seul
+        symptôme aurait été « les téléphones ne sonnent pas ». Le défaut a échappé aux tests parce
+        qu'ils court-circuitaient `_authorization` — la seule ligne qui échouait. Corrigé par
+        `_TransportOAuth`, transport `google-auth` bâti sur httpx (point d'extension documenté par
+        la bibliothèque) ; 4 tests couvrent désormais ce chemin.
+      - **Authentification, projet et URL acceptés** : jeton OAuth obtenu avec la portée
+        `firebase.messaging`, l'API répond sur `/v1/projects/elcorazon-9595/messages:send`, et
+        `send_test_push` passe bien par `backend()` — le chemin de production.
+      - **Les codes de refus observés sont ceux que `ERREURS_DEFINITIVES` classe** : jeton tronqué
+        → `400 INVALID_ARGUMENT`, jeton inexistant → `404 UNREGISTERED`, tous deux dans la liste et
+        classés définitifs. Aucun code inconnu, aucun appareil sain classé définitif.
+        `SENDER_ID_MISMATCH` n'a pas pu être provoqué (il demande un jeton d'un autre projet) et
+        reste dans la liste à dessein.
+      - **Reste, et cela demande un appareil physique** : la livraison réelle sur un téléphone, et
+        le parcours métier application fermée (commande → worker Celery → notification).
+      - **iOS n'est pas configuré** : aucune des deux applications ne porte de
+        `GoogleService-Info.plist`, le `flutterfire configure` n'a couvert qu'Android. Sans lui ni
+        clé APNs, l'API v1 accepte l'envoi et l'iPhone ne reçoit rien — le mode d'échec le plus
+        trompeur de FCM. Seul Android est en état de recevoir (voir `docs/firebase.md` §7.2).
 - [x] **MinIO validé en conditions réelles** (2026-07-27) : `default_storage.save()` contre une
       instance MinIO locale réelle (`docker compose up -d minio`, bucket `elcorazon` créé), lecture
       via l'URL signée générée par `default_storage.url()` (200, contenu identique), accès direct
@@ -375,7 +396,11 @@ groupe » de `SocialService` contre ces endpoints, puis retirer le code Supabase
    `supabase_realtime_service.dart` (façade Supabase Realtime, seul appelant de ce service) est
    supprimé ; `RealtimeTrackingService` ne transporte plus que du Django.
 4. [x] Jeton FCM enregistré via `AuthRepository.registerDevice()` après connexion (2026-07-27) —
-   best-effort, ne bloque pas la connexion en cas d'échec.
+   best-effort, ne bloque pas la connexion en cas d'échec. Cycle de vie complété le 2026-08-05,
+   à parité avec `fastfood` : `NotificationService` expose `tokenRefreshStream` (FCM renouvelle
+   le jeton de son propre chef — sans ré-enregistrement, le livreur cesse de recevoir ses offres
+   de course en silence) et la déconnexion détache l'appareil du compte. Sans ce second geste, un
+   téléphone partagé entre deux tournées continuait de recevoir les offres du livreur précédent.
 5. [x] Clés Supabase codées en dur retirées de `api_config.dart` (2026-07-27) — la clé Google Maps,
    elle, reste (toujours utilisée par 3 services non liés à Supabase).
 
@@ -441,8 +466,38 @@ le parcours manuellement.
 - [x] **Agora — fait** (2026-07-31) : `apps/calls` porte la signalisation, `common/agora.py` la
       délivrance du jeton, `ws/me/` la sonnerie. Le flux média reste en pair-à-pair chez Agora,
       seul le jeton vient de l'API (`API -->|jeton RTC| RTC`, §2.1). Voir §3.5 pour le détail.
-- [ ] **Stockage** : toutes les images produits, avatars et documents livreurs passent par les URL
-      signées MinIO servies par le backend.
+- [x] **Stockage — arbitré et construit** (2026-08-05, **ADR-011**). Le chapitre était resté ouvert
+      avec MinIO validé techniquement mais aucune décision écrite sur ce qui va où. La formulation
+      d'origine — « tout passe par des URL signées » — était d'ailleurs le problème, pas la
+      solution :
+      - **Deux familles de fichiers, deux traitements.** Signer une image de catalogue la fait
+        expirer en quinze minutes : aucun cache ni CDN ne peut s'y accrocher, chaque affichage de
+        menu regénère autant de signatures que de vignettes, et une carte mise en favori montre des
+        cadres vides le lendemain. Les médias publics (`products`, `banners`, `users`) sont donc
+        servis par des URL **stables et sans signature** ; seuls les documents (`documents` —
+        pièces d'identité, permis, cartes grises, preuves de livraison) passent par des URL signées
+        et expirantes.
+      - **La visibilité est portée par le compartiment**, pas par un contrôle applicatif : une
+        politique de lecture se pose sur un compartiment et non sur un préfixe, ce qui rendait la
+        frontière inexprimable avec le compartiment unique de départ. Les publics reçoivent
+        `s3:GetObject` et rien d'autre — ni `ListBucket`, qui publierait l'inventaire, ni
+        `PutObject`. Le privé ne reçoit aucune politique : sans elle, S3 refuse tout ce qui n'est
+        pas signé.
+      - **`STORAGES["default"]` est le compartiment privé.** Un champ fichier ajouté demain sans
+        stockage explicite atterrit dans le signé : l'oubli ferme au lieu d'ouvrir.
+      - **Une seule porte** — `common/storage.py`. Aucun autre module n'importe `boto3`,
+        `botocore` ni `storages` ; un test inspecte l'AST de chaque module pour le vérifier. Le
+        service porte dépôt, suppression, URL publique, URL signée (lecture **et** envoi direct) et
+        création des compartiments.
+      - **Les compartiments se créent seuls** : `ensure_storage_buckets`, idempotente, appelée au
+        démarrage de l'API en développement comme en production. Un stockage injoignable fait
+        échouer le démarrage plutôt que le premier envoi d'un utilisateur.
+      - **Rien n'est écrit en dur** : point d'accès, région, identifiants, TLS, style d'adressage et
+        les quatre noms de compartiment viennent de l'environnement. Passer sur AWS S3 est une
+        modification de `.env`.
+      - Corrigé au passage : `file_overwrite = False`. Avec le défaut de `django-storages`, deux
+        clients envoyant chacun un `photo.jpg` comme avatar auraient partagé le même objet — le
+        second écrasant le premier, qui aurait vu la photo d'un inconnu sur son profil.
 
 ### 3.5 Nettoyage Supabase
 
@@ -557,6 +612,27 @@ le parcours manuellement.
         (le backend n'expose **aucune liste publique de promotions**, par décision explicite),
         `otp_verification_screen` (écran injoignable, et pas d'authentification par téléphone
         en v2).
+- [x] **Options structurées portées jusqu'au panier — commande de gâteaux sur mesure**
+      (2026-08-06). La tranche précédente laissait `CartRepository.addLine` envoyer
+      `options: []` : la composition ne partait qu'en texte libre dans `notes`, et le
+      configurateur compensait en déposant au panier un prix calculé dans l'application
+      (`copyWith(price: base + suppléments)`). Ce prix ne franchissait pas la
+      synchronisation — le serveur relit le catalogue (C1) — si bien que le client
+      composait un gâteau à 45 000 F et en commandait un à 20 000 F.
+  - `CartLine.options` (miroir de `SelectedOptionSerializer`) et `addLine(optionIds:)` ajoutés
+    au package ; `CartItem.selectedOptionIds` persisté localement et rejoué par la file hors
+    ligne. Le prix de la ligne redevient celui du catalogue, options comprises, côté serveur.
+  - **Les contraintes viennent du groupe** (`min_select`/`max_select`), plus d'une table
+    indexée par étiquettes locales (`shape`, `size`) que le serveur n'emploie pas — il groupe
+    par nom (« Forme »). Aucune de ces règles n'était donc appliquée sur des options réelles :
+    l'écart n'apparaissait qu'au refus de `validate_selection`.
+  - **Le repli en mémoire n'est plus commandable.** Ses identifiants n'existent pas au
+    catalogue ; la ligne était acceptée localement puis rejetée à la synchronisation. Pire,
+    ce rejet survenait *après* le `clear` de `_replaceRemoteCart` et interrompait la boucle :
+    un seul article invalide vidait le panier distant et emportait les suivants. La boucle
+    poursuit désormais sur un refus 4xx et ne propage que les pannes.
+  - Même correction appliquée à `item_customization_screen`, qui partageait le service et le
+    défaut (prix local, et résumé lu **après** `finishCustomization`, donc toujours vide).
 - [x] **Recherche avancée rendue au serveur** (2026-07-31) : `apps/catalog/filters.py`
       (`MenuItemFilter` — prix, calories, temps de préparation, note, régimes, allergènes,
       ingrédients), 12 tests. L'app composait la requête depuis le téléphone puis **filtrait la
@@ -602,6 +678,47 @@ le parcours manuellement.
       deux plantaient au démarrage sur `Supabase.instance` (aucune clé en `.env`). Les contrôles
       d'unicité (email, téléphone, adresse, carte) étaient déjà inertes et incombent au backend ;
       les brouillons de formulaires sont désormais explicitement en mémoire seule.
+- [x] **Frais de livraison et couverture rendus au serveur** (2026-08-05). Le suivi temps réel était
+      migré depuis longtemps, mais tout ce qui touchait à la **géographie** restait calculé sur le
+      téléphone — dernier morceau de l'invariant C1 encore ouvert dans `fastfood` :
+      - **`DeliveryFeeService` ne calcule plus rien.** Il appliquait son propre barème (500 F de
+        base, 200 F du kilomètre, franco à 10 000 F, plafond à 5 000 F, arrondi à la dizaine), sur
+        une distance à vol d'oiseau mesurée depuis des coordonnées de restaurant écrites en dur.
+        Aucune de ces valeurs n'existait côté serveur, qui facture depuis le barème de la
+        `DeliveryZone` couvrant l'adresse d'arrivée : **l'écran annonçait un prix, la commande en
+        retenait un autre**, et c'est le second que le client payait. Le service interroge
+        désormais `GET /geography/zones/resolve/` (couverture et barème d'un point) et
+        `POST /orders/preview/` (devis de la commande, même chemin de calcul que la création).
+        `config/delivery_config.dart` supprimé.
+      - **Deux ajouts au socle** : `GeographyRepository.resolveZone` + `ZoneResolution`, et
+        `OrderRepository.preview` + `OrderQuote`. `POST /orders/preview/` existait côté serveur
+        depuis la Phase 3 sans qu'aucune application ne l'appelle. 5 tests.
+      - **`CartService` ne porte plus de frais par défaut.** Il démarrait à `500.0`, persistait le
+        montant entre deux sessions et retombait sur `1000.0` en cas d'erreur — trois façons
+        d'afficher un chiffre que personne n'allait facturer. Le panier porte maintenant le devis
+        serveur (`refreshQuote`), invalidé à chaque modification, et l'écran dit « livraison
+        calculée à la validation » tant qu'aucune adresse n'est choisie, au lieu d'un montant
+        inventé.
+      - **Deux positions de restaurant contradictoires** vivaient dans `fastfood` :
+        `AppConstants` (Lomé, 6.1375/1.2123) et le sélecteur de carte (5.3599/-4.0083, soit
+        Abidjan). Les cercles de couverture de cet écran étaient donc centrés à 600 km du
+        restaurant. Ils sont retirés : une zone réelle est un contour souvent discontinu que
+        PostGIS teste en base, pas un rayon, et le serveur ne rend pas le contour aux clients —
+        c'est le repère lui-même qui porte la réponse, point par point.
+      - **Corrigé au passage** : `DeliveryZone.fromJson` lisait `max_distance_km` comme un nombre
+        alors qu'un `DecimalField` de DRF voyage en chaîne (plantait à la première zone reçue), et
+        prenait la ville imbriquée de la route publique pour un identifiant.
+- [x] **Faux suivi de livraison retiré des trois applications** (2026-08-05). Les trois
+      `location_service.dart` portaient le même `startDeliveryTracking` : une minuterie locale qui
+      faisait passer une commande de « en préparation » à « livré avec succès » en quarante
+      secondes **sans rien demander à personne** — un client dont le repas n'était pas parti voyait
+      son écran annoncer la livraison. Avec elle disparaissent un itinéraire fabriqué en ajoutant
+      des millièmes de degré au point de départ et une liste de « restaurants à proximité »
+      entièrement inventée. Les services ne gardent que le GPS réel (permission, relevé, distance) ;
+      l'avancement vient de `ws/orders/{id}/tracking/`, l'émission de position de
+      `RealtimeTrackingService`. Côté `admin`, les deux services de position (dont un rendant une
+      position fixe à Bamako) n'avaient **aucun appelant** : supprimés, avec la dépendance
+      `geolocator`.
 - [ ] Mettre à jour `CAHIER_DES_CHARGES.md` et `ETAT_FONCTIONNALITES.md` (actuellement rédigés pour
       l'architecture Supabase) : soit les archiver comme référence historique — à l'image du
       backend Laravel, consultable dans l'historique git jusqu'au commit `56e0bec` — soit les
@@ -628,7 +745,9 @@ le parcours manuellement.
 
 ## 4. Suivi
 
-- [ ] 3.0 — Prérequis backend (reste : validation FCM avec un vrai projet Firebase)
+- [ ] 3.0 — Prérequis backend. FCM validé côté serveur contre `elcorazon-9595` (2026-08-05).
+  **Reste** : une livraison sur un appareil Android physique, et la configuration iOS
+  (`GoogleService-Info.plist` + clé APNs), qui n'a pas été faite.
 - [x] 3.1 — Fondations Flutter partagées (`packages/elcorazon_core`, un module par domaine migré,
   87 tests)
 - [x] 3.2 — Authentification commune (les trois apps)
@@ -647,7 +766,8 @@ le parcours manuellement.
   rôles, promotions, analytics, campagnes, fidélisation, zones, planning et dossiers livreurs,
   recherche transverse, paiements et remboursements. Neuf trous de sécurité fermés (§3.3), sept
   endpoints construits, ~9 000 lignes de code Supabase ou injoignable supprimées.
-- [ ] 3.4 — Flux externes (Agora, stockage)
+- [x] 3.4 — Flux externes : Agora (signalisation et jeton côté serveur) et stockage objet
+  (ADR-011 — compartiments publics et privé, une seule porte, provisionnement automatique)
 - [x] 3.5 — Nettoyage Supabase — **les trois applications sont sorties de Supabase**
 - [ ] 3.6 — Infrastructure de déploiement réelle
 - [ ] 3.7 — Validation de bout en bout et bascule finale

@@ -1,16 +1,28 @@
+import 'dart:async';
+
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/widgets/custom_text_field.dart';
 import 'package:elcora_fast/screens/client/address_map_picker_screen.dart';
+import 'package:elcora_fast/services/address_service.dart';
+import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
+import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/places_service.dart';
-import 'package:geolocator/geolocator.dart';
 
-/// Bottom Sheet moderne pour ajouter ou éditer une adresse
+/// Feuille de saisie d'une adresse — création si [address] est nul, édition
+/// sinon.
+///
+/// Rend un [AddressDraft], et non plus une `Map<String, dynamic>` dont chaque
+/// appelant relisait les clés à la main (`addressData['postalCode'] ?? ''`) :
+/// une clé mal orthographiée d'un côté passait la compilation et arrivait nulle
+/// de l'autre. Le point est obligatoire, et c'est le type qui le dit.
 class AddressDetailBottomSheet extends StatefulWidget {
-  final Address? address; // null pour ajout, non-null pour édition
-  final Function(Map<String, dynamic>) onSave;
+  final Address? address;
+  final Future<void> Function(AddressDraft) onSave;
 
   const AddressDetailBottomSheet({
     required this.onSave,
@@ -30,10 +42,15 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
   final _addressController = TextEditingController();
   final _cityController = TextEditingController();
   final _postalCodeController = TextEditingController();
+  final _landmarkController = TextEditingController();
+  final _instructionsController = TextEditingController();
+  final _searchController = TextEditingController();
 
   late TabController _tabController;
   final GeocodingService _geocodingService = GeocodingService();
   final PlacesService _placesService = PlacesService();
+  final LocationService _locationService = LocationService();
+  final DeliveryFeeService _deliveryFeeService = DeliveryFeeService();
 
   LatLng? _pickedLatLng;
   AddressType _selectedType = AddressType.home;
@@ -41,7 +58,14 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
   bool _isFavorite = false;
   bool _isLocating = false;
   bool _isSearching = false;
+  bool _isSaving = false;
   List<PlaceSuggestion> _placeSuggestions = [];
+
+  Timer? _searchDebounce;
+
+  /// Jeton de la dernière recherche émise — les réponses d'une frappe
+  /// antérieure, revenues plus tard, sont écartées.
+  int _searchToken = 0;
 
   @override
   void initState() {
@@ -51,7 +75,10 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     if (widget.address != null) {
       _loadExistingAddress();
     } else {
-      _cityController.text = 'Abidjan'; // Valeur par défaut
+      // La ville pré-remplie était « Abidjan », alors que le serveur n'accepte
+      // que la ville de `AppConstants.citySlug` : toute adresse créée par
+      // défaut décrivait un autre pays que celui où l'on livre.
+      _cityController.text = AppConstants.defaultCityName;
     }
   }
 
@@ -61,22 +88,25 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     _addressController.text = addr.address;
     _cityController.text = addr.city;
     _postalCodeController.text = addr.postalCode;
+    _landmarkController.text = addr.landmark;
+    _instructionsController.text = addr.deliveryInstructions;
     _selectedType = addr.type;
     _isDefault = addr.isDefault;
     _isFavorite = addr.isFavorite;
-
-    if (addr.latitude != null && addr.longitude != null) {
-      _pickedLatLng = LatLng(addr.latitude!, addr.longitude!);
-    }
+    _pickedLatLng = LatLng(addr.latitude, addr.longitude);
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _tabController.dispose();
     _nameController.dispose();
     _addressController.dispose();
     _cityController.dispose();
     _postalCodeController.dispose();
+    _landmarkController.dispose();
+    _instructionsController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -275,7 +305,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                   child: CustomTextField(
                     controller: _cityController,
                     label: 'Ville',
-                    hint: 'Abidjan',
+                    hint: AppConstants.defaultCityName,
                     validator: (value) =>
                         value?.isEmpty == true ? 'Ville requise' : null,
                   ),
@@ -289,6 +319,24 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 16),
+
+            // Repère et consignes : les deux champs que le livreur lit
+            // réellement. Le serveur les accepte depuis toujours
+            // (`AddressSerializer.landmark` / `delivery_instructions`) ; ce
+            // formulaire ne les collectait pas, et ils partaient vides.
+            CustomTextField(
+              controller: _landmarkController,
+              label: 'Repère',
+              hint: 'Ex: en face de la pharmacie du Golfe',
+            ),
+            const SizedBox(height: 16),
+            CustomTextField(
+              controller: _instructionsController,
+              label: 'Consignes de livraison',
+              hint: 'Ex: portail bleu, appeler en arrivant',
+              maxLines: 2,
             ),
             const SizedBox(height: 24),
 
@@ -370,8 +418,10 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       child: Column(
         children: [
           TextField(
+            controller: _searchController,
+            textInputAction: TextInputAction.search,
             decoration: InputDecoration(
-              hintText: 'Rechercher une adresse...',
+              hintText: 'Rechercher un lieu, une rue, un quartier…',
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _isSearching
                   ? const Padding(
@@ -382,14 +432,26 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                         child: CircularProgressIndicator(strokeWidth: 2),
                       ),
                     )
-                  : null,
+                  : (_searchController.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear),
+                          tooltip: 'Effacer',
+                          onPressed: () {
+                            _searchDebounce?.cancel();
+                            setState(() {
+                              _searchController.clear();
+                              _placeSuggestions = [];
+                            });
+                          },
+                        )),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
               filled: true,
               fillColor: Colors.grey.shade100,
             ),
-            onChanged: _searchPlaces,
+            onChanged: _onSearchChanged,
           ),
           const SizedBox(height: 16),
           Expanded(
@@ -433,17 +495,6 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     );
   }
 
-  Color _getColor(AddressType type) {
-    switch (type) {
-      case AddressType.home:
-        return Colors.green;
-      case AddressType.work:
-        return Colors.blue;
-      case AddressType.other:
-        return Colors.orange;
-    }
-  }
-
   Widget _buildTypeSelector() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -460,7 +511,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
           runSpacing: 8,
           children: AddressType.values.map((type) {
             final isSelected = _selectedType == type;
-            final color = _getColor(type);
+            final color = type.color;
             return InkWell(
               onTap: () => setState(() => _selectedType = type),
               borderRadius: BorderRadius.circular(24),
@@ -539,7 +590,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
           children: [
             Expanded(
               child: OutlinedButton(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
@@ -553,9 +604,15 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
             Expanded(
               flex: 2,
               child: FilledButton.icon(
-                onPressed: _saveAddress,
-                icon: const Icon(Icons.save),
-                label: const Text('Enregistrer'),
+                onPressed: _isSaving ? null : _saveAddress,
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save),
+                label: Text(_isSaving ? 'Vérification…' : 'Enregistrer'),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
@@ -574,38 +631,64 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     setState(() => _isLocating = true);
 
     try {
-      final position = await Geolocator.getCurrentPosition();
-      final latLng = LatLng(position.latitude, position.longitude);
+      // La permission était supposée acquise : `Geolocator.getCurrentPosition()`
+      // levait alors une exception dont le message technique s'affichait tel
+      // quel au client, sans lui dire quoi faire.
+      final position = await _locationService.getCurrentLocation();
+      if (!mounted) return;
 
-      setState(() {
-        _pickedLatLng = latLng;
-      });
-
-      // Reverse geocode
-      final address = await _geocodingService.reverseGeocode(latLng);
-      if (address != null && mounted) {
-        setState(() {
-          _addressController.text = address;
-          if (address.contains('Abidjan')) {
-            _cityController.text = 'Abidjan';
-          }
-        });
+      if (position == null) {
+        _showError(
+          'Autorisez la localisation, ou placez le point sur la carte.',
+        );
+        return;
       }
 
-      // Passer à l'onglet formulaire
+      final latLng = LatLng(position.latitude, position.longitude);
+      setState(() => _pickedLatLng = latLng);
+
+      final address = await _geocodingService.reverseGeocode(latLng);
+      if (!mounted) return;
+
+      if (address != null) {
+        setState(() => _applyResolvedAddress(address));
+      }
+
       _tabController.animateTo(0);
     } catch (e) {
+      debugPrint('Position indisponible : $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showError('Position indisponible pour le moment.');
       }
     } finally {
-      setState(() => _isLocating = false);
+      // Sans ce garde, quitter la feuille pendant le relevé provoquait un
+      // `setState` sur un State démonté.
+      if (mounted) setState(() => _isLocating = false);
     }
+  }
+
+  /// Reporte une adresse résolue dans le formulaire.
+  ///
+  /// La ville était devinée par `address.contains('Abidjan')`, une ville d'un
+  /// autre pays : la condition était toujours fausse ici, et le champ gardait
+  /// ce qui s'y trouvait. On retient la ville configurée dès que l'adresse la
+  /// mentionne, sinon on laisse la saisie du client intacte.
+  void _applyResolvedAddress(String formatted) {
+    _addressController.text = formatted;
+    const city = AppConstants.defaultCityName;
+    if (formatted.toLowerCase().contains(city.toLowerCase())) {
+      _cityController.text = city;
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _openMapPicker() async {
@@ -619,10 +702,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       setState(() {
         _pickedLatLng = picked.location;
         if (picked.formattedAddress != null) {
-          _addressController.text = picked.formattedAddress!;
-          if (picked.formattedAddress!.contains('Abidjan')) {
-            _cityController.text = 'Abidjan';
-          }
+          _applyResolvedAddress(picked.formattedAddress!);
         }
       });
 
@@ -631,94 +711,189 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     }
   }
 
-  Future<void> _searchPlaces(String query) async {
-    if (query.isEmpty) {
-      setState(() => _placeSuggestions = []);
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+
+    final query = value.trim();
+    if (query.length < 3) {
+      setState(() {
+        _placeSuggestions = [];
+        _isSearching = false;
+      });
       return;
     }
 
+    // Un appel partait à chaque frappe — donc facturé à chaque lettre, et les
+    // réponses arrivaient dans le désordre : la liste affichait par moments
+    // les suggestions d'un préfixe déjà abandonné.
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 350),
+      () => _searchPlaces(query),
+    );
+  }
+
+  Future<void> _searchPlaces(String query) async {
+    final token = ++_searchToken;
     setState(() => _isSearching = true);
 
     try {
       final suggestions = await _placesService.autocomplete(
         query,
         language: 'fr',
-        countryCode: 'ci',
+        // `country:ci` bornait la recherche à la Côte d'Ivoire : un client de
+        // Lomé ne recevait jamais la moindre suggestion.
+        countryCode: AppConstants.countryCode,
+        locationBias: const LatLng(
+          AppConstants.restaurantLatitude,
+          AppConstants.restaurantLongitude,
+        ),
+        radiusMeters: AppConstants.placesBiasRadiusMeters,
       );
 
-      if (mounted) {
-        setState(() {
-          _placeSuggestions = suggestions;
-        });
-      }
+      if (!mounted || token != _searchToken) return;
+      setState(() {
+        _placeSuggestions = suggestions;
+        _isSearching = false;
+      });
     } catch (e) {
       debugPrint('Erreur recherche Places: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isSearching = false);
-      }
+      if (!mounted || token != _searchToken) return;
+      setState(() => _isSearching = false);
     }
   }
 
   Future<void> _selectPlace(PlaceSuggestion suggestion) async {
+    setState(() => _isSearching = true);
+
     try {
-      final coords =
-          await _geocodingService.geocodeAddress(suggestion.description);
+      // `getDetails` rend le point exact du lieu touché. Le géocodage de la
+      // description repassait par une recherche textuelle : un appel de plus,
+      // et un point qui pouvait ne pas être celui de la suggestion choisie.
+      final details = await _placesService.getDetails(
+        suggestion.placeId,
+        language: 'fr',
+      );
 
-      if (coords != null && mounted) {
-        setState(() {
-          _pickedLatLng = coords;
-          _addressController.text = suggestion.description;
-          if (suggestion.description.contains('Abidjan')) {
-            _cityController.text = 'Abidjan';
-          }
-        });
+      if (!mounted) return;
 
-        // Retour à l'onglet formulaire
-        _tabController.animateTo(0);
+      if (details == null) {
+        _showError('Ce lieu n\'a pas pu être localisé.');
+        return;
       }
+
+      setState(() {
+        _pickedLatLng = details.location;
+        _applyResolvedAddress(details.formattedAddress);
+      });
+
+      // Retour à l'onglet formulaire
+      _tabController.animateTo(0);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      debugPrint('Détail de lieu indisponible : $e');
+      if (mounted) _showError('Ce lieu n\'a pas pu être localisé.');
+    } finally {
+      if (mounted) setState(() => _isSearching = false);
     }
   }
 
-  void _saveAddress() {
+  Future<void> _saveAddress() async {
+    if (_isSaving) return;
+
     if (!_formKey.currentState!.validate()) {
       _tabController.animateTo(0); // Aller au formulaire pour voir les erreurs
       return;
     }
 
-    if (_pickedLatLng == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Veuillez sélectionner une position sur la carte'),
-          backgroundColor: Colors.red,
-        ),
-      );
+    final point = _pickedLatLng;
+    if (point == null) {
+      _showError('Veuillez sélectionner une position sur la carte');
       _tabController.animateTo(1); // Aller à l'onglet carte
       return;
     }
 
-    final addressData = {
-      'name': _nameController.text,
-      'address': _addressController.text,
-      'city': _cityController.text,
-      'postalCode': _postalCodeController.text,
-      'type': _selectedType,
-      'isDefault': _isDefault,
-      'isFavorite': _isFavorite,
-      'latitude': _pickedLatLng!.latitude,
-      'longitude': _pickedLatLng!.longitude,
-    };
+    setState(() => _isSaving = true);
 
-    widget.onSave(addressData);
-    Navigator.of(context).pop();
+    // La couverture est vérifiée ici, et non au moment de commander. Une
+    // adresse hors zone s'enregistrait sans un mot, et le refus ne tombait
+    // qu'au paiement, panier plein — le client devait alors tout reprendre.
+    try {
+      final breakdown = await _deliveryFeeService.breakdownForPoint(
+        latitude: point.latitude,
+        longitude: point.longitude,
+      );
+
+      if (!mounted) return;
+
+      if (!breakdown.isInServiceableZone) {
+        setState(() => _isSaving = false);
+        final saveAnyway = await _confirmOutOfZone();
+        if (!mounted || saveAnyway != true) return;
+        setState(() => _isSaving = true);
+      }
+    } catch (e) {
+      // Serveur injoignable : on n'empêche pas l'enregistrement pour autant.
+      // Le devis de commande refera la vérification, et lui seul fait foi.
+      debugPrint('Couverture non vérifiée avant enregistrement : $e');
+    }
+
+    if (!mounted) return;
+
+    final draft = AddressDraft(
+      name: _nameController.text.trim(),
+      address: _addressController.text.trim(),
+      city: _cityController.text.trim(),
+      postalCode: _postalCodeController.text.trim(),
+      landmark: _landmarkController.text.trim(),
+      deliveryInstructions: _instructionsController.text.trim(),
+      type: _selectedType,
+      isDefault: _isDefault,
+      isFavorite: _isFavorite,
+      latitude: point.latitude,
+      longitude: point.longitude,
+    );
+
+    // L'enregistrement est **attendu**, et la feuille ne se ferme que s'il
+    // aboutit. Elle se fermait auparavant sans attendre : l'écran affichait
+    // « Adresse ajoutée » pendant que l'appel partait, et un refus du serveur
+    // arrivait sur une feuille déjà disparue, avec la saisie perdue.
+    try {
+      await widget.onSave(draft);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      _showError(_messageFor(e));
+    }
+  }
+
+  String _messageFor(Object error) {
+    if (error is AddressSessionRequired) return error.toString();
+    if (error is eccore.ApiException) return error.detail;
+    return 'Adresse non enregistrée. Réessayez.';
+  }
+
+  Future<bool?> _confirmOutOfZone() {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.location_off, color: Colors.orange),
+        title: const Text('Adresse hors zone'),
+        content: const Text(
+          'Aucune de nos zones de livraison ne couvre ce point. '
+          'Vous pouvez l\'enregistrer, mais aucune commande ne pourra y être '
+          'livrée pour le moment.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Modifier'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Enregistrer quand même'),
+          ),
+        ],
+      ),
+    );
   }
 }

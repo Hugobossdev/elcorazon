@@ -12,11 +12,10 @@ import 'admin_auth_service.dart';
 /// seule côté contrat, sans quoi on pourrait fabriquer une réputation.
 ///
 /// L'envoi d'image change de nature : l'app poussait le fichier dans un bucket
-/// Supabase **public** puis écrivait l'URL obtenue dans la table. Le stockage v2
-/// est privé et servi par URL signées — le fichier est joint à l'article, et le
-/// serveur rend l'URL. La méthode d'envoi direct disparaît donc ; le champ
-/// `image` d'un article s'écrit par un `multipart` que cet écran ne compose pas
-/// encore.
+/// Supabase **public** puis écrivait l'URL obtenue dans la table. Le fichier est
+/// désormais joint à l'article par un `multipart`, et c'est le serveur qui le
+/// range et qui rend l'URL — l'application n'a ni les identifiants du stockage
+/// ni le nom des compartiments.
 class MenuService extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
@@ -27,21 +26,80 @@ class MenuService extends ChangeNotifier {
   /// Établissement supervisé — une seule enseigne pour l'instant.
   static const String _restaurantSlug = 'el-corazon-lome';
 
+  /// Plafond accepté pour une photo de produit.
+  ///
+  /// Le sélecteur recompresse déjà à 85 % et borne le côté long à 1920 px, si
+  /// bien qu'une photo de téléphone en sort très en dessous. Ce plafond attrape
+  /// ce qui échappe à la recompression — un PNG plein écran, une capture, un
+  /// fichier choisi depuis un disque sur la version web — et le refuse **avant**
+  /// de faire voyager les octets.
+  static const int _tailleMaxImage = 5 * 1024 * 1024;
+
   eccore.ManagedCatalogRepository get _catalog =>
       eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient);
 
-  /// L'envoi d'image n'est plus fait par le client.
+  /// Joint une image à un article et rend l'URL **que le serveur a retenue**.
   ///
-  /// Rend `null` : le stockage v2 n'est pas public, il n'y a pas d'URL à
-  /// fabriquer côté navigateur. Conservée le temps que les formulaires
-  /// envoient l'article en `multipart/form-data` avec sa photo.
-  Future<String?> uploadProductImage(
-    XFile image,
-    String productName, {
-    String? oldImageUrl,
+  /// L'article doit exister : il n'y a pas d'image sans article à qui
+  /// l'attacher. Pour une création, l'ordre est « créer, puis envoyer l'image »
+  /// — les formulaires gardent la photo choisie de côté et l'envoient une fois
+  /// l'identifiant connu.
+  ///
+  /// Il n'y a plus d'`oldImageUrl` à passer : le serveur efface lui-même le
+  /// fichier remplacé (`common/files.py`). Le lui faire faire depuis ici
+  /// supposait que le client sache traduire une URL en chemin de stockage, et
+  /// ne couvrait de toute façon pas les écritures venues d'ailleurs.
+  Future<String?> uploadProductImage({
+    required String menuItemId,
+    required XFile image,
   }) async {
-    debugPrint("MenuService: l'envoi d'image passera par le formulaire d'article");
-    return null;
+    try {
+      // `readAsBytes` plutôt qu'un chemin : sur le web, un fichier choisi n'a
+      // pas de chemin lisible, et le back-office tourne aussi dans un
+      // navigateur.
+      final octets = await image.readAsBytes();
+
+      if (octets.length > _tailleMaxImage) {
+        final mo = (octets.length / (1024 * 1024)).toStringAsFixed(1);
+        _error = 'Image trop lourde ($mo Mo) : le maximum est de 5 Mo.';
+        notifyListeners();
+        return null;
+      }
+
+      final maj = await _catalog.uploadMenuItemImage(
+        menuItemId: menuItemId,
+        filename: image.name,
+        bytes: octets,
+        contentType: image.mimeType,
+      );
+
+      _error = null;
+      notifyListeners();
+      return maj.image;
+    } on eccore.ApiException catch (e) {
+      // Le serveur refuse ce qui n'est pas une image : `ImageField` la fait
+      // ouvrir par Pillow. Un fichier renommé en `.jpg` sort donc en 400, et
+      // non en image cassée découverte par un client.
+      _error = e.detail;
+      debugPrint("MenuService: envoi d'image refusé — ${e.code}");
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Retire l'image d'un article. Le serveur efface le fichier.
+  Future<bool> removeProductImage(String menuItemId) async {
+    try {
+      await _catalog.clearMenuItemImage(menuItemId);
+      _error = null;
+      notifyListeners();
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      debugPrint("MenuService: retrait d'image refusé — ${e.code}");
+      notifyListeners();
+      return false;
+    }
   }
 
   Future<List<MenuItem>> getMenuItems(String? categoryId, {bool notify = true}) async {

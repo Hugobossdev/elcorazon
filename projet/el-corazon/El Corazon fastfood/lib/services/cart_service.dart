@@ -21,7 +21,15 @@ class CartService extends ChangeNotifier {
   CartService._internal();
 
   final List<CartItem> _items = [];
-  double _deliveryFee = 500.0;
+
+  /// Dernier devis rendu par le serveur — frais de livraison, remise et total.
+  ///
+  /// Nul tant qu'aucun n'a été demandé, et c'est un état normal : tant qu'une
+  /// adresse n'est pas choisie, personne ne sait ce que coûte la course. Le
+  /// panier portait auparavant `_deliveryFee = 500.0` par défaut, persisté
+  /// entre deux sessions, ce qui affichait un montant inventé puis périmé.
+  eccore.OrderQuote? _quote;
+
   double _promoDiscount = 0.0;
   String? _promoCode;
 
@@ -45,17 +53,43 @@ class CartService extends ChangeNotifier {
   List<CartItem> get items => List.unmodifiable(_items);
   bool get isEmpty => _items.isEmpty;
   int get itemCount => _items.fold(0, (sum, item) => sum + item.quantity);
+  /// Somme des lignes, telle qu'affichée. Le serveur relit les prix au
+  /// catalogue à la commande (invariant C1) : ce cumul sert à montrer un
+  /// panier, jamais à décider d'un montant.
   double get subtotal => _items.fold(0.0, (sum, item) => sum + item.totalPrice);
-  double get deliveryFee => _deliveryFee;
-  double get discount => _promoDiscount;
+
+  /// Frais de livraison du dernier devis. Zéro tant qu'aucun devis n'existe —
+  /// et [hasQuote] permet à l'écran de dire « calculés à la validation »
+  /// plutôt que d'annoncer une livraison gratuite.
+  double get deliveryFee => _quote?.deliveryFee.toMajorUnits() ?? 0.0;
+
+  /// Remise retenue par le serveur quand un devis existe ; à défaut, celle que
+  /// `PromoCodeService` a fait valider. Les deux viennent du serveur, mais
+  /// seule la première tient compte du panier complet.
+  double get discount => _quote?.discount.toMajorUnits() ?? _promoDiscount;
+
   double get total =>
-      (subtotal + _deliveryFee - discount).clamp(0.0, double.infinity);
+      _quote?.total.toMajorUnits() ??
+      (subtotal - _promoDiscount).clamp(0.0, double.infinity);
+
+  /// Vrai quand le serveur a chiffré ce panier — donc quand [total] est le
+  /// montant qui sera facturé, et non un cumul d'affichage.
+  bool get hasQuote => _quote != null;
+
+  /// Le serveur refuse de commander ce panier (article devenu indisponible,
+  /// prix changé). `null` tant qu'aucun devis n'a été demandé.
+  bool? get isOrderable => _quote?.isOrderable;
+
   String? get promoCode => _promoCode;
   bool get isInitialized => _isInitialized;
   String? get userId => _userId;
 
   String get _cartItemsKey => 'cart_items_${_userId ?? 'guest'}';
-  String get _deliveryFeeKey => 'cart_delivery_fee_${_userId ?? 'guest'}';
+
+  /// Clé de l'ancien montant de livraison mémorisé localement. Elle n'est plus
+  /// écrite — seulement effacée : un frais rendu par le serveur pour un panier
+  /// et une adresse donnés n'a aucun sens à la session suivante.
+  String get _legacyDeliveryFeeKey => 'cart_delivery_fee_${_userId ?? 'guest'}';
   String get _promoDiscountKey => 'cart_promo_discount_${_userId ?? 'guest'}';
   // Legacy key for migration
   String get _discountKey => 'cart_discount_${_userId ?? 'guest'}';
@@ -104,7 +138,7 @@ class CartService extends ChangeNotifier {
 
     _userId = null;
     _items.clear();
-    _deliveryFee = 500.0;
+    _quote = null;
     _promoDiscount = 0.0;
     _promoCode = null;
 
@@ -113,10 +147,17 @@ class CartService extends ChangeNotifier {
   }
 
   /// Ajoute un article au panier avec protection contre les doublons
+  ///
+  /// [optionIds] porte les options du catalogue retenues sur la ligne. Elles
+  /// ne modifient **pas** le prix ici : c'est le serveur qui les valorise
+  /// (invariant C1), et le devis du panier qui fait foi. Deux lignes du même
+  /// article aux options différentes restent deux lignes — la même règle que
+  /// `CartService._identical_line` côté serveur.
   void addItem(
     MenuItem menuItem, {
     int quantity = 1,
     Map<String, dynamic>? customizations,
+    List<String> optionIds = const [],
   }) {
     if (quantity <= 0) {
       debugPrint('⚠️ La quantité doit être supérieure à 0');
@@ -129,11 +170,13 @@ class CartService extends ChangeNotifier {
     }
 
     final normalizedCustomizations = _normalizeCustomizations(customizations);
+    final normalizedOptionIds = List<String>.from(optionIds)..sort();
 
     final existingIndex = _items.indexWhere(
       (item) =>
           item.menuItemId == menuItem.id &&
-          _mapsEqual(item.customizations, normalizedCustomizations),
+          _mapsEqual(item.customizations, normalizedCustomizations) &&
+          _listsEqual(item.selectedOptionIds, normalizedOptionIds),
     );
 
     if (existingIndex >= 0) {
@@ -154,6 +197,7 @@ class CartService extends ChangeNotifier {
         quantity: quantity,
         imageUrl: menuItem.imageUrl,
         customizations: normalizedCustomizations,
+        selectedOptionIds: normalizedOptionIds,
       );
 
       _items.add(newItem);
@@ -326,64 +370,38 @@ class CartService extends ChangeNotifier {
     return _items.any((item) => item.menuItemId == menuItemId);
   }
 
-  /// Définit les frais de livraison
-  void setDeliveryFee(double fee) {
-    if (fee < 0) {
-      debugPrint('⚠️ Les frais de livraison ne peuvent pas être négatifs');
-      return;
-    }
-    _deliveryFee = fee;
+  /// Demande au serveur le chiffrage du panier pour une adresse donnée.
+  ///
+  /// Remplace le calcul local des frais, qui appliquait un barème écrit dans
+  /// l'application (500 F + 200 F/km, plafonné à 5 000) sans rapport avec
+  /// celui de la zone qui dessert réellement l'adresse. Le panier n'est pas
+  /// transmis : le serveur le relit et le chiffre lui-même.
+  ///
+  /// L'échec **n'invente pas de montant de repli** — il propage. Un « 1 000 F
+  /// par défaut » affiché à la place d'une erreur réseau est un prix que
+  /// personne ne facturera.
+  Future<eccore.OrderQuote> refreshQuote({Address? address}) async {
+    // La commande est créée depuis le panier serveur : sans cette attente, le
+    // devis chiffrerait l'état d'avant le dernier ajout.
+    await ensureSynced();
+
+    final quote = await _deliveryFeeService.quoteOrder(
+      addressId: address?.id,
+      promoCode: _promoCode ?? '',
+    );
+
+    _quote = quote;
     notifyListeners();
-    _persistChanges();
+    return quote;
   }
 
-  /// Calcule et met à jour automatiquement les frais de livraison basés sur la distance
-  ///
-  /// [deliveryAddress] : Adresse de livraison (texte)
-  /// [deliveryLatitude] : Latitude de l'adresse (optionnel)
-  /// [deliveryLongitude] : Longitude de l'adresse (optionnel)
-  /// [address] : Objet Address (optionnel, prioritaire sur les autres paramètres)
-  Future<void> calculateAndSetDeliveryFee({
-    String? deliveryAddress,
-    double? deliveryLatitude,
-    double? deliveryLongitude,
-    Address? address,
-  }) async {
-    try {
-      // Initialiser le service si nécessaire
-      if (!_deliveryFeeService.isInitialized) {
-        await _deliveryFeeService.initialize();
-      }
-
-      // Le statut VIP n'entre pas dans le calcul : le portefeuille est
-      // désactivé, et la remise correspondante n'a donc aucun appelant.
-
-      double fee;
-
-      if (address != null) {
-        // Utiliser l'objet Address si fourni
-        fee = await _deliveryFeeService.calculateDeliveryFeeFromAddress(
-          address: address,
-          orderSubtotal: subtotal,
-        );
-      } else {
-        // Utiliser les paramètres fournis
-        fee = await _deliveryFeeService.calculateDeliveryFee(
-          deliveryAddress: deliveryAddress,
-          deliveryLatitude: deliveryLatitude,
-          deliveryLongitude: deliveryLongitude,
-          orderSubtotal: subtotal,
-        );
-      }
-
-      setDeliveryFee(fee);
-      debugPrint(
-          '✅ CartService: Frais de livraison calculés et mis à jour: ${fee.toStringAsFixed(0)} FCFA',);
-    } catch (e) {
-      debugPrint('❌ CartService: Erreur calcul frais livraison - $e');
-      // En cas d'erreur, utiliser le prix par défaut
-      setDeliveryFee(1000.0);
-    }
+  /// Oublie le devis — après un ajout au panier, un retrait, ou un changement
+  /// d'adresse. L'écran cesse alors d'afficher un total qui ne correspond plus
+  /// à ce qu'il montre, jusqu'au prochain [refreshQuote].
+  void invalidateQuote() {
+    if (_quote == null) return;
+    _quote = null;
+    notifyListeners();
   }
 
   /// Applique directement une remise validée (après sélection d'un code promo)
@@ -451,7 +469,7 @@ class CartService extends ChangeNotifier {
           )
           .toList(),
       'subtotal': subtotal,
-      'delivery_fee': _deliveryFee,
+      'delivery_fee': deliveryFee,
       'discount': discount,
       'promo_code': _promoCode,
       'total': total,
@@ -496,7 +514,10 @@ class CartService extends ChangeNotifier {
         _items.clear();
       }
 
-      _deliveryFee = _prefs?.getDouble(_deliveryFeeKey) ?? 500.0;
+      // Les frais de livraison ne sont plus relus du stockage : ils dépendent
+      // de l'adresse et du panier du moment, et un montant vieux d'une session
+      // ne serait juste que par accident. La clé résiduelle est effacée.
+      await _prefs?.remove(_legacyDeliveryFeeKey);
 
       // Migration from single discount to split discount
       if (_prefs?.containsKey(_discountKey) == true) {
@@ -522,7 +543,6 @@ class CartService extends ChangeNotifier {
 
       final itemsData = _items.map((item) => item.toMap()).toList();
       await _prefs!.setString(_cartItemsKey, json.encode(itemsData));
-      await _prefs!.setDouble(_deliveryFeeKey, _deliveryFee);
       await _prefs!.setDouble(_promoDiscountKey, _promoDiscount);
 
       // Remove legacy discount key
@@ -543,18 +563,31 @@ class CartService extends ChangeNotifier {
   Future<void> _removeStoredCartKeys() async {
     if (_prefs == null) return;
     await _prefs!.remove(_cartItemsKey);
-    await _prefs!.remove(_deliveryFeeKey);
+    await _prefs!.remove(_legacyDeliveryFeeKey);
     await _prefs!.remove(_promoDiscountKey);
     await _prefs!.remove(_discountKey); // Legacy
     await _prefs!.remove(_promoCodeKey);
   }
 
-  /// Traduit une ligne de panier Django vers le modèle local. Le prix et le
-  /// nom sont relus du serveur (invariant C1) ; `customizations` ne porte que
-  /// le texte libre stocké dans `notes` — la structure fine (options
-  /// choisies) n'est pas encore portée par cette tranche, voir
-  /// `_notesFromCustomizations`.
+  /// Traduit une ligne de panier Django vers le modèle local.
+  ///
+  /// Tout vient du serveur : le nom, le prix unitaire — options comprises,
+  /// puisque `unit_price` les intègre déjà (invariant C1) — et les options
+  /// elles-mêmes, regroupées par leur groupe d'origine pour l'affichage. Le
+  /// texte libre de `notes` reste à part : c'est ce que le client a écrit, pas
+  /// ce qu'il a choisi.
   CartItem _fromRemoteLine(eccore.CartLine line) {
+    final customizations = <String, dynamic>{};
+    for (final option in line.options) {
+      final category = option.groupName.isEmpty ? 'Options' : option.groupName;
+      final existing = customizations[category] as String?;
+      customizations[category] =
+          existing == null ? option.name : '$existing, ${option.name}';
+    }
+    if (line.notes.isNotEmpty) {
+      customizations['note'] = line.notes;
+    }
+
     return CartItem(
       id: line.id,
       menuItemId: line.menuItemId,
@@ -562,7 +595,8 @@ class CartService extends ChangeNotifier {
       price: line.unitPrice.toMajorUnits(),
       quantity: line.quantity,
       imageUrl: line.image,
-      customizations: line.notes.isEmpty ? {} : {'note': line.notes},
+      customizations: customizations,
+      selectedOptionIds: line.options.map((option) => option.id).toList()..sort(),
     );
   }
 
@@ -604,30 +638,42 @@ class CartService extends ChangeNotifier {
     }
   }
 
-  /// Condense les personnalisations libres en texte pour la ligne Django
-  /// (`CartLine.notes`) — pas de portage des options structurées dans cette
-  /// tranche. Trié par clé pour être déterministe : deux personnalisations
-  /// équivalentes doivent produire la même note, sans quoi
-  /// `CartService._identical_line` (serveur) les traiterait comme deux
-  /// lignes distinctes à chaque resynchronisation.
-  String _notesFromCustomizations(Map<String, dynamic> customizations) {
-    if (customizations.isEmpty) return '';
-    final sortedKeys = customizations.keys.toList()..sort();
-    return sortedKeys.map((key) => '$key: ${customizations[key]}').join(', ');
-  }
-
   /// Réécrit intégralement le panier serveur depuis l'état local — même
   /// stratégie que l'ancien `DatabaseService.upsertUserCart` (delete puis
   /// insert), nécessaire ici en l'absence de correspondance stable entre
   /// `CartItem.id` local et l'identifiant de ligne Django.
+  ///
+  /// Une ligne que le serveur refuse (article retiré du menu, option qui
+  /// n'existe plus, identifiant forgé hors catalogue) **n'interrompt plus la
+  /// boucle**. Elle le faisait, après le `clear` : un seul article devenu
+  /// invalide vidait le panier distant et emportait tous les suivants. Les
+  /// refus sont signalés ; seule une panne de réseau propage, pour que
+  /// [_syncCartToDatabase] bascule sur la file hors ligne.
   Future<void> _replaceRemoteCart() async {
     await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
+
+    final refused = <String>[];
     for (final item in _items) {
-      await _cartRepository.addLine(
-        restaurantSlug: AppConstants.restaurantSlug,
-        menuItemId: item.menuItemId,
-        quantity: item.quantity,
-        notes: _notesFromCustomizations(item.customizations),
+      try {
+        await _cartRepository.addLine(
+          restaurantSlug: AppConstants.restaurantSlug,
+          menuItemId: item.menuItemId,
+          quantity: item.quantity,
+          optionIds: item.selectedOptionIds,
+          notes: item.remoteNotes,
+        );
+      } on eccore.ApiException catch (error) {
+        // `status == 0` est une panne réseau (`ApiException.network`), 5xx une
+        // panne serveur : dans les deux cas la ligne est encore valide et doit
+        // repartir plus tard. Seul un refus 4xx est définitif.
+        if (error.status < 400 || error.status >= 500) rethrow;
+        refused.add('${item.name} (${error.code})');
+      }
+    }
+
+    if (refused.isNotEmpty) {
+      debugPrint(
+        '⚠️ Lignes refusées par le serveur, non synchronisées : ${refused.join(' ; ')}',
       );
     }
   }
@@ -646,7 +692,7 @@ class CartService extends ChangeNotifier {
         await _offlineSyncService.saveCartUpdateOffline(
           _userId!,
           List<CartItem>.from(_items),
-          _deliveryFee,
+          deliveryFee,
           discount,
           _promoCode,
         );
@@ -661,6 +707,10 @@ class CartService extends ChangeNotifier {
   }
 
   void _persistChanges() {
+    // Le panier vient de changer : le devis qui le chiffrait ne le décrit
+    // plus. Le garder afficherait l'ancien total sous la nouvelle liste.
+    _quote = null;
+
     if (_prefs != null) {
       unawaited(_saveCartToStorage());
     }
@@ -672,10 +722,9 @@ class CartService extends ChangeNotifier {
   }
 
   /// Réconcilie panier local et panier serveur au premier chargement d'une
-  /// session (`initializeForUser`). Les frais de livraison, remise et code
-  /// promo n'ont pas d'équivalent côté serveur (hors scope de cette tranche)
-  /// et restent donc uniquement pilotés par l'état local, quelle que soit la
-  /// branche empruntée ici.
+  /// session (`initializeForUser`). Le code promotionnel reste local jusqu'à
+  /// la commande ; les frais et le total, eux, viennent du devis serveur
+  /// (`refreshQuote`) et non de cet état.
   Future<void> _syncDatabaseWithLocal({bool overwriteRemote = false}) async {
     if (_userId == null) return;
     if (_isSyncing) return;
@@ -723,15 +772,13 @@ class CartService extends ChangeNotifier {
     final seen = <String, CartItem>{};
 
     for (final item in remoteItems) {
-      final key =
-          '${item.menuItemId}_${jsonEncode(_normalizeCustomizations(item.customizations))}';
+      final key = _mergeKey(item);
       seen[key] = item;
       merged.add(item);
     }
 
     for (final item in localItems) {
-      final key =
-          '${item.menuItemId}_${jsonEncode(_normalizeCustomizations(item.customizations))}';
+      final key = _mergeKey(item);
       if (seen.containsKey(key)) {
         final existing = seen[key]!;
         final combinedQuantity =
@@ -747,6 +794,28 @@ class CartService extends ChangeNotifier {
     }
 
     return merged;
+  }
+
+  /// Ce qui fait que deux lignes n'en sont qu'une : même article, mêmes
+  /// options, mêmes personnalisations libres. Exactement le critère de
+  /// `CartService._identical_line` côté serveur — s'en écarter ferait
+  /// réapparaître une ligne fusionnée ici à chaque relecture distante.
+  String _mergeKey(CartItem item) {
+    final options = List<String>.from(item.selectedOptionIds)..sort();
+    final customizations = jsonEncode(
+      _normalizeCustomizations(item.customizations),
+    );
+    return '${item.menuItemId}_${options.join(',')}_$customizations';
+  }
+
+  bool _listsEqual(List<String> first, List<String> second) {
+    if (first.length != second.length) return false;
+    final sortedFirst = List<String>.from(first)..sort();
+    final sortedSecond = List<String>.from(second)..sort();
+    for (var index = 0; index < sortedFirst.length; index++) {
+      if (sortedFirst[index] != sortedSecond[index]) return false;
+    }
+    return true;
   }
 
   Map<String, dynamic> _normalizeCustomizations(

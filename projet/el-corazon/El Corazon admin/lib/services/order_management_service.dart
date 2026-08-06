@@ -220,6 +220,76 @@ class OrderManagementService extends ChangeNotifier {
     return _allOrders.where((order) => order.status == status).toList();
   }
 
+  /// Statuts d'une commande encore en cours — celle sur laquelle la
+  /// supervision peut encore agir. Les terminales (livrée, annulée,
+  /// remboursée, échouée) ne peuvent être ni urgentes ni en retard : leur
+  /// sort est joué.
+  static const Set<OrderStatus> _enCours = {
+    OrderStatus.pending,
+    OrderStatus.confirmed,
+    OrderStatus.preparing,
+    OrderStatus.ready,
+    OrderStatus.pickedUp,
+    OrderStatus.onTheWay,
+  };
+
+  /// Au-delà de ce délai sans être confirmée ni préparée, une commande est
+  /// signalée. C'est un seuil d'attention pour l'exploitation, pas une règle
+  /// métier : rien ne se décide sur ce chiffre côté serveur.
+  static const Duration _delaiUrgence = Duration(minutes: 20);
+
+  /// Commandes qui traînent en début de parcours.
+  ///
+  /// L'écran affichait un bandeau d'alerte alimenté par une liste vide écrite
+  /// en dur : la section ne s'affichait jamais, et une commande oubliée en
+  /// cuisine ne se voyait qu'en parcourant les onglets.
+  List<Order> get urgentOrders => urgentAmong(_allOrders);
+
+  /// Commandes en cours dont l'heure de livraison annoncée est dépassée.
+  List<Order> get overdueOrders => overdueAmong(_allOrders);
+
+  /// Sélection pure, exposée à part des accesseurs d'instance.
+  ///
+  /// [now] est un paramètre plutôt qu'un `DateTime.now()` interne : ce sont des
+  /// règles **temporelles**, et une règle temporelle qui lit l'horloge en son
+  /// sein ne se vérifie qu'en attendant. L'écran omet l'argument ; les tests le
+  /// fournissent.
+  static List<Order> urgentAmong(List<Order> orders, {DateTime? now}) {
+    final maintenant = now ?? DateTime.now();
+    return orders
+        .where(
+          (order) =>
+              (order.status == OrderStatus.pending ||
+                  order.status == OrderStatus.confirmed) &&
+              maintenant.difference(order.orderTime) > _delaiUrgence,
+        )
+        .toList()
+      // La plus ancienne d'abord : c'est celle qui attend le plus.
+      ..sort((a, b) => a.orderTime.compareTo(b.orderTime));
+  }
+
+  /// Commandes en cours dont l'heure de livraison annoncée est dépassée.
+  ///
+  /// Le délai annoncé vient de la zone (`estimated_delivery_minutes`), donc du
+  /// serveur : le retard se mesure sur la promesse faite au client, et non sur
+  /// une constante du back-office. Une commande sans heure annoncée n'est pas
+  /// en retard — elle est seulement sans promesse, ce qui n'est pas la même
+  /// chose et ne doit pas déclencher d'alerte.
+  static List<Order> overdueAmong(List<Order> orders, {DateTime? now}) {
+    final maintenant = now ?? DateTime.now();
+    return orders
+        .where(
+          (order) =>
+              _enCours.contains(order.status) &&
+              order.estimatedDeliveryTime != null &&
+              maintenant.isAfter(order.estimatedDeliveryTime!),
+        )
+        .toList()
+      ..sort(
+        (a, b) => a.estimatedDeliveryTime!.compareTo(b.estimatedDeliveryTime!),
+      );
+  }
+
   /// Commandes d'un statut donné, filtrées **par le serveur**.
   Future<List<Order>> loadOrdersByStatusFromDB(OrderStatus status) async {
     try {
@@ -276,18 +346,11 @@ class OrderManagementService extends ChangeNotifier {
         .toList();
   }
 
-  /// Rechercher des commandes
-  List<Order> searchOrders(String query) {
-    if (query.isEmpty) return _allOrders;
-
-    return _allOrders
-        .where((order) =>
-            order.id.toLowerCase().contains(query.toLowerCase()) ||
-            // (order.userName?.toLowerCase().contains(query.toLowerCase()) ?? // userName n'est pas défini dans le modèle Order
-            //         false) ||
-            order.deliveryAddress.toLowerCase().contains(query.toLowerCase()))
-        .toList();
-  }
+  // `searchOrders` a été retiré : il rendait une liste filtrée que son seul
+  // appelant jetait (`service.searchOrders(value);`), si bien que la barre de
+  // recherche de la supervision ne filtrait rien. La recherche est désormais
+  // un état d'écran, appliqué là où la liste est construite — un service
+  // partagé n'a pas à porter le champ de saisie d'un écran.
 
   /// Obtenir les statistiques des commandes
   Map<String, dynamic> getOrderStats() {

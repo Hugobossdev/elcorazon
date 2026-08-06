@@ -348,7 +348,11 @@ class _ItemCustomizationScreenState extends State<ItemCustomizationScreen> {
     final selectedIds = customization?.selections[category] ?? <String>[];
 
     // ✅ Utilisation des contraintes dynamiques
-    final constraint = service.getCategoryConstraint(category);
+    final constraint = service.constraintFor(
+      _menuItemId,
+      category,
+      fallbackName: widget.item.name,
+    );
     final isSingleChoice = constraint.isSingleChoice;
     final maxSelections = constraint.maxSelections;
 
@@ -1164,37 +1168,30 @@ class _ItemCustomizationScreenState extends State<ItemCustomizationScreen> {
       return;
     }
 
+    // Relevés **avant** `finishCustomization`, qui referme la session : le
+    // résumé en était rendu vide, et la description de la ligne avec lui.
+    final selectedOptionIds = service.selectedOptionIds(_sessionId);
+    final summary = service.getCustomizationSummary(_sessionId);
+
     final customization = service.finishCustomization(_sessionId);
     if (customization != null) {
-      final double finalPrice =
-          widget.item.price + customization.totalPriceModifier;
-
-      // Convertir les personnalisations en format Map pour le panier
+      // Les libellés servent à afficher la ligne ; seule `note` rejoint
+      // `CartLine.notes` quand des options structurées accompagnent la ligne
+      // (voir `CartItem.remoteNotes`).
       final Map<String, dynamic> customizationsMap = {
-        'selections': customization.selections,
-        'quantities': customization.quantities,
-        'special_instructions': customization.specialInstructions,
-        'total_price_modifier': customization.totalPriceModifier,
-        'summary': service.getCustomizationSummary(_sessionId),
+        if (summary.isNotEmpty) 'summary': summary,
+        if (customization.specialInstructions?.isNotEmpty == true)
+          'note': customization.specialInstructions,
       };
 
-      final MenuItem customizedItem = MenuItem(
-        id: widget.item.id, // Utiliser l'ID original du menu item
-        name: widget.item.name,
-        description:
-            '${widget.item.description}\n${service.getCustomizationSummary(_sessionId)}',
-        price: finalPrice,
-        categoryId: widget.item.categoryId,
-        category: widget.item.category,
-        imageUrl: widget.item.imageUrl,
-        isPopular: widget.item.isPopular,
-        isVegetarian: widget.item.isVegetarian,
-        availableQuantity: widget.item.availableQuantity,
-      );
-
       Provider.of<CartService>(context, listen: false).addItem(
-        customizedItem,
+        // Le prix reste celui du catalogue : le supplément des options est
+        // ajouté par le serveur, qui les relit lui-même (invariant C1).
+        // Y déposer un prix calculé dans l'app affichait au panier un montant
+        // que la facture ne reprenait pas.
+        widget.item,
         customizations: customizationsMap,
+        optionIds: selectedOptionIds,
       );
 
       if (!mounted || !context.mounted) return;

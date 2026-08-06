@@ -1,6 +1,6 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Dernière révision** : 1er août 2026
+**Dernière révision** : 5 août 2026
 
 > ⚠️ **Inventaire fonctionnel daté.** Le corps de ce document a été écrit en
 > décembre 2024, quand les trois applications parlaient directement à Supabase.
@@ -74,6 +74,50 @@ avec TLS et renouvellement Let's Encrypt, scripts `deploy.sh`, `backup.sh`,
 `restore.sh`. Il n'a pas encore tourné sur une infrastructure réelle : voir
 [docs/deploiement.md](docs/deploiement.md).
 
+## 🔄 Troisième vague (5 août 2026) — suivi et géolocalisation
+
+**Les frais de livraison ne se calculent plus sur le téléphone.** L'application
+cliente appliquait son propre barème — 500 F de base, 200 F du kilomètre à vol
+d'oiseau depuis des coordonnées de restaurant écrites en dur, livraison offerte
+au-dessus de 10 000 F, plafond à 5 000 F. Aucune de ces valeurs n'existait côté
+serveur, qui facture depuis le barème de la **zone qui couvre l'adresse
+d'arrivée** : l'écran annonçait un prix, la commande en retenait un autre.
+
+Deux routes existaient déjà côté serveur et n'étaient appelées par personne :
+
+- `GET /geography/zones/resolve/` — ce point est-il desservi, à quel barème,
+  avec quel délai et quel minimum de commande ;
+- `POST /orders/preview/` — le devis complet de la commande, par le même chemin
+  de calcul que sa création.
+
+Le barème vit donc en **donnée** : ouvrir un quartier ou relever un forfait se
+fait depuis le back-office, sans republier les applications.
+
+**Le seuil de franco est enfin réglable depuis le back-office.** Le champ
+existait en base et dans l'API depuis l'origine, mais aucun écran ne le
+montrait : une zone qui offrait la livraison au-dessus d'un montant l'offrait
+jusqu'à ce qu'un développeur passe en base. L'onglet « Tarifs » qui aurait dû
+le porter listait cinq zones inventées (« Zone Centre », « Zone Nord »…) dont
+les montants partaient dans les préférences locales du poste — personne ne les
+facturait. Il liste désormais les zones réelles et permet d'en modifier le nom,
+le forfait, le seuil de gratuité, le temps estimé et l'état actif.
+
+**Le stockage des fichiers est arbitré** (ADR-011) : trois compartiments
+publics pour ce qui est fait pour être vu (images d'articles, bannières,
+avatars) et un compartiment privé pour ce qui ne l'est jamais (pièces
+d'identité des livreurs, preuves de livraison). Les premiers sont servis par
+des URL stables et cachables, les seconds par des URL signées qui expirent.
+
+**Le faux suivi de livraison a disparu des trois applications.** Un
+`startDeliveryTracking` local lançait une minuterie qui faisait passer une
+commande de « en préparation » à « livré avec succès » en quarante secondes,
+sans jamais interroger le serveur — un client dont le repas n'était pas parti
+voyait son écran annoncer la livraison. Étaient également fabriqués sur
+l'appareil : l'itinéraire affiché (quatre points obtenus en ajoutant des
+millièmes de degré au départ) et la liste des « restaurants à proximité ». Le
+suivi réel, lui, existait déjà et n'a pas changé : `ws/orders/{id}/tracking/`,
+alimenté par le livreur, diffusé au client et au personnel.
+
 ---
 
 Ce document présente l'état d'implémentation des fonctionnalités des 3
@@ -104,9 +148,12 @@ applications de l'écosystème El Corazón.
 #### 🎨 Personnalisation de Produits
 - ✅ Personnalisation avancée (burgers, pizzas, gâteaux)
 - ✅ Options de personnalisation (taille, cuisson, sauce, garniture)
-- ✅ Modification des prix selon les options
-- ✅ Validation des personnalisations
-- ✅ Interface dédiée pour gâteaux sur mesure
+- ✅ Options transmises au panier serveur, qui les valorise (invariant C1 —
+  l'application affiche un **total estimé**, jamais un prix facturable)
+- ✅ Validation des personnalisations sur les bornes du groupe (`min_select`/`max_select`)
+- ✅ Interface dédiée pour gâteaux sur mesure — commandable dès que l'établissement a publié
+  l'article et ses groupes d'options au catalogue ; sinon l'écran reste une vitrine et le
+  dit, au lieu d'accepter une commande que le serveur refuse
 
 #### 🛍️ Panier & Commandes
 - ✅ Gestion du panier (ajout, modification, suppression)
@@ -124,11 +171,15 @@ applications de l'écosystème El Corazón.
 - ⚠️ **TODO** : Implémentation complète de l'API PayDunya (actuellement simulée)
 
 #### 🚚 Suivi de Livraison
-- ✅ Suivi en temps réel sur carte
+- ✅ Suivi en temps réel sur carte (`ws/orders/{id}/tracking/`)
 - ✅ Position du livreur en direct
-- ✅ Estimation du temps de livraison
+- ✅ Estimation du temps de livraison — **délai annoncé par la zone**, lu du
+  serveur ; il n'est plus déduit d'une distance divisée par une vitesse moyenne
+  choisie dans l'application
 - ✅ Notifications de statut
 - ✅ Historique des livraisons
+- 🔴 **Retiré le 5 août 2026** : la progression simulée localement, qui
+  déclarait la commande livrée quarante secondes après l'avoir passée
 
 #### 👥 Commandes Groupées
 - ✅ Création de groupes de livraison
@@ -151,7 +202,12 @@ applications de l'écosystème El Corazón.
 - ✅ Notifications push (structure)
 - ✅ Centre de notifications
 - ✅ Historique des notifications
-- ⚠️ **TODO** : Configuration complète Firebase pour push notifications
+- ✅ **Projet Firebase créé et validé côté serveur** (`elcorazon-9595`,
+  5 août 2026) : authentification du compte de service, envoi accepté par
+  l'API v1, codes de refus conformes à ce que le connecteur classe
+- ⚠️ **Reste** : une livraison sur un appareil Android physique, et **toute la
+  configuration iOS** (`GoogleService-Info.plist` et clé APNs manquants). Voir
+  `docs/firebase.md` §7
 
 #### 💬 Communication
 - ✅ Chat avec le livreur
@@ -189,7 +245,10 @@ applications de l'écosystème El Corazón.
 - ✅ Détection de position GPS
 - ✅ Géocodage d'adresses
 - ✅ Calcul d'itinéraires
-- ✅ Estimation des frais de livraison
+- ✅ Couverture et frais de livraison — **décidés par le serveur**
+  (`/geography/zones/resolve/` et `/orders/preview/`) depuis le barème de la
+  zone qui couvre l'adresse, plus par un tarif au kilomètre embarqué dans
+  l'application
 - ⚠️ **TODO** : Configuration Google Maps API Key
 
 #### 📊 Autres Fonctionnalités
@@ -210,10 +269,19 @@ applications de l'écosystème El Corazón.
    - **Action requise** : les clés dans le `.env` du **backend**, jamais dans
      celui d'une application.
 
-2. **Notifications Push**
-   - Service présent
-   - Firebase non complètement configuré
-   - **Action requise** : Configurer Firebase dans `.env`
+2. **Notifications Push** — *validé côté serveur, Android seulement*
+   - Projet Firebase `elcorazon-9595`, compte de service en place,
+     `PUSH_BACKEND` sur le connecteur FCM. L'aller-retour avec Google a été
+     exercé le 5 août 2026 : authentification, envoi accepté, et confrontation
+     des codes de refus réels (`400 INVALID_ARGUMENT`, `404 UNREGISTERED`) à
+     ceux que le connecteur classe comme définitifs — ils correspondent.
+   - Cette validation a trouvé un défaut qui rendait le push **totalement
+     muet** : le rafraîchissement du jeton OAuth exigeait le paquet `requests`,
+     absent des dépendances. Corrigé par un transport bâti sur `httpx`.
+   - **Reste** : une livraison sur un appareil Android physique, et **toute la
+     configuration iOS** — aucune des deux applications ne porte de
+     `GoogleService-Info.plist`, et sans clé APNs l'API accepte l'envoi pendant
+     que l'iPhone ne reçoit rien. Voir `docs/firebase.md` §7.
 
 3. **Appels Vidéo (Agora)**
    - Service présent
@@ -281,7 +349,9 @@ applications de l'écosystème El Corazón.
 - ✅ Classements
 
 #### 📱 Notifications
-- ✅ Notifications Firebase (configuré)
+- ⚠️ Notifications Firebase — **câblées, pas configurées** : jeton enregistré et
+  renouvelé auprès de `/auth/devices/`, détaché à la déconnexion, mais les
+  identifiants Firebase sont factices (voir `docs/firebase.md`)
 - ✅ Notifications locales
 - ✅ Notifications de nouvelles commandes
 - ✅ Notifications de statut
@@ -292,9 +362,13 @@ applications de l'écosystème El Corazón.
 - ✅ Service de synthèse vocale
 
 #### 📍 Géolocalisation
-- ✅ Mise à jour position en temps réel
+- ✅ Mise à jour position en temps réel — un relevé toutes les dix secondes,
+  déposé sur la course en cours (invariant L3 : un relevé appartient à une
+  course, pas à un livreur)
 - ✅ Partage de position
 - ✅ Géocodage d'adresses
+- 🔴 **Retiré le 5 août 2026** : la même progression de livraison simulée que
+  dans l'application cliente
 
 ### ⚠️ Fonctionnalités Partiellement Implémentées
 
@@ -333,26 +407,68 @@ applications de l'écosystème El Corazón.
 #### 🛒 Gestion des Commandes
 - ✅ Vue Kanban des commandes
 - ✅ Vue Liste des commandes
-- ✅ Filtres avancés
 - ✅ Changement de statut
 - ✅ Attribution de livreurs
 - ✅ Gestion des remboursements
 - ✅ Notes internes
 - ✅ Recherche globale
+- ✅ **Recherche dans la supervision** (id, destinataire, adresse) — elle
+  appelait `searchOrders(value)` **en jetant la valeur de retour** : la barre
+  était affichée et ne filtrait rien. La recherche est désormais un état
+  d'écran, appliqué là où la liste se construit
+- ✅ **Tri** des commandes (date, total, statut) — la liste déroulante existait,
+  branchée sur rien
+- ✅ **Alertes « urgentes / en retard »** — le bandeau était alimenté par deux
+  listes vides écrites en dur et ne s'affichait donc jamais. « Urgente » = en
+  attente ou confirmée depuis plus de 20 min ; « en retard » = en cours et
+  heure de livraison annoncée dépassée. Une commande sans heure annoncée n'est
+  pas en retard, et une commande livrée sort des deux listes
+- ✅ **Export CSV** — le fichier était construit puis écrit dans la console de
+  débogage : le bouton annonçait un succès dont rien ne sortait. Il aboutit
+  dans le presse-papier, et les champs sont échappés selon RFC 4180 (un retour
+  à la ligne dans une adresse coupait la commande en deux lignes)
+- 🔴 **Retiré** : le filtre par statut de la boîte « Filtres ». Les cinq onglets
+  de l'écran *sont* le filtre par statut ; un second filtre, global et
+  invisible depuis l'onglet courant, ne pouvait que le contredire
 
 #### 🍔 Gestion du Menu
 - ✅ CRUD complet des produits
 - ✅ Gestion des catégories
-- ✅ Upload d'images (structure)
 - ✅ Gestion des stocks
 - ✅ Personnalisations de produits
 - ✅ Groupes d'options
-- ⚠️ **TODO** : Compléter l'upload d'images (stockage serveur, URL signées)
+- ✅ **Envoi d'images produits** — le fichier est joint à l'article par un
+  `PATCH multipart`, rangé par le serveur dans le compartiment `products` du
+  stockage objet, et c'est le serveur qui rend l'URL. L'application n'a ni les
+  identifiants du stockage ni le nom des compartiments :
+  - ✅ Sélection galerie ou caméra, recompression à 85 % et 1920 px
+  - ✅ Refus au-delà de 5 Mo, **avant** de faire voyager les octets
+  - ✅ Aperçu local immédiat, y compris avant l'envoi
+  - ✅ Photo choisie sur un produit **pas encore créé** : elle est retenue et
+    envoyée juste après la création, faute d'identifiant à qui l'attacher avant
+  - ✅ Retrait d'image (`image: null` explicite, en JSON — un `multipart` ne
+    sait pas exprimer « vide »)
+  - ✅ Envoi par **octets** et non par chemin : sur le web un fichier choisi
+    n'a pas de chemin lisible, et le back-office tourne aussi dans un navigateur
+- 🔴 **Corrigé le 6 août 2026** : `uploadProductImage` était un talon qui
+  journalisait puis rendait `null`. Ce document affirmait pourtant la
+  fonctionnalité « COMPLÉTÉE », suppression de l'ancienne image comprise —
+  rien de tout cela n'existait
 
 #### 🚚 Gestion des Livreurs
 - ✅ Liste des livreurs
 - ✅ Ajout/Modification/Suppression
-- ✅ Validation des documents
+- ✅ Validation des documents — **la décision porte sur le dossier, pas sur
+  chaque pièce** : un dossier, trois pièces, un statut de vérification, qui
+  décide seul de l'éligibilité (L1). Les pièces s'ouvrent depuis l'écran par
+  URL signée expirante ; le dépôt reste au livreur, depuis son application, et
+  tout dépôt repasse le dossier en attente (L5)
+- ✅ **Pièces remplacées effacées du stockage** (`common/files.py`) — un dossier
+  rejeté est redéposé, si bien que chaque pièce d'identité, permis et carte
+  grise jamais envoyés s'accumulaient indéfiniment dans le compartiment privé.
+  Ce n'était pas une question de facture de stockage mais de rétention de
+  données personnelles. Le signal couvre les sept champs fichier du projet, et
+  tout champ ajouté plus tard
 - ✅ Tableau de bord des documents
 - ✅ Historique des validations
 - ✅ Planning des livreurs
@@ -394,8 +510,30 @@ applications de l'écosystème El Corazón.
 #### ⚙️ Paramètres
 - ✅ Paramètres généraux
 - ✅ Configuration de l'application
-- ✅ Gestion des zones de livraison
-- ✅ Configuration des frais
+- ✅ **Sélection des zones desservies** (onglet « Zones ») — c'est ici qu'on
+  décide *où* l'on livre, par opposition à l'onglet « Tarifs » qui décide de
+  *combien* :
+  - ✅ Zones regroupées par ville, avec le nom de la ville et non sa clé
+    (`/geography/manage/cities/`)
+  - ✅ Ouverture/fermeture d'une zone d'un geste, écrite immédiatement sur le
+    serveur — l'interrupteur est neutralisé le temps de l'aller-retour, sans
+    quoi deux bascules rapides laissent la réponse la plus lente décider
+  - ✅ « Tout ouvrir / tout fermer » par ville ; la fermeture en masse est
+    confirmée, l'ouverture non (rien d'irréversible)
+  - ✅ Recherche par nom de zone **ou** de ville
+  - ✅ Les zones fermées restent affichées : les masquer supprimerait le seul
+    endroit d'où on peut les rouvrir
+  - ✅ Alerte visible quand plus aucune zone n'est ouverte (livraison
+    indisponible pour tous les clients)
+- ✅ Barèmes de livraison — **écrits sur le serveur** : nom, forfait, seuil de
+  livraison offerte (franco), temps estimé, état actif. Le tarif au kilomètre
+  et le minimum de commande sont affichés en lecture
+- ⚠️ Le **contour** d'une zone (polygone GeoJSON) ne se dessine pas depuis le
+  back-office : la création d'une zone passe par le serveur. L'API le permet
+  (`POST /geography/manage/zones/`) mais un outil de dessin cartographique
+  reste à faire
+- 🔴 **Retiré le 5 août 2026** : les cinq zones en dur dont les tarifs
+  n'atteignaient jamais le serveur
 
 #### 🔍 Recherche Globale
 - ✅ Recherche unifiée
@@ -415,25 +553,50 @@ applications de l'écosystème El Corazón.
    - ✅ BarChart pour les commandes et livreurs
    - ✅ PieChart pour les catégories
 
-2. ~~**Upload d'Images Produits**~~ ✅ **COMPLÉTÉ**
-   - ✅ Upload vers le stockage serveur implémenté (privé, URL signées)
+2. ~~**Upload d'Images Produits**~~ ✅ **COMPLÉTÉ le 6 août 2026**
+   - ✅ Envoi vers le stockage objet, compartiment `products`
    - ✅ Sélection depuis galerie ou caméra
-   - ✅ Aperçu de l'image avant upload
-   - ✅ Compression automatique (85% qualité, max 1920px)
-   - ✅ Validation de taille (max 5MB)
-   - ✅ Suppression automatique de l'ancienne image lors de la mise à jour
-   - ✅ Gestion d'erreurs améliorée
-   - ✅ Feedback utilisateur avec SnackBar
+   - ✅ Aperçu de l'image avant envoi
+   - ✅ Compression automatique (85 % qualité, max 1920 px)
+   - ✅ Validation de taille (max 5 Mo)
+   - ✅ Suppression automatique de l'ancienne image — faite **par le serveur**
+     (`common/files.py`), pas par le client
+   - ✅ Gestion d'erreurs et retours à l'écran
+   - ⚠️ Deux affirmations de la version précédente de cette entrée étaient
+     fausses : l'envoi n'existait pas (talon rendant `null`) et rien n'effaçait
+     l'ancienne image. Les images produits sont par ailleurs **publiques**, pas
+     « privées, URL signées » — une photo de burger n'a aucune raison
+     d'expirer, contrairement à une pièce d'identité (ADR-011)
 
-3. **Carte Interactive des Livreurs**
-   - Données de position disponibles
-   - Placeholder dans l'interface
-   - **Action requise** : Intégrer google_maps_flutter
+3. ~~**Carte Interactive des Livreurs**~~ ✅ **déjà faite** — entrée périmée.
+   `driver_map_screen.dart` monte un vrai `GoogleMap`, avec marqueurs par
+   livreur, tracés d'itinéraire et rafraîchissement périodique. Il n'y a plus
+   de placeholder ni d'intégration à faire
 
-4. **Export de Rapports PDF**
-   - Structure présente
-   - Génération PDF partielle
-   - **Action requise** : Compléter l'export PDF
+4. 🔴 **Export de Rapports PDF — inexistant**, et non « partiel ». Le paquet
+   `pdf: ^3.10.7` est déclaré dans `pubspec.yaml` mais **importé nulle part** ;
+   aucun écran n'expose de bouton d'export de rapport. Il n'y a donc rien à
+   compléter : c'est une fonctionnalité à écrire, ou une dépendance à retirer
+
+5. 🔴 **Supprimé le 6 août 2026 : `enhanced_admin_dashboard.dart`** (1 987
+   lignes). Cet écran n'était **référencé par aucune route** — le tableau de
+   bord réellement affiché est `admin_dashboard_screen.dart` — et il affichait
+   des chiffres fabriqués présentés comme des analyses : `_getTopSellingItems`
+   rendait cinq produits écrits en dur (« Burger Classique », 45 ventes, 225 de
+   chiffre d'affaires) et `_getActiveDriversCount` rendait `8`. Ses six boutons
+   de navigation affichaient un `SnackBar` au lieu de naviguer.
+
+   Il a été supprimé plutôt que rebranché : ce qu'il proposait existe déjà dans
+   le tableau de bord en service et dans l'écran d'analyses, tous deux sur des
+   données réelles. Le garder sans le router n'avait aucun bénéfice et laissait
+   à portée de main un écran qui, une fois routé, aurait publié des ventes
+   inventées.
+
+   **Conséquence** : `lib/core/widgets/admin_card.dart` (`AdminCard`,
+   `AdminCardWithHeader`, `StatCard` — 438 lignes) n'a plus aucun appelant. Il
+   n'a pas été supprimé : c'est une bibliothèque de composants génériques rangée
+   dans `core/widgets/`, réutilisable telle quelle. À retirer si personne ne
+   s'en sert d'ici la prochaine revue
 
 ### 📈 Taux de Complétion : **~97%** (graphiques fl_chart et upload d'images complétés)
 
@@ -489,8 +652,14 @@ applications de l'écosystème El Corazón.
 2. **Firebase (Notifications push)**
    - Nécessaire pour : Notifications push
    - Où l'obtenir : https://console.firebase.google.com
-   - **Note** : `elcora_dely` a déjà Firebase configuré
-   - **Action** : Configurer pour `elcora_fast` si nécessaire
+   - **Correction (2026-08-05)** : `elcora_dely` n'était pas configuré non plus.
+     Son `firebase_options.dart` portait l'en-tête « File generated by
+     FlutterFire CLI » mais des clés factices et un projet inexistant
+     (`fastfoodgo-deliver`) — l'en-tête a été retiré. Les deux applications sont
+     dans le même état.
+   - **Action** : un **seul** projet Firebase pour les deux applications (un
+     jeton émis par un projet est refusé depuis un autre, et le backend n'a
+     qu'un `FCM_PROJECT_ID`), puis `docs/firebase.md` de bout en bout.
 
 ---
 

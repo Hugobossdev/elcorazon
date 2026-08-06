@@ -43,12 +43,14 @@ services:
       target: dev
     command: >
       sh -c "python manage.py migrate --noinput &&
+             python manage.py ensure_storage_buckets &&
              uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload"
     env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       POSTGRES_HOST: db
       REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
     volumes:
       - .:/app          # rechargement à chaud
       - ./secrets:/run/secrets:ro
@@ -57,6 +59,10 @@ services:
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_healthy}
+      # Les compartiments sont créés au démarrage, donc le stockage doit
+      # répondre avant l'API — sinon `docker compose up` échoue sur une
+      # installation neuve.
+      minio: {condition: service_healthy}
 
   worker:
     build:
@@ -91,6 +97,9 @@ services:
     depends_on:
       redis: {condition: service_healthy}
 
+  # Stockage objet compatible S3 (ADR-011). L'API et la console d'administration
+  # sont exposées séparément : la première est parlée par le backend, la seconde
+  # sert à regarder ce qui a été écrit pendant le développement.
   minio:
     image: minio/minio
     command: server /data --console-address ":9001"
@@ -100,8 +109,16 @@ services:
     volumes:
       - miniodata:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"   # console
+      - "9000:9000"   # API S3
+      - "9001:9001"   # console d'administration
+    healthcheck:
+      # `depends_on: service_healthy` en dépend : sans lui, l'API démarre avant
+      # que le serveur n'accepte les requêtes et la création des compartiments
+      # échoue au premier démarrage — celui où personne ne regarde les journaux.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   nginx:
     image: nginx:alpine

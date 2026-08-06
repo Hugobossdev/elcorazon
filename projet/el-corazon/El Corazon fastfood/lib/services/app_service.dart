@@ -138,9 +138,43 @@ class AppService extends ChangeNotifier {
   /// l'identité — Phase 6) et le `_currentUser` local que le reste de cette
   /// classe lit encore. C'est le seul endroit qui traduit l'un vers l'autre.
   void _onSessionChanged(AsyncValue<eccore.User?> next) {
+    // Une session en cours de restauration n'est pas une session fermée : agir
+    // sur `next.value` pendant le chargement viderait le carnet d'adresses au
+    // démarrage, avant même de savoir qui est connecté.
+    if (next.isLoading) return;
+
     final djangoUser = next.value;
     _currentUser = djangoUser == null ? null : _fromDjangoUser(djangoUser);
+    unawaited(_followSessionInAddressBook(djangoUser?.id));
     notifyListeners();
+  }
+
+  /// Identité dont le carnet d'adresses est actuellement ouvert.
+  ///
+  /// Le carnet vit côté serveur et n'était relié à rien : `initializeForUser`,
+  /// seul point d'entrée qui le branche sur le compte, n'était appelé par
+  /// personne. Le service restait donc en mode « invité » pour tout le monde,
+  /// et les adresses n'atteignaient jamais `/profiles/addresses/` — celles que
+  /// l'écran de commande transmettait ensuite portaient un identifiant que le
+  /// serveur n'avait jamais émis. C'est ici, et seulement ici, que la session
+  /// pilote le carnet.
+  String? _addressBookUserId;
+
+  Future<void> _followSessionInAddressBook(String? userId) async {
+    if (_addressBookUserId == userId) return;
+    _addressBookUserId = userId;
+
+    try {
+      if (userId == null) {
+        await AddressService().clearSession();
+      } else {
+        await AddressService().initializeForUser(userId);
+      }
+    } catch (e) {
+      // Le carnet est secondaire par rapport à l'identité : son échec ne doit
+      // pas empêcher la connexion d'aboutir.
+      debugPrint('Carnet d\'adresses non synchronisé : $e');
+    }
   }
 
   /// Les points de fidélité et les badges n'existent pas dans
@@ -289,7 +323,10 @@ class AppService extends ChangeNotifier {
       await _container.read(eccore.sessionProvider.notifier).logout();
       _cartItems.clear();
       await CartService().clearForLogout();
-      unawaited(AddressService().clearSession());
+      // Le carnet d'adresses n'est pas fermé ici : il suit la session, via
+      // `_followSessionInAddressBook`. Le fermer aussi depuis cet endroit
+      // donnait deux chemins pour la même chose, dont un seul couvrait
+      // l'expiration du jeton — l'autre cas où la session tombe.
       _gamificationService.reset();
       NotificationDatabaseService().clearSession();
       notifyListeners();
@@ -344,11 +381,11 @@ class AppService extends ChangeNotifier {
   }) async {
     if (cartItems.isEmpty || _currentUser == null) return '';
 
-    if (deliveryAddress == null ||
-        deliveryAddress.latitude == null ||
-        deliveryAddress.longitude == null) {
+    // Le point n'est plus vérifié ici : une `Address` en porte toujours un, et
+    // elle provient toujours du carnet serveur.
+    if (deliveryAddress == null) {
       throw Exception(
-        'Adresse de livraison invalide : sélectionnez une adresse géocodée avant de commander.',
+        'Adresse de livraison manquante : choisissez-en une avant de commander.',
       );
     }
 
@@ -402,8 +439,10 @@ class AppService extends ChangeNotifier {
 
       _gamificationService.onOrderPlaced(remoteOrder.total);
 
-      // Démarrer le suivi de livraison
-      _locationService.startDeliveryTracking(remoteOrder.id);
+      // Aucun suivi n'est « démarré » ici : l'avancement d'une commande vient
+      // du serveur, que l'écran de suivi écoute sur `ws/orders/{id}/tracking/`.
+      // La ligne précédente lançait une minuterie locale qui déclarait la
+      // commande livrée quarante secondes après l'avoir passée.
 
       notifyListeners();
       return remoteOrder.id;

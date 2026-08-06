@@ -18,7 +18,7 @@ un serveur. Ce qui suit est donc une procédure écrite, pas une procédure épr
 | `api`     | ASGI (Uvicorn). Sert l'API REST **et** les WebSocket — même processus, même autorisation. |
 | `worker`  | Celery. Envois push, expiration de points, tâches différées.          |
 | `beat`    | Celery beat. Ordonnanceur. Volume `beatdata` pour ne pas rejouer un cycle au redémarrage. |
-| `minio`   | Stockage objet S3. Pièces livreurs, photos d'avis. Volume `miniodata`. |
+| `minio`   | Stockage objet S3 (ADR-011). Quatre compartiments : trois publics (images, bannières, avatars) et un privé (pièces livreurs, preuves de livraison). Volume `miniodata`. Console fermée (`MINIO_BROWSER=off`). |
 | `nginx`   | Terminaison TLS, limitation de premier niveau, service des fichiers statiques. |
 | `certbot` | Renouvellement Let's Encrypt.                                         |
 
@@ -71,6 +71,21 @@ immédiat plutôt qu'un incident de sécurité découvert plus tard :
 - `JWT_VERIFYING_KEY` (ou `JWT_PUBLIC_KEY_PATH`)
 - `POSTGRES_PASSWORD`
 - les identifiants MinIO (`S3_ACCESS_KEY`, `S3_SECRET_KEY`)
+
+**`S3_PUBLIC_URL` mérite une attention particulière.** C'est l'adresse par
+laquelle un téléphone atteint les images publiques, et elle doit passer par le
+domaine servi par Nginx — pas par `http://minio:9000`, que seul le réseau
+Docker joint. Mal renseignée, l'API rend des URL d'images injoignables : le
+catalogue s'affiche sans photos, sans qu'aucune erreur ne remonte.
+
+Les compartiments sont créés au démarrage de l'API
+(`python manage.py ensure_storage_buckets`), avec leur politique de lecture.
+Rien à faire à la main ; la commande est idempotente et peut être rejouée :
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm api \
+  python manage.py ensure_storage_buckets --dry-run   # montre sans créer
+```
 
 Les clés du prestataire de paiement (`PAYDUNYA_*`) et le certificat Agora
 (`AGORA_APP_CERTIFICATE`) vivent ici et **nulle part ailleurs** : ni dans un
@@ -155,8 +170,15 @@ que 401 sans jeton signale une régression d'autorisation (ADR-005).
 
 - **aucun déploiement réel n'a été exécuté** — la procédure est écrite, pas
   éprouvée ;
-- **le push FCM n'a pas été validé** contre un vrai projet Firebase. Le code
-  d'envoi est testé, l'aller-retour avec Google ne l'est pas ;
+- **le push FCM est validé côté serveur, pas côté téléphone** (5 août 2026,
+  projet `elcorazon-9595`). L'aller-retour avec Google a été exercé :
+  authentification du compte de service, envoi accepté, et surtout
+  confrontation des codes de refus réels à ceux que le connecteur sait
+  interpréter — `400 INVALID_ARGUMENT` et `404 UNREGISTERED` sont bien classés
+  définitifs. Ce qui n'a pas été fait : **une livraison sur un appareil
+  physique**, et **toute la configuration iOS** (`GoogleService-Info.plist` et
+  clé APNs manquants — sans eux, l'API accepte l'envoi et l'iPhone ne reçoit
+  rien). Détail et marche à suivre : `docs/firebase.md` §5 et §7 ;
 - **pas de sauvegarde hors site.** `backup.sh` écrit sur le même serveur : une
   perte de machine emporte la base et ses sauvegardes. Recopiez `deploy/backups/`
   vers un stockage distant ;

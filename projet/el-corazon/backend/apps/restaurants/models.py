@@ -17,6 +17,7 @@ from django.db import models
 from apps.accounts.models import User
 from apps.geography.models import DeliveryZone
 from common.models import TimeStampedModel, UUIDModel
+from common.storage import banners
 
 __all__ = ["OpeningHours", "Restaurant", "StaffMembership", "Weekday"]
 
@@ -36,7 +37,11 @@ class Restaurant(UUIDModel, TimeStampedModel):
 
     phone = models.CharField(max_length=16)
     email = models.EmailField(blank=True)
-    cover_image = models.ImageField(upload_to="restaurants/", null=True, blank=True)
+    # Compartiment public, avec les bannières et visuels de campagne : c'est
+    # l'image d'accueil de l'établissement, faite pour être vue (ADR-011).
+    cover_image = models.ImageField(
+        upload_to="restaurants/", storage=banners, null=True, blank=True
+    )
 
     # `is_active` est structurel — l'établissement existe-t-il ? —, tandis que
     # `accepts_orders` est conjoncturel : un coup de feu en cuisine, une panne

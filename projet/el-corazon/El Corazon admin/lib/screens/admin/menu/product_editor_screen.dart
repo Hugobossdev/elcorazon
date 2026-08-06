@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -34,6 +36,16 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
   List<MenuOptionGroup> _optionGroups = [];
   bool _isLoading = false;
   bool _isUploadingImage = false;
+
+  /// Photo choisie pour un article **qui n'existe pas encore**.
+  ///
+  /// L'image se joint à un article par son identifiant ; une création n'en a
+  /// pas avant d'avoir abouti. On garde donc le fichier ici et on l'envoie
+  /// juste après la création. L'alternative — refuser de choisir une photo
+  /// tant que le produit n'est pas enregistré — imposerait deux allers-retours
+  /// à l'exploitant pour une opération qu'il vit comme une seule.
+  XFile? _pendingImage;
+  Uint8List? _pendingImageBytes;
 
   @override
   void initState() {
@@ -95,6 +107,29 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
         // Create
         final createdItem = await menuService.createMenuItem(newItem);
         if (createdItem != null) {
+          // La photo choisie avant que l'article existe : c'est maintenant
+          // qu'elle trouve un article à qui s'attacher. L'échec n'annule pas
+          // la création — le produit est enregistré, il lui manque une image,
+          // et le dire vaut mieux que de perdre la saisie.
+          final enAttente = _pendingImage;
+          if (enAttente != null) {
+            final imageUrl = await menuService.uploadProductImage(
+              menuItemId: createdItem.id,
+              image: enAttente,
+            );
+            if (imageUrl == null && mounted && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'Produit créé, mais l’image n’a pas pu être envoyée : '
+                    '${menuService.error ?? 'erreur inconnue'}',
+                  ),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            }
+          }
+
           // Save option groups
           for (var group in _optionGroups) {
             final groupWithItemId = group.copyWith(menuItemId: createdItem.id);
@@ -169,6 +204,28 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     }
   }
 
+  /// Vignette du cadre de photo.
+  ///
+  /// La photo en attente prime sur l'URL enregistrée : c'est le dernier choix
+  /// de l'exploitant, et il doit se voir avant même d'avoir été envoyé. Elle
+  /// s'affiche depuis les octets en mémoire, sans passer par le réseau — un
+  /// fichier qui n'est pas encore parti n'a pas d'adresse.
+  DecorationImage? _apercu() {
+    if (_isUploadingImage) return null;
+
+    final octets = _pendingImageBytes;
+    if (octets != null) {
+      return DecorationImage(image: MemoryImage(octets), fit: BoxFit.cover);
+    }
+
+    if (_imageUrlController.text.isEmpty) return null;
+    return DecorationImage(
+      image: NetworkImage(_imageUrlController.text),
+      fit: BoxFit.cover,
+      onError: (exception, stackTrace) {},
+    );
+  }
+
   Future<void> _pickImage() async {
     final ImagePicker picker = ImagePicker();
 
@@ -206,7 +263,29 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
 
     if (image != null) {
       if (!mounted) return;
-      
+
+      final existant = widget.menuItem?.id;
+
+      // Article pas encore créé : on garde la photo et son aperçu, et l'envoi
+      // se fera juste après la création, dans `_save`.
+      if (existant == null || existant.isEmpty) {
+        final octets = await image.readAsBytes();
+        if (!mounted) return;
+
+        setState(() {
+          _pendingImage = image;
+          _pendingImageBytes = octets;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Photo retenue — elle sera envoyée à l’enregistrement du produit',
+            ),
+          ),
+        );
+        return;
+      }
+
       setState(() {
         _isUploadingImage = true;
       });
@@ -214,25 +293,21 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
       try {
         if (!mounted) return;
         final menuService = Provider.of<MenuService>(context, listen: false);
-        final productName =
-            _nameController.text.isNotEmpty ? _nameController.text : 'product';
-
-        // Passer l'ancienne URL si on modifie un produit existant
-        final oldImageUrl = widget.menuItem?.imageUrl;
 
         final imageUrl = await menuService.uploadProductImage(
-          image,
-          productName,
-          oldImageUrl: oldImageUrl,
+          menuItemId: existant,
+          image: image,
         );
 
         if (imageUrl != null && mounted && context.mounted) {
           setState(() {
             _imageUrlController.text = imageUrl;
+            _pendingImage = null;
+            _pendingImageBytes = null;
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Image uploadée avec succès'),
+              content: Text('Image enregistrée'),
               backgroundColor: Colors.green,
             ),
           );
@@ -361,19 +436,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                                         color: Colors.grey[300]!,
                                         width: 2,
                                       ),
-                                      image: _imageUrlController
-                                                  .text.isNotEmpty &&
-                                              !_isUploadingImage
-                                          ? DecorationImage(
-                                              image: NetworkImage(
-                                                _imageUrlController.text,
-                                              ),
-                                              fit: BoxFit.cover,
-                                              onError: (exception, stackTrace) {
-                                                // En cas d'erreur de chargement de l'image
-                                              },
-                                            )
-                                          : null,
+                                      image: _apercu(),
                                     ),
                                     child: _isUploadingImage
                                         ? const Center(

@@ -1,10 +1,10 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
-import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/address.dart';
@@ -53,13 +53,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   final AddressService _addressService = AddressService();
   final DeliveryFeeService _deliveryFeeService = DeliveryFeeService();
-  final GeocodingService _geocodingService = GeocodingService();
 
   @override
   void initState() {
     super.initState();
     _loadUserAddress();
-    _initializeDeliveryFeeService();
     // S'assurer que le wallet n'est pas sélectionné (fonctionnalité désactivée)
     if (_selectedPayment == PaymentMethod.wallet) {
       _selectedPayment = PaymentMethod.cash;
@@ -72,14 +70,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  Future<void> _initializeDeliveryFeeService() async {
-    try {
-      await _deliveryFeeService.initialize();
-    } catch (e) {
-      debugPrint('Erreur initialisation DeliveryFeeService: $e');
-    }
-  }
-
   @override
   void dispose() {
     _addressController.dispose();
@@ -87,35 +77,40 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     super.dispose();
   }
 
+  /// Pré-remplit l'adresse de livraison.
+  ///
+  /// Le carnet est ouvert par la session (`AppService`), pas par cet écran :
+  /// il appelait `initialize()`, qui ne lisait que le cache local et ne
+  /// contactait jamais le serveur. On reprend le choix déjà mémorisé — celui
+  /// que le client a fait à sa commande précédente — avant de retomber sur
+  /// l'adresse par défaut.
   Future<void> _loadUserAddress() async {
     try {
-      // Initialiser le service si nécessaire
-      if (!_addressService.isInitialized) {
-        await _addressService.initialize();
-      }
+      final address = _addressService.selectedAddress ??
+          _addressService.defaultAddress ??
+          _addressService.addresses.firstOrNull;
 
-      // Charger l'adresse par défaut de l'utilisateur
-      final defaultAddress = _addressService.defaultAddress;
-
-      if (defaultAddress != null) {
-        _selectedAddress = defaultAddress;
-        _addressController.text = defaultAddress.fullAddress;
-        // Calculer les frais de livraison automatiquement
-        await _calculateDeliveryFeeForAddress(defaultAddress);
-      } else if (_addressService.addresses.isNotEmpty) {
-        final firstAddress = _addressService.addresses.first;
-        _selectedAddress = firstAddress;
-        _addressController.text = firstAddress.fullAddress;
-        await _calculateDeliveryFeeForAddress(firstAddress);
-      } else {
+      if (address == null) {
         _addressController.text = '';
+        return;
       }
+
+      _selectedAddress = address;
+      _addressController.text = address.fullAddress;
+      await _calculateDeliveryFeeForAddress(address);
     } catch (e) {
       debugPrint('Erreur chargement adresse: $e');
       _addressController.text = '';
     }
   }
 
+  /// Demande au serveur le chiffrage de la commande pour cette adresse.
+  ///
+  /// L'écran calculait auparavant lui-même les frais, puis les poussait dans
+  /// le panier. Il les **lit** désormais : `CartService.refreshQuote` appelle
+  /// `POST /orders/preview/`, qui emprunte le chemin de calcul de la création
+  /// de commande. Ce qui s'affiche ici est donc, au centime près, ce qui sera
+  /// facturé.
   Future<void> _calculateDeliveryFeeForAddress(Address? address) async {
     if (address == null) return;
 
@@ -125,12 +120,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
     try {
       final cartService = context.read<CartService>();
+      await cartService.refreshQuote(address: address);
 
-      // Calculer les frais de livraison avec détails
-      final breakdown =
-          await _deliveryFeeService.calculateDetailedDeliveryFeeFromAddress(
+      final breakdown = await _deliveryFeeService.breakdownForAddress(
         address: address,
-        orderSubtotal: cartService.subtotal,
+        promoCode: cartService.promoCode ?? '',
       );
 
       if (mounted) {
@@ -138,20 +132,34 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           _deliveryBreakdown = breakdown;
         });
 
-        // Mettre à jour les frais dans le panier
-        cartService.setDeliveryFee(breakdown.totalFee);
-
-        // Si la zone n'est pas desservie, afficher le dialog
         if (!breakdown.isInServiceableZone && mounted) {
           await ZoneNotServiceableDialog.show(
             context,
-            breakdown: breakdown,
             onChooseAnotherAddress: _selectAddress,
           );
         }
       }
     } catch (e) {
-      debugPrint('Erreur calcul frais livraison: $e');
+      // Le serveur a refusé de chiffrer — adresse hors zone, minimum de
+      // commande non atteint, article devenu indisponible. Aucun montant de
+      // secours n'est fabriqué : le bouton de commande reste inactif tant
+      // qu'aucun devis n'est arrivé.
+      debugPrint('Devis de commande indisponible : $e');
+      if (mounted) {
+        setState(() {
+          _deliveryBreakdown = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              e is eccore.ApiException
+                  ? e.detail
+                  : 'Impossible de chiffrer la commande pour le moment.',
+            ),
+            backgroundColor: Colors.orange.shade800,
+          ),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -161,39 +169,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  /// Tente de géocoder une adresse si les coordonnées manquent
-  Future<Address?> _ensureAddressHasCoordinates(Address address) async {
-    if (address.latitude != null && address.longitude != null) {
-      return address;
-    }
-
-    debugPrint(
-      'CheckoutScreen: Tentative de géocodage de l\'adresse: ${address.fullAddress}',
-    );
-
-    try {
-      final coords =
-          await _geocodingService.geocodeAddress(address.fullAddress);
-      if (coords != null) {
-        // Mettre à jour l'adresse avec les coordonnées
-        final updatedAddress = await _addressService.updateAddress(
-          addressId: address.id,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-        );
-        debugPrint(
-          'CheckoutScreen: Coordonnées obtenues - lat: ${coords.latitude}, lng: ${coords.longitude}',
-        );
-        return updatedAddress;
-      } else {
-        debugPrint('⚠️ CheckoutScreen: Impossible de géocoder l\'adresse');
-        return null;
-      }
-    } catch (e) {
-      debugPrint('⚠️ CheckoutScreen: Erreur lors du géocodage: $e');
-      return null;
-    }
-  }
+  // Plus de rattrapage de coordonnées ici : une `Address` en porte toujours,
+  // par construction. Cet écran géocodait l'adresse choisie quand elle n'en
+  // avait pas — un rattrapage qui n'existait que parce que le carnet laissait
+  // créer des adresses sans point, et qui n'a plus d'objet.
 
   Future<void> _selectAddress() async {
     final selected = await Navigator.of(context).push<Address>(
@@ -207,16 +186,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ),
     );
 
-    if (selected != null && mounted && context.mounted) {
-      // S'assurer que l'adresse a des coordonnées
-      final addressWithCoords = await _ensureAddressHasCoordinates(selected);
-
+    if (selected != null && mounted) {
       setState(() {
-        _selectedAddress = addressWithCoords ?? selected;
-        _addressController.text =
-            (_selectedAddress?.fullAddress ?? selected.fullAddress);
+        _selectedAddress = selected;
+        _addressController.text = selected.fullAddress;
       });
-      await _calculateDeliveryFeeForAddress(_selectedAddress);
+      await _calculateDeliveryFeeForAddress(selected);
     }
   }
 
@@ -240,7 +215,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               : cartService.subtotal;
           final deliveryFee = cartService.deliveryFee;
           final discount = isGroupOrder ? 0.0 : cartService.discount;
-          final total = subtotal + deliveryFee - discount;
+          // Le total vient du devis serveur dès qu'il existe. La ligne
+          // précédente le recomposait ici (`sous-total + frais − remise`), ce
+          // qui donnait un troisième chiffre, différent de celui du panier et
+          // de celui de la commande.
+          final total = isGroupOrder
+              ? (subtotal + deliveryFee - discount)
+              : cartService.total;
 
           if (cartItems.isEmpty) {
             return _buildEmptyCart(context);
@@ -532,17 +513,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             icon: Icons.location_on,
             maxLines: 3,
             enabled: false,
-            validator: (_) {
-              if (_selectedAddress == null) {
-                return 'Veuillez sélectionner une adresse';
-              }
-              if (_selectedAddress!.latitude == null ||
-                  _selectedAddress!.longitude == null) {
-                // Le géocodage sera fait lors de la soumission du formulaire
-                return 'Adresse invalide (coordonnées manquantes). Veuillez sélectionner une position sur la carte.';
-              }
-              return null;
-            },
+            validator: (_) =>
+                _selectedAddress == null ? 'Veuillez sélectionner une adresse' : null,
           ),
           if (_isCalculatingDeliveryFee) ...[
             const SizedBox(height: 16),
@@ -729,85 +701,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       return;
     }
 
-    // Vérifier et géocoder l'adresse si nécessaire
-    if (_selectedAddress != null &&
-        (_selectedAddress!.latitude == null ||
-            _selectedAddress!.longitude == null)) {
-      setState(() {
-        _isLoading = true;
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Géocodage de l\'adresse en cours...'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-
-      final updatedAddress =
-          await _ensureAddressHasCoordinates(_selectedAddress!);
-      if (updatedAddress != null &&
-          updatedAddress.latitude != null &&
-          updatedAddress.longitude != null) {
-        setState(() {
-          _selectedAddress = updatedAddress;
-          _addressController.text = updatedAddress.fullAddress;
-        });
-        // Recalculer les frais de livraison avec les nouvelles coordonnées
-        await _calculateDeliveryFeeForAddress(updatedAddress);
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Impossible de géocoder l\'adresse. Veuillez sélectionner une position sur la carte.',
-              ),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-    }
-
+    // Le géocodage de rattrapage qui se trouvait ici — deux passes, dont une
+    // qui affichait « Géocodage de l'adresse en cours… » au moment de payer —
+    // n'a plus d'objet : une adresse du carnet porte toujours son point, et
+    // elle existe toujours côté serveur.
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // V2: checkout = adresse sélectionnée obligatoire (avec lat/lng)
-      Address? addressToUse = _selectedAddress;
+      final addressToUse = _selectedAddress;
 
-      // S'assurer que l'adresse a des coordonnées
-      if (addressToUse != null &&
-          (addressToUse.latitude == null || addressToUse.longitude == null)) {
-        debugPrint(
-          'CheckoutScreen: Tentative de géocodage avant passage de commande',
-        );
-        addressToUse = await _ensureAddressHasCoordinates(addressToUse);
-      }
-
-      if (addressToUse == null ||
-          addressToUse.latitude == null ||
-          addressToUse.longitude == null) {
+      if (addressToUse == null) {
+        setState(() => _isLoading = false);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                'Adresse de livraison invalide. Veuillez sélectionner une adresse avec coordonnées valides.',
-              ),
+              content: Text('Choisissez une adresse de livraison.'),
               backgroundColor: Colors.red,
             ),
           );
         }
-        throw Exception(
-          'Adresse de livraison invalide. Veuillez sélectionner une adresse.',
-        );
+        return;
       }
 
       // Créer la commande d'abord (Django, Phase 6) — le paiement s'ouvre

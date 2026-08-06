@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/admin_auth_service.dart';
+import '../../services/delivery_zone_service.dart';
 import '../../widgets/custom_text_field.dart';
 import '../../utils/dialog_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'zone_form_dialog.dart';
+import 'zone_selection_tab.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -16,9 +20,12 @@ class _SettingsScreenState extends State<SettingsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  // Tarifs de livraison
-  final Map<String, double> _deliveryRates = {};
-  final Map<String, TextEditingController> _rateControllers = {};
+  // Les tarifs de livraison ne sont plus tenus ici. Cet écran portait cinq
+  // zones écrites en dur (« Zone Centre », « Zone Nord »…) dont les tarifs
+  // étaient enregistrés dans les préférences locales du poste : ils
+  // n'atteignaient jamais le serveur, ne correspondaient à aucune zone réelle,
+  // et laissaient croire qu'on venait de changer un prix. Le barème vit dans
+  // `DeliveryZoneService`, c'est-à-dire dans la base.
 
   // Horaires
   String _openingTime = '08:00';
@@ -47,9 +54,8 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _loadSettings();
-    _initializeDeliveryRates();
   }
 
   @override
@@ -58,35 +64,11 @@ class _SettingsScreenState extends State<SettingsScreen>
     _googleMapsApiKeyController.dispose();
     _faqController.dispose();
     _cgvController.dispose();
-    for (final controller in _rateControllers.values) {
-      controller.dispose();
-    }
     super.dispose();
-  }
-
-  void _initializeDeliveryRates() {
-    final zones = [
-      'Zone Centre',
-      'Zone Nord',
-      'Zone Sud',
-      'Zone Est',
-      'Zone Ouest',
-    ];
-    for (final zone in zones) {
-      _deliveryRates[zone] = 5.0;
-      _rateControllers[zone] = TextEditingController(text: '5.0');
-    }
   }
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-
-    // Charger les tarifs
-    for (final zone in _deliveryRates.keys) {
-      final rate = prefs.getDouble('delivery_rate_$zone') ?? 5.0;
-      _deliveryRates[zone] = rate;
-      _rateControllers[zone]?.text = rate.toStringAsFixed(2);
-    }
 
     // Charger les horaires
     _openingTime = prefs.getString('opening_time') ?? '08:00';
@@ -119,12 +101,9 @@ class _SettingsScreenState extends State<SettingsScreen>
     
     final prefs = await SharedPreferences.getInstance();
 
-    // Sauvegarder les tarifs
-    for (final entry in _rateControllers.entries) {
-      final rate = double.tryParse(entry.value.text) ?? 5.0;
-      _deliveryRates[entry.key] = rate;
-      await prefs.setDouble('delivery_rate_${entry.key}', rate);
-    }
+    // Les tarifs ne sont plus enregistrés ici : chaque zone s'écrit sur le
+    // serveur, depuis son propre formulaire, et le bouton global ne peut donc
+    // pas les emporter par mégarde.
 
     // Sauvegarder les horaires
     await prefs.setString('opening_time', _openingTime);
@@ -178,6 +157,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           controller: _tabController,
           isScrollable: true,
           tabs: const [
+            Tab(icon: Icon(Icons.map), text: 'Zones'),
             Tab(icon: Icon(Icons.local_shipping), text: 'Tarifs'),
             Tab(icon: Icon(Icons.access_time), text: 'Horaires'),
             Tab(icon: Icon(Icons.vpn_key), text: 'API Keys'),
@@ -189,6 +169,9 @@ class _SettingsScreenState extends State<SettingsScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
+          // Où l'on livre — la sélection des zones desservies.
+          const ZoneSelectionTab(),
+          // Ce que coûte la livraison — le barème de chaque zone.
           _buildDeliveryRatesTab(),
           _buildOpeningHoursTab(),
           _buildApiKeysTab(),
@@ -204,56 +187,240 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
 
+  /// Barèmes de livraison — **les zones réelles**, lues et écrites sur le
+  /// serveur.
+  ///
+  /// Cet onglet listait cinq zones inventées dont les tarifs allaient dans les
+  /// préférences du poste. Personne ne facturait ces montants : le barème qui
+  /// s'applique vit sur la `DeliveryZone`, en base, et c'est lui qu'on édite
+  /// ici — seuil de livraison offerte compris, qui n'avait jusqu'ici aucune
+  /// interface.
   Widget _buildDeliveryRatesTab() {
     final scheme = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Tarifs de livraison par zone',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+
+    return Consumer<DeliveryZoneService>(
+      builder: (context, service, child) {
+        return RefreshIndicator(
+          onRefresh: service.refresh,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Barèmes de livraison par zone',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Ces montants sont ceux que le serveur facture. Une '
+                  'modification s’applique à la commande suivante, sans '
+                  'republier les applications.',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 24),
+                if (service.isLoading && service.zones.isEmpty)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else if (service.error != null && service.zones.isEmpty)
+                  _buildZonesError(service, scheme)
+                else if (service.zones.isEmpty)
+                  _buildNoZones(scheme)
+                else
+                  ...service.zones.map(
+                    (zone) => _buildZoneCard(service, zone, scheme),
+                  ),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Définissez les tarifs de livraison pour chaque zone',
-            style: TextStyle(color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 24),
-          ..._deliveryRates.keys.map((zone) {
-            return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        zone,
+        );
+      },
+    );
+  }
+
+  Widget _buildZonesError(DeliveryZoneService service, ColorScheme scheme) {
+    return Card(
+      color: scheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline, color: scheme.onErrorContainer),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                service.error!,
+                style: TextStyle(color: scheme.onErrorContainer),
+              ),
+            ),
+            TextButton(
+              onPressed: service.refresh,
+              child: const Text('Réessayer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNoZones(ColorScheme scheme) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Row(
+          children: [
+            Icon(Icons.map_outlined, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Aucune zone de livraison n’est enregistrée. Le contour d’une '
+                'zone se dessine côté serveur ; les barèmes se règlent ensuite '
+                'ici.',
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildZoneCard(
+    DeliveryZoneService service,
+    DeliveryZone zone,
+    ColorScheme scheme,
+  ) {
+    final devise = zone.currency == 'XOF' ? 'FCFA' : zone.currency;
+    String montant(double valeur) => valeur == valeur.roundToDouble()
+        ? valeur.toStringAsFixed(0)
+        : valeur.toStringAsFixed(2);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        zone.name,
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
                       ),
-                    ),
-                    SizedBox(
-                      width: 120,
-                      child: CustomTextField(
-                        controller: _rateControllers[zone]!,
-                        label: 'Tarif (CFA)',
-                        keyboardType: TextInputType.number,
-                        prefixIcon: Icons.monetization_on,
+                      // Deux villes peuvent avoir chacune leur « Centre-ville » :
+                      // sans ce rappel, les deux lignes seraient indiscernables.
+                      Text(
+                        service.cityName(zone.cityId),
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            );
-          }),
-        ],
+                if (!zone.isActive)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Chip(
+                      label: const Text('Inactive'),
+                      backgroundColor: scheme.surfaceContainerHighest,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                TextButton.icon(
+                  onPressed: () => _editZone(zone),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Modifier'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 24,
+              runSpacing: 8,
+              children: [
+                _buildZoneFact(
+                  Icons.monetization_on_outlined,
+                  'Forfait',
+                  '${montant(zone.deliveryFee)} $devise',
+                  scheme,
+                ),
+                _buildZoneFact(
+                  Icons.straighten,
+                  'Par kilomètre',
+                  '${montant(zone.feePerKm)} $devise',
+                  scheme,
+                ),
+                _buildZoneFact(
+                  Icons.card_giftcard,
+                  'Livraison offerte',
+                  zone.freeDeliveryThreshold == null
+                      ? 'Jamais'
+                      : 'dès ${montant(zone.freeDeliveryThreshold!)} $devise',
+                  scheme,
+                ),
+                _buildZoneFact(
+                  Icons.schedule,
+                  'Temps estimé',
+                  '~${zone.estimatedTimeMinutes} min',
+                  scheme,
+                ),
+                if (zone.minOrderAmount != null)
+                  _buildZoneFact(
+                    Icons.shopping_basket_outlined,
+                    'Commande minimum',
+                    '${montant(zone.minOrderAmount!)} $devise',
+                    scheme,
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildZoneFact(
+    IconData icone,
+    String libelle,
+    String valeur,
+    ColorScheme scheme,
+  ) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icone, size: 16, color: scheme.onSurfaceVariant),
+        const SizedBox(width: 6),
+        Text('$libelle : ', style: TextStyle(color: scheme.onSurfaceVariant)),
+        Text(valeur, style: const TextStyle(fontWeight: FontWeight.w600)),
+      ],
+    );
+  }
+
+  Future<void> _editZone(DeliveryZone zone) async {
+    final enregistre = await ZoneFormDialog.show(context, zone);
+    if (!enregistre || !mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('✅ Barème de « ${zone.name} » enregistré'),
+        backgroundColor: Theme.of(context).colorScheme.inverseSurface,
       ),
     );
   }

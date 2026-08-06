@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/app_service.dart';
@@ -2434,6 +2435,21 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     }
   }
 
+  /// Échappe une valeur selon RFC 4180.
+  ///
+  /// L'export remplaçait les virgules par des points-virgules. Cela sauvait la
+  /// colonne mais abîmait la donnée — une adresse rendue « Rue X; Quartier Y »
+  /// n'est plus celle du client — et surtout cela ne traitait pas le vrai
+  /// casseur de fichier : un **retour à la ligne** dans une adresse, qui coupe
+  /// la commande en deux lignes et décale tout le reste du tableau. Guillemets
+  /// et virgules d'origine sont donc conservés, et c'est le champ qui est
+  /// entouré.
+  static String _csvChamp(Object? valeur) {
+    final texte = valeur?.toString() ?? '';
+    if (!texte.contains(RegExp('[",\n\r]'))) return texte;
+    return '"${texte.replaceAll('"', '""')}"';
+  }
+
   Future<void> _exportOrders() async {
     try {
       final orderService = context.read<OrderManagementService>();
@@ -2457,70 +2473,47 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
       csvBuffer.writeln('ID,Date,Client,Adresse,Statut,Total,Articles');
 
       for (final order in filteredOrders) {
-        try {
-          // Le nom vient de la commande : une requête par ligne exportée
-          // rendait l'export d'un mois de commandes interminable.
-          final clientName = order.recipientName.isEmpty
-              ? 'Inconnu'
-              : order.recipientName;
+        // Le nom vient de la commande : une requête par ligne exportée rendait
+        // l'export d'un mois de commandes interminable.
+        final clientName = order.recipientName.isEmpty
+            ? 'Inconnu'
+            : order.recipientName;
 
-          csvBuffer.writeln(
-            [
-              order.id,
-              order.orderTime.toIso8601String(),
-              clientName.replaceAll(',', ';'),
-              order.deliveryAddress.replaceAll(',', ';'),
-              order.status.displayName,
-              PriceFormatter.format(order.total)
-                  .replaceAll(' ', ''), // Remove spaces for CSV
-              order.items.length,
-            ].join(','),
-          );
-        } catch (e) {
-          // Si on ne peut pas récupérer le nom, continuer sans
-          csvBuffer.writeln(
-            [
-              order.id,
-              order.orderTime.toIso8601String(),
-              'Inconnu',
-              order.deliveryAddress.replaceAll(',', ';'),
-              order.status.displayName,
-              PriceFormatter.format(order.total)
-                  .replaceAll(' ', ''), // Remove spaces for CSV
-              order.items.length,
-            ].join(','),
-          );
-        }
-      }
-
-      // Pour le web, on peut utiliser le partage ou le téléchargement
-      // Pour mobile, on peut utiliser share_plus
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${filteredOrders.length} commande(s) exportée(s)'),
-            backgroundColor: Colors.green,
-            action: SnackBarAction(
-              label: 'Copier',
-              onPressed: () {
-                // Copier le CSV dans le presse-papier
-                // Note: clipboard nécessite un package supplémentaire
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'CSV généré (fonctionnalité de copie à implémenter)',
-                    ),
-                    backgroundColor: Colors.blue,
-                  ),
-                );
-              },
-            ),
-          ),
+        csvBuffer.writeln(
+          [
+            order.id,
+            order.orderTime.toIso8601String(),
+            clientName,
+            order.deliveryAddress,
+            order.status.displayName,
+            PriceFormatter.format(order.total).replaceAll(' ', ''),
+            order.items.length,
+          ].map(_csvChamp).join(','),
         );
       }
 
-      // Log pour debug
-      debugPrint('CSV Export:\n${csvBuffer.toString()}');
+      // L'export aboutit dans le presse-papier, d'où il se colle dans un
+      // tableur. C'était jusqu'ici la seule sortie manquante : le CSV était
+      // construit puis écrit dans la console de débogage, si bien que le
+      // bouton « Exporter » annonçait un succès dont rien ne sortait.
+      //
+      // `Clipboard` vient de `flutter/services.dart` : aucun paquet
+      // supplémentaire, et cela fonctionne sur les six plateformes — ce que ne
+      // ferait pas un téléchargement de fichier, qui demanderait un chemin sur
+      // bureau et une permission sur mobile.
+      await Clipboard.setData(ClipboardData(text: csvBuffer.toString()));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${filteredOrders.length} commande(s) copiée(s) dans le '
+              'presse-papier — collez dans un tableur',
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

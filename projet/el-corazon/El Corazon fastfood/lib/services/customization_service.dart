@@ -17,6 +17,20 @@ class CustomizationOption {
   final String? imageUrl;
   final List<String>? allergens;
 
+  /// Vrai quand l'option vient du catalogue serveur — son [id] est alors un
+  /// identifiant que `POST /carts/{slug}/lines/` accepte.
+  ///
+  /// Les options de démonstration ([_getDefaultCustomizationOptions]) portent
+  /// des identifiants inventés (`cake-shape-round`) : les envoyer au serveur
+  /// produit un 400. C'est ce drapeau qui permet à un écran de savoir s'il
+  /// compose une commande réelle ou une simple maquette.
+  final bool isRemote;
+
+  /// Nombre minimal de choix imposé par le groupe côté serveur
+  /// (`OptionGroup.min_select`). Zéro pour les options locales, dont la règle
+  /// vient de [CustomizationService._categoryConstraints].
+  final int minSelections;
+
   CustomizationOption({
     required this.id,
     required this.name,
@@ -28,6 +42,8 @@ class CustomizationOption {
     this.description,
     this.imageUrl,
     this.allergens,
+    this.isRemote = false,
+    this.minSelections = 0,
   });
 
   /// Depuis le contrat Django (`OptionSerializer` dans son groupe).
@@ -45,6 +61,8 @@ class CustomizationOption {
       isDefault: option.isDefault,
       isRequired: group.isRequired,
       maxQuantity: group.maxSelect,
+      minSelections: group.minSelect,
+      isRemote: true,
     );
   }
 
@@ -130,6 +148,8 @@ class CustomizationOption {
     String? description,
     String? imageUrl,
     List<String>? allergens,
+    bool? isRemote,
+    int? minSelections,
   }) {
     return CustomizationOption(
       id: id ?? this.id,
@@ -143,6 +163,8 @@ class CustomizationOption {
       imageUrl: imageUrl ?? this.imageUrl,
       allergens: allergens ??
           (this.allergens != null ? List<String>.from(this.allergens!) : null),
+      isRemote: isRemote ?? this.isRemote,
+      minSelections: minSelections ?? this.minSelections,
     );
   }
 }
@@ -853,6 +875,20 @@ class CustomizationService extends ChangeNotifier {
     return _getOptionsForMenuItem(menuItemId, fallbackName: fallbackName);
   }
 
+  /// Installe les options d'un article sans passer par le réseau.
+  ///
+  /// Le service est un singleton dont les options viennent du détail d'un
+  /// article : sans ce point d'entrée, la règle qui distingue une option du
+  /// catalogue d'une option de démonstration ne serait vérifiable qu'en
+  /// lançant l'application.
+  @visibleForTesting
+  void seedOptionsForTest(
+    String menuItemId,
+    List<CustomizationOption> options,
+  ) {
+    _itemOptions[menuItemId] = options;
+  }
+
   // Get options by category for an item
   Map<String, List<CustomizationOption>> getOptionsByCategory(
     String menuItemId, {
@@ -895,27 +931,30 @@ class CustomizationService extends ChangeNotifier {
     final Map<String, List<String>> defaultSelections = {};
     final Map<String, int> defaultQuantities = {};
 
-    // Set default selections - pour les catégories single choice, ne garder qu'une seule option par défaut
-    final singleChoiceCategories = {
-      'shape',
-      'size',
-      'flavor',
-      'tiers',
-      'icing',
-      'dietary',
-    };
-
+    // Sélections par défaut. La liste des catégories à choix unique était
+    // écrite ici en dur (`shape`, `size`...) : un groupe du catalogue nommé
+    // « Forme » n'y figurait pas, et deux options par défaut du même groupe se
+    // cumulaient — une sélection que le serveur refuse ensuite. La contrainte
+    // décide désormais, qu'elle vienne du groupe ou de la table locale.
     for (final option in options) {
       if (option.isDefault) {
         final category = option.category;
+        final constraint = constraintFor(
+          menuItemId,
+          category,
+          fallbackName: menuItemName,
+        );
 
-        // Pour les catégories single choice, remplacer l'option précédente si elle existe
-        if (singleChoiceCategories.contains(category)) {
+        if (constraint.isSingleChoice) {
           defaultSelections[category] = [option.id];
         } else {
-          // Pour les catégories multi-choice, ajouter à la liste
-          defaultSelections[category] = (defaultSelections[category] ?? [])
-            ..add(option.id);
+          final selected = defaultSelections[category] ?? [];
+          // Un groupe borné à N choix ne peut pas en présélectionner N+1.
+          if (selected.length < constraint.maxSelections) {
+            defaultSelections[category] = selected..add(option.id);
+          } else {
+            continue;
+          }
         }
 
         defaultQuantities[option.id] = 1;
@@ -1038,8 +1077,79 @@ class CustomizationService extends ChangeNotifier {
 
   // Get constraint for a category
   CategoryConstraint getCategoryConstraint(String category) {
-    return _categoryConstraints[category] ?? 
+    return _categoryConstraints[category] ??
         CategoryConstraint(category: category);
+  }
+
+  /// Contrainte applicable à une catégorie **de cet article**.
+  ///
+  /// Quand les options viennent du catalogue, la règle vient avec elles :
+  /// `OptionGroup.min_select`/`max_select` sont saisis par l'exploitation, et
+  /// c'est ce couple que le serveur revalide (`validate_selection`). S'en
+  /// remettre à [_categoryConstraints] serait ici doublement faux — cette
+  /// table est indexée par des étiquettes locales (`shape`, `size`) quand le
+  /// serveur groupe par nom de groupe (« Forme », « Taille »), si bien
+  /// qu'aucune n'était trouvée : plus rien n'était requis ni plafonné côté
+  /// app, et l'écart n'apparaissait qu'au refus du serveur.
+  ///
+  /// La table locale reste la règle des options de démonstration, qui n'ont
+  /// pas de groupe pour la porter.
+  CategoryConstraint constraintFor(
+    String menuItemId,
+    String category, {
+    String? fallbackName,
+  }) {
+    CustomizationOption? remote;
+    for (final option
+        in getOptionsForMenuItem(menuItemId, fallbackName: fallbackName)) {
+      if (option.category == category && option.isRemote) {
+        remote = option;
+        break;
+      }
+    }
+
+    if (remote == null) {
+      return getCategoryConstraint(category);
+    }
+
+    return CategoryConstraint(
+      category: category,
+      minSelections: remote.minSelections,
+      maxSelections: remote.maxQuantity,
+      isRequired: remote.isRequired,
+      // Un groupe qui n'accepte qu'un choix *est* un choix unique : le rendre
+      // explicite laisse l'écran proposer des puces exclusives plutôt qu'une
+      // case à cocher qu'il refuserait ensuite.
+      isSingleChoice: remote.maxQuantity <= 1,
+    );
+  }
+
+  /// Identifiants des options retenues, tels que le panier doit les envoyer.
+  ///
+  /// Vide tant que les options ne viennent pas du catalogue : un identifiant
+  /// de démonstration (`cake-shape-round`) n'existe pas côté serveur, et
+  /// l'envoyer ferait refuser toute la ligne.
+  List<String> selectedOptionIds(String sessionId) {
+    final customization = _currentCustomizations[sessionId];
+    if (customization == null) return const [];
+
+    final ids = <String>[];
+    for (final selected in customization.selections.values) {
+      for (final optionId in selected) {
+        final option = _findOptionById(optionId);
+        if (option != null && option.isRemote) {
+          ids.add(option.id);
+        }
+      }
+    }
+    return ids..sort();
+  }
+
+  /// Vrai quand cet article a de vraies options de catalogue — donc quand une
+  /// personnalisation peut être commandée telle qu'elle est composée.
+  bool hasRemoteOptions(String menuItemId, {String? fallbackName}) {
+    return getOptionsForMenuItem(menuItemId, fallbackName: fallbackName)
+        .any((option) => option.isRemote);
   }
 
   // Validate customization for an item
@@ -1066,10 +1176,17 @@ class CustomizationService extends ChangeNotifier {
           (optionsByCategory[option.category] ?? [])..add(option);
     }
 
-    // ✅ Validation centralisée basée sur _categoryConstraints
-    // 1. Vérifier les catégories présentes dans les options disponibles
+    // ✅ Validation centralisée : la contrainte vient du groupe serveur quand
+    // il y en a un, de _categoryConstraints sinon. C'est la même règle que
+    // `validate_selection` côté Django — la vérifier ici évite au client de
+    // découvrir au moment d'ajouter au panier ce qu'il aurait pu savoir en
+    // composant.
     for (final category in optionsByCategory.keys) {
-      final constraint = getCategoryConstraint(category);
+      final constraint = constraintFor(
+        customization.menuItemId,
+        category,
+        fallbackName: menuItemName,
+      );
       final selectedOptions = customization.selections[category] ?? [];
       final selectedCount = selectedOptions.length;
 
@@ -1082,12 +1199,17 @@ class CustomizationService extends ChangeNotifier {
         }
       }
 
-      // Vérifier max selections (pour multi-choice)
-      if (!constraint.isSingleChoice && selectedCount > constraint.maxSelections) {
+      // Vérifier max selections. Un choix unique plafonne à 1 quelle que soit
+      // la valeur portée par la contrainte : la table locale laisse
+      // `maxSelections` à sa valeur par défaut (99) sur ces catégories, et
+      // deux choix y passaient donc inaperçus.
+      final effectiveMax =
+          constraint.isSingleChoice ? 1 : constraint.maxSelections;
+      if (selectedCount > effectiveMax) {
         errors.add(
-            'Maximum ${constraint.maxSelections} choix pour ${_translateCategory(category)}',);
+            'Maximum $effectiveMax choix pour ${_translateCategory(category)}',);
       }
-      
+
       // Vérifier min selections (si > 0)
       if (selectedCount < constraint.minSelections) {
          errors.add(

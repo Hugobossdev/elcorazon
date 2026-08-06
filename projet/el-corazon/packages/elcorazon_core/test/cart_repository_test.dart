@@ -10,7 +10,26 @@ const _jsonHeaders = {
   Headers.contentTypeHeader: [Headers.jsonContentType],
 };
 
-Map<String, dynamic> _lineJson({String quantity = '1', String notes = ''}) {
+Map<String, dynamic> _optionJson(String id, String name, String delta, String group) {
+  return {
+    'id': id,
+    'name': name,
+    'price_delta': {'amount': delta, 'currency': 'XOF'},
+    'group': group,
+  };
+}
+
+Map<String, dynamic> _lineJson({
+  String quantity = '1',
+  String notes = '',
+  List<Map<String, dynamic>> options = const [],
+}) {
+  final supplements = options.fold<int>(
+    0,
+    (sum, option) =>
+        sum + int.parse((option['price_delta'] as Map<String, dynamic>)['amount'] as String),
+  );
+  final unit = 2500 + supplements;
   return {
     'id': 'line-1',
     'menu_item': 'item-1',
@@ -18,9 +37,9 @@ Map<String, dynamic> _lineJson({String quantity = '1', String notes = ''}) {
     'image': null,
     'quantity': int.parse(quantity),
     'notes': notes,
-    'options': <dynamic>[],
-    'unit_price': {'amount': '2500', 'currency': 'XOF'},
-    'total': {'amount': (2500 * int.parse(quantity)).toString(), 'currency': 'XOF'},
+    'options': options,
+    'unit_price': {'amount': unit.toString(), 'currency': 'XOF'},
+    'total': {'amount': (unit * int.parse(quantity)).toString(), 'currency': 'XOF'},
     'is_orderable': true,
     'unavailable_reason': '',
   };
@@ -43,10 +62,20 @@ Map<String, dynamic> _cartJson({List<Map<String, dynamic>> lines = const []}) {
   };
 }
 
+/// Catalogue minimal du serveur simulé — c'est lui qui connaît le nom et le
+/// supplément d'une option, jamais le client (invariant C1).
+const _catalogue = {
+  'option-bacon': ['Bacon', '500', 'Suppléments'],
+  'option-cuisson': ['À point', '0', 'Cuisson'],
+};
+
 /// Simule `/carts/el-corazon-lome/*` : chaque route renvoie le panier entier
 /// après écriture, comme le fait `CartViewSet._rendered` côté serveur.
 class _FakeServer implements HttpClientAdapter {
   final List<String> requests = [];
+
+  /// Corps du dernier POST de ligne — pour vérifier ce que le client envoie.
+  Map<String, dynamic>? lastAddLineBody;
 
   @override
   void close({bool force = false}) {}
@@ -62,8 +91,32 @@ class _FakeServer implements HttpClientAdapter {
     if (options.path.endsWith('/carts/el-corazon-lome/lines/') && options.method == 'POST') {
       final bytes = requestStream == null ? <int>[] : await _readAll(requestStream);
       final body = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+      lastAddLineBody = body;
+
+      // Le serveur ne renvoie pas les identifiants reçus tels quels : il les
+      // résout au catalogue et rend nom, groupe et supplément.
+      final selected = (body['options'] as List<dynamic>? ?? const [])
+          .map((id) => _catalogue[id]!)
+          .toList();
+
       return _jsonResponse(
-        _cartJson(lines: [_lineJson(quantity: body['quantity'].toString(), notes: body['notes'] as String)]),
+        _cartJson(
+          lines: [
+            _lineJson(
+              quantity: body['quantity'].toString(),
+              notes: body['notes'] as String,
+              options: [
+                for (var index = 0; index < selected.length; index++)
+                  _optionJson(
+                    (body['options'] as List<dynamic>)[index] as String,
+                    selected[index][0],
+                    selected[index][1],
+                    selected[index][2],
+                  ),
+              ],
+            ),
+          ],
+        ),
         201,
       );
     }
@@ -129,7 +182,7 @@ void main() {
       expect(cart.subtotal.amountMinor, 2500);
     });
 
-    test('addLine envoie toujours options: [] et renvoie le panier mis à jour', () async {
+    test('addLine sans option envoie une liste vide', () async {
       final cart = await repository.addLine(
         restaurantSlug: 'el-corazon-lome',
         menuItemId: 'item-1',
@@ -138,7 +191,40 @@ void main() {
       );
 
       expect(cart.lines.single.quantity, 2);
+      expect(cart.lines.single.options, isEmpty);
+      expect(server.lastAddLineBody!['options'], isEmpty);
       expect(server.requests, contains('POST /carts/el-corazon-lome/lines/'));
+    });
+
+    test('addLine transmet les identifiants d’options retenus', () async {
+      await repository.addLine(
+        restaurantSlug: 'el-corazon-lome',
+        menuItemId: 'item-1',
+        quantity: 1,
+        optionIds: const ['option-bacon', 'option-cuisson'],
+      );
+
+      // Des identifiants, et rien d'autre : ni nom ni supplément. Le prix
+      // d'une option se décide au serveur (invariant C1) ; l'envoyer d'ici
+      // laisserait le client fixer ce qu'il paie.
+      expect(server.lastAddLineBody!['options'], ['option-bacon', 'option-cuisson']);
+      expect(server.lastAddLineBody!.containsKey('price'), isFalse);
+    });
+
+    test('les options rendues portent le prix et le groupe du serveur', () async {
+      final cart = await repository.addLine(
+        restaurantSlug: 'el-corazon-lome',
+        menuItemId: 'item-1',
+        quantity: 1,
+        optionIds: const ['option-bacon'],
+      );
+
+      final line = cart.lines.single;
+      expect(line.options.single.name, 'Bacon');
+      expect(line.options.single.groupName, 'Suppléments');
+      expect(line.options.single.priceDelta.amountMinor, 500);
+      // 2 500 de base + 500 de supplément : c'est le serveur qui l'a fait.
+      expect(line.unitPrice.amountMinor, 3000);
     });
 
     test('setQuantity appelle PATCH sur la ligne', () async {

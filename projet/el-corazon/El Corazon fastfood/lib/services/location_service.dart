@@ -1,20 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+/// Position de l'appareil : permission et relevé, rien d'autre.
+///
+/// Ce service portait aussi un **faux suivi de livraison** : `startDeliveryTracking`
+/// déclenchait une minuterie qui faisait passer la commande de « en préparation »
+/// à « livré avec succès » en quarante secondes, sans jamais interroger
+/// personne. Un client dont le repas n'était pas parti voyait donc son écran
+/// annoncer la livraison. Il fabriquait aussi un itinéraire (quatre points
+/// obtenus en ajoutant des millièmes de degré au départ) et une liste de
+/// « restaurants à proximité » entièrement inventée, positionnée autour de
+/// l'utilisateur.
+///
+/// Le vrai suivi existe : `RealtimeTrackingService` écoute
+/// `ws/orders/{id}/tracking/`, où le livreur publie sa position et le serveur
+/// diffuse les changements de statut. C'est la seule source d'avancement d'une
+/// livraison.
 class LocationService extends ChangeNotifier {
+  /// Instance unique, comme les autres services de l'application.
+  ///
+  /// Chaque `LocationService()` construisait auparavant un objet neuf, dont
+  /// `currentPosition` valait `null` tant que personne n'avait relevé la
+  /// position *sur cette instance-là*. Le tri des adresses par distance, qui
+  /// en construisait une à la volée, retombait donc systématiquement sur une
+  /// position absente : l'option existait dans le menu et ne triait rien.
+  static final LocationService _instance = LocationService._internal();
+  factory LocationService() => _instance;
+  LocationService._internal();
+
   Position? _currentPosition;
-  bool _isTrackingDelivery = false;
-  String _deliveryStatus = 'En préparation';
-  double _deliveryProgress = 0.0;
-  List<LatLng> _deliveryRoute = [];
   bool _isInitialized = false;
 
   Position? get currentPosition => _currentPosition;
-  bool get isTrackingDelivery => _isTrackingDelivery;
-  String get deliveryStatus => _deliveryStatus;
-  double get deliveryProgress => _deliveryProgress;
-  List<LatLng> get deliveryRoute => _deliveryRoute;
   bool get isInitialized => _isInitialized;
 
   /// Initialise le service de géolocalisation
@@ -22,10 +39,7 @@ class LocationService extends ChangeNotifier {
     if (_isInitialized) return;
 
     try {
-      // Demander les permissions
       await requestLocationPermission();
-
-      // Obtenir la position actuelle
       await getCurrentLocation();
 
       _isInitialized = true;
@@ -75,110 +89,18 @@ class LocationService extends ChangeNotifier {
     }
   }
 
-  // Démarrer le suivi de livraison
-  void startDeliveryTracking(String orderId) {
-    _isTrackingDelivery = true;
-    _deliveryStatus = 'Commande confirmée';
-    _deliveryProgress = 0.1;
-
-    // Simuler les étapes de livraison
-    _simulateDeliveryProgress();
-    notifyListeners();
-  }
-
-  // Simuler le progrès de la livraison
-  void _simulateDeliveryProgress() async {
-    // Étape 1: En préparation
-    await Future.delayed(const Duration(seconds: 5));
-    _deliveryStatus = 'En préparation';
-    _deliveryProgress = 0.3;
-    notifyListeners();
-
-    // Étape 2: Prêt pour livraison
-    await Future.delayed(const Duration(seconds: 10));
-    _deliveryStatus = 'Prêt pour livraison';
-    _deliveryProgress = 0.5;
-    notifyListeners();
-
-    // Étape 3: En route
-    await Future.delayed(const Duration(seconds: 5));
-    _deliveryStatus = 'En route vers vous';
-    _deliveryProgress = 0.7;
-    notifyListeners();
-
-    // Étape 4: Proche
-    await Future.delayed(const Duration(seconds: 15));
-    _deliveryStatus = 'Très proche';
-    _deliveryProgress = 0.9;
-    notifyListeners();
-
-    // Étape 5: Livré
-    await Future.delayed(const Duration(seconds: 5));
-    _deliveryStatus = 'Livré avec succès!';
-    _deliveryProgress = 1.0;
-    _isTrackingDelivery = false;
-    notifyListeners();
-  }
-
-  // Calculer la distance entre deux points
-  double calculateDistance(LatLng start, LatLng end) {
+  /// Distance en mètres entre deux points, sur l'ellipsoïde.
+  double distanceBetween(
+    double startLatitude,
+    double startLongitude,
+    double endLatitude,
+    double endLongitude,
+  ) {
     return Geolocator.distanceBetween(
-      start.latitude,
-      start.longitude,
-      end.latitude,
-      end.longitude,
+      startLatitude,
+      startLongitude,
+      endLatitude,
+      endLongitude,
     );
-  }
-
-  // Simuler la route de livraison
-  void generateDeliveryRoute(LatLng restaurant, LatLng destination) {
-    _deliveryRoute = [
-      restaurant,
-      LatLng(restaurant.latitude + 0.001, restaurant.longitude + 0.0005),
-      LatLng(restaurant.latitude + 0.002, restaurant.longitude + 0.001),
-      LatLng(destination.latitude - 0.001, destination.longitude - 0.0005),
-      destination,
-    ];
-    notifyListeners();
-  }
-
-  // Arrêter le suivi
-  void stopTracking() {
-    _isTrackingDelivery = false;
-    _deliveryProgress = 0.0;
-    _deliveryStatus = 'En préparation';
-    _deliveryRoute.clear();
-    notifyListeners();
-  }
-
-  // Trouver les restaurants à proximité
-  List<Map<String, dynamic>> getNearbyRestaurants(Position userLocation) {
-    // Simulation de restaurants proches
-    return [
-      {
-        'name': 'El Corazón - Centre Ville',
-        'distance': 0.8,
-        'position': LatLng(
-            userLocation.latitude + 0.005, userLocation.longitude + 0.003,),
-        'rating': 4.8,
-        'deliveryTime': '15-20 min',
-      },
-      {
-        'name': 'El Corazón - Zone Industrielle',
-        'distance': 1.2,
-        'position': LatLng(
-            userLocation.latitude - 0.008, userLocation.longitude + 0.006,),
-        'rating': 4.6,
-        'deliveryTime': '20-25 min',
-      },
-      {
-        'name': 'El Corazón - Quartier Résidentiel',
-        'distance': 2.1,
-        'position': LatLng(
-            userLocation.latitude + 0.012, userLocation.longitude - 0.009,),
-        'rating': 4.7,
-        'deliveryTime': '25-30 min',
-      },
-    ];
   }
 }

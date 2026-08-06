@@ -184,10 +184,12 @@ quelqu'un cliquera « rembourser » et croira que c'est fait.
   ne décide pas seul : un 400 peut signaler un jeton mort comme une charge utile
   mal formée, et purger sur le second effacerait des appareils sains.
 
-**Avant la mise en service**, envoyer une notification à un appareil de test et
-comparer la réponse d'erreur reçue à `ERREURS_DEFINITIVES` : c'est cette
-classification qui compte, et elle n'a pas pu être confrontée au service réel
-depuis ce dépôt.
+**Avant la mise en service**, envoyer une notification à un appareil de test
+(`python manage.py send_test_push <jeton>`) et comparer la réponse d'erreur reçue
+à `ERREURS_DEFINITIVES` : c'est cette classification qui compte, et elle n'a pas
+pu être confrontée au service réel depuis ce dépôt. Chaque refus de Google est
+journalisé sous `fcm.rejet` — statut HTTP, code, décision prise — et c'est ce
+`code` qu'on compare. Marche à suivre complète : `docs/firebase.md`.
 
 ## Limitation de débit
 

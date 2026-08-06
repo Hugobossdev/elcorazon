@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import '../models/money.dart';
 import '../network/api_client.dart';
 import 'category.dart';
@@ -186,6 +188,60 @@ class ManagedCatalogRepository {
   /// copie figée.
   Future<void> deleteMenuItem(String menuItemId) async {
     await apiClient.delete('/catalog/manage/items/$menuItemId/');
+  }
+
+  // -------------------------------------------------------------- image
+
+  /// Attache une image à un article — `PATCH` en `multipart/form-data`.
+  ///
+  /// L'octet part vers le serveur, qui le range dans le compartiment
+  /// `products` du stockage objet et rend l'article à jour, `image` portant
+  /// l'URL **publique et durable** (`common/storage.py` : une photo de burger
+  /// n'a aucune raison d'expirer, contrairement à une pièce d'identité).
+  /// L'application ne parle jamais au stockage directement : elle n'en a ni les
+  /// identifiants ni le nom des compartiments, et c'est ce qui permet de
+  /// changer de fournisseur sans republier.
+  ///
+  /// **Des octets, pas un chemin.** `MultipartFile.fromFile` échoue sur le web,
+  /// où un fichier choisi n'a pas de chemin lisible — et le back-office tourne
+  /// aussi dans un navigateur. `XFile.readAsBytes()` fonctionne partout, au
+  /// prix de tenir l'image en mémoire, ce qui est sans conséquence pour une
+  /// photo de produit.
+  ///
+  /// L'article doit **exister** : il n'y a pas d'image sans article à qui
+  /// l'attacher. Pour une création, l'ordre est donc « créer, puis envoyer
+  /// l'image ».
+  Future<MenuItem> uploadMenuItemImage({
+    required String menuItemId,
+    required String filename,
+    required List<int> bytes,
+    String? contentType,
+  }) async {
+    final response = await apiClient.patch(
+      '/catalog/manage/items/$menuItemId/',
+      data: FormData.fromMap({
+        'image': MultipartFile.fromBytes(
+          bytes,
+          filename: filename,
+          contentType: contentType == null ? null : DioMediaType.parse(contentType),
+        ),
+      }),
+    );
+    return MenuItem.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Retire l'image d'un article.
+  ///
+  /// En JSON, et non en `multipart` : c'est un `null` explicite qu'il faut
+  /// transmettre, et un formulaire multipart ne sait pas exprimer « vide » —
+  /// il ne sait qu'omettre le champ, ce que le serveur lirait comme « ne pas y
+  /// toucher ». L'ancien fichier est effacé par le serveur.
+  Future<MenuItem> clearMenuItemImage(String menuItemId) async {
+    final response = await apiClient.patch(
+      '/catalog/manage/items/$menuItemId/',
+      data: const {'image': null},
+    );
+    return MenuItem.fromJson(response.data as Map<String, dynamic>);
   }
 
   // ------------------------------------------------------ groupes d'options

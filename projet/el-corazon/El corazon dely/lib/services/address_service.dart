@@ -306,36 +306,39 @@ class AddressService extends ChangeNotifier {
         postalCode.isNotEmpty;
   }
 
-  /// Obtient les suggestions d'adresses populaires (pour les tests)
+  /// Quartiers proposés en raccourci de saisie.
+  ///
+  /// Ils désignaient Cocody, le Plateau, Marcory et Yopougon — des quartiers
+  /// d'Abidjan, dans un autre pays que celui où l'on livre.
   List<Map<String, dynamic>> getPopularAddresses() {
     return [
       {
-        'name': 'Cocody',
-        'address': 'Cocody, Abidjan',
-        'city': 'Abidjan',
-        'postalCode': '00225',
-        'type': AddressType.other,
+        'name': 'Tokoin',
+        'address': 'Tokoin, Lomé',
+        'city': 'Lomé',
+        'postalCode': '',
+        'type': AddressType.home,
       },
       {
-        'name': 'Plateau',
-        'address': 'Plateau, Abidjan',
-        'city': 'Abidjan',
-        'postalCode': '00225',
+        'name': 'Bè',
+        'address': 'Bè, Lomé',
+        'city': 'Lomé',
+        'postalCode': '',
+        'type': AddressType.home,
+      },
+      {
+        'name': 'Adidogomé',
+        'address': 'Adidogomé, Lomé',
+        'city': 'Lomé',
+        'postalCode': '',
+        'type': AddressType.home,
+      },
+      {
+        'name': 'Administratif',
+        'address': 'Quartier administratif, Lomé',
+        'city': 'Lomé',
+        'postalCode': '',
         'type': AddressType.work,
-      },
-      {
-        'name': 'Marcory',
-        'address': 'Marcory, Abidjan',
-        'city': 'Abidjan',
-        'postalCode': '00225',
-        'type': AddressType.home,
-      },
-      {
-        'name': 'Yopougon',
-        'address': 'Yopougon, Abidjan',
-        'city': 'Abidjan',
-        'postalCode': '00225',
-        'type': AddressType.home,
       },
     ];
   }

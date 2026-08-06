@@ -40,10 +40,22 @@ class AppService extends ChangeNotifier {
       (previous, next) => _onSessionChanged(next),
       fireImmediately: true,
     );
+
+    // FCM renouvelle le jeton d'appareil de son propre chef : sans
+    // ré-enregistrement, le livreur cesse de recevoir ses offres de course, en
+    // silence. Ne fait rien tant que personne n'est connecté — l'appel
+    // échouerait en 401, et le jeton sera enregistré à la connexion.
+    _tokenRefreshSubscription =
+        _notificationService.tokenRefreshStream.listen((_) {
+      if (_currentUser != null) {
+        unawaited(_registerPushDeviceBestEffort());
+      }
+    });
   }
 
   final ProviderContainer _container;
   late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
+  late final StreamSubscription<String> _tokenRefreshSubscription;
 
   User? _currentUser;
   bool _isInitialized = false;
@@ -107,6 +119,7 @@ class AppService extends ChangeNotifier {
   void dispose() {
     _sessionSubscription.close();
     unawaited(_courseOffersSubscription?.cancel());
+    unawaited(_tokenRefreshSubscription.cancel());
     super.dispose();
   }
 
@@ -216,6 +229,22 @@ class AppService extends ChangeNotifier {
     }
   }
 
+  /// Détache le jeton du compte au moment de la déconnexion.
+  ///
+  /// Sans ce geste, le téléphone reste rattaché au livreur qui vient de partir
+  /// et continue de recevoir ses offres de course — sur un appareil où plus
+  /// personne n'est connecté, et souvent partagé entre deux tournées.
+  Future<void> _unregisterPushDeviceBestEffort() async {
+    final token = _notificationService.fcmToken;
+    if (token == null || token.isEmpty) return;
+
+    try {
+      await _container.read(eccore.authRepositoryProvider).unregisterDevice(token);
+    } catch (e) {
+      debugPrint('⚠️ Échec du retrait du jeton FCM: $e');
+    }
+  }
+
   Future<void> initialize() async {
     try {
       // Le livreur ne voit que ses courses. Le catalogue ne le concerne pas —
@@ -244,6 +273,9 @@ class AppService extends ChangeNotifier {
 
   Future<void> logout() async {
     try {
+      // Avant la révocation : `/auth/devices/` exige la session qu'on est en
+      // train de fermer.
+      await _unregisterPushDeviceBestEffort();
       // Révoque le jeton de rafraîchissement côté serveur et efface le
       // stockage sécurisé (Phase 6) ; `_currentUser` repasse à `null` via le
       // pont d'écoute (`_onSessionChanged`), pas ici directement.

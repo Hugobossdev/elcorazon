@@ -57,16 +57,19 @@ class Command(BaseCommand):
                 self.style.WARNING(
                     "Appareil signalé définitivement injoignable "
                     "(UNREGISTERED / INVALID_ARGUMENT / SENDER_ID_MISMATCH / NOT_FOUND). "
-                    "C'est le point à vérifier en premier : confirmer que ce jeton est "
-                    "effectivement mort avant de faire confiance à cette classification "
-                    "pour la purge automatique en production."
+                    "C'est le point à vérifier en premier : le code exact figure dans la "
+                    "ligne « fcm.rejet » ci-dessus. Confirmer que ce jeton est effectivement "
+                    "mort avant de faire confiance à cette classification pour la purge "
+                    "automatique en production."
                 )
             )
 
         if result.failed:
             self.stdout.write(
                 self.style.ERROR(
-                    "Échec — panne passagère ou erreur de configuration. Voir les "
-                    "journaux (fcm.authentification, fcm.reseau) pour le détail."
+                    "Échec — panne passagère ou erreur de configuration. Le détail est "
+                    "dans les journaux ci-dessus : « fcm.rejet » (Google a répondu, `code` "
+                    "porte son refus), « fcm.authentification » (compte de service illisible "
+                    "ou refusé) ou « fcm.reseau » (rien n'est parti)."
                 )
             )
