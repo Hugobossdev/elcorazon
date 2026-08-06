@@ -9,6 +9,43 @@ qui décrit la migration fonctionnelle vers le backend v2 et reste la référenc
 doit être branché*. Il traite d'autre chose : **la dette laissée derrière cette migration**
 — ce qui n'a pas été supprimé, ce qui a été dupliqué, et ce que l'outillage ne voit pas.
 
+> ### État d'avancement — 6 août 2026
+>
+> **Lots 0 et 1 faits.** Le diagnostic ci-dessous décrit l'état du dépôt **avant**
+> ces deux lots ; il est conservé tel quel, c'est lui qui justifie la suite.
+>
+> | Lot | État | Commit |
+> |---|---|---|
+> | 0 — correctifs + garde-fou | ✅ | `fd4ffb4` |
+> | 1.1 — fichiers injoignables | ✅ | `39a057e` |
+> | 1.2 — services zombies | ✅ | `847958c` |
+> | 1.3 — résidus + CI | ✅ | `945a25d` |
+> | 2 — socle unifié | à faire | |
+> | 3 — pile héritée | à faire | |
+> | 4 — écrans géants | à faire | |
+> | 5 — outillage | à faire | |
+> | 6 — documentation | à faire | |
+>
+> **Résultat mesuré** : les applications passent de 135 050 à **99 573 lignes**
+> (−35 477, soit −26 %) et de 385 à **259 fichiers**. `flutter analyze` rend le
+> même nombre de diagnostics qu'avant (0, 1, 9, 46), `flutter test` reste vert
+> (265 tests), `flutter build web` aboutit sur les trois applications.
+>
+> Deux constats du diagnostic sont désormais **périmés et corrigés** : le §2.7
+> (`beat` en panne permanente, `Sink` non fermés) et le §2.2 (code mort), ce
+> dernier étant maintenant tenu par un job CI bloquant. Le §2.3 reste vrai et
+> reste la raison d'être de ce job.
+>
+> Deux enseignements pour les lots suivants :
+>
+> - **`flutter analyze` ne suffit pas à valider une suppression.** `admin` a
+>   compilé faux après le retrait de dépendances, sur un
+>   `web_plugin_registrant.dart` généré que `flutter pub get` ne régénère pas.
+>   Il faut `flutter clean` puis `flutter build`.
+> - **Supprimer fait tomber d'autres fichiers.** Retirer `cart_service.dart` de
+>   `dely` a rendu `models/cart_item.dart` injoignable à son tour. Le garde-fou
+>   l'a signalé ; boucler jusqu'à point fixe.
+
 ---
 
 ## 1. Ligne de base vérifiée
