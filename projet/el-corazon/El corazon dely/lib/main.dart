@@ -10,20 +10,9 @@ import 'services/app_service.dart';
 import 'services/location_service.dart';
 import 'services/notification_service.dart';
 import 'services/gamification_service.dart';
-import 'services/voice_service.dart';
-import 'services/ar_service.dart';
-import 'services/ai_service.dart';
-import 'services/group_delivery_service.dart';
 import 'services/realtime_tracking_service.dart';
 import 'services/address_service.dart';
 import 'services/promo_code_service.dart';
-import 'services/advanced_gamification_service.dart';
-import 'services/ai_recommendation_service.dart';
-import 'services/cart_service.dart';
-import 'services/offline_sync_service.dart';
-import 'services/social_features_service.dart';
-import 'services/voice_command_service.dart';
-import 'services/wallet_service.dart';
 import 'services/error_handler_service.dart';
 import 'services/performance_service.dart';
 import 'services/chat_service.dart';
@@ -124,28 +113,21 @@ class DeliverApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
+      // Onze services de plus étaient construits ici à chaque démarrage —
+      // réalité augmentée, panier, portefeuille, recommandation, commande
+      // groupée, synchronisation hors ligne, voix — sans qu'aucun écran ne les
+      // lise : `main.dart` en était le seul importateur. Une application de
+      // livreur n'a ni panier ni portefeuille ; ces services venaient d'un
+      // copier-coller de l'application cliente. Ils sont supprimés, et le
+      // démarrage ne les instancie plus.
       providers: [
-        // Core services
         ChangeNotifierProvider(create: (_) => AppService(container)),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => NotificationService()),
         ChangeNotifierProvider(create: (_) => GamificationService()),
-        ChangeNotifierProvider(create: (_) => VoiceService()),
-        ChangeNotifierProvider(create: (_) => ARService()),
-        ChangeNotifierProvider(create: (_) => AIService()),
-        ChangeNotifierProvider(create: (_) => GroupDeliveryService()),
         ChangeNotifierProvider(create: (_) => RealtimeTrackingService()),
         ChangeNotifierProvider(create: (_) => AddressService()),
         ChangeNotifierProvider(create: (_) => PromoCodeService()),
-
-        // Advanced services (only ChangeNotifier services)
-        ChangeNotifierProvider(create: (_) => AIRecommendationService()),
-        ChangeNotifierProvider(create: (_) => AdvancedGamificationService()),
-        ChangeNotifierProvider(create: (_) => CartService()),
-        ChangeNotifierProvider(create: (_) => OfflineSyncService()),
-        ChangeNotifierProvider(create: (_) => SocialFeaturesService()),
-        ChangeNotifierProvider(create: (_) => VoiceCommandService()),
-        ChangeNotifierProvider(create: (_) => WalletService()),
         ChangeNotifierProvider(create: (_) => ErrorHandlerService()),
         ChangeNotifierProvider(create: (_) => PerformanceService()),
         ChangeNotifierProvider(create: (_) => ChatService()),

@@ -24,21 +24,16 @@ import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
-import 'package:elcora_fast/services/connectivity_service.dart';
 import 'package:elcora_fast/services/push_notification_service.dart';
 import 'package:elcora_fast/services/subscription_service.dart';
 import 'package:elcora_fast/services/error_handler_service.dart';
 import 'package:elcora_fast/services/performance_service.dart';
 import 'package:elcora_fast/services/form_validation_service.dart';
-import 'package:elcora_fast/services/form_manager_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
 import 'package:elcora_fast/services/review_rating_service.dart';
 import 'package:elcora_fast/services/support_service.dart';
-import 'package:elcora_fast/services/complaints_returns_service.dart';
-import 'package:elcora_fast/services/alert_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/services/theme_service.dart';
-import 'package:elcora_fast/database/init_database.dart';
 import 'package:elcora_fast/widgets/error_boundary.dart';
 import 'package:elcora_fast/widgets/service_initialization_widget.dart';
 import 'package:elcora_fast/widgets/incoming_call_handler.dart';
@@ -121,29 +116,16 @@ Future<void> _initializeEssentialServices() async {
   await ErrorHandlerService().initialize();
 
   await FormValidationService().initialize();
-  await FormManagerService().initialize();
 
-  // Initialize database with real data (async to not block UI)
-  _initializeDatabaseAsync();
+  // `_initializeDatabaseAsync()` a été retiré, avec `database/init_database.dart`.
+  // L'application n'a plus de base locale à préparer depuis le retrait de
+  // Supabase, et le code ne le faisait plus depuis longtemps : il posait un
+  // drapeau dans `SharedPreferences` après un `Future.delayed(1 s)` commenté
+  // « Simulate work ». Au premier lancement, c'était une seconde d'attente pour
+  // ne rien faire ; aux suivants, une lecture de drapeau pour ne rien faire.
 
   // Other services will be initialized lazily when needed
   // This significantly improves app startup time
-}
-
-/// Initialize database asynchronously without blocking the UI
-void _initializeDatabaseAsync() async {
-  try {
-    final isInitialized = await DatabaseInitializer.isDatabaseInitialized();
-    if (!isInitialized) {
-      debugPrint('🗄️ Initialisation de la base de données...');
-      await DatabaseInitializer.initializeDatabase();
-    } else {
-      debugPrint('✅ Base de données déjà initialisée');
-    }
-  } catch (e) {
-    debugPrint('⚠️ Erreur lors de l\'initialisation de la base de données: $e');
-    // Continue without failing the app
-  }
 }
 
 class ClientApp extends StatelessWidget {
@@ -156,9 +138,11 @@ class ClientApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         // Services essentiels uniquement - chargés immédiatement
-        ChangeNotifierProvider(
-          create: (_) => ConnectivityService()..initialize(),
-        ),
+        //
+        // `ConnectivityService` a été retiré : il n'était lu par aucun écran, et
+        // `OfflineSyncService` — qui a bien des lecteurs — s'abonne directement
+        // à `connectivity_plus`. C'était une seconde implémentation du même
+        // guet, initialisée à chaque démarrage pour personne.
         ChangeNotifierProvider(create: (_) => AppService(container)),
         ChangeNotifierProvider(create: (_) => CartService()),
         ChangeNotifierProvider(create: (_) => LocationService()),
@@ -204,7 +188,6 @@ class ClientApp extends StatelessWidget {
           create: (_) => FormValidationService(),
           lazy: true,
         ),
-        ChangeNotifierProvider(create: (_) => FormManagerService(), lazy: true),
         // Services avec initialisation immédiate nécessaire
         ChangeNotifierProvider(
           create: (_) => FavoritesService()..initialize(),
@@ -215,14 +198,6 @@ class ClientApp extends StatelessWidget {
           lazy: true,
         ),
         ChangeNotifierProvider(create: (_) => SupportService(), lazy: true),
-        ChangeNotifierProvider(
-          create: (_) => ComplaintsReturnsService(),
-          lazy: true,
-        ),
-        ChangeNotifierProvider(
-          create: (_) => AlertService()..initialize(),
-          lazy: true,
-        ),
         // Aucune initialisation : le service n'a plus d'état à préparer, il
         // interroge le serveur à la demande.
         ChangeNotifierProvider(create: (_) => DeliveryFeeService(), lazy: true),
