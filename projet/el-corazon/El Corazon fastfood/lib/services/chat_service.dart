@@ -49,9 +49,17 @@ class ChatService extends ChangeNotifier {
   /// Flux de la conversation d'une commande. La liste part vide : le serveur
   /// n'a pas d'historique à servir.
   Stream<List<ChatMessage>> getMessageStream(String orderId) {
+    // `close_sinks` ne sait pas suivre un contrôleur rangé dans une `Map` puis
+    // fermé par une autre méthode : il exige la fermeture dans la fonction qui
+    // l'ouvre, ce qui est impossible ici — le flux doit survivre à l'appel pour
+    // que l'écran s'y abonne. La fermeture a bien lieu, dans [disconnect], que
+    // [dispose] appelle. Le vrai défaut que ce lint désignait — les contrôleurs
+    // n'étaient effectivement jamais fermés — est corrigé là-bas.
+    // ignore: close_sinks
     final existing = _messageControllers[orderId];
     if (existing != null) return existing.stream;
 
+    // ignore: close_sinks
     final controller = StreamController<List<ChatMessage>>.broadcast();
     _messageControllers[orderId] = controller;
     _messages[orderId] = [];
@@ -106,6 +114,18 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Referme tout : abonnements, canaux, et **les contrôleurs de flux**.
+  ///
+  /// Ces derniers manquaient. `disconnect()` vidait `_subscriptions`,
+  /// `_channels` et `_messages` mais laissait `_messageControllers` intact et
+  /// ouvert, ce qui avait deux conséquences. Les `StreamController` fuyaient,
+  /// d'abord — c'est ce que signalait `close_sinks`. Surtout, un second appel à
+  /// [getMessageStream] pour la même commande retrouvait le contrôleur resté en
+  /// place et rendait son flux, alors que le canal qui l'alimentait, lui, avait
+  /// bien été fermé : la conversation se rouvrait muette, définitivement.
+  ///
+  /// Les abonnements sont annulés avant la fermeture des contrôleurs, sans quoi
+  /// un message en vol pourrait être publié sur un contrôleur déjà clos.
   Future<void> disconnect() async {
     for (final subscription in _subscriptions.values) {
       await subscription.cancel();
@@ -113,8 +133,12 @@ class ChatService extends ChangeNotifier {
     for (final channel in _channels.values) {
       await channel.close();
     }
+    for (final controller in _messageControllers.values) {
+      await controller.close();
+    }
     _subscriptions.clear();
     _channels.clear();
+    _messageControllers.clear();
     _messages.clear();
     _isConnected = false;
     notifyListeners();
@@ -122,11 +146,10 @@ class ChatService extends ChangeNotifier {
 
   @override
   void dispose() {
+    // `dispose()` est synchrone par contrat de `ChangeNotifier` : on ne peut pas
+    // attendre `disconnect()`. Les fermetures qu'il déclenche sont engagées
+    // immédiatement, ce qui suffit — plus rien ne référence le service après.
     disconnect();
-    for (final controller in _messageControllers.values) {
-      controller.close();
-    }
-    _messageControllers.clear();
     super.dispose();
   }
 }

@@ -77,6 +77,16 @@ services:
     volumes:
       - .:/app
       - ./secrets:/run/secrets:ro
+    # L'image est commune aux trois rôles (voir Dockerfile) et porte un
+    # `HEALTHCHECK` HTTP taillé pour l'API. Un worker ne sert aucun HTTP : sans
+    # cette redéfinition, il est signalé `unhealthy` en permanence alors qu'il
+    # consomme ses tâches normalement.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -94,6 +104,26 @@ services:
     volumes:
       - .:/app
       - ./secrets:/run/secrets:ro
+    # Même motif que le worker, mais `inspect ping` ne conviendrait pas :
+    # l'ordonnanceur n'est pas un worker et ne répond pas au protocole de
+    # contrôle. Ce qui prouve qu'il tourne, c'est qu'il **écrit** : il
+    # sérialise son échéancier à chaque tour de boucle. Un fichier touché
+    # récemment est donc un signe de vie, un fichier figé un beat coincé.
+    #
+    # Le glob est nécessaire : `shelve` s'appuie ici sur SQLite, et ce sont les
+    # fichiers `-wal`/`-shm` qui bougent, pas le fichier de base.
+    #
+    # Dix minutes de fenêtre plutôt que cinq : `beat_max_loop_interval` vaut
+    # 300 s par défaut, une fenêtre collée à cette valeur clignoterait sans
+    # qu'il y ait de panne.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - find /app -maxdepth 1 -name 'celerybeat-schedule*' -newermt '-10 minutes' | grep -q .
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     depends_on:
       redis: {condition: service_healthy}
 

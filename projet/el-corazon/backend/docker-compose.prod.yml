@@ -139,6 +139,26 @@ services:
     volumes:
       - ./secrets:/run/secrets:ro
       - beatdata:/var/lib/celery
+    # Sans cette redéfinition, `beat` hérite du `HEALTHCHECK` HTTP gravé dans
+    # l'image (Dockerfile), qui interroge `localhost:8000/health/` — un port que
+    # l'ordonnanceur n'ouvre pas. Il était donc marqué `unhealthy` en
+    # permanence, et avec `restart: unless-stopped` un orchestrateur qui agit
+    # sur la santé redémarre en boucle un service qui va très bien. Constaté en
+    # développement : 908 échecs d'affilée pendant que les tâches passaient.
+    #
+    # `inspect ping` (utilisé par le worker juste au-dessus) ne s'applique pas :
+    # beat n'est pas un worker et ne répond pas au protocole de contrôle. Ce
+    # qu'on observe à la place, c'est qu'il sérialise son échéancier à chaque
+    # tour de boucle — le glob attrape les fichiers `-wal`/`-shm` de SQLite, qui
+    # sont ceux qui bougent réellement.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - find /var/lib/celery -maxdepth 1 -name 'celerybeat-schedule*' -newermt '-10 minutes' | grep -q .
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     depends_on:
       redis: {condition: service_healthy}
 
