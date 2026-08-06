@@ -27,7 +27,6 @@ dependencies:
   intl: ^0.20.2
   
   # UI components
-  badges: ^3.1.2
   flutter_rating_bar: ^4.0.1
   intl_phone_field: ^3.2.0
   
@@ -51,8 +50,6 @@ dependencies:
   # Database
   sqflite: ^2.3.3+1
   
-  # Security
-  jwt_decoder: ^2.0.1
   flutter_dotenv: ^6.0.0
 
   # Backend Django v2 (Phase 6) — fondations partagées avec dely/admin
@@ -62,10 +59,6 @@ dependencies:
   # Fonts
   google_fonts: ^6.2.1
   
-  # Package info
-  package_info_plus: ^8.3.1
-  freezed_annotation: ^2.4.4
-  json_annotation: ^4.8.1
 
   http: any
   path: any

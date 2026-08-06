@@ -44,12 +44,7 @@ dependencies:
   shared_preferences: ^2.2.2
   url_launcher: ^6.2.5
   http: ^1.2.0
-  sqflite: ^2.3.0
-  connectivity_plus: ^7.0.0
-  pdf: ^3.10.7
-  file_picker: ^10.3.7
   google_fonts: ^6.1.0
-  path: ^1.9.0
   image_picker: ^1.0.7
   fl_chart: ^1.1.1
   google_maps_flutter: ^2.5.3
