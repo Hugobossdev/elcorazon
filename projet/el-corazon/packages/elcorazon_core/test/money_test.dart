@@ -62,4 +62,67 @@ void main() {
       );
     });
   });
+
+  group('Affichage', () {
+    // Espace insécable étroite (U+202F), pas une espace ordinaire : un montant
+    // ne doit pas pouvoir être coupé en fin de ligne.
+    const nbsp = ' ';
+
+    test('les milliers sont séparés', () {
+      expect(formatPrice(1000), '1${nbsp}000 CFA');
+      expect(formatPrice(12500), '12${nbsp}500 CFA');
+      expect(formatPrice(150000), '150${nbsp}000 CFA');
+      expect(formatPrice(1234567), '1${nbsp}234${nbsp}567 CFA');
+    });
+
+    test('en deçà de mille, aucun séparateur', () {
+      expect(formatPrice(0), '0 CFA');
+      expect(formatPrice(999), '999 CFA');
+    });
+
+    test('le franc CFA s’affiche « CFA » et non « XOF »', () {
+      expect(formatPrice(500), '500 CFA');
+      expect(formatPrice(500, currency: 'XAF'), '500 CFA');
+    });
+
+    test('une devise sans symbole connu garde son code', () {
+      expect(formatPrice(500, currency: 'NGN'), '500,00 NGN');
+    });
+
+    test('les décimales suivent la devise, pas l’appelant', () {
+      // Le franc CFA n'a pas de centime : en afficher laisserait croire à une
+      // précision qui n'existe pas.
+      expect(formatPrice(1250.4), '1${nbsp}250 CFA');
+      expect(formatPrice(12.50, currency: 'EUR'), '12,50 EUR');
+      expect(formatPrice(1234.5, currency: 'EUR'), '1${nbsp}234,50 EUR');
+    });
+
+    test('l’arrondi se fait sur l’unité mineure, avant le découpage', () {
+      // `12.505 €` doit devenir « 12,51 » : arrondir d'abord, découper ensuite.
+      // Découper d'abord rendrait « 12,50 ».
+      expect(formatPrice(12.505, currency: 'EUR'), '12,51 EUR');
+      expect(formatPrice(999.999, currency: 'EUR'), '1${nbsp}000,00 EUR');
+    });
+
+    test('un montant négatif garde son signe', () {
+      // Les trois formateurs remplacés l'écrasaient à « 0 CFA » ou rendaient
+      // « -.500 CFA ». Un avoir est légitimement négatif ; masquer le signe
+      // d'un montant est la dernière chose qu'une interface doive faire.
+      expect(formatPrice(-1500), '-1${nbsp}500 CFA');
+      expect(formatPrice(-500), '-500 CFA');
+      expect(formatPrice(-12.50, currency: 'EUR'), '-12,50 EUR');
+    });
+
+    test('NaN et l’infini ne représentent aucun montant', () {
+      expect(formatPrice(double.nan), '0 CFA');
+      expect(formatPrice(double.infinity), '0 CFA');
+      expect(formatPrice(double.negativeInfinity), '0 CFA');
+    });
+
+    test('Money.format part de l’unité mineure', () {
+      expect(const Money(amountMinor: 12500, currency: 'XOF').format(), '12${nbsp}500 CFA');
+      expect(const Money(amountMinor: 1250, currency: 'EUR').format(), '12,50 EUR');
+      expect(const Money(amountMinor: -1250, currency: 'EUR').format(), '-12,50 EUR');
+    });
+  });
 }

@@ -67,6 +67,74 @@ class Money {
     return result;
   }
 
+  /// Libellé affiché à la place du code ISO, quand l'usage en impose un.
+  ///
+  /// Personne en zone franc n'écrit « 1 500 XOF » : on écrit « 1 500 CFA ». Les
+  /// devises absentes de cette table gardent leur code — c'est délibéré,
+  /// inventer un symbole pour une devise qu'on ne sert pas encore serait pire
+  /// que de rendre `NGN`.
+  static const _symboles = {'XOF': 'CFA', 'XAF': 'CFA'};
+
+  /// Montant tel qu'on le montre à un humain : « 12 500 CFA », « 12,50 EUR ».
+  ///
+  /// Espace fine insécable entre les groupes de milliers, virgule décimale —
+  /// les conventions françaises, qui sont celles de tous les libellés du
+  /// projet. Le nombre de décimales vient de la devise, pas d'un choix
+  /// d'affichage : un montant en francs CFA n'a pas de centimes, en afficher
+  /// deux laisserait croire à une précision qui n'existe pas.
+  ///
+  /// **Les montants négatifs sont rendus tels quels** (« -1 500 CFA »). Les
+  /// trois formateurs d'application que cette méthode remplace les
+  /// écrasaient à zéro ou produisaient « -.500 CFA » ; or un avoir, un
+  /// remboursement ou un ajustement sont légitimement négatifs, et masquer un
+  /// signe sur un montant est la dernière chose qu'une interface doive faire.
+  String format() => formatPrice(toMajorUnits(), currency: currency);
+
   @override
   String toString() => '$amountMinor $currency';
+}
+
+/// Sépare les milliers par une espace insécable étroite (U+202F).
+///
+/// Une espace ordinaire autoriserait un retour à la ligne au milieu d'un
+/// montant — « 12 » en fin de ligne et « 500 CFA » au début de la suivante.
+const _separateurMilliers = ' ';
+
+/// Formate un montant **en unité majeure** — 1250.0 pour 1 250 F CFA.
+///
+/// C'est la porte d'entrée des appelants qui manipulent encore un `double`,
+/// c'est-à-dire tout ce qui n'a pas migré vers [Money]. Les trois applications
+/// avaient chacune la leur, et elles ne rendaient pas la même chose : le client
+/// et le livreur écrivaient « 12.500 CFA » avec un point, le back-office
+/// « 12 500 CFA » avec une espace. Une même commande s'affichait donc de deux
+/// façons selon l'écran qui la montrait.
+///
+/// `NaN` et l'infini rendent « 0 » suivi de la devise : ils ne représentent
+/// aucun montant, et il n'y a rien de mieux à écrire. C'est le seul cas où
+/// cette fonction substitue une valeur.
+String formatPrice(double amount, {String currency = 'XOF'}) {
+  final symbole = Money._symboles[currency] ?? currency;
+  if (amount.isNaN || amount.isInfinite) return '0 $symbole';
+
+  final exposant = Money._exponents[currency] ?? 0;
+  final facteur = Money._pow10(exposant);
+
+  // Passage par l'unité mineure avant tout découpage : `12.505` en euros doit
+  // devenir « 12,51 », pas « 12,50 » — arrondir d'abord, découper ensuite.
+  final mineur = (amount * facteur).round();
+  final negatif = mineur < 0;
+  final absolu = mineur.abs();
+
+  final entier = (absolu ~/ facteur).toString();
+  final tampon = StringBuffer();
+  for (var i = 0; i < entier.length; i++) {
+    if (i > 0 && (entier.length - i) % 3 == 0) tampon.write(_separateurMilliers);
+    tampon.write(entier[i]);
+  }
+
+  final signe = negatif ? '-' : '';
+  if (exposant == 0) return '$signe$tampon $symbole';
+
+  final decimales = (absolu % facteur).toString().padLeft(exposant, '0');
+  return '$signe$tampon,$decimales $symbole';
 }
