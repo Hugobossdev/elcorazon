@@ -5,7 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/chat_service.dart';
 import 'package:elcora_dely/services/agora_call_service.dart';
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/models/message.dart';
 import 'package:elcora_dely/widgets/loading_widget.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
@@ -14,7 +14,7 @@ import 'package:elcora_dely/screens/communication/call_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class ChatScreen extends StatefulWidget {
-  final Order order;
+  final Course order;
   final String chatType; // 'customer' or 'support'
 
   const ChatScreen({
@@ -48,7 +48,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _messagesSubscription?.cancel();
-    _chatService.unsubscribeFromMessages(widget.order.id);
+    _chatService.unsubscribeFromMessages(widget.order.orderId);
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -66,12 +66,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Charger les messages existants
       setState(() => _isLoading = true);
-      final messages = await _chatService.loadMessages(widget.order.id);
+      final messages = await _chatService.loadMessages(widget.order.orderId);
 
       setState(() {
         _messages = messages;
         _isLoading = false;
-        _isConnected = _chatService.isConnected(widget.order.id);
+        _isConnected = _chatService.isConnected(widget.order.orderId);
       });
 
       _scrollToBottom();
@@ -94,12 +94,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _subscribeToMessages() {
     _messagesSubscription =
-        _chatService.subscribeToMessages(widget.order.id).listen(
+        _chatService.subscribeToMessages(widget.order.orderId).listen(
       (messages) {
         if (mounted) {
           setState(() {
             _messages = messages;
-            _isConnected = _chatService.isConnected(widget.order.id);
+            _isConnected = _chatService.isConnected(widget.order.orderId);
           });
           _scrollToBottom();
         }
@@ -145,7 +145,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
       // Envoyer le message via ChatService
       final success = await _chatService.sendMessage(
-        orderId: widget.order.id,
+        orderId: widget.order.orderId,
         content: content,
       );
 
@@ -225,7 +225,7 @@ class _ChatScreenState extends State<ChatScreen> {
         // ne connaît pas de type « système ». La signature laissait croire le
         // contraire jusqu'au lot 3.
         await _chatService.sendMessage(
-          orderId: widget.order.id,
+          orderId: widget.order.orderId,
           content: isVideo
               ? '📹 Appel vidéo en cours...'
               : '📞 Appel vocal en cours...',
@@ -278,7 +278,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final cleanPhone = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
       
       // Ouvrir WhatsApp avec un message pré-rempli
-      final message = 'Bonjour, je suis votre livreur pour la commande #${widget.order.id}.';
+      final message = 'Bonjour, je suis votre livreur pour la commande #${widget.order.orderId}.';
       final uri = Uri.parse('https://wa.me/$cleanPhone?text=${Uri.encodeComponent(message)}');
       final canLaunch = await canLaunchUrl(uri);
       
@@ -327,7 +327,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
             Text(
-              'Commande #${widget.order.id.substring(0, 8)}',
+              'Commande #${widget.order.orderId.substring(0, 8)}',
               style:
                   const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
             ),
@@ -617,6 +617,6 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Téléphone du destinataire, lu sur la course.
   String? _recipientPhone() {
     return Provider.of<AppService>(context, listen: false)
-        .recipientPhoneFor(widget.order.id);
+        .recipientPhoneFor(widget.order.orderId);
   }
 }

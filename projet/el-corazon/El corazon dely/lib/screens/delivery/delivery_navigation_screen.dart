@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/performance_service.dart';
-import 'package:elcora_dely/models/order.dart';
 import 'package:elcora_dely/screens/delivery/delivery_home_screen.dart';
 import 'package:elcora_dely/screens/delivery/delivery_orders_screen.dart';
 import 'package:elcora_dely/screens/delivery/analytics_screen.dart';
@@ -13,7 +12,6 @@ import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
 import 'package:elcora_dely/screens/payments/driver_payment_screen.dart';
 import 'package:elcora_dely/screens/communication/chat_screen.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DeliveryNavigationScreen extends StatefulWidget {
   const DeliveryNavigationScreen({super.key});
@@ -355,19 +353,18 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
         ),
       );
     } else {
-      // Create a mock order for support chat if no deliveries
-      final mockOrder = _createMockOrder();
-      if (mockOrder != null) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ChatScreen(
-              order: mockOrder,
-              chatType: 'support',
-            ),
-          ),
-        );
-      }
+      // Aucune course : il n'y a pas de conversation à ouvrir.
+      //
+      // Une commande fictive était fabriquée ici pour ouvrir quand même
+      // l'écran. Son identifiant `mock-...` faisait ouvrir un canal
+      // `ws/orders/{id}/chat/` que le serveur refuse : la discussion ne se
+      // connectait jamais, et le livreur attendait devant un écran vide.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aucune course en cours : pas de discussion à ouvrir.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
     }
   }
 
@@ -556,40 +553,4 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
     );
   }
 
-  // Méthode utilitaire pour créer une commande fictive pour les tests
-  Order? _createMockOrder() {
-    try {
-      final appService = Provider.of<AppService>(context, listen: false);
-      final user = appService.currentUser;
-
-      if (user == null) return null;
-
-      return Order(
-        id: 'mock-${DateTime.now().millisecondsSinceEpoch}',
-        userId: user.id,
-        items: [
-          OrderItem(
-            menuItemId: 'mock-item-1',
-            menuItemName: 'Commande de test',
-            name: 'Commande de test',
-            category: 'other',
-            menuItemImage: '',
-            quantity: 1,
-            unitPrice: 0.0,
-            totalPrice: 0.0,
-          ),
-        ],
-        subtotal: 0.0,
-        deliveryFee: 0.0,
-        total: 0.0,
-        deliveryAddress: 'Adresse de test',
-        paymentMethod: PaymentMethod.cash,
-        orderTime: DateTime.now(),
-        createdAt: DateTime.now(),
-      );
-    } catch (e) {
-      Journal.trace('Error creating mock order: $e');
-      return null;
-    }
-  }
 }

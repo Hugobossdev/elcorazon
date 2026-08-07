@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/services/location_service.dart';
 import 'package:elcora_dely/services/notification_service.dart';
@@ -53,7 +53,7 @@ class AppService extends ChangeNotifier {
 
   eccore.User? _currentUser;
   bool _isInitialized = false;
-  List<Order> _orders = [];
+  List<Course> _courses = [];
 
   // Services intégrés
   final LocationService _locationService = LocationService();
@@ -77,7 +77,7 @@ class AppService extends ChangeNotifier {
 
   // Getters
   eccore.User? get currentUser => _currentUser;
-  List<Order> get orders => _orders;
+  List<Course> get orders => _courses;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
 
@@ -123,13 +123,13 @@ class AppService extends ChangeNotifier {
     final tracking = trackingService;
 
     tracking.bind(
-      readOrder: (orderId) async {
+      readCourse: (orderId) async {
         final known = _coursesByOrderId[orderId];
         if (known == null) return null;
 
         final refreshed = await _delivery.loadCourse(known.assignmentId);
         _rememberCourse(refreshed);
-        return refreshed.order;
+        return refreshed;
       },
       reportPosition: (position) async {
         final course = activeCourse;
@@ -302,12 +302,10 @@ class AppService extends ChangeNotifier {
     }
   }
 
-  /// Reflète les courses dans `_orders`, que les écrans généralistes
-  /// (`allOrders`, `activeOrders`) lisent encore.
+  /// Liste ordonnée des courses connues, de la plus récente à la plus ancienne.
   void _syncOrdersFromCourses() {
-    _orders = [
-      for (final course in _coursesByOrderId.values) course.order,
-    ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    _courses = _coursesByOrderId.values.toList()
+      ..sort((a, b) => b.assignment.createdAt.compareTo(a.assignment.createdAt));
   }
 
   /// Enregistre une course rendue par le serveur après une action, et rafraîchit
@@ -334,9 +332,9 @@ class AppService extends ChangeNotifier {
   }
 
   // Admin methods
-  Future<void> updateOrderStatus(String orderId, OrderStatus newStatus) async {
+  Future<void> updateOrderStatus(String orderId, EtapeCourse etape) async {
     final course = _requireCourse(orderId);
-    final target = _toDeliveryTarget(newStatus);
+    final target = etape.versServeur;
 
     if (target == eccore.DeliveryStatus.accepted) {
       await acceptDelivery(orderId);
@@ -344,31 +342,6 @@ class AppService extends ChangeNotifier {
     }
 
     _rememberCourse(await _delivery.advanceTo(course.assignmentId, target));
-  }
-
-  /// Statut affiché → étape de course demandée au serveur.
-  static String _toDeliveryTarget(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.confirmed:
-        return eccore.DeliveryStatus.accepted;
-      case OrderStatus.pickedUp:
-        return eccore.DeliveryStatus.pickedUp;
-      case OrderStatus.onTheWay:
-        return eccore.DeliveryStatus.onTheWay;
-      case OrderStatus.delivered:
-        return eccore.DeliveryStatus.delivered;
-      case OrderStatus.cancelled:
-        return eccore.DeliveryStatus.cancelled;
-      case OrderStatus.pending:
-      case OrderStatus.preparing:
-      case OrderStatus.ready:
-        // Ces trois-là décrivent la cuisine, pas la course : rien ne permet au
-        // livreur de les provoquer, et le serveur les refuserait de toute
-        // façon. Échouer ici plutôt que d'émettre une requête vouée au 409.
-        throw ArgumentError(
-          'Étape « ${status.displayName} » hors du ressort du livreur.',
-        );
-    }
   }
 
   // ------------------------------------------------------------- Livraison
@@ -416,21 +389,21 @@ class AppService extends ChangeNotifier {
   }
 
   /// Les courses qu'on me propose et auxquelles je n'ai pas encore répondu.
-  List<Order> get pendingOffers => _ordersWhereCourse(
-    (course) => course.assignment.status == eccore.DeliveryStatus.offered,
+  List<Course> get pendingOffers => _ordersWhereCourse(
+    (course) => course.estProposee,
   );
 
   /// Mes courses : acceptées, en cours, et l'historique récent des livrées.
-  List<Order> get assignedDeliveries => _ordersWhereCourse(
-    (course) => course.assignment.status != eccore.DeliveryStatus.offered,
+  List<Course> get assignedDeliveries => _ordersWhereCourse(
+    (course) => course.estMienne,
   );
 
-  List<Order> _ordersWhereCourse(bool Function(Course) predicate) {
+  List<Course> _ordersWhereCourse(bool Function(Course) predicate) {
     if (_currentUser == null) return [];
     return [
       for (final course in _coursesByOrderId.values)
-        if (predicate(course)) course.order,
-    ]..sort((a, b) => b.orderTime.compareTo(a.orderTime));
+        if (predicate(course)) course,
+    ]..sort((a, b) => b.passeeLe.compareTo(a.passeeLe));
   }
 
   /// Accepte la course proposée pour cette commande.
@@ -453,11 +426,11 @@ class AppService extends ChangeNotifier {
 
   /// Marque la course comme récupérée au restaurant (`picked_up`).
   Future<void> markOrderPickedUp(String orderId) =>
-      updateOrderStatus(orderId, OrderStatus.pickedUp);
+      updateOrderStatus(orderId, EtapeCourse.recuperee);
 
   /// Marque la course comme partie chez le client (`on_the_way`).
   Future<void> markOrderOnTheWay(String orderId) =>
-      updateOrderStatus(orderId, OrderStatus.onTheWay);
+      updateOrderStatus(orderId, EtapeCourse.enRoute);
 
   /// Marque la course comme livrée (`delivered`).
   ///
@@ -465,7 +438,7 @@ class AppService extends ChangeNotifier {
   /// crédite la rémunération : la machine étant acyclique, rejouer cette étape
   /// est refusé au lieu d'être compté deux fois (C3).
   Future<void> markOrderDelivered(String orderId) =>
-      updateOrderStatus(orderId, OrderStatus.delivered);
+      updateOrderStatus(orderId, EtapeCourse.livree);
 
   // Driver authentication methods
   ///

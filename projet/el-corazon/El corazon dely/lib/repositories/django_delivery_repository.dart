@@ -1,31 +1,90 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/presentation/libelles_course.dart';
 
-/// Une course telle que l'app la manipule : la course Django (`Assignment`) et
-/// la commande qu'elle porte, traduite dans le modèle `Order` local.
+/// Une course telle que l'app la manipule : l'affectation Django, et le détail
+/// de la commande quand il a pu être lu.
 ///
-/// Les deux voyagent ensemble parce que les écrans raisonnent en commandes
-/// (`order.id`, `order.status`) alors que **toutes les actions du livreur
+/// Les deux voyagent ensemble parce que les écrans montrent une commande
+/// (articles, montants, adresse) alors que **toutes les actions du livreur
 /// s'adressent à la course** (`/delivery/assignments/{id}/...`). Garder
 /// l'affectation sous la main évite de la rechercher à chaque geste.
+///
+/// Jusqu'au lot 3, cette classe portait en plus une **copie locale** de la
+/// commande, de forme héritée de Supabase, que l'adaptateur recomposait champ
+/// par champ. Elle n'existe plus : les écrans lisent les entités du socle, et
+/// ce que l'affichage réclame en propre est calculé ici, une fois.
 @immutable
 class Course {
-  const Course({required this.assignment, required this.order});
+  const Course({required this.assignment, this.commande});
 
   final eccore.Assignment assignment;
 
-  /// La même course, vue comme une commande — c'est ce que les écrans
-  /// existants affichent.
-  final Order order;
+  /// Détail de la commande — articles, montants, moyen de paiement.
+  ///
+  /// `null` pour les courses **livrées** : leur détail n'est pas relu, ce qui
+  /// coûterait une requête par ligne d'historique pour des articles que plus
+  /// personne ne regarde. `null` aussi quand la lecture a échoué, auquel cas la
+  /// course reste affichable — mieux vaut une course incomplète qu'une course
+  /// disparue de l'écran.
+  final eccore.Order? commande;
 
   String get assignmentId => assignment.id;
+
+  /// L'identifiant que les écrans exposent est celui de la **commande** : c'est
+  /// lui qui ouvre le suivi (`ws/orders/{id}/tracking/`) et la discussion.
   String get orderId => assignment.orderId;
 
   /// Étapes que le serveur autorise depuis l'état courant. C'est la source des
   /// boutons à afficher : la machine à états n'est pas rejouée côté client.
   List<String> get allowedTransitions => assignment.allowedTransitions;
+
+  EtapeCourse get etape => EtapeCourse.depuisServeur(assignment.status);
+
+  MoyenPaiement get moyenPaiement =>
+      MoyenPaiement.depuisServeur(commande?.paymentMethod);
+
+  /// Ce que le livreur touche pour cette course, tel que le serveur le calcule.
+  ///
+  /// Lu sur l'affectation et non déduit d'un pourcentage du panier : le taux de
+  /// commission appartient au serveur. L'écran des gains appliquait 10 % à un
+  /// total qui vaut zéro sur toute course livrée — il affichait donc zéro.
+  eccore.Money? get remuneration => assignment.courierFee;
+
+  /// Adresse de dépôt, repère compris quand il y en a un.
+  String get adresseLivraison => assignment.deliveryLandmark.isEmpty
+      ? assignment.deliveryAddressLine
+      : '${assignment.deliveryAddressLine} (${assignment.deliveryLandmark})';
+
+  String get destinataire => assignment.recipientName;
+  String get telephoneDestinataire => assignment.recipientPhone;
+
+  /// Consignes de livraison, ou `null` s'il n'y en a pas — pour que l'écran
+  /// n'affiche pas un encart vide.
+  String? get consignes {
+    final texte = commande?.deliveryInstructions ?? '';
+    return texte.isEmpty ? null : texte;
+  }
+
+  List<eccore.OrderLine> get articles => commande?.lines ?? const [];
+
+  eccore.Money? get total => commande?.total;
+  eccore.Money? get sousTotal => commande?.subtotal;
+  eccore.Money? get fraisLivraison => commande?.deliveryFee;
+  eccore.Money? get remise => commande?.discount;
+
+  /// Moment où la commande a été passée, à défaut celui où la course a été
+  /// proposée — l'historique n'a que le second.
+  DateTime get passeeLe => commande?.placedAt ?? assignment.offeredAt;
+
+  DateTime? get livraisonEstimeeA => commande?.estimatedDeliveryAt;
+
+  /// La course m'est proposée et je n'y ai pas encore répondu.
+  bool get estProposee => assignment.status == eccore.DeliveryStatus.offered;
+
+  /// Elle est à moi — acceptée, en cours, ou déjà livrée.
+  bool get estMienne => !estProposee;
 }
 
 /// Courses du livreur contre le backend Django (Phase 6) — remplace les appels
@@ -121,112 +180,26 @@ class DjangoDeliveryRepository {
     return ping != null;
   }
 
-  /// Assemble la course et la commande qu'elle porte.
+  /// Assemble la course et, quand elle est en cours, le détail de sa commande.
   ///
-  /// La commande est relue parce que l'affectation ne porte ni les articles, ni
-  /// les montants, ni le moyen de paiement — or un livreur qui encaisse en
-  /// espèces a besoin de savoir combien, et de vérifier le sac avant de partir.
-  /// Le contrat le lui permet : `OrderViewSet` rend au livreur les commandes
-  /// qui lui sont confiées, et rien d'autre.
+  /// L'affectation ne porte ni les articles, ni les montants, ni le moyen de
+  /// paiement — or un livreur qui encaisse en espèces a besoin de savoir
+  /// combien, et de vérifier le sac avant de partir. Le contrat le lui
+  /// permet : `OrderViewSet` rend au livreur les commandes qui lui sont
+  /// confiées, et rien d'autre.
   ///
-  /// **Seulement pour les courses en cours**, en revanche : relire le détail de
-  /// chaque livraison passée coûterait une requête par ligne d'historique pour
-  /// des articles que plus personne ne regarde. Ce que l'historique doit
-  /// montrer — la date, l'adresse, la rémunération — est déjà sur
-  /// l'affectation.
-  ///
-  /// L'échec de cette lecture n'emporte pas la course : elle reste affichable à
-  /// partir de la seule affectation, ce qui vaut mieux que de faire disparaître
-  /// de l'écran une course bien réelle.
+  /// L'échec de cette lecture n'emporte pas la course : voir [Course.commande].
   Future<Course> _toCourse(eccore.Assignment assignment) async {
-    eccore.Order? order;
-    if (assignment.isActive) {
-      try {
-        order = await _orders.getById(assignment.orderId);
-      } catch (e) {
-        eccore.Journal.trace('⚠️ Commande ${assignment.orderId} illisible : $e');
-      }
-    }
-    return Course(assignment: assignment, order: _toLocalOrder(assignment, order));
-  }
+    if (!assignment.isActive) return Course(assignment: assignment);
 
-  Order _toLocalOrder(eccore.Assignment assignment, eccore.Order? order) {
-    return Order(
-      // L'identifiant exposé aux écrans est celui de la **commande** : c'est
-      // lui qui ouvre le suivi (`ws/orders/{id}/tracking/`) et le chat.
-      id: assignment.orderId,
-      // Le client n'est pas exposé au livreur — ni identifiant, ni historique.
-      // Il voit un destinataire, un point de dépôt et un téléphone d'appoint.
-      userId: '',
-      items: [
-        for (final line in order?.lines ?? const <eccore.OrderLine>[])
-          OrderItem(
-            menuItemId: line.menuItemId,
-            menuItemName: line.itemName,
-            name: line.itemName,
-            category: '',
-            menuItemImage: line.itemImage ?? '',
-            quantity: line.quantity,
-            unitPrice: line.unitPrice.toMajorUnits(),
-            totalPrice: line.lineTotal.toMajorUnits(),
-            notes: line.notes.isEmpty ? null : line.notes,
-          ),
-      ],
-      subtotal: order?.subtotal.toMajorUnits() ?? 0,
-      deliveryFee: order?.deliveryFee.toMajorUnits() ?? 0,
-      discount: order?.discount.toMajorUnits() ?? 0,
-      total: order?.total.toMajorUnits() ?? 0,
-      status: _toLocalStatus(assignment.status),
-      deliveryAddress: assignment.deliveryLandmark.isEmpty
-          ? assignment.deliveryAddressLine
-          : '${assignment.deliveryAddressLine} (${assignment.deliveryLandmark})',
-      deliveryNotes: order?.deliveryInstructions.isEmpty ?? true
-          ? null
-          : order!.deliveryInstructions,
-      paymentMethod: _toLocalPaymentMethod(order?.paymentMethod),
-      orderTime: order?.placedAt ?? assignment.offeredAt,
-      createdAt: order?.createdAt ?? assignment.createdAt,
-      estimatedDeliveryTime: order?.estimatedDeliveryAt,
-      // Renseigné dès que la course est acceptée : c'est ce que les écrans
-      // lisent pour distinguer « proposée » de « la mienne ».
-      deliveryPersonId:
-          assignment.status == eccore.DeliveryStatus.offered ? null : assignment.courier.id,
-    );
-  }
-
-  /// Étape de course → statut affiché par les écrans du livreur.
-  ///
-  /// C'est bien l'étape de la **course** qui est traduite, pas le statut de la
-  /// commande : côté livreur, ce sont ses propres gestes qui doivent piloter
-  /// l'écran. `accepted` retombe sur `confirmed`, faute d'équivalent dans
-  /// l'énumération locale — c'était déjà la convention de l'app Supabase.
-  static OrderStatus _toLocalStatus(String deliveryStatus) {
-    switch (deliveryStatus) {
-      case eccore.DeliveryStatus.offered:
-        return OrderStatus.pending;
-      case eccore.DeliveryStatus.accepted:
-        return OrderStatus.confirmed;
-      case eccore.DeliveryStatus.pickedUp:
-        return OrderStatus.pickedUp;
-      case eccore.DeliveryStatus.onTheWay:
-        return OrderStatus.onTheWay;
-      case eccore.DeliveryStatus.delivered:
-        return OrderStatus.delivered;
-      default:
-        return OrderStatus.cancelled;
-    }
-  }
-
-  static PaymentMethod _toLocalPaymentMethod(String? method) {
-    switch (method) {
-      case 'mobile_money':
-        return PaymentMethod.mobileMoney;
-      case 'card':
-        return PaymentMethod.creditCard;
-      case 'wallet':
-        return PaymentMethod.wallet;
-      default:
-        return PaymentMethod.cash;
+    try {
+      return Course(
+        assignment: assignment,
+        commande: await _orders.getById(assignment.orderId),
+      );
+    } catch (e) {
+      eccore.Journal.trace('⚠️ Commande ${assignment.orderId} illisible : $e');
+      return Course(assignment: assignment);
     }
   }
 }

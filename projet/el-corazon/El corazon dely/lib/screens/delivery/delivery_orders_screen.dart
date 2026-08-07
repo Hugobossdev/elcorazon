@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:elcora_dely/services/app_service.dart';
-import 'package:elcora_dely/utils/price_formatter.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/presentation/libelles_course.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
@@ -145,8 +145,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
         final activeDeliveries = appService.assignedDeliveries
             .where(
               (order) =>
-                  order.status != OrderStatus.delivered &&
-                  order.status != OrderStatus.cancelled,
+                  order.etape.estEnCours,
             )
             .toList();
 
@@ -183,8 +182,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
         final completedDeliveries = appService.assignedDeliveries
             .where(
               (order) =>
-                  order.status == OrderStatus.delivered ||
-                  order.status == OrderStatus.cancelled,
+                  !order.etape.estEnCours,
             )
             .toList();
 
@@ -246,7 +244,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     );
   }
 
-  Widget _buildDeliveryCard(Order order, {required bool isActive}) {
+  Widget _buildDeliveryCard(Course order, {required bool isActive}) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 4,
@@ -275,19 +273,19 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     );
   }
 
-  Widget _buildDeliveryHeader(Order order, bool isActive) {
+  Widget _buildDeliveryHeader(Course order, bool isActive) {
     return Row(
       children: [
         Container(
           width: 48,
           height: 48,
           decoration: BoxDecoration(
-            color: _getStatusColor(order.status).withValues(alpha: 0.1),
+            color: _getStatusColor(order.etape).withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Center(
             child: Text(
-              order.status.emoji,
+              order.etape.pastille,
               style: const TextStyle(fontSize: 24),
             ),
           ),
@@ -298,7 +296,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Livraison #${order.id.substring(0, 8).toUpperCase()}',
+                'Livraison #${order.orderId.substring(0, 8).toUpperCase()}',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -306,7 +304,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
               ),
               const SizedBox(height: 2),
               Text(
-                _formatDateTime(order.orderTime),
+                _formatDateTime(order.passeeLe),
                 style: TextStyle(color: Colors.grey[600], fontSize: 12),
               ),
             ],
@@ -320,11 +318,11 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: _getStatusColor(order.status),
+                  color: _getStatusColor(order.etape),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  order.status.displayName,
+                  order.etape.libelle,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 12,
@@ -335,7 +333,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
               ),
               const SizedBox(height: 4),
               Text(
-                PriceFormatter.format(order.total),
+                order.total?.format() ?? '—',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -349,7 +347,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     );
   }
 
-  Widget _buildDeliveryInfo(Order order) {
+  Widget _buildDeliveryInfo(Course order) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -365,13 +363,13 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  order.deliveryAddress,
+                  order.adresseLivraison,
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
             ],
           ),
-          if (order.deliveryNotes?.isNotEmpty == true) ...[
+          if (order.consignes != null) ...[
             const SizedBox(height: 8),
             Row(
               children: [
@@ -379,7 +377,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Note: ${order.deliveryNotes}',
+                    'Note: ${order.consignes}',
                     style: TextStyle(
                       color: Colors.grey[600],
                       fontSize: 12,
@@ -397,8 +395,8 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  order.estimatedDeliveryTime != null
-                      ? 'Livraison prévue: ${_formatTime(order.estimatedDeliveryTime!)}'
+                  order.livraisonEstimeeA != null
+                      ? 'Livraison prévue: ${_formatTime(order.livraisonEstimeeA!)}'
                       : 'Temps estimé: 30 min',
                   style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   overflow: TextOverflow.ellipsis,
@@ -411,16 +409,16 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     );
   }
 
-  Widget _buildOrderItems(Order order) {
+  Widget _buildOrderItems(Course order) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${order.items.length} article${order.items.length > 1 ? 's' : ''} commandé${order.items.length > 1 ? 's' : ''}',
+          '${order.articles.length} article${order.articles.length > 1 ? 's' : ''} commandé${order.articles.length > 1 ? 's' : ''}',
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
         ),
         const SizedBox(height: 8),
-        ...order.items
+        ...order.articles
             .take(3)
             .map(
               (item) => Padding(
@@ -430,7 +428,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
                     ClipRRect(
                       borderRadius: BorderRadius.circular(6),
                       child: Image.network(
-                        item.menuItemImage,
+                        item.itemImage ?? '',
                         width: 24,
                         height: 24,
                         fit: BoxFit.cover,
@@ -453,7 +451,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
-                        item.menuItemName,
+                        item.itemName,
                         style: const TextStyle(fontSize: 12),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -462,9 +460,9 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
                 ),
               ),
             ),
-        if (order.items.length > 3)
+        if (order.articles.length > 3)
           Text(
-            '... et ${order.items.length - 3} autre${order.items.length - 3 > 1 ? 's' : ''} article${order.items.length - 3 > 1 ? 's' : ''}',
+            '... et ${order.articles.length - 3} autre${order.articles.length - 3 > 1 ? 's' : ''} article${order.articles.length - 3 > 1 ? 's' : ''}',
             style: TextStyle(
               color: Colors.grey[600],
               fontSize: 12,
@@ -475,7 +473,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     );
   }
 
-  Widget _buildDeliveryActions(Order order) {
+  Widget _buildDeliveryActions(Course order) {
     return Row(
       children: [
         Expanded(
@@ -492,8 +490,8 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
         Expanded(
           child: ElevatedButton.icon(
             onPressed: () => _updateDeliveryStatus(order),
-            icon: Icon(_getNextActionIcon(order.status), size: 18),
-            label: Text(_getNextActionText(order.status)),
+            icon: Icon(_getNextActionIcon(order.etape), size: 18),
+            label: Text(_getNextActionText(order.etape)),
             style: ElevatedButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.primary,
               foregroundColor: Theme.of(context).colorScheme.onPrimary,
@@ -504,7 +502,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     );
   }
 
-  void _showDeliveryDetails(Order order) {
+  void _showDeliveryDetails(Course order) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -515,7 +513,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     );
   }
 
-  void _navigateToCustomer(Order order) {
+  void _navigateToCustomer(Course order) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -524,28 +522,28 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     );
   }
 
-  Future<void> _updateDeliveryStatus(Order order) async {
+  Future<void> _updateDeliveryStatus(Course order) async {
     try {
       final appService = Provider.of<AppService>(context, listen: false);
-      OrderStatus nextStatus;
+      EtapeCourse suivante;
 
-      switch (order.status) {
-        case OrderStatus.pickedUp:
-          nextStatus = OrderStatus.onTheWay;
+      switch (order.etape) {
+        case EtapeCourse.recuperee:
+          suivante = EtapeCourse.enRoute;
           break;
-        case OrderStatus.onTheWay:
-          nextStatus = OrderStatus.delivered;
+        case EtapeCourse.enRoute:
+          suivante = EtapeCourse.livree;
           break;
         default:
           return;
       }
 
-      await appService.updateOrderStatus(order.id, nextStatus);
+      await appService.updateOrderStatus(order.orderId, suivante);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Statut mis à jour: ${nextStatus.displayName}'),
+            content: Text('Statut mis à jour: ${suivante.libelle}'),
             backgroundColor: Colors.green,
           ),
         );
@@ -567,39 +565,39 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
     }
   }
 
-  String _getNextActionText(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.pickedUp:
+  String _getNextActionText(EtapeCourse etape) {
+    switch (etape) {
+      case EtapeCourse.recuperee:
         return 'En route';
-      case OrderStatus.onTheWay:
+      case EtapeCourse.enRoute:
         return 'Livré';
       default:
         return 'Suivant';
     }
   }
 
-  IconData _getNextActionIcon(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.pickedUp:
+  IconData _getNextActionIcon(EtapeCourse etape) {
+    switch (etape) {
+      case EtapeCourse.recuperee:
         return Icons.delivery_dining;
-      case OrderStatus.onTheWay:
+      case EtapeCourse.enRoute:
         return Icons.check_circle;
       default:
         return Icons.arrow_forward;
     }
   }
 
-  Color _getStatusColor(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.ready:
+  Color _getStatusColor(EtapeCourse etape) {
+    switch (etape) {
+      case EtapeCourse.acceptee:
         return Colors.orange;
-      case OrderStatus.pickedUp:
+      case EtapeCourse.recuperee:
         return Colors.teal;
-      case OrderStatus.onTheWay:
+      case EtapeCourse.enRoute:
         return Colors.indigo;
-      case OrderStatus.delivered:
+      case EtapeCourse.livree:
         return Colors.green;
-      case OrderStatus.cancelled:
+      case EtapeCourse.annulee:
         return Colors.red;
       default:
         return Colors.grey;
@@ -628,7 +626,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
 }
 
 class DeliveryDetailsSheet extends StatefulWidget {
-  final Order order;
+  final Course order;
 
   const DeliveryDetailsSheet({required this.order, super.key});
 
@@ -708,24 +706,24 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
             const SizedBox(height: 12),
             _buildInfoRow(
               'Numéro',
-              '#${widget.order.id.substring(0, 8).toUpperCase()}',
+              '#${widget.order.orderId.substring(0, 8).toUpperCase()}',
             ),
             _buildInfoRow(
               'Statut',
-              '${widget.order.status.emoji} ${widget.order.status.displayName}',
+              '${widget.order.etape.pastille} ${widget.order.etape.libelle}',
             ),
             _buildInfoRow(
               'Montant',
-              PriceFormatter.format(widget.order.total),
+              widget.order.total?.format() ?? '—',
             ),
             _buildInfoRow(
               'Paiement',
-              '${widget.order.paymentMethod.emoji} ${widget.order.paymentMethod.displayName}',
+              '${widget.order.moyenPaiement.pastille} ${widget.order.moyenPaiement.libelle}',
             ),
-            if (widget.order.estimatedDeliveryTime != null)
+            if (widget.order.livraisonEstimeeA != null)
               _buildInfoRow(
                 'Livraison prévue',
-                _formatTime(widget.order.estimatedDeliveryTime!),
+                _formatTime(widget.order.livraisonEstimeeA!),
               ),
           ],
         ),
@@ -754,13 +752,13 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    widget.order.deliveryAddress,
+                    widget.order.adresseLivraison,
                     style: const TextStyle(fontSize: 16),
                   ),
                 ),
               ],
             ),
-            if (widget.order.deliveryNotes?.isNotEmpty == true) ...[
+            if (widget.order.consignes != null) ...[
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -768,7 +766,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Instructions: ${widget.order.deliveryNotes}',
+                      'Instructions: ${widget.order.consignes}',
                       style: TextStyle(
                         color: Colors.grey[600],
                         fontStyle: FontStyle.italic,
@@ -823,7 +821,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
-            ...widget.order.items.map(
+            ...widget.order.articles.map(
               (item) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -831,7 +829,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Image.network(
-                        item.menuItemImage,
+                        item.itemImage ?? '',
                         width: 40,
                         height: 40,
                         fit: BoxFit.cover,
@@ -850,7 +848,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            item.menuItemName,
+                            item.itemName,
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           Text(
@@ -864,7 +862,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
                       ),
                     ),
                     Text(
-                      PriceFormatter.format(item.totalPrice),
+                      item.lineTotal.format(),
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ],
@@ -1026,7 +1024,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
 
       // Ouvrir WhatsApp avec un message pré-rempli
       final message =
-          'Bonjour, je suis votre livreur pour la commande #${widget.order.id}.';
+          'Bonjour, je suis votre livreur pour la commande #${widget.order.orderId}.';
       final uri = Uri.parse(
         'https://wa.me/$cleanPhone?text=${Uri.encodeComponent(message)}',
       );
@@ -1055,7 +1053,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
 
   Future<void> _openNavigation() async {
     try {
-      final address = widget.order.deliveryAddress;
+      final address = widget.order.adresseLivraison;
 
       if (address.isEmpty) {
         if (context.mounted) {
@@ -1113,6 +1111,6 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
   /// Téléphone du destinataire, lu sur la course.
   String? _recipientPhone() {
     return Provider.of<AppService>(context, listen: false)
-        .recipientPhoneFor(widget.order.id);
+        .recipientPhoneFor(widget.order.orderId);
   }
 }

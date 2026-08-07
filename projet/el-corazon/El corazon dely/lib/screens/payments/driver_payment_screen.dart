@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 
 /// Ce que le livreur doit encaisser — **en consultation seule**.
 ///
@@ -25,10 +26,10 @@ class DriverPaymentScreen extends StatelessWidget {
     required this.order, required this.amount, super.key,
   });
 
-  final Order order;
-  final double amount;
+  final Course order;
+  final eccore.Money? amount;
 
-  bool get _enEspeces => order.paymentMethod == PaymentMethod.cash;
+  bool get _enEspeces => order.moyenPaiement.aEncaisser;
 
   @override
   Widget build(BuildContext context) {
@@ -62,8 +63,8 @@ class DriverPaymentScreen extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       _enEspeces
-                          ? '${amount.toStringAsFixed(0)} FCFA'
-                          : order.paymentMethod.displayName,
+                          ? amount?.format() ?? '—'
+                          : order.moyenPaiement.libelle,
                       style: theme.textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -80,16 +81,16 @@ class DriverPaymentScreen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _ligne(theme, 'Commande', '#${_reference()}'),
-                    _ligne(theme, 'Adresse', order.deliveryAddress),
+                    _ligne(theme, 'Adresse', order.adresseLivraison),
                     _ligne(
                       theme,
                       'Mode de règlement',
-                      order.paymentMethod.displayName,
+                      order.moyenPaiement.libelle,
                     ),
                     _ligne(
                       theme,
                       'Total',
-                      '${order.total.toStringAsFixed(0)} FCFA',
+                      order.total?.format() ?? '—',
                     ),
                   ],
                 ),
@@ -128,7 +129,9 @@ class DriverPaymentScreen extends StatelessWidget {
 
   /// Référence courte, lisible à voix haute au téléphone.
   String _reference() =>
-      order.id.length <= 8 ? order.id : order.id.substring(0, 8).toUpperCase();
+      order.orderId.length <= 8
+          ? order.orderId
+          : order.orderId.substring(0, 8).toUpperCase();
 
   Widget _ligne(ThemeData theme, String libelle, String valeur) {
     return Padding(

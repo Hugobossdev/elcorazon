@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/services.dart';
@@ -189,81 +189,81 @@ void main() {
     test('porte l’identifiant de la commande, pas celui de la course', () async {
       // C'est cet identifiant qui ouvre le suivi et la discussion.
       final course = await premiere();
-      expect(course.order.id, 'commande-1');
+      expect(course.orderId, 'commande-1');
       expect(course.assignmentId, 'course-1');
       expect(course.orderId, 'commande-1');
     });
 
     test('les montants passent en unité majeure', () async {
       final course = await premiere();
-      expect(course.order.subtotal, 9000);
-      expect(course.order.deliveryFee, 1000);
-      expect(course.order.discount, 500);
-      expect(course.order.total, 9500);
+      expect(course.sousTotal!.amountMinor, 9000);
+      expect(course.fraisLivraison!.amountMinor, 1000);
+      expect(course.remise!.amountMinor, 500);
+      expect(course.total!.amountMinor, 9500);
     });
 
     test('les articles sont repris ligne à ligne', () async {
       final course = await premiere();
-      final article = course.order.items.single;
+      final article = course.articles.single;
 
       expect(article.menuItemId, 'article-1');
-      expect(article.menuItemName, 'Poulet braisé');
+      expect(article.itemName, 'Poulet braisé');
       expect(article.quantity, 2);
-      expect(article.unitPrice, 4500);
-      expect(article.totalPrice, 9000);
+      expect(article.unitPrice.amountMinor, 4500);
+      expect(article.lineTotal.amountMinor, 9000);
       expect(article.notes, 'Bien épicé');
     });
 
     test('le client n’est jamais exposé au livreur', () async {
       // Ni identifiant ni historique : il voit un destinataire et un point de
-      // dépôt, rien d'autre.
+      // dépôt. Depuis le lot 3, la course ne porte plus de champ « client »
+      // du tout — auparavant une chaîne vide en tenait lieu.
       final course = await premiere();
-      expect(course.order.userId, isEmpty);
+      expect(course.destinataire, 'Awa');
+      expect(course.telephoneDestinataire, '+22890000000');
     });
 
     test('le repère complète l’adresse quand il existe', () async {
       expect(
-        (await premiere()).order.deliveryAddress,
+        (await premiere()).adresseLivraison,
         'Rue du Commerce',
       );
       expect(
-        (await premiere(repere: 'face à la pharmacie')).order.deliveryAddress,
+        (await premiere(repere: 'face à la pharmacie')).adresseLivraison,
         'Rue du Commerce (face à la pharmacie)',
       );
     });
 
     test('des consignes vides ne deviennent pas une note vide', () async {
-      expect((await premiere()).order.deliveryNotes, isNull);
+      expect((await premiere()).consignes, isNull);
       expect(
         (await premiere(commande: _commande(consignes: 'Sonner deux fois')))
-            .order
-            .deliveryNotes,
+            .consignes,
         'Sonner deux fois',
       );
     });
   });
 
   group('L’étape de la course pilote l’écran', () {
-    Future<OrderStatus> statutAffiche(String etape) async {
+    Future<EtapeCourse> statutAffiche(String etape) async {
       final courses = await depot(
         _FauxServeur(
           coursesParStatut: {etape: [_course(statut: etape)]},
           commande: _commande(),
         ),
       ).loadCourses();
-      return courses.single.order.status;
+      return courses.single.etape;
     }
 
     test('chaque étape a son statut', () async {
-      expect(await statutAffiche(eccore.DeliveryStatus.offered), OrderStatus.pending);
-      // `accepted` retombe sur `confirmed`, faute d'équivalent local.
-      expect(await statutAffiche(eccore.DeliveryStatus.accepted), OrderStatus.confirmed);
-      expect(await statutAffiche(eccore.DeliveryStatus.pickedUp), OrderStatus.pickedUp);
-      expect(await statutAffiche(eccore.DeliveryStatus.onTheWay), OrderStatus.onTheWay);
-      expect(await statutAffiche(eccore.DeliveryStatus.delivered), OrderStatus.delivered);
+      expect(await statutAffiche(eccore.DeliveryStatus.offered), EtapeCourse.proposee);
+      expect(await statutAffiche(eccore.DeliveryStatus.accepted), EtapeCourse.acceptee);
+      expect(await statutAffiche(eccore.DeliveryStatus.pickedUp), EtapeCourse.recuperee);
+      expect(await statutAffiche(eccore.DeliveryStatus.onTheWay), EtapeCourse.enRoute);
+      expect(await statutAffiche(eccore.DeliveryStatus.delivered), EtapeCourse.livree);
     });
 
-    test('une course proposée n’a pas encore de livreur', () async {
+    test('une course proposée se distingue de la mienne', () async {
       // C'est ce que les écrans lisent pour distinguer « proposée » de
       // « la mienne ».
       final proposee = await depot(
@@ -276,7 +276,8 @@ void main() {
           commande: _commande(),
         ),
       ).loadCourses();
-      expect(proposee.single.order.deliveryPersonId, isNull);
+      expect(proposee.single.estProposee, isTrue);
+      expect(proposee.single.estMienne, isFalse);
 
       final mienne = await depot(
         _FauxServeur(
@@ -286,12 +287,13 @@ void main() {
           commande: _commande(),
         ),
       ).loadCourses();
-      expect(mienne.single.order.deliveryPersonId, 'livreur-7');
+      expect(mienne.single.estMienne, isTrue);
+      expect(mienne.single.assignment.courier.id, 'livreur-7');
     });
   });
 
   group('Moyen de paiement', () {
-    Future<PaymentMethod> moyen(String recu) async {
+    Future<MoyenPaiement> moyen(String recu) async {
       final courses = await depot(
         _FauxServeur(
           coursesParStatut: {
@@ -300,20 +302,21 @@ void main() {
           commande: _commande(moyenPaiement: recu),
         ),
       ).loadCourses();
-      return courses.single.order.paymentMethod;
+      return courses.single.moyenPaiement;
     }
 
     test('chaque moyen connu est traduit', () async {
-      expect(await moyen('cash'), PaymentMethod.cash);
-      expect(await moyen('mobile_money'), PaymentMethod.mobileMoney);
-      expect(await moyen('card'), PaymentMethod.creditCard);
-      expect(await moyen('wallet'), PaymentMethod.wallet);
+      expect(await moyen('cash'), MoyenPaiement.especes);
+      expect(await moyen('mobile_money'), MoyenPaiement.mobileMoney);
+      expect(await moyen('card'), MoyenPaiement.carte);
+      expect(await moyen('wallet'), MoyenPaiement.portefeuille);
     });
 
     test('un moyen inconnu retombe sur les espèces', () async {
       // Le livreur doit se préparer à encaisser plutôt que l'inverse : c'est
       // l'erreur la moins coûteuse des deux.
-      expect(await moyen('crypto-monnaie'), PaymentMethod.cash);
+      expect(await moyen('crypto-monnaie'), MoyenPaiement.especes);
+      expect(MoyenPaiement.especes.aEncaisser, isTrue);
     });
   });
 
@@ -347,11 +350,14 @@ void main() {
         ),
       ).loadCourses();
 
-      final livree = courses.single.order;
-      expect(livree.status, OrderStatus.delivered);
-      expect(livree.deliveryAddress, 'Rue du Commerce');
-      expect(livree.items, isEmpty);
-      expect(livree.total, 0);
+      final livree = courses.single;
+      expect(livree.etape, EtapeCourse.livree);
+      expect(livree.adresseLivraison, 'Rue du Commerce');
+      expect(livree.articles, isEmpty);
+      expect(livree.total, isNull);
+      // La rémunération, elle, est sur l'affectation — c'est d'elle que vivent
+      // les gains, et non d'un pourcentage d'un total qu'on n'a pas relu.
+      expect(livree.remuneration!.amountMinor, 1000);
     });
   });
 
@@ -368,10 +374,10 @@ void main() {
 
       final course = courses.single;
       expect(course.assignmentId, 'course-1');
-      expect(course.order.status, OrderStatus.confirmed);
-      expect(course.order.deliveryAddress, 'Rue du Commerce');
-      expect(course.order.items, isEmpty);
-      expect(course.order.total, 0);
+      expect(course.etape, EtapeCourse.acceptee);
+      expect(course.adresseLivraison, 'Rue du Commerce');
+      expect(course.articles, isEmpty);
+      expect(course.total, isNull);
     });
   });
 

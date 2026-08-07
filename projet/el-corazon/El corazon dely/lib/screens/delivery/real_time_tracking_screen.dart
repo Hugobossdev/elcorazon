@@ -7,14 +7,15 @@ import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/directions_service.dart';
 import 'package:elcora_dely/services/geocoding_service.dart' as geocoding;
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/presentation/libelles_course.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/widgets/loading_widget.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class RealTimeTrackingScreen extends StatefulWidget {
-  final Order order;
+  final Course order;
 
   const RealTimeTrackingScreen({
     required this.order, super.key,
@@ -82,7 +83,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       // Obtenir les coordonnées de l'adresse de livraison depuis la commande
       try {
         final customerLatLng = await _geocodingService.geocodeAddress(
-          widget.order.deliveryAddress,
+          widget.order.adresseLivraison,
         );
         
         if (customerLatLng != null) {
@@ -378,7 +379,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
                 BitmapDescriptor.hueGreen),
             infoWindow: InfoWindow(
               title: 'Client',
-              snippet: widget.order.deliveryAddress,
+              snippet: widget.order.adresseLivraison,
             ),
           ),
         if (_restaurantLocation != null)
@@ -436,15 +437,15 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
     }
   }
 
-  Future<void> _updateOrderStatus(OrderStatus status) async {
+  Future<void> _updateOrderStatus(EtapeCourse etape) async {
     try {
       final appService = Provider.of<AppService>(context, listen: false);
-      await appService.updateOrderStatus(widget.order.id, status);
+      await appService.updateOrderStatus(widget.order.orderId, etape);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Statut mis à jour: ${status.displayName}'),
+            content: Text('Statut mis à jour: ${etape.libelle}'),
             backgroundColor: Colors.green,
           ),
         );
@@ -467,7 +468,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Suivi - Commande #${widget.order.id.substring(0, 8)}'),
+        title: Text('Suivi - Commande #${widget.order.orderId.substring(0, 8)}'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
@@ -617,7 +618,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
 
                         // Order status
                         Text(
-                          'Statut: ${widget.order.status.displayName}',
+                          'Statut: ${widget.order.etape.libelle}',
                           style:
                               Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.bold,
@@ -631,7 +632,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
                             Expanded(
                               child: OutlinedButton.icon(
                                 onPressed: () =>
-                                    _updateOrderStatus(OrderStatus.pickedUp),
+                                    _updateOrderStatus(EtapeCourse.recuperee),
                                 icon: const Icon(Icons.shopping_bag),
                                 label: const Text('Commande récupérée'),
                                 style: OutlinedButton.styleFrom(
@@ -644,7 +645,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: () =>
-                                    _updateOrderStatus(OrderStatus.delivered),
+                                    _updateOrderStatus(EtapeCourse.livree),
                                 icon: const Icon(Icons.check_circle),
                                 label: const Text('Livré'),
                                 style: ElevatedButton.styleFrom(

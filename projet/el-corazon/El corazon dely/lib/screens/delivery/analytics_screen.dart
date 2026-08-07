@@ -3,7 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/performance_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/app_service.dart';
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/presentation/libelles_course.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 
@@ -153,19 +154,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       builder: (context, appService, child) {
         final deliveries = appService.assignedDeliveries;
         final completedToday = deliveries
-            .where((order) =>
-                order.status == OrderStatus.delivered &&
-                _isToday(order.orderTime))
+            .where((c) => c.etape == EtapeCourse.livree && _isToday(c.passeeLe))
             .length;
         final completedThisWeek = deliveries
-            .where((order) =>
-                order.status == OrderStatus.delivered &&
-                _isThisWeek(order.orderTime))
+            .where((c) => c.etape == EtapeCourse.livree && _isThisWeek(c.passeeLe))
             .length;
         final completedThisMonth = deliveries
-            .where((order) =>
-                order.status == OrderStatus.delivered &&
-                _isThisMonth(order.orderTime))
+            .where((c) => c.etape == EtapeCourse.livree && _isThisMonth(c.passeeLe))
             .length;
 
         return SingleChildScrollView(
@@ -492,16 +487,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-  Widget _buildDeliveryChart(List<Order> deliveries) {
+  Widget _buildDeliveryChart(List<Course> deliveries) {
     // Grouper les livraisons par jour de la semaine
     final Map<int, int> weeklyData = {};
     for (int i = 0; i < 7; i++) {
       weeklyData[i] = 0;
     }
 
-    for (final delivery
-        in deliveries.where((d) => d.status == OrderStatus.delivered)) {
-      final weekday = delivery.orderTime.weekday % 7;
+    for (final course
+        in deliveries.where((c) => c.etape == EtapeCourse.livree)) {
+      final weekday = course.passeeLe.weekday % 7;
       weeklyData[weekday] = (weeklyData[weekday] ?? 0) + 1;
     }
 
@@ -564,11 +559,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-  Widget _buildEarningsBreakdown(List<Order> deliveries) {
+  Widget _buildEarningsBreakdown(List<Course> deliveries) {
     final completedDeliveries =
-        deliveries.where((d) => d.status == OrderStatus.delivered);
-    final totalEarnings = completedDeliveries.fold<double>(
-        0, (sum, order) => sum + (order.total * 0.1)); // 10% commission
+        deliveries.where((c) => c.etape == EtapeCourse.livree);
+    // Rémunération arrêtée par le serveur, et non 10 % d'un total de commande
+    // qui n'est pas relu une fois la course terminée — il valait zéro.
+    final totalEarnings = completedDeliveries.fold<int>(
+      0,
+      (somme, course) => somme + (course.remuneration?.amountMinor ?? 0),
+    );
 
     return Card(
       elevation: 2,

@@ -3,12 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:elcora_dely/services/agora_call_service.dart';
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/services/app_service.dart';
 
 /// Écran d'appel vocal/vidéo
 class CallScreen extends StatefulWidget {
-  final Order order;
+  final Course order;
   final CallType callType;
   final bool isIncoming;
   final String? callerName;
@@ -63,7 +63,7 @@ class _CallScreenState extends State<CallScreen> {
       if (!mounted) return;
 
       // Générer l'ID de canal et l'UID
-      final channelId = AgoraCallService.generateChannelId(widget.order.id);
+      final channelId = AgoraCallService.generateChannelId(widget.order.orderId);
       final appService = Provider.of<AppService>(context, listen: false);
       final currentUser = appService.currentUser;
       

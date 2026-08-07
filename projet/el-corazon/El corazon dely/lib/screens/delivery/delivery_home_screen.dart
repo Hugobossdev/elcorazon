@@ -2,10 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
-import 'package:elcora_dely/utils/price_formatter.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/performance_service.dart';
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/presentation/libelles_course.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
 import 'package:elcora_dely/screens/communication/chat_screen.dart';
 import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
@@ -306,14 +306,10 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                 try {
                   final assignedDeliveries = appService.assignedDeliveries;
 
-                  // Filter available orders (orders are already loaded via initState)
-                  final availableOrders = appService.orders
-                      .where(
-                        (order) =>
-                            order.status == OrderStatus.ready &&
-                            order.deliveryPersonId == null,
-                      )
-                      .toList();
+                  // Les courses qu'on me propose. Ce filtre cherchait
+                  // auparavant un statut « prête » qu'aucune course ne portait
+                  // jamais : la section restait vide en toutes circonstances.
+                  final availableOrders = appService.pendingOffers;
 
                   return RefreshIndicator(
                     onRefresh: () => _refreshOrders(),
@@ -502,20 +498,19 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
-  Widget _buildStatsCard(BuildContext context, List<Order> assignedDeliveries) {
+  Widget _buildStatsCard(BuildContext context, List<Course> assignedDeliveries) {
     final completedToday = assignedDeliveries
         .where(
           (order) =>
-              order.status == OrderStatus.delivered &&
-              _isToday(order.orderTime),
+              order.etape == EtapeCourse.livree &&
+              _isToday(order.passeeLe),
         )
         .length;
 
     final activeDeliveries = assignedDeliveries
         .where(
           (order) =>
-              order.status != OrderStatus.delivered &&
-              order.status != OrderStatus.cancelled,
+              order.etape.estEnCours,
         )
         .length;
 
@@ -586,7 +581,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
 
   Widget _buildAvailableOrders(
     BuildContext context,
-    List<Order> availableOrders,
+    List<Course> availableOrders,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -654,7 +649,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
-  Widget _buildAvailableOrderCard(BuildContext context, Order order) {
+  Widget _buildAvailableOrderCard(BuildContext context, Course order) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
@@ -683,12 +678,12 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Commande #${order.id.substring(0, 8).toUpperCase()}',
+                        'Commande #${order.orderId.substring(0, 8).toUpperCase()}',
                         style: const TextStyle(fontWeight: FontWeight.bold),
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        '${order.items.length} articles - ${PriceFormatter.format(order.total)}',
+                        '${order.articles.length} articles - ${order.total?.format() ?? '—'}',
                         style: TextStyle(color: Colors.grey[600], fontSize: 12),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -697,7 +692,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                 ),
                 Flexible(
                   child: Text(
-                    PriceFormatter.format(order.total),
+                    order.total?.format() ?? '—',
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.bold,
@@ -716,7 +711,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    order.deliveryAddress,
+                    order.adresseLivraison,
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -742,12 +737,11 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
-  Widget _buildMyDeliveries(BuildContext context, List<Order> myDeliveries) {
+  Widget _buildMyDeliveries(BuildContext context, List<Course> myDeliveries) {
     final activeDeliveries = myDeliveries
         .where(
           (order) =>
-              order.status != OrderStatus.delivered &&
-              order.status != OrderStatus.cancelled,
+              order.etape.estEnCours,
         )
         .toList();
 
@@ -792,7 +786,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
-  Widget _buildMyDeliveryCard(BuildContext context, Order order) {
+  Widget _buildMyDeliveryCard(BuildContext context, Course order) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 4,
@@ -808,12 +802,12 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: _getStatusColor(order.status).withValues(alpha: 0.1),
+                    color: _getStatusColor(order.etape).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Center(
                     child: Text(
-                      order.status.emoji,
+                      order.etape.pastille,
                       style: const TextStyle(fontSize: 20),
                     ),
                   ),
@@ -824,14 +818,14 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Commande #${order.id.substring(0, 8).toUpperCase()}',
+                        'Commande #${order.orderId.substring(0, 8).toUpperCase()}',
                         style: const TextStyle(fontWeight: FontWeight.bold),
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        order.status.displayName,
+                        order.etape.libelle,
                         style: TextStyle(
-                          color: _getStatusColor(order.status),
+                          color: _getStatusColor(order.etape),
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
@@ -842,7 +836,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                 ),
                 Flexible(
                   child: Text(
-                    PriceFormatter.format(order.total),
+                    order.total?.format() ?? '—',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
@@ -860,7 +854,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    order.deliveryAddress,
+                    order.adresseLivraison,
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -881,8 +875,8 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () => _updateDeliveryStatus(context, order),
-                    icon: Icon(_getNextActionIcon(order.status), size: 18),
-                    label: Text(_getNextActionText(order.status)),
+                    icon: Icon(_getNextActionIcon(order.etape), size: 18),
+                    label: Text(_getNextActionText(order.etape)),
                   ),
                 ),
               ],
@@ -950,7 +944,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     }
   }
 
-  Future<void> _acceptOrder(BuildContext context, Order order) async {
+  Future<void> _acceptOrder(BuildContext context, Course order) async {
     try {
       final appService = Provider.of<AppService>(context, listen: false);
       final performanceService = Provider.of<PerformanceService>(
@@ -961,7 +955,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       // Mesurer les performances
       performanceService.startTimer('accept_delivery');
 
-      await appService.acceptDelivery(order.id);
+      await appService.acceptDelivery(order.orderId);
 
       performanceService.stopTimer('accept_delivery');
 
@@ -969,7 +963,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Livraison acceptée pour la commande #${order.id.substring(0, 8).toUpperCase()}',
+              'Livraison acceptée pour la commande #${order.orderId.substring(0, 8).toUpperCase()}',
             ),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 2),
@@ -997,7 +991,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     }
   }
 
-  void _navigateToOrder(BuildContext context, Order order) {
+  void _navigateToOrder(BuildContext context, Course order) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1006,27 +1000,24 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
-  Future<void> _updateDeliveryStatus(BuildContext context, Order order) async {
+  Future<void> _updateDeliveryStatus(BuildContext context, Course order) async {
     try {
       final appService = Provider.of<AppService>(context, listen: false);
-      OrderStatus nextStatus;
+      EtapeCourse suivante;
 
-      // Workflow: confirmed (accepted) → picked_up → on_the_way → delivered
-      switch (order.status) {
-        case OrderStatus.confirmed:
-          // After accepting, mark as picked up when arriving at restaurant
-          nextStatus = OrderStatus.pickedUp;
-          await appService.markOrderPickedUp(order.id);
+      // Déroulement : acceptée → récupérée → en route → livrée
+      switch (order.etape) {
+        case EtapeCourse.acceptee:
+          suivante = EtapeCourse.recuperee;
+          await appService.markOrderPickedUp(order.orderId);
           break;
-        case OrderStatus.pickedUp:
-          // After picking up, mark as on the way
-          nextStatus = OrderStatus.onTheWay;
-          await appService.markOrderOnTheWay(order.id);
+        case EtapeCourse.recuperee:
+          suivante = EtapeCourse.enRoute;
+          await appService.markOrderOnTheWay(order.orderId);
           break;
-        case OrderStatus.onTheWay:
-          // After arriving, mark as delivered
-          nextStatus = OrderStatus.delivered;
-          await appService.markOrderDelivered(order.id);
+        case EtapeCourse.enRoute:
+          suivante = EtapeCourse.livree;
+          await appService.markOrderDelivered(order.orderId);
           break;
         default:
           return;
@@ -1035,7 +1026,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Commande mise à jour: ${nextStatus.displayName}'),
+            content: Text('Commande mise à jour: ${suivante.libelle}'),
             backgroundColor: Colors.green,
           ),
         );
@@ -1057,46 +1048,46 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     }
   }
 
-  String _getNextActionText(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.confirmed:
+  String _getNextActionText(EtapeCourse etape) {
+    switch (etape) {
+      case EtapeCourse.acceptee:
         return 'Récupérée';
-      case OrderStatus.pickedUp:
+      case EtapeCourse.recuperee:
         return 'En route';
-      case OrderStatus.onTheWay:
+      case EtapeCourse.enRoute:
         return 'Livré';
       default:
         return 'Suivant';
     }
   }
 
-  IconData _getNextActionIcon(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.confirmed:
+  IconData _getNextActionIcon(EtapeCourse etape) {
+    switch (etape) {
+      case EtapeCourse.acceptee:
         return Icons.shopping_bag;
-      case OrderStatus.pickedUp:
+      case EtapeCourse.recuperee:
         return Icons.delivery_dining;
-      case OrderStatus.onTheWay:
+      case EtapeCourse.enRoute:
         return Icons.check_circle;
       default:
         return Icons.arrow_forward;
     }
   }
 
-  Color _getStatusColor(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.pickedUp:
+  Color _getStatusColor(EtapeCourse etape) {
+    switch (etape) {
+      case EtapeCourse.recuperee:
         return Colors.teal;
-      case OrderStatus.onTheWay:
+      case EtapeCourse.enRoute:
         return Colors.indigo;
-      case OrderStatus.delivered:
+      case EtapeCourse.livree:
         return Colors.green;
       default:
         return Colors.grey;
     }
   }
 
-  void _openChat(BuildContext context, Order order) {
+  void _openChat(BuildContext context, Course order) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1105,7 +1096,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
-  void _openSupportChat(BuildContext context, Order order) {
+  void _openSupportChat(BuildContext context, Course order) {
     Navigator.push(
       context,
       MaterialPageRoute(

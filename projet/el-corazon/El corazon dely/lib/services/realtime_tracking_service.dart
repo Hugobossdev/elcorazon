@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/services/geocoding_service.dart';
 
 /// Transport temps réel du livreur (Phase 6) — remplace intégralement
@@ -50,7 +50,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   eccore.RealtimeChannel? _orderChannel;
   StreamSubscription<eccore.RealtimeEvent>? _orderSubscription;
   String? _trackedOrderId;
-  final _orderUpdatesController = StreamController<Order>.broadcast();
+  final _orderUpdatesController = StreamController<Course>.broadcast();
   final _deliveryLocationUpdatesController =
       StreamController<Map<String, dynamic>>.broadcast();
 
@@ -58,7 +58,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   Timer? _emissionTimer;
   Position? _currentPosition;
 
-  Future<Order?> Function(String orderId)? _readOrder;
+  Future<Course?> Function(String orderId)? _readCourse;
   Future<void> Function(Position position)? _reportPosition;
 
   bool _isFeedConnected = false;
@@ -71,7 +71,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   /// Les courses qu'on me propose, à mesure qu'elles arrivent.
   Stream<eccore.AssignmentOffer> get courseOffers => _courseOffersController.stream;
 
-  Stream<Order> get orderUpdates => _orderUpdatesController.stream;
+  Stream<Course> get orderUpdates => _orderUpdatesController.stream;
   Stream<Map<String, dynamic>> get deliveryLocationUpdates =>
       _deliveryLocationUpdatesController.stream;
 
@@ -83,15 +83,15 @@ class RealtimeTrackingService extends ChangeNotifier {
   /// Branche les deux gestes qui demandent de connaître les courses. Appelé une
   /// fois par `AppService`, qui les détient.
   ///
-  /// [readOrder] relit une commande après un changement de statut ; le message
+  /// [readCourse] relit la course après un changement de statut ; le message
   /// diffusé ne porte que le statut et sa raison, pas la commande entière.
   /// [reportPosition] dépose un relevé sur la course en cours — l'affectation
   /// visée n'est connue que d'`AppService`.
   void bind({
-    required Future<Order?> Function(String orderId) readOrder,
+    required Future<Course?> Function(String orderId) readCourse,
     required Future<void> Function(Position position) reportPosition,
   }) {
-    _readOrder = readOrder;
+    _readCourse = readCourse;
     _reportPosition = reportPosition;
   }
 
@@ -234,8 +234,8 @@ class RealtimeTrackingService extends ChangeNotifier {
         case 'order.status':
           // Le message ne porte que le statut et sa raison ; la commande se
           // relit pour rester cohérente avec ce que l'écran affiche déjà.
-          final order = await _readOrder?.call(orderId);
-          if (order != null) _orderUpdatesController.add(order);
+          final course = await _readCourse?.call(orderId);
+          if (course != null) _orderUpdatesController.add(course);
           break;
         case 'tracking.position':
           // `speed`/`heading` ne sont pas relayés par ce canal côté serveur

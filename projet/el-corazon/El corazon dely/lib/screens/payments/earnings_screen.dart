@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
-import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/presentation/libelles_course.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/widgets/loading_widget.dart';
 import 'package:elcora_dely/widgets/custom_button.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
@@ -49,68 +50,53 @@ class _EarningsScreenState extends State<EarningsScreen> {
       }
 
       final deliveries = appService.assignedDeliveries
-          .where((order) => order.status == OrderStatus.delivered)
+          .where((course) => course.etape == EtapeCourse.livree)
           .toList();
 
-      // Calculate earnings by period
       final todayDeliveries =
-          deliveries.where((d) => _isToday(d.orderTime)).toList();
+          deliveries.where((c) => _isToday(c.passeeLe)).toList();
       final weekDeliveries =
-          deliveries.where((d) => _isThisWeek(d.orderTime)).toList();
+          deliveries.where((c) => _isThisWeek(c.passeeLe)).toList();
       final monthDeliveries =
-          deliveries.where((d) => _isThisMonth(d.orderTime)).toList();
+          deliveries.where((c) => _isThisMonth(c.passeeLe)).toList();
 
-      // Calculate earnings (10% commission per delivery, plus estimated tips and bonuses)
-      const commissionRate = 0.10;
-
-      Map<String, num> calculateEarnings(List<Order> orders) {
-        if (orders.isEmpty) {
-          return {
-            'total': 0.0,
-            'deliveries': 0,
-            'bonus': 0.0,
-            'tips': 0.0,
-          };
-        }
-
-        final baseEarnings = orders.fold<double>(
-            0.0, (sum, order) => sum + (order.total * commissionRate));
-        final deliveriesCount = orders.length;
-        final estimatedTips = baseEarnings * 0.1; // 10% of earnings as tips
-        final estimatedBonus = deliveriesCount > 10
-            ? baseEarnings * 0.05
-            : 0.0; // 5% bonus if > 10 deliveries
-
-        return {
-          'total': baseEarnings + estimatedTips + estimatedBonus,
-          'deliveries': deliveriesCount,
-          'bonus': estimatedBonus,
-          'tips': estimatedTips,
-        };
+      /// Somme des rémunérations que le serveur a arrêtées pour ces courses.
+      ///
+      /// Cet écran appliquait auparavant une commission de 10 % au total de la
+      /// commande, majorée de pourboires et de primes estimés à 10 % et 5 %.
+      /// Aucun de ces trois taux n'existe au contrat, et le total en question
+      /// vaut **zéro** sur toute course livrée : le détail d'une commande
+      /// n'est pas relu une fois la course terminée. L'écran affichait donc
+      /// invariablement 0 FCFA, quelle que soit la période.
+      ///
+      /// `courier_fee` est la rémunération réelle, calculée et rendue par le
+      /// serveur sur chaque affectation. Le taux appartient au serveur.
+      Map<String, num> calculerGains(List<Course> courses) {
+        final total = courses.fold<int>(
+          0,
+          (somme, course) => somme + (course.remuneration?.amountMinor ?? 0),
+        );
+        return {'total': total, 'deliveries': courses.length};
       }
 
       if (mounted) {
         setState(() {
           _earningsData = {
-            'today': calculateEarnings(todayDeliveries),
-            'week': calculateEarnings(weekDeliveries),
-            'month': calculateEarnings(monthDeliveries),
+            'today': calculerGains(todayDeliveries),
+            'week': calculerGains(weekDeliveries),
+            'month': calculerGains(monthDeliveries),
           };
 
-          // Build recent earnings from recent deliveries (sorted by date)
-          final sortedDeliveries = List<Order>.from(deliveries)
-            ..sort((a, b) => b.orderTime.compareTo(a.orderTime));
+          final triees = List<Course>.from(deliveries)
+            ..sort((a, b) => b.passeeLe.compareTo(a.passeeLe));
 
-          _recentEarnings = sortedDeliveries
+          _recentEarnings = triees
               .take(10)
-              .map((order) => {
-                    'id': order.id,
-                    'orderId': order.id.substring(0, 8).toUpperCase(),
-                    'amount': order.total * commissionRate,
-                    'tip': (order.total * commissionRate * 0.1),
-                    'bonus': 0.0,
-                    'timestamp': order.orderTime,
-                    'status': 'completed',
+              .map((course) => {
+                    'id': course.orderId,
+                    'orderId': course.orderId.substring(0, 8).toUpperCase(),
+                    'amount': course.remuneration?.amountMinor ?? 0,
+                    'timestamp': course.passeeLe,
                   })
               .toList();
 
@@ -378,10 +364,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
               children: [
                 _buildSummaryItem(
                     'Livraisons', '${earnings['deliveries'] ?? 0}'),
-                _buildSummaryItem('Bonus',
-                    '${earnings['bonus']?.toStringAsFixed(0) ?? '0'} FCFA'),
-                _buildSummaryItem('Pourboires',
-                    '${earnings['tips']?.toStringAsFixed(0) ?? '0'} FCFA'),
               ],
             ),
           ],
@@ -415,9 +397,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Widget _buildEarningsBreakdown() {
     final earnings = _getCurrentEarnings();
     final deliveriesCount = earnings['deliveries'] ?? 0;
-    final baseAmount = earnings['total'] ?? 0.0;
-    final deliveriesEarning =
-        baseAmount - (earnings['tips'] ?? 0.0) - (earnings['bonus'] ?? 0.0);
+    final deliveriesEarning = earnings['total'] ?? 0;
     final avgPerDelivery =
         deliveriesCount > 0 ? deliveriesEarning / deliveriesCount : 0.0;
 
@@ -443,22 +423,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               Icons.delivery_dining,
               Colors.blue,
             ),
-            const SizedBox(height: 12),
-            _buildBreakdownItem(
-              'Bonus',
-              'Prime de performance',
-              '${earnings['bonus']?.toStringAsFixed(0) ?? '0'} FCFA',
-              Icons.star,
-              Colors.orange,
-            ),
-            const SizedBox(height: 12),
-            _buildBreakdownItem(
-              'Pourboires',
-              'Gratifications clients',
-              '${earnings['tips']?.toStringAsFixed(0) ?? '0'} FCFA',
-              Icons.volunteer_activism,
-              Colors.green,
-            ),
+
             const SizedBox(height: 12),
             _buildBreakdownItem(
               'Gain moyen',
@@ -544,12 +509,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildEarningItem(Map<String, dynamic> earning) {
-    // Les trois montants sont lus plusieurs fois : les typer une fois ici évite
-    // autant d'accès non typés, et fait dire au compilateur ce que la carte
-    // contient réellement.
+    // Typé une fois ici : la carte est dynamique, et le compilateur ne dirait
+    // rien d'une clé disparue.
     final montant = earning['amount']! as num;
-    final pourboire = earning['tip']! as num;
-    final prime = earning['bonus']! as num;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -591,20 +553,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${(montant + pourboire + prime).toStringAsFixed(0)} FCFA',
+                '${montant.toStringAsFixed(0)} FCFA',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),
               ),
-              if (pourboire > 0)
-                Text(
-                  '+${pourboire.toStringAsFixed(0)} FCFA pourboire',
-                  style: TextStyle(
-                    color: Colors.green[600],
-                    fontSize: 10,
-                  ),
-                ),
             ],
           ),
         ],
