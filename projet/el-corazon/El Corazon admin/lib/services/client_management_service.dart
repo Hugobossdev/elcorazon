@@ -2,7 +2,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
 import 'package:admin/models/order.dart';
-import 'package:admin/models/user.dart';
 import 'package:admin/repositories/django_order_mapper.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
@@ -36,12 +35,12 @@ class ClientManagementService extends ChangeNotifier {
   eccore.ManagedOrderRepository get _orders =>
       eccore.ManagedOrderRepository(apiClient: AdminAuthService().apiClient);
 
-  List<User> _clients = [];
+  List<eccore.Customer> _clients = [];
   bool _isLoading = false;
   String? _error;
   bool _isInitialized = false;
 
-  List<User> get clients => _clients;
+  List<eccore.Customer> get clients => _clients;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
@@ -65,7 +64,7 @@ class ClientManagementService extends ChangeNotifier {
 
     try {
       final comptes = await _admin.customers(search: search);
-      _clients = comptes.map(_toLocal).toList();
+      _clients = comptes;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('Clients : chargement impossible — ${e.code}');
@@ -115,7 +114,7 @@ class ClientManagementService extends ChangeNotifier {
         customerId: clientId,
         reason: reason,
       );
-      _remplacer(_toLocal(maj));
+      _remplacer(maj);
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
@@ -129,7 +128,7 @@ class ClientManagementService extends ChangeNotifier {
   Future<bool> reactivateClient(String clientId) async {
     try {
       final maj = await _admin.unblockCustomer(clientId);
-      _remplacer(_toLocal(maj));
+      _remplacer(maj);
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
@@ -139,30 +138,10 @@ class ClientManagementService extends ChangeNotifier {
     }
   }
 
-  void _remplacer(User client) {
+  void _remplacer(eccore.Customer client) {
     final index = _clients.indexWhere((c) => c.id == client.id);
     if (index != -1) _clients[index] = client;
     notifyListeners();
   }
 
-  /// Traduit un dossier serveur vers le modèle local des écrans.
-  ///
-  /// `loyaltyPoints`, `badges` et `stats` restent vides : ce sont des agrégats
-  /// que la liste ne porte pas, et les remplir article par article coûterait
-  /// une requête par ligne affichée. La fiche détaillée les demande au serveur
-  /// quand on l'ouvre.
-  User _toLocal(eccore.Customer remote) {
-    return User(
-      id: remote.id,
-      authUserId: remote.id,
-      name: remote.fullName,
-      email: remote.email,
-      phone: remote.phone ?? '',
-      role: UserRole.client,
-      profileImageUrl: remote.avatar,
-      createdAt: remote.createdAt,
-      lastLoginAt: remote.lastSeenAt,
-      isActive: remote.isActive,
-    );
-  }
 }

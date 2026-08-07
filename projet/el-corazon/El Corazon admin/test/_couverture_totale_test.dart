@@ -15,7 +15,6 @@ import 'package:admin/models/driver.dart';
 import 'package:admin/models/driver_document.dart';
 import 'package:admin/models/menu_models.dart';
 import 'package:admin/models/order.dart';
-import 'package:admin/models/user.dart';
 import 'package:admin/repositories/django_order_mapper.dart';
 import 'package:admin/screens/admin/active_deliveries_screen.dart';
 import 'package:admin/screens/admin/admin_dashboard_screen.dart';

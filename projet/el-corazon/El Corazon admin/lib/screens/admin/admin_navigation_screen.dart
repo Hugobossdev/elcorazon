@@ -686,7 +686,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                   radius: 20,
                   backgroundColor: theme.colorScheme.primaryContainer,
                   child: Text(
-                    (adminAuth.currentAdmin?.name ?? 'A')
+                    (adminAuth.currentAdmin?.fullName ?? 'A')
                         .substring(0, 1)
                         .toUpperCase(),
                     style: TextStyle(
@@ -701,7 +701,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        adminAuth.currentAdmin?.name ?? 'Admin',
+                        adminAuth.currentAdmin?.fullName ?? 'Admin',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -980,7 +980,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
             currentAccountPicture: CircleAvatar(
               backgroundColor: scheme.onPrimary.withValues(alpha: 0.18),
               child: Text(
-                (adminAuth.currentAdmin?.name ?? 'A')
+                (adminAuth.currentAdmin?.fullName ?? 'A')
                     .substring(0, 1)
                     .toUpperCase(),
                 style: TextStyle(
@@ -991,7 +991,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
               ),
             ),
             accountName: Text(
-              adminAuth.currentAdmin?.name ?? 'Admin',
+              adminAuth.currentAdmin?.fullName ?? 'Admin',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             accountEmail: Text(

@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:admin/models/category.dart' as app_models;
 import 'package:admin/models/menu_models.dart';
 import 'package:admin/models/order.dart';
-import 'package:admin/models/user.dart';
 import 'package:admin/repositories/django_order_mapper.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
@@ -70,7 +69,7 @@ class AppService extends ChangeNotifier {
   ///
   /// `null` tant que personne n'est authentifié ; les écrans d'administration
   /// ne sont de toute façon atteignables qu'après connexion.
-  User? get currentUser => AdminAuthService().currentAdmin;
+  eccore.User? get currentUser => AdminAuthService().currentAdmin;
 
   bool get isLoggedIn => currentUser != null;
   bool get isAdmin => isLoggedIn;

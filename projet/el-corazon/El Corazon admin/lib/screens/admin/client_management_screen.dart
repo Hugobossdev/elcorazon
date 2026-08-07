@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/client_management_service.dart';
 import 'package:admin/services/app_service.dart';
-import 'package:admin/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/models/order.dart';
 import 'package:admin/widgets/custom_text_field.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -25,7 +25,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
   // chargées ailleurs — deux sources jamais du même moment. Ce que le serveur
   // ne dit pas, l'écran ne le devine pas.
   String _selectedFilter = 'all'; // all, active, suspended
-  List<User> _filteredClients = [];
+  List<eccore.Customer> _filteredClients = [];
   bool _hasInitialized = false;
 
   @override
@@ -63,9 +63,9 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     _filteredClients = allClients.where((client) {
       // Filtre de recherche
       final matchesSearch = _searchQuery.isEmpty ||
-          client.name.toLowerCase().contains(_searchQuery) ||
+          client.fullName.toLowerCase().contains(_searchQuery) ||
           client.email.toLowerCase().contains(_searchQuery) ||
-          (client.phone.toLowerCase().contains(_searchQuery));
+          ((client.phone ?? '').toLowerCase().contains(_searchQuery));
 
       // Filtre par statut
       final matchesFilter = _selectedFilter == 'all' ||
@@ -76,7 +76,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     }).toList();
   }
 
-  bool _isSuspended(User client) {
+  bool _isSuspended(eccore.Customer client) {
     // Vérifier si le client est suspendu (is_active = false dans la DB)
     return !client.isActive;
   }
@@ -211,7 +211,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                       context,
                                     ).colorScheme.primary,
                                     child: Text(
-                                      client.name.substring(0, 1).toUpperCase(),
+                                      client.fullName.substring(0, 1).toUpperCase(),
                                       style: TextStyle(
                                         color: Theme.of(
                                           context,
@@ -221,7 +221,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                     ),
                                   ),
                                   title: Text(
-                                    client.name,
+                                    client.fullName,
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -231,7 +231,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(client.email),
-                                      Text(client.phone),
+                                      Text(client.phone ?? '—'),
                                       const SizedBox(height: 4),
                                       Row(
                                         children: [
@@ -332,7 +332,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     );
   }
 
-  void _handleClientAction(String action, User client) {
+  void _handleClientAction(String action, eccore.Customer client) {
     switch (action) {
       case 'view':
         _showClientDetails(client, context.read<AppService>());
@@ -349,7 +349,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     }
   }
 
-  Future<void> _showClientDetails(User client, AppService appService) async {
+  Future<void> _showClientDetails(eccore.Customer client, AppService appService) async {
     final clientService = context.read<ClientManagementService>();
 
     // Agrégat calculé par le serveur : le panier moyen porte sur toutes les
@@ -370,14 +370,14 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     unawaited(DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Détails du client: ${client.name}'),
+        title: Text('Détails du client: ${client.fullName}'),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildDetailRow('Email', client.email),
-              _buildDetailRow('Téléphone', client.phone),
+              _buildDetailRow('Téléphone', client.phone ?? '—'),
               _buildDetailRow('Total commandes', '${stats.ordersCount}'),
               _buildDetailRow('Commandes livrées', '${stats.ordersDelivered}'),
               _buildDetailRow('Commandes annulées', '${stats.ordersCancelled}'),
@@ -440,7 +440,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     );
   }
 
-  Future<void> _showClientOrders(User client) async {
+  Future<void> _showClientOrders(eccore.Customer client) async {
     final clientService = context.read<ClientManagementService>();
     final orders = await clientService.getClientOrders(client.id);
 
@@ -449,7 +449,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     unawaited(DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Historique des commandes: ${client.name}'),
+        title: Text('Historique des commandes: ${client.fullName}'),
         content: SizedBox(
           width: double.maxFinite,
           height: 400,
@@ -529,7 +529,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     }
   }
 
-  Future<void> _suspendClient(User client) async {
+  Future<void> _suspendClient(eccore.Customer client) async {
     final reasonController = TextEditingController();
     final confirmed = await DialogHelper.showSafeDialog<bool>(
       context: context,
@@ -540,7 +540,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Client: ${client.name}',
+              'Client: ${client.fullName}',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
@@ -593,7 +593,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
           SnackBar(
             content: Text(
               success
-                  ? '✅ ${client.name} a été suspendu'
+                  ? '✅ ${client.fullName} a été suspendu'
                   : '❌ Erreur lors de la suspension',
             ),
             backgroundColor: inverseSurfaceColor,
@@ -603,7 +603,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     }
   }
 
-  Future<void> _showLoyaltyPoints(User client) async {
+  Future<void> _showLoyaltyPoints(eccore.Customer client) async {
     // Le solde vient du serveur : la liste ne le porte pas, et l'afficher
     // depuis une valeur locale montrerait un chiffre d'une autre heure.
     final stats = await context.read<ClientManagementService>().getClientStats(
@@ -616,7 +616,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
       context: context,
       builder: (context) => AlertDialog(
         // Note: on récupère les tokens ici car on est dans le builder du dialog
-        title: Text('Points Fidélité: ${client.name}'),
+        title: Text('Points Fidélité: ${client.fullName}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -657,7 +657,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
 
     for (final client in clients) {
       csvBuffer.writeln(
-          '${client.id},"${client.name}","${client.email}","${client.phone}",${client.isActive},${client.createdAt.toIso8601String()}',);
+          '${client.id},"${client.fullName}","${client.email}","${client.phone}",${client.isActive},${client.createdAt.toIso8601String()}',);
     }
 
     final csvContent = csvBuffer.toString();

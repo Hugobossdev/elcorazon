@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:admin/models/user.dart' as app_user;
 
 /// Session du back-office, contre `/api/v1/auth/*` (Phase 6).
 ///
@@ -59,7 +58,7 @@ class AdminAuthService extends ChangeNotifier {
   Duration _inactivityTimeout = const Duration(minutes: 30);
   bool _autoLogoutEnabled = true;
 
-  app_user.User? get currentAdmin => _staff == null ? null : _toLocalUser(_staff!);
+  eccore.User? get currentAdmin => _staff;
   bool get isAuthenticated => _staff != null;
   bool get isLoading => _isLoading;
   Duration get inactivityTimeout => _inactivityTimeout;
@@ -209,20 +208,6 @@ class AdminAuthService extends ChangeNotifier {
     if (!isAuthenticated || !_autoLogoutEnabled) return true;
     if (_lastActivity == null) return false;
     return DateTime.now().difference(_lastActivity!) < _inactivityTimeout;
-  }
-
-  app_user.User _toLocalUser(eccore.User user) {
-    return app_user.User(
-      id: user.id,
-      authUserId: user.id,
-      name: user.fullName,
-      email: user.email,
-      phone: user.phone ?? '',
-      role: app_user.UserRole.admin,
-      profileImage: user.avatar,
-      createdAt: user.createdAt,
-      isActive: user.isActive,
-    );
   }
 
   @override

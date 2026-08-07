@@ -1,8 +1,8 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:admin/services/app_service.dart';
-import 'package:admin/models/user.dart';
 import 'package:admin/services/analytics_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/models/order.dart';
@@ -112,7 +112,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   Widget _buildOverviewTab(
     BuildContext context,
-    User? user,
+    eccore.User? user,
     List<Order> orders,
     List<MenuItem> menuItems,
     DriverManagementService driverService,
@@ -257,7 +257,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   // --- Widgets for Overview Tab ---
 
-  Widget _buildWelcomeCard(BuildContext context, User? user) {
+  Widget _buildWelcomeCard(BuildContext context, eccore.User? user) {
     final hour = DateTime.now().hour;
     final greeting = hour < 12
         ? 'Bonjour'
@@ -295,7 +295,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '$greeting, ${user?.name ?? 'Admin'}! 👋',
+                      '$greeting, ${user?.fullName ?? 'Admin'}! 👋',
                       style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: scheme.onPrimary,
