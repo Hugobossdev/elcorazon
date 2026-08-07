@@ -141,10 +141,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                           final category = categories[index - 1];
                           return ListTile(
                             leading: Text(
-                              category.emoji != null &&
-                                      category.emoji!.isNotEmpty
-                                  ? category.emoji!
-                                  : '📁',
+                              category.emoji.isEmpty ? '📁' : category.emoji,
                               style: const TextStyle(fontSize: 20),
                             ),
                             title: Text(category.name),

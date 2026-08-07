@@ -1,7 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:admin/models/category.dart' as app_models;
 import 'package:admin/models/menu_models.dart';
 import 'package:admin/models/order.dart';
 import 'package:admin/repositories/django_order_mapper.dart';
@@ -40,7 +39,7 @@ class AppService extends ChangeNotifier {
 
   bool _isInitialized = false;
   List<MenuItem> _menuItems = [];
-  List<app_models.Category> _categories = [];
+  List<eccore.ManagedCategory> _categories = [];
   List<Order> _allOrders = [];
   String? _error;
 
@@ -48,7 +47,7 @@ class AppService extends ChangeNotifier {
   String? get error => _error;
 
   List<MenuItem> get menuItems => _menuItems;
-  List<app_models.Category> get categoriesList => _categories;
+  List<eccore.ManagedCategory> get categoriesList => _categories;
   List<Order> get allOrders => _allOrders;
 
   List<Order> get pendingOrders =>
@@ -92,7 +91,7 @@ class AppService extends ChangeNotifier {
       final categories = await _catalog.categories(
         restaurantSlug: _restaurantSlug,
       );
-      _categories = categories.map(_toLocalCategory).toList();
+      _categories = categories;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('Contexte : chargement partiel — ${e.code}');
@@ -125,15 +124,4 @@ class AppService extends ChangeNotifier {
     );
   }
 
-  app_models.Category _toLocalCategory(eccore.Category remote) {
-    return app_models.Category(
-      id: remote.id,
-      name: remote.name,
-      description: remote.description.isEmpty ? null : remote.description,
-      emoji: remote.emoji.isEmpty ? null : remote.emoji,
-      displayOrder: remote.sortOrder,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
-  }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/category_management_service.dart';
-import 'package:admin/models/category.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/ui/ui.dart';
@@ -71,7 +71,7 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
                 newIndex -= 1;
               }
               // Créer une nouvelle liste pour ne pas modifier l'état directement
-              final newCategories = List<Category>.from(categories);
+              final newCategories = List<eccore.ManagedCategory>.from(categories);
               final item = newCategories.removeAt(oldIndex);
               newCategories.insert(newIndex, item);
 
@@ -94,7 +94,7 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      category.emoji ?? '🍽️',
+                      category.emoji.isEmpty ? '🍽️' : category.emoji,
                       style: const TextStyle(fontSize: 20),
                     ),
                   ),
@@ -103,7 +103,8 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: Text(
-                    '${category.description ?? 'Pas de description'} • ${category.isActive ? 'Active' : 'Inactive'}',
+                    '${category.description.isEmpty ? 'Pas de description' : category.description}'
+                    ' • ${category.isActive ? 'Active' : 'Inactive'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -152,7 +153,7 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
     );
   }
 
-  void _showCategoryDialog(BuildContext context, {Category? category}) {
+  void _showCategoryDialog(BuildContext context, {eccore.ManagedCategory? category}) {
     final nameController = TextEditingController(text: category?.name);
     final descController = TextEditingController(text: category?.description);
     final emojiController =

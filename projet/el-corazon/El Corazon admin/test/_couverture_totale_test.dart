@@ -10,7 +10,6 @@ import 'package:admin/core/constants/admin_constants.dart';
 import 'package:admin/core/utils/admin_helpers.dart';
 import 'package:admin/dialogs/notifications_dialog.dart';
 import 'package:admin/main.dart';
-import 'package:admin/models/category.dart';
 import 'package:admin/models/driver.dart';
 import 'package:admin/models/driver_document.dart';
 import 'package:admin/models/menu_models.dart';

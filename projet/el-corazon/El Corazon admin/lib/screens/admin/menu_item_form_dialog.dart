@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:admin/models/menu_models.dart';
-import 'package:admin/models/category.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/services/menu_service.dart';
 import 'package:admin/services/category_management_service.dart';
 import 'package:admin/widgets/custom_button.dart';
@@ -306,7 +306,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
     );
   }
 
-  Widget _buildGeneralInfoTab(List<Category> categories) {
+  Widget _buildGeneralInfoTab(List<eccore.ManagedCategory> categories) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(

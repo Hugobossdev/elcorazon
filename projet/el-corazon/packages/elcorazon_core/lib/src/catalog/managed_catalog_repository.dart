@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 
 import 'package:elcorazon_core/src/models/money.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
-import 'package:elcorazon_core/src/catalog/category.dart';
+import 'package:elcorazon_core/src/catalog/managed_category.dart';
 import 'package:elcorazon_core/src/catalog/menu_item.dart';
 import 'package:elcorazon_core/src/catalog/option_template.dart';
 
@@ -29,15 +29,15 @@ class ManagedCatalogRepository {
   ///
   /// La liste publique les filtre ; celle-ci les montre, sans quoi désactiver
   /// une catégorie la ferait disparaître de l'écran qui sert à la réactiver.
-  Future<List<Category>> categories({String? restaurantSlug}) {
+  Future<List<ManagedCategory>> categories({String? restaurantSlug}) {
     return _collect(
       '/catalog/manage/categories/',
-      Category.fromJson,
+      ManagedCategory.fromJson,
       queryParameters: {if (restaurantSlug != null) 'restaurant__slug': restaurantSlug},
     );
   }
 
-  Future<Category> createCategory({
+  Future<ManagedCategory> createCategory({
     required String restaurantSlug,
     required String name,
     required String slug,
@@ -58,10 +58,10 @@ class ManagedCatalogRepository {
         'is_active': isActive,
       },
     );
-    return Category.fromJson(response.data as Map<String, dynamic>);
+    return ManagedCategory.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<Category> updateCategory({
+  Future<ManagedCategory> updateCategory({
     required String categoryId,
     String? name,
     String? emoji,
@@ -79,7 +79,7 @@ class ManagedCatalogRepository {
         if (isActive != null) 'is_active': isActive,
       },
     );
-    return Category.fromJson(response.data as Map<String, dynamic>);
+    return ManagedCategory.fromJson(response.data as Map<String, dynamic>);
   }
 
   Future<void> deleteCategory(String categoryId) async {

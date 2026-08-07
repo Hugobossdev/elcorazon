@@ -1,7 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:flutter/foundation.dart' hide Category;
+import 'package:flutter/foundation.dart';
 
-import 'package:admin/models/category.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Catégories du catalogue — `/api/v1/catalog/manage/categories/` (Phase 6).
@@ -21,11 +20,11 @@ class CategoryManagementService extends ChangeNotifier {
   eccore.ManagedCatalogRepository get _catalog =>
       eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient);
 
-  List<Category> _categories = [];
+  List<eccore.ManagedCategory> _categories = [];
   bool _isLoading = false;
   String? _error;
 
-  List<Category> get categories => _categories;
+  List<eccore.ManagedCategory> get categories => _categories;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
@@ -40,7 +39,7 @@ class CategoryManagementService extends ChangeNotifier {
 
     try {
       final remote = await _catalog.categories(restaurantSlug: _restaurantSlug);
-      _categories = remote.map(_toLocal).toList();
+      _categories = remote;
       eccore.Journal.trace('CategoryManagementService: ${_categories.length} catégorie(s)');
     } on eccore.ApiException catch (e) {
       _error = e.detail;
@@ -52,17 +51,6 @@ class CategoryManagementService extends ChangeNotifier {
     }
   }
 
-  Category _toLocal(eccore.Category remote) {
-    return Category(
-      id: remote.id,
-      name: remote.name,
-      description: remote.description.isEmpty ? null : remote.description,
-      displayOrder: remote.sortOrder,
-      emoji: remote.emoji,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
-  }
 
   /// Rafraîchir les catégories
   Future<void> refreshCategories() async {
@@ -70,7 +58,7 @@ class CategoryManagementService extends ChangeNotifier {
   }
 
   /// Créer une nouvelle catégorie
-  Future<Category?> createCategory({
+  Future<eccore.ManagedCategory?> createCategory({
     required String name,
     required String displayName,
     required String emoji,
@@ -93,10 +81,9 @@ class CategoryManagementService extends ChangeNotifier {
         sortOrder: sortOrder ?? _categories.length + 1,
       );
 
-      final locale = _toLocal(created);
-      _categories.add(locale);
+      _categories.add(created);
       _sortCategories();
-      return locale;
+      return created;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('CategoryManagementService: création refusée — ${e.code}');
@@ -122,7 +109,7 @@ class CategoryManagementService extends ChangeNotifier {
   }
 
   /// Mettre à jour une catégorie
-  Future<bool> updateCategory(Category category) async {
+  Future<bool> updateCategory(eccore.ManagedCategory category) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -132,14 +119,14 @@ class CategoryManagementService extends ChangeNotifier {
         categoryId: category.id,
         name: category.name,
         emoji: category.emoji,
-        description: category.description ?? '',
-        sortOrder: category.displayOrder,
+        description: category.description,
+        sortOrder: category.sortOrder,
         isActive: category.isActive,
       );
 
       final index = _categories.indexWhere((c) => c.id == category.id);
       if (index != -1) {
-        _categories[index] = _toLocal(updated);
+        _categories[index] = updated;
         _sortCategories();
       }
       return true;
@@ -186,8 +173,8 @@ class CategoryManagementService extends ChangeNotifier {
   ///
   /// Un `PATCH` par catégorie déplacée : le contrat n'a pas de route de
   /// réordonnancement en lot, et l'ordre est une simple valeur (`sort_order`).
-  Future<bool> reorderCategories(List<Category> reorderedCategories) async {
-    final avant = List<Category>.from(_categories);
+  Future<bool> reorderCategories(List<eccore.ManagedCategory> reorderedCategories) async {
+    final avant = List<eccore.ManagedCategory>.from(_categories);
     _categories = List.from(reorderedCategories);
     notifyListeners();
 
@@ -260,7 +247,7 @@ class CategoryManagementService extends ChangeNotifier {
   }
 
   /// Rechercher des catégories
-  List<Category> searchCategories(String query) {
+  List<eccore.ManagedCategory> searchCategories(String query) {
     if (query.isEmpty) return _categories;
 
     final q = query.toLowerCase();
@@ -268,22 +255,22 @@ class CategoryManagementService extends ChangeNotifier {
         .where(
           (category) =>
               category.name.toLowerCase().contains(q) ||
-              (category.description?.toLowerCase().contains(q) ?? false),
+              category.description.toLowerCase().contains(q),
         )
         .toList();
   }
 
   /// Obtenir les catégories actives
-  List<Category> get activeCategories =>
+  List<eccore.ManagedCategory> get activeCategories =>
       _categories.where((c) => c.isActive).toList();
 
   /// Obtenir les catégories inactives
-  List<Category> get inactiveCategories =>
+  List<eccore.ManagedCategory> get inactiveCategories =>
       _categories.where((c) => !c.isActive).toList();
 
   /// Trier les catégories par ordre d'affichage
   void _sortCategories() {
-    _categories.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
+    _categories.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
   }
 
   /// Initialiser le service
