@@ -390,9 +390,10 @@ class CartScreen extends StatelessWidget {
           ),
         ),
         Text(
-          isDiscount
-              ? '-${PriceFormatter.format(amount)}'
-              : PriceFormatter.format(amount),
+          // Pas de signe ajouté ici : la remise arrive déjà négative (`-discount`)
+          // et le formateur du socle rend le signe. Le préfixer une seconde fois
+          // écrivait « --.500 CFA ». `isDiscount` ne pilote plus que la couleur.
+          PriceFormatter.format(amount),
           style: TextStyle(
             fontSize: isTotal ? 18 : 16,
             fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,

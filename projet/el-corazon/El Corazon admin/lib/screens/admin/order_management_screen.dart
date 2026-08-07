@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../services/app_service.dart';
-import '../../models/order.dart';
-import '../../widgets/custom_button.dart';
-import '../../utils/dialog_helper.dart';
-import 'driver_assignment_dialog.dart';
-import '../../services/order_management_service.dart';
-import '../../services/payments_service.dart';
-import '../../widgets/order_timeline_widget.dart';
-import '../../utils/price_formatter.dart';
+import 'package:admin/services/app_service.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/screens/admin/driver_assignment_dialog.dart';
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/services/payments_service.dart';
+import 'package:admin/widgets/order_timeline_widget.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 class OrderManagementScreen extends StatefulWidget {
   const OrderManagementScreen({super.key});
@@ -773,7 +773,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.1),
-          width: 1,
         ),
       ),
       child: Padding(
@@ -895,7 +894,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.1),
-          width: 1,
         ),
       ),
       child: Padding(
@@ -924,7 +922,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: const Color(0xFFFF6A00).withValues(alpha: 0.2),
-                    width: 1,
                   ),
                 ),
                 child: Column(
@@ -1036,7 +1033,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                         width: 4,
                                         height: 4,
                                         margin: const EdgeInsets.only(
-                                            top: 6, right: 8),
+                                            top: 6, right: 8,),
                                         decoration: const BoxDecoration(
                                           color: Color(0xFFFF6A00),
                                           shape: BoxShape.circle,
@@ -1054,7 +1051,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                       ),
                                     ],
                                   ),
-                                )),
+                                ),),
                           ],
                         ),
                       ),
@@ -1069,7 +1066,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: Colors.blue.withValues(alpha: 0.3),
-                            width: 1,
                           ),
                         ),
                         child: Row(
@@ -1112,7 +1108,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.1),
-          width: 1,
         ),
       ),
       child: Padding(
@@ -1397,7 +1392,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
   }
 
   List<Order> _filterOrders(List<Order> orders) {
-    var filtered = orders.where((order) {
+    final filtered = orders.where((order) {
       // Search filter
       if (_searchController.text.isNotEmpty) {
         final searchText = _searchController.text.toLowerCase();
@@ -2041,7 +2036,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                     gradient: const LinearGradient(
                                       colors: [
                                         Color(0xFFFF6A00),
-                                        Color(0xFFFF8A50)
+                                        Color(0xFFFF8A50),
                                       ],
                                     ),
                                     borderRadius: BorderRadius.circular(8),
@@ -2096,7 +2091,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                   if (customizations.isNotEmpty) ...[
                                     Padding(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 16, vertical: 8),
+                                          horizontal: 16, vertical: 8,),
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
@@ -2123,7 +2118,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                           ...customizations.map((custom) =>
                                               Padding(
                                                 padding: const EdgeInsets.only(
-                                                    bottom: 4, left: 22),
+                                                    bottom: 4, left: 22,),
                                                 child: Row(
                                                   crossAxisAlignment:
                                                       CrossAxisAlignment.start,
@@ -2133,7 +2128,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                                       height: 4,
                                                       margin:
                                                           const EdgeInsets.only(
-                                                              top: 6, right: 8),
+                                                              top: 6, right: 8,),
                                                       decoration:
                                                           const BoxDecoration(
                                                         color:
@@ -2153,7 +2148,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                                     ),
                                                   ],
                                                 ),
-                                              )),
+                                              ),),
                                         ],
                                       ),
                                     ),
@@ -2162,7 +2157,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                       item.notes!.isNotEmpty) ...[
                                     Padding(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 16, vertical: 8),
+                                          horizontal: 16, vertical: 8,),
                                       child: Container(
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
@@ -2171,7 +2166,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                               BorderRadius.circular(8),
                                           border: Border.all(
                                             color: Colors.blue[200]!,
-                                            width: 1,
                                           ),
                                         ),
                                         child: Row(
@@ -2486,7 +2480,10 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
             clientName,
             order.deliveryAddress,
             order.status.displayName,
-            PriceFormatter.format(order.total).replaceAll(' ', ''),
+            // `\s` et non l'espace ordinaire : le socle sépare les milliers par
+            // une espace insécable étroite (U+202F), qu'un `replaceAll(' ')`
+            // laisserait filer jusque dans la cellule du tableur.
+            PriceFormatter.format(order.total).replaceAll(RegExp(r'\s'), ''),
             order.items.length,
           ].map(_csvChamp).join(','),
         );

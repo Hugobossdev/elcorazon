@@ -1,19 +1,25 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as socle;
+
+/// Délégation vers la règle d'affichage des montants du socle.
+///
+/// Les trois applications portaient chacune la sienne, et elles ne rendaient
+/// pas la même chose pour un même montant : « 12.500 CFA » ici et chez le
+/// livreur, « 12 500 CFA » au back-office. La règle est désormais unique et
+/// testée — `formatPrice()` / `Money.format()` dans `elcorazon_core`.
+///
+/// Ce fichier ne subsiste que pour laisser intacts les points d'appel qui
+/// manipulent encore un `double`. Il disparaîtra au lot 3, quand les écrans
+/// porteront des `Money` — voir `docs/refactoring-2026-08.md` §4.
 class PriceFormatter {
-  static String format(double price) {
-    // Formatage en franc CFA avec séparateur de milliers
-    final priceString = price.toStringAsFixed(0);
-    final parts = <String>[];
-    
-    // Diviser le prix en groupes de 3 chiffres
-    for (int i = priceString.length; i > 0; i -= 3) {
-      final start = i - 3 < 0 ? 0 : i - 3;
-      parts.insert(0, priceString.substring(start, i));
-    }
-    
-    return '${parts.join('.')} CFA';
-  }
+  /// Formate un montant exprimé en **unité majeure** — 12500.0 pour
+  /// 12 500 F CFA — en francs CFA, la seule devise que ces écrans affichent.
+  ///
+  /// Trois différences avec la version qu'elle remplace, toutes voulues : les
+  /// milliers sont séparés par une espace insécable étroite et non par un
+  /// point, un montant négatif garde son signe au lieu de rendre « -.500 CFA »,
+  /// et `NaN` comme l'infini rendent « 0 CFA » au lieu de « NaN CFA ».
+  static String format(double price) => socle.formatPrice(price);
 }
 
-String formatPrice(double price) {
-  return PriceFormatter.format(price);
-}
+/// Voir [PriceFormatter.format].
+String formatPrice(double price) => socle.formatPrice(price);
