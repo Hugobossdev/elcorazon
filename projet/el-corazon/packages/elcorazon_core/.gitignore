@@ -3,3 +3,8 @@
 .flutter-plugins-dependencies
 build/
 pubspec.lock
+
+# Rapport de `flutter test --coverage`, lu par `tools/couverture.py`. Les trois
+# applications l'ignorent déjà ; ce paquet ne le faisait pas, faute d'avoir
+# jamais été mesuré.
+/coverage/

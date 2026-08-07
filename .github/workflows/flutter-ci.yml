@@ -94,6 +94,10 @@ jobs:
           channel: stable
           cache: true
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - run: flutter pub get
 
       - name: Analyse — aucun écart toléré
@@ -114,8 +118,14 @@ jobs:
         # champs décidés par le serveur qu'un client n'a pas à envoyer
         # (`is_public`, `is_verified_purchase`, compteurs, identifiants
         # d'utilisateur).
-        run: flutter test
+        run: flutter test --coverage
 
+      - name: Plancher de couverture
+        # `flutter test --coverage` n'instrumente que les fichiers qu'un test
+        # charge : sur `dely`, 3 fichiers sur 48, et un ratio brut de 29,96 %
+        # pour une couverture réelle de 1,31 %. `tools/couverture.py` rétablit
+        # le dénominateur et refuse toute baisse.
+        run: python ../../tools/couverture.py "packages/elcorazon_core"
 
   applications:
     name: ${{ matrix.nom }}
@@ -127,10 +137,13 @@ jobs:
         include:
           - nom: Client (fastfood)
             chemin: "projet/el-corazon/El Corazon fastfood"
+            nom_repertoire: "El Corazon fastfood"
           - nom: Livreur (dely)
             chemin: "projet/el-corazon/El corazon dely"
+            nom_repertoire: "El corazon dely"
           - nom: Back-office (admin)
             chemin: "projet/el-corazon/El Corazon admin"
+            nom_repertoire: "El Corazon admin"
     defaults:
       run:
         working-directory: ${{ matrix.chemin }}
@@ -142,6 +155,10 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
       - name: Fichier .env
         # Les trois `pubspec.yaml` déclarent `.env` comme asset, et le fichier
@@ -174,5 +191,11 @@ jobs:
         # Bloquant, sans exception. L'analyseur attrape ce qui ne compile pas ;
         # il ne dit rien d'un écran qui affiche le mauvais prix, ni d'une saisie
         # de carte bancaire qui reviendrait dans l'application du livreur.
-        run: flutter test
+        run: flutter test --coverage
 
+      - name: Plancher de couverture
+        # Bas — il constate l'existant (0,99 % à 3,51 %) plutôt qu'il ne fixe
+        # une cible. C'est un cliquet : il se relève à chaque domaine migré au
+        # lot 3, et interdit d'ici là qu'on ajoute du code non testé sans que
+        # la mesure bouge.
+        run: python ../tools/couverture.py "${{ matrix.nom_repertoire }}"
