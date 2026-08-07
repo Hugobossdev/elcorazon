@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Rôles et permissions du personnel — `/administration/roles/` et
 /// `/restaurants/staff/` (Phase 6).
@@ -76,7 +76,7 @@ class RoleManagementService extends ChangeNotifier {
       _staff = await _admin.staff();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Rôles : chargement impossible — ${e.code}');
+      eccore.Journal.trace('Rôles : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -101,7 +101,7 @@ class RoleManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Rôles : création refusée — ${e.code}');
+      eccore.Journal.trace('Rôles : création refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -131,7 +131,7 @@ class RoleManagementService extends ChangeNotifier {
           ? "Les rôles fournis à l'installation ne se modifient pas : "
                 'créez-en un sur mesure et attribuez-le.'
           : e.detail;
-      debugPrint('Rôles : modification refusée — ${e.code}');
+      eccore.Journal.trace('Rôles : modification refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -150,7 +150,7 @@ class RoleManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Rôles : attribution refusée — ${e.code}');
+      eccore.Journal.trace('Rôles : attribution refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -171,7 +171,7 @@ class RoleManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint("Rôles : changement d'état refusé — ${e.code}");
+      eccore.Journal.trace("Rôles : changement d'état refusé — ${e.code}");
       notifyListeners();
       return false;
     }

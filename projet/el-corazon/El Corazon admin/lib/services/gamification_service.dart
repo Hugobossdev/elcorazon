@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Catalogues de fidélisation — `/gamification/manage/*` et
 /// `/loyalty/manage/rewards/` (Phase 6).
@@ -69,7 +69,7 @@ class GamificationService extends ChangeNotifier {
       _loyaltyRewards = (await _catalogues.rewards()).map(_recompense).toList();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Fidélisation : catalogues indisponibles — ${e.code}');
+      eccore.Journal.trace('Fidélisation : catalogues indisponibles — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -317,7 +317,7 @@ class GamificationService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Fidélisation : écriture refusée — ${e.code}');
+      eccore.Journal.trace('Fidélisation : écriture refusée — ${e.code}');
       notifyListeners();
       return false;
     }

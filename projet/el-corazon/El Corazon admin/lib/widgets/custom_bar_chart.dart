@@ -8,9 +8,7 @@ class CustomBarChart extends StatelessWidget {
   final String? tooltipFormat;
 
   const CustomBarChart({
-    super.key,
-    required this.data,
-    required this.labels,
+    required this.data, required this.labels, super.key,
     this.color = Colors.blue,
     this.height = 200,
     this.tooltipFormat,

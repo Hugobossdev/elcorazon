@@ -16,10 +16,9 @@ class User {
     required this.email,
     required this.phone,
     required this.role,
-    this.profileImage,
+    required this.createdAt, this.profileImage,
     this.loyaltyPoints = 0,
     this.badges = const [],
-    required this.createdAt,
     this.isOnline = false,
   });
 

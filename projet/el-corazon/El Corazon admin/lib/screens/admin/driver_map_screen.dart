@@ -2,13 +2,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../../services/driver_management_service.dart';
-import '../../services/geocoding_service.dart' as geocoding;
-import '../../models/driver.dart';
-import '../../models/order.dart';
-import '../../services/order_management_service.dart';
-import '../../services/delivery_zone_service.dart';
-import '../../utils/dialog_helper.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/services/geocoding_service.dart' as geocoding;
+import 'package:admin/models/driver.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DriverMapScreen extends StatefulWidget {
   const DriverMapScreen({super.key});
@@ -87,7 +88,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
             child: IconButton(
               icon: Icon(_showOrders
                   ? Icons.shopping_cart
-                  : Icons.shopping_cart_outlined),
+                  : Icons.shopping_cart_outlined,),
               onPressed: () {
                 setState(() => _showOrders = !_showOrders);
               },
@@ -178,13 +179,13 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                   runSpacing: 4,
                   children: [
                     _buildLegendItem(
-                        DriverStatus.available, 'Disponible', Colors.green),
+                        DriverStatus.available, 'Disponible', Colors.green,),
                     _buildLegendItem(
-                        DriverStatus.onDelivery, 'En livraison', Colors.orange),
+                        DriverStatus.onDelivery, 'En livraison', Colors.orange,),
                     _buildLegendItem(
-                        DriverStatus.offline, 'Hors ligne', Colors.grey),
+                        DriverStatus.offline, 'Hors ligne', Colors.grey,),
                     _buildLegendItem(
-                        DriverStatus.unavailable, 'Indisponible', Colors.red),
+                        DriverStatus.unavailable, 'Indisponible', Colors.red,),
                   ],
                 ),
               ],
@@ -238,7 +239,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                             order.status == OrderStatus.preparing ||
                             order.status == OrderStatus.ready ||
                             order.status == OrderStatus.pickedUp ||
-                            order.status == OrderStatus.onTheWay)
+                            order.status == OrderStatus.onTheWay,)
                         .toList()
                     : <Order>[];
 
@@ -282,7 +283,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                           final onlineCount = service.drivers
                               .where((d) =>
                                   d.status == DriverStatus.available ||
-                                  d.status == DriverStatus.onDelivery)
+                                  d.status == DriverStatus.onDelivery,)
                               .length;
                           return Text(
                             '$onlineCount en ligne',
@@ -334,7 +335,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                               title: Text(
                                 driver.name,
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
+                                    fontWeight: FontWeight.bold,),
                               ),
                               subtitle: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -391,11 +392,11 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   }
 
   Widget _buildMapView(List<Driver> drivers, List<Order> orders) {
-    Set<Marker> markers = {};
-    Set<Polyline> polylines = {};
+    final Set<Marker> markers = {};
+    final Set<Polyline> polylines = {};
 
     // Marqueurs pour les livreurs
-    for (var driver in drivers) {
+    for (final driver in drivers) {
       if (driver.latitude != null && driver.longitude != null) {
         markers.add(
           Marker(
@@ -422,7 +423,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     if (_showOrders) {
       final geocodingService = geocoding.GeocodingService();
 
-      for (var order in orders) {
+      for (final order in orders) {
         // Si la commande a un livreur assigné et qu'il est en livraison
         if (order.deliveryPersonId != null) {
           final driver = drivers.firstWhere(
@@ -475,7 +476,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   }
 
   Widget _buildMapWidget(
-      Set<Marker> markers, Set<Polyline> polylines, List<Driver> drivers) {
+      Set<Marker> markers, Set<Polyline> polylines, List<Driver> drivers,) {
     return GoogleMap(
       initialCameraPosition: _initialPosition,
       markers: markers,
@@ -488,9 +489,6 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
         }
       },
       myLocationEnabled: true,
-      zoomControlsEnabled: true,
-      mapType: MapType.normal,
-      compassEnabled: true,
       mapToolbarEnabled: false,
       onTap: (LatLng position) {
         // Fermer les info windows si on clique ailleurs
@@ -564,7 +562,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Erreur géocodage commande ${order.id}: $e');
+      Journal.trace('Erreur géocodage commande ${order.id}: $e');
     }
   }
 
@@ -582,7 +580,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     double minLng = validDrivers.first.longitude!;
     double maxLng = validDrivers.first.longitude!;
 
-    for (var driver in validDrivers) {
+    for (final driver in validDrivers) {
       if (driver.latitude != null && driver.longitude != null) {
         minLat = minLat < driver.latitude! ? minLat : driver.latitude!;
         maxLat = maxLat > driver.latitude! ? maxLat : driver.latitude!;
@@ -615,7 +613,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
             _buildInfoRow('Adresse', order.deliveryAddress),
             _buildInfoRow('Montant', '${order.total} CFA'),
             _buildInfoRow('Date',
-                '${order.orderTime.day}/${order.orderTime.month}/${order.orderTime.year}'),
+                '${order.orderTime.day}/${order.orderTime.month}/${order.orderTime.year}',),
           ],
         ),
         actions: [
@@ -654,7 +652,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
           decoration: BoxDecoration(
             color: color,
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 1),
+            border: Border.all(color: Colors.white),
           ),
         ),
         const SizedBox(width: 4),
@@ -824,7 +822,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text('Zone:',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
+                              style: TextStyle(fontWeight: FontWeight.bold),),
                           const SizedBox(height: 8),
                           Container(
                             constraints: const BoxConstraints(
@@ -838,17 +836,17 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                               ),
                               items: [
                                 const DropdownMenuItem(
-                                    value: null, child: Text('Toutes')),
+                                    child: Text('Toutes'),),
                                 ...[
                                   'Zone Centre',
                                   'Zone Nord',
                                   'Zone Sud',
                                   'Zone Est',
-                                  'Zone Ouest'
+                                  'Zone Ouest',
                                 ].map((zone) => DropdownMenuItem(
                                       value: zone,
                                       child: Text(zone),
-                                    )),
+                                    ),),
                               ],
                               onChanged: (value) {
                                 setState(() {
@@ -860,7 +858,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                           ),
                           const SizedBox(height: 24),
                           const Text('Statut:',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
+                              style: TextStyle(fontWeight: FontWeight.bold),),
                           const SizedBox(height: 8),
                           Container(
                             constraints: const BoxConstraints(
@@ -874,7 +872,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                               ),
                               items: [
                                 const DropdownMenuItem(
-                                    value: null, child: Text('Tous')),
+                                    child: Text('Tous'),),
                                 ...DriverStatus.values
                                     .map((status) => DropdownMenuItem(
                                           value: status,
@@ -882,12 +880,12 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                                             children: [
                                               Icon(status.icon,
                                                   size: 18,
-                                                  color: status.color),
+                                                  color: status.color,),
                                               const SizedBox(width: 8),
                                               Text(status.displayName),
                                             ],
                                           ),
-                                        )),
+                                        ),),
                               ],
                               onChanged: (value) {
                                 setState(() {

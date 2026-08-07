@@ -2,9 +2,9 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../services/role_management_service.dart';
-import '../../utils/dialog_helper.dart';
-import '../../widgets/loading_widget.dart';
+import 'package:admin/services/role_management_service.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/widgets/loading_widget.dart';
 
 /// Rôles & permissions — composés à partir du **registre du serveur**.
 ///

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Bannières de notification **locales** (plugin système) — Phase 6.
 ///
@@ -112,6 +113,6 @@ class NotificationService extends ChangeNotifier {
 
   void _handleNotificationTap(NotificationResponse response) {
     // Gérer l'action quand l'utilisateur tape sur une notification
-    debugPrint('Notification tapped: ${response.payload}');
+    Journal.trace('Notification tapped: ${response.payload}');
   }
 }

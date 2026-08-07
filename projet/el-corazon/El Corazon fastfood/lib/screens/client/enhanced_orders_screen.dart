@@ -12,6 +12,7 @@ import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran amélioré de l'historique des commandes avec filtres et tri
 class EnhancedOrdersScreen extends StatefulWidget {
@@ -564,7 +565,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
             addedCount++;
           }
         } catch (e) {
-          debugPrint(
+          Journal.trace(
               'Erreur lors de l\'ajout de l\'item ${orderItem.name}: $e',);
         }
       }
@@ -600,7 +601,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
         );
       }
     } catch (e) {
-      debugPrint('Erreur lors de la réorganisation: $e');
+      Journal.trace('Erreur lors de la réorganisation: $e');
       if (mounted && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

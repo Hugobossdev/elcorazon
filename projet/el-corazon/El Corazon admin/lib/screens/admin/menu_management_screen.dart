@@ -1,15 +1,16 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../models/menu_models.dart';
-import '../../services/menu_service.dart';
-import '../../services/category_management_service.dart';
-import '../../widgets/modern/modern_button.dart';
-import '../../widgets/modern/modern_card.dart';
-import '../../widgets/loading_widget.dart';
-import '../../utils/dialog_helper.dart';
-import '../../utils/price_formatter.dart';
-import 'menu_item_form_dialog.dart';
-import 'category_management_screen.dart';
+import 'package:admin/models/menu_models.dart';
+import 'package:admin/services/menu_service.dart';
+import 'package:admin/services/category_management_service.dart';
+import 'package:admin/widgets/modern/modern_button.dart';
+import 'package:admin/widgets/modern/modern_card.dart';
+import 'package:admin/widgets/loading_widget.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/utils/price_formatter.dart';
+import 'package:admin/screens/admin/menu_item_form_dialog.dart';
+import 'package:admin/screens/admin/category_management_screen.dart';
 
 class MenuManagementScreen extends StatefulWidget {
   const MenuManagementScreen({super.key});
@@ -210,7 +211,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                               backgroundColor:
                                   Theme.of(context).scaffoldBackgroundColor,
                               shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
+                                  borderRadius: BorderRadius.circular(12),),
                             ),
                           ),
                         ),
@@ -228,7 +229,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                             fillColor:
                                 Theme.of(context).scaffoldBackgroundColor,
                             contentPadding:
-                                const EdgeInsets.symmetric(vertical: 0),
+                                EdgeInsets.zero,
                           ),
                         ),
                       ),
@@ -286,7 +287,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
 
                           if (menuService.isLoading) {
                             return const LoadingWidget(
-                                message: 'Chargement des produits...');
+                                message: 'Chargement des produits...',);
                           }
 
                           if (snapshot.hasError) {
@@ -446,7 +447,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                       right: 8,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
+                            horizontal: 8, vertical: 4,),
                         decoration: BoxDecoration(
                           color: scheme.tertiary,
                           borderRadius: BorderRadius.circular(12),
@@ -508,7 +509,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                              horizontal: 6, vertical: 2,),
                           decoration: BoxDecoration(
                             color: theme.colorScheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(4),
@@ -566,12 +567,12 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                             PopupMenuItem(
                               value: 'toggle',
                               child: Text(
-                                  item.isAvailable ? 'Masquer' : 'Afficher'),
+                                  item.isAvailable ? 'Masquer' : 'Afficher',),
                             ),
                             PopupMenuItem(
                               value: 'delete',
                               child: Text('Supprimer',
-                                  style: TextStyle(color: scheme.error)),
+                                  style: TextStyle(color: scheme.error),),
                             ),
                           ],
                         ),
@@ -654,7 +655,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
   ) async {
     final updatedItem = item.copyWith(isAvailable: !item.isAvailable);
     await menuService.updateMenuItem(updatedItem);
-    _refreshMenu();
+    unawaited(_refreshMenu());
   }
 
   Future<void> _deleteMenuItem(
@@ -683,7 +684,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
 
     if (confirmed == true) {
       await menuService.deleteMenuItem(item.id);
-      _refreshMenu();
+      unawaited(_refreshMenu());
     }
   }
 

@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
-import '../models/order.dart';
+import 'package:admin/models/order.dart';
 import 'package:intl/intl.dart';
 
 class OrderTimelineWidget extends StatelessWidget {
   final Order order;
 
   const OrderTimelineWidget({
-    super.key,
-    required this.order,
+    required this.order, super.key,
   });
 
   @override
@@ -23,7 +22,7 @@ class OrderTimelineWidget extends StatelessWidget {
             Row(
               children: [
                 Icon(Icons.history,
-                    color: Theme.of(context).colorScheme.primary),
+                    color: Theme.of(context).colorScheme.primary,),
                 const SizedBox(width: 8),
                 Text(
                   'Timeline de la commande',
@@ -141,7 +140,7 @@ class OrderTimelineWidget extends StatelessWidget {
 
     // Trier par timestamp (plus récent en premier)
     events.sort((a, b) => (b['timestamp'] as DateTime)
-        .compareTo(a['timestamp'] as DateTime));
+        .compareTo(a['timestamp'] as DateTime),);
 
     return events;
   }

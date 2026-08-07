@@ -47,18 +47,9 @@ class PromoCode {
     required this.description,
     required this.type,
     required this.value,
-    this.minimumOrderAmount,
+    required this.usageCount, required this.startDate, required this.endDate, required this.status, required this.applicableCategories, required this.applicableItems, required this.isForNewUsersOnly, required this.createdAt, required this.updatedAt, this.minimumOrderAmount,
     this.maximumDiscountAmount,
     this.usageLimit,
-    required this.usageCount,
-    required this.startDate,
-    required this.endDate,
-    required this.status,
-    required this.applicableCategories,
-    required this.applicableItems,
-    required this.isForNewUsersOnly,
-    required this.createdAt,
-    required this.updatedAt,
   });
 
   PromoCode copyWith({

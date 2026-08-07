@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Option réutilisable de la bibliothèque d'un établissement — miroir de
 /// `ManagedOptionTemplateSerializer`.

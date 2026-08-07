@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Code promotionnel tel que l'affichent les écrans du back-office.
 ///
@@ -140,7 +140,7 @@ class PromotionService extends ChangeNotifier {
       _promotionsLocales = codes.map(Promotion.fromRemote).toList();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Promotions : chargement impossible — ${e.code}');
+      eccore.Journal.trace('Promotions : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -189,7 +189,7 @@ class PromotionService extends ChangeNotifier {
       return locale;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Promotions : création refusée — ${e.code}');
+      eccore.Journal.trace('Promotions : création refusée — ${e.code}');
       notifyListeners();
       return null;
     }
@@ -233,7 +233,7 @@ class PromotionService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Promotions : modification refusée — ${e.code}');
+      eccore.Journal.trace('Promotions : modification refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -251,7 +251,7 @@ class PromotionService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Promotions : suspension refusée — ${e.code}');
+      eccore.Journal.trace('Promotions : suspension refusée — ${e.code}');
       notifyListeners();
       return false;
     }

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/admin_auth_service.dart';
-import '../../services/delivery_zone_service.dart';
-import '../../widgets/custom_text_field.dart';
-import '../../utils/dialog_helper.dart';
+import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/widgets/custom_text_field.dart';
+import 'package:admin/utils/dialog_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'zone_form_dialog.dart';
-import 'zone_selection_tab.dart';
+import 'package:admin/screens/admin/zone_form_dialog.dart';
+import 'package:admin/screens/admin/zone_selection_tab.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});

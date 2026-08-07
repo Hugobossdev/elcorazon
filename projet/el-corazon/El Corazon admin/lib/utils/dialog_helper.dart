@@ -17,7 +17,7 @@ class DialogHelper {
   }) {
     // Vérifier que le contexte est monté
     if (!context.mounted) {
-      return Future.value(null);
+      return Future.value();
     }
 
     // Utiliser showDialog directement mais avec un wrapper pour garantir les contraintes
@@ -45,8 +45,7 @@ class SafeDialogWrapper extends StatelessWidget {
   final Widget child;
 
   const SafeDialogWrapper({
-    super.key,
-    required this.child,
+    required this.child, super.key,
   });
 
   @override

@@ -64,14 +64,14 @@ void main() async {
   try {
     // Load environment variables from .env file
     await dotenv.load();
-    debugPrint('✅ Environment variables loaded');
+    Journal.trace('✅ Environment variables loaded');
 
     // Initialize only essential services at startup for better performance
     await _initializeEssentialServices();
 
-    debugPrint('✅ Essential services initialized successfully');
+    Journal.trace('✅ Essential services initialized successfully');
   } catch (e) {
-    debugPrint('❌ Error initializing essential services: $e');
+    Journal.trace('❌ Error initializing essential services: $e');
     // Continue with app launch even if some services fail
   }
 
@@ -104,9 +104,9 @@ Future<void> _initializeEssentialServices() async {
   // `lib/firebase_options.dart`), et l'app doit démarrer sans push.
   try {
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-    debugPrint('✅ Firebase initialisé');
+    Journal.trace('✅ Firebase initialisé');
   } catch (e) {
-    debugPrint('⚠️ Firebase indisponible, notifications push désactivées: $e');
+    Journal.trace('⚠️ Firebase indisponible, notifications push désactivées: $e');
   }
 
   // Initialize performance monitoring first

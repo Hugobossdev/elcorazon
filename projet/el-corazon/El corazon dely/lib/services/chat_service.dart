@@ -4,7 +4,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import '../models/message.dart';
+import 'package:elcora_dely/models/message.dart';
 
 /// Conversation livreur ↔ client sur `ws/orders/{id}/chat/` (Phase 6).
 ///
@@ -64,9 +64,14 @@ class ChatService extends ChangeNotifier {
   }
 
   Stream<List<Message>> subscribeToMessages(String orderId) {
+    // Fermés par `unsubscribe` via `_controllers.remove(orderId)?.close()`.
+    // Le lint ne suit pas la fermeture au travers de la map.
+    // ignore: close_sinks
     final existing = _controllers[orderId];
     if (existing != null) return existing.stream;
 
+    // Même raison qu'au-dessus.
+    // ignore: close_sinks
     final controller = StreamController<List<Message>>.broadcast();
     _controllers[orderId] = controller;
     _messages[orderId] = [];
@@ -121,7 +126,7 @@ class ChatService extends ChangeNotifier {
   }) async {
     final channel = _channels[orderId];
     if (channel == null) {
-      debugPrint('ChatService: canal non ouvert pour la commande $orderId');
+      eccore.Journal.trace('ChatService: canal non ouvert pour la commande $orderId');
       return false;
     }
 
@@ -129,7 +134,7 @@ class ChatService extends ChangeNotifier {
       channel.send({'text': content});
       return true;
     } catch (e) {
-      debugPrint('ChatService: envoi impossible — $e');
+      eccore.Journal.trace('ChatService: envoi impossible — $e');
       return false;
     }
   }

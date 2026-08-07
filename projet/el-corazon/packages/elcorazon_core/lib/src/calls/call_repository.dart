@@ -1,5 +1,5 @@
-import '../network/api_client.dart';
-import 'call.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/calls/call.dart';
 
 /// Accès à `/api/v1/calls/*` — voir `backend/apps/calls/views.py`.
 ///

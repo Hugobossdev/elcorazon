@@ -1,8 +1,8 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import '../models/driver_document.dart';
-import 'admin_auth_service.dart';
+import 'package:admin/models/driver_document.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Pièces justificatives des livreurs — `/delivery/couriers/` (Phase 6).
 ///
@@ -76,7 +76,7 @@ class DriverDocumentService extends ChangeNotifier {
       _couriers = await _fleet.list();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Dossiers livreurs : chargement impossible — ${e.code}');
+      eccore.Journal.trace('Dossiers livreurs : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -158,7 +158,7 @@ class DriverDocumentService extends ChangeNotifier {
       // La machine à états refuse les transitions impossibles : un dossier
       // rejeté ne repasse pas « validé » sans nouveau dépôt du livreur.
       _error = e.detail;
-      debugPrint('Dossiers livreurs : décision refusée — ${e.code}');
+      eccore.Journal.trace('Dossiers livreurs : décision refusée — ${e.code}');
       notifyListeners();
       return false;
     }

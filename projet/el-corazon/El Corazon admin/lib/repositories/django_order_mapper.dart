@@ -1,6 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
-import '../models/order.dart';
+import 'package:admin/models/order.dart';
 
 /// Traduit une commande du contrat Django vers le modèle local du back-office.
 ///

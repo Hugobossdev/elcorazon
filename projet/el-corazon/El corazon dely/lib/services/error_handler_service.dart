@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Service centralisé pour la gestion des erreurs
 class ErrorHandlerService extends ChangeNotifier {
@@ -36,10 +37,10 @@ class ErrorHandlerService extends ChangeNotifier {
 
     // Log en mode debug
     if (kDebugMode) {
-      debugPrint('🚨 Error: $message');
-      if (code != null) debugPrint('   Code: $code');
-      if (details != null) debugPrint('   Details: $details');
-      if (stackTrace != null) debugPrint('   StackTrace: $stackTrace');
+      Journal.trace('🚨 Error: $message');
+      if (code != null) Journal.trace('   Code: $code');
+      if (details != null) Journal.trace('   Details: $details');
+      if (stackTrace != null) Journal.trace('   StackTrace: $stackTrace');
     }
 
     notifyListeners();
@@ -153,11 +154,9 @@ class AppError {
   final StackTrace? stackTrace;
 
   AppError({
-    String? id,
-    required this.message,
+    required this.message, required this.timestamp, String? id,
     this.code,
     this.details,
-    required this.timestamp,
     this.stackTrace,
   }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 

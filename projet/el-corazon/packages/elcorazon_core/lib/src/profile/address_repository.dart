@@ -1,5 +1,5 @@
-import '../network/api_client.dart';
-import 'address.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/profile/address.dart';
 
 /// Accès à `/api/v1/profiles/addresses/` — voir
 /// `backend/apps/profiles/{serializers,views}.py`. Carnet du client

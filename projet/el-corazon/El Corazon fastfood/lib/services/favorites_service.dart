@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elcora_fast/models/menu_item.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class FavoritesService extends ChangeNotifier {
   static final FavoritesService _instance = FavoritesService._internal();
@@ -24,7 +25,7 @@ class FavoritesService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      debugPrint('Error initializing FavoritesService: $e');
+      Journal.trace('Error initializing FavoritesService: $e');
     }
   }
 
@@ -37,9 +38,9 @@ class FavoritesService extends ChangeNotifier {
       // Convertir les IDs en MenuItems
       // Pour l'instant, on garde juste les IDs
       _favorites.clear();
-      debugPrint('Loaded ${favoriteIds.length} favorites from storage');
+      Journal.trace('Loaded ${favoriteIds.length} favorites from storage');
     } catch (e) {
-      debugPrint('Error loading favorites from storage: $e');
+      Journal.trace('Error loading favorites from storage: $e');
     }
   }
 
@@ -49,9 +50,9 @@ class FavoritesService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       final favoriteIds = _favorites.map((item) => item.id).toList();
       await prefs.setStringList('favorites', favoriteIds);
-      debugPrint('Saved ${favoriteIds.length} favorites to storage');
+      Journal.trace('Saved ${favoriteIds.length} favorites to storage');
     } catch (e) {
-      debugPrint('Error saving favorites to storage: $e');
+      Journal.trace('Error saving favorites to storage: $e');
     }
   }
 
@@ -67,12 +68,12 @@ class FavoritesService extends ChangeNotifier {
         _favorites.add(item);
         await _saveFavoritesToStorage();
         notifyListeners();
-        debugPrint('Added ${item.name} to favorites');
+        Journal.trace('Added ${item.name} to favorites');
         return true;
       }
       return false;
     } catch (e) {
-      debugPrint('Error adding to favorites: $e');
+      Journal.trace('Error adding to favorites: $e');
       return false;
     }
   }
@@ -87,12 +88,12 @@ class FavoritesService extends ChangeNotifier {
       if (removed) {
         await _saveFavoritesToStorage();
         notifyListeners();
-        debugPrint('Removed ${item.name} from favorites');
+        Journal.trace('Removed ${item.name} from favorites');
         return true;
       }
       return false;
     } catch (e) {
-      debugPrint('Error removing from favorites: $e');
+      Journal.trace('Error removing from favorites: $e');
       return false;
     }
   }
@@ -116,7 +117,7 @@ class FavoritesService extends ChangeNotifier {
     _favorites.clear();
     await _saveFavoritesToStorage();
     notifyListeners();
-    debugPrint('Cleared all favorites');
+    Journal.trace('Cleared all favorites');
   }
 
   /// Mettre à jour un produit dans les favoris

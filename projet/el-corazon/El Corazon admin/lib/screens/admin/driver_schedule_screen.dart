@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/driver_schedule_service.dart';
-import '../../models/driver.dart';
+import 'package:admin/services/driver_schedule_service.dart';
+import 'package:admin/models/driver.dart';
 
 /// Écran de gestion des horaires d'un livreur
 class DriverScheduleScreen extends StatefulWidget {
   final Driver driver;
 
   const DriverScheduleScreen({
-    super.key,
-    required this.driver,
+    required this.driver, super.key,
   });
 
   @override
@@ -80,7 +79,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                       );
 
                       return _buildScheduleCard(
-                          schedule, scheduleService, theme);
+                          schedule, scheduleService, theme,);
                     }),
                   ],
                 ),
@@ -99,7 +98,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
           tooltip:
               'Copier les horaires du premier jour actif sur toute la semaine',
         );
-      }),
+      },),
     );
   }
 
@@ -158,7 +157,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                 Row(
                   children: [
                     const Icon(Icons.email_outlined,
-                        color: Colors.white70, size: 16),
+                        color: Colors.white70, size: 16,),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -179,7 +178,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                         color: widget.driver.isActive
                             ? Colors.greenAccent
                             : Colors.orangeAccent,
-                        size: 12),
+                        size: 12,),
                     const SizedBox(width: 8),
                     Text(
                       widget.driver.isActive
@@ -308,7 +307,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.arrow_forward_rounded,
-                          size: 16, color: Colors.grey),
+                          size: 16, color: Colors.grey,),
                     ),
                     Expanded(
                       child: _buildTimeSelector(
@@ -499,7 +498,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                   backgroundColor: Colors.green,
                   behavior: SnackBarBehavior.floating,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
+                      borderRadius: BorderRadius.circular(10),),
                 ),
               );
             },

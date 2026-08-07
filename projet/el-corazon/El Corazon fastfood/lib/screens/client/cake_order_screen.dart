@@ -10,6 +10,7 @@ import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 enum CakeDeliveryMethod { delivery, pickup }
 
@@ -111,7 +112,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
       if (_dessertsCategoryId == null) {
         // Si aucune catégorie desserts n'est trouvée, utiliser tous les items disponibles
-        debugPrint(
+        Journal.trace(
           '⚠️ Catégorie desserts non trouvée, chargement de tous les items',
         );
       }
@@ -131,9 +132,9 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         });
       }
 
-      debugPrint('✅ Loaded ${_readyCakes.length} ready cakes from database');
+      Journal.trace('✅ Loaded ${_readyCakes.length} ready cakes from database');
     } catch (e) {
-      debugPrint('❌ Error loading cakes from database: $e');
+      Journal.trace('❌ Error loading cakes from database: $e');
       if (!_isDisposed && mounted && context.mounted) {
         setState(() {
           _error = 'Erreur lors du chargement des gâteaux: $e';
@@ -165,7 +166,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       if (customCake != null) {
         _customCakeItem = customCake;
         _customCakeIsFromCatalog = true;
-        debugPrint('✅ Gâteau personnalisé trouvé au catalogue : ${customCake.id}');
+        Journal.trace('✅ Gâteau personnalisé trouvé au catalogue : ${customCake.id}');
         return;
       }
 
@@ -183,9 +184,9 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         isPopular: true,
         preparationTime: 90,
       );
-      debugPrint('⚠️ Custom cake item not found, using default in-memory item');
+      Journal.trace('⚠️ Custom cake item not found, using default in-memory item');
     } catch (e) {
-      debugPrint('❌ Error loading custom cake item: $e');
+      Journal.trace('❌ Error loading custom cake item: $e');
       // Fallback vers un item par défaut
       _customCakeIsFromCatalog = false;
       _customCakeItem = MenuItem(
@@ -206,12 +207,12 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
   Future<void> _initializeCustomization({MenuItem? prefillFrom}) async {
     // 🔒 Empêcher les initialisations multiples en parallèle
     if (_isInitializingCustomization) {
-      debugPrint('⚠️ Initialisation déjà en cours, annulation...');
+      Journal.trace('⚠️ Initialisation déjà en cours, annulation...');
       return;
     }
 
     if (_customCakeItem == null) {
-      debugPrint(
+      Journal.trace(
         '⚠️ _customCakeItem est null, impossible d\'initialiser la personnalisation',
       );
       return;
@@ -227,12 +228,12 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
       // S'assurer que le service est initialisé
       if (!customizationService.isInitialized) {
-        debugPrint('🔄 Initialisation du service de personnalisation...');
+        Journal.trace('🔄 Initialisation du service de personnalisation...');
         await customizationService.initialize();
       }
       if (!mounted || !context.mounted) return;
 
-      debugPrint(
+      Journal.trace(
         '🎂 Démarrage de la personnalisation pour: ${_customCakeItem!.name} (${_customCakeItem!.id})',
       );
 
@@ -247,14 +248,14 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         _applySmartPrefill(customizationService, prefillFrom);
       }
 
-      debugPrint('✅ Personnalisation initialisée avec succès');
+      Journal.trace('✅ Personnalisation initialisée avec succès');
 
       // Forcer un rebuild pour afficher les options
       if (!_isDisposed && mounted) {
         setState(() {});
       }
     } catch (e) {
-      debugPrint(
+      Journal.trace(
         '❌ Erreur lors de l\'initialisation de la personnalisation: $e',
       );
       if (!_isDisposed && mounted && context.mounted) {
@@ -372,7 +373,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         customizationService.clearCustomization(_customizationId);
       }
     } catch (e) {
-      debugPrint('⚠️ Error cleaning customization on dispose: $e');
+      Journal.trace('⚠️ Error cleaning customization on dispose: $e');
     }
 
     _messageController.dispose();
@@ -2221,7 +2222,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       if (mounted) {
         _showError('Erreur lors de l\'ajout au panier: ${e.toString()}');
       }
-      debugPrint('❌ Error adding ready cake to cart: $e');
+      Journal.trace('❌ Error adding ready cake to cart: $e');
     }
   }
 
@@ -2474,7 +2475,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     } catch (e) {
       setState(() => _isSubmitting = false);
       _showError('Erreur lors de l\'ajout au panier: ${e.toString()}');
-      debugPrint('❌ Error adding custom cake to cart: $e');
+      Journal.trace('❌ Error adding custom cake to cart: $e');
     }
   }
 

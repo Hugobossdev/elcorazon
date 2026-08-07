@@ -1,6 +1,6 @@
-import '../network/api_client.dart';
-import 'assignment.dart';
-import 'courier_profile.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/delivery/assignment.dart';
+import 'package:elcorazon_core/src/delivery/courier_profile.dart';
 
 /// Accès à `/api/v1/delivery/*` du point de vue du **livreur** — voir
 /// `backend/apps/delivery/{serializers,views,services}.py`.

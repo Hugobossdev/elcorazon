@@ -46,9 +46,9 @@ class NotificationDatabaseService extends ChangeNotifier {
       // serveur qui fait foi.
       _unreadCount = await _repository.getUnreadCount();
       _unreadCountController.add(_unreadCount);
-      debugPrint('✅ ${_notifications.length} notifications chargées');
+      eccore.Journal.trace('✅ ${_notifications.length} notifications chargées');
     } on eccore.ApiException catch (e) {
-      debugPrint('❌ Chargement des notifications: ${e.code}');
+      eccore.Journal.trace('❌ Chargement des notifications: ${e.code}');
       _notifications = [];
       _updateUnreadCountLocally();
     } finally {
@@ -75,7 +75,7 @@ class NotificationDatabaseService extends ChangeNotifier {
       _updateUnreadCountLocally();
       notifyListeners();
     } on eccore.ApiException catch (e) {
-      debugPrint('❌ Marquage lu de $notificationId: ${e.code}');
+      eccore.Journal.trace('❌ Marquage lu de $notificationId: ${e.code}');
     }
   }
 
@@ -86,7 +86,7 @@ class NotificationDatabaseService extends ChangeNotifier {
       _updateUnreadCountLocally();
       notifyListeners();
     } on eccore.ApiException catch (e) {
-      debugPrint('❌ Marquage global lu: ${e.code}');
+      eccore.Journal.trace('❌ Marquage global lu: ${e.code}');
     }
   }
 

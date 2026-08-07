@@ -1,10 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/user.dart';
-import '../network/api_client.dart';
-import '../network/api_exception.dart';
-import 'auth_repository.dart';
-import 'token_storage.dart';
+import 'package:elcorazon_core/src/models/user.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/network/api_exception.dart';
+import 'package:elcorazon_core/src/auth/auth_repository.dart';
+import 'package:elcorazon_core/src/auth/token_storage.dart';
 
 /// Stockage des jetons — un seul par app (le conteneur Riverpod en tient une
 /// seule instance).

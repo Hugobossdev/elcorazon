@@ -23,11 +23,10 @@ class User {
     required this.email,
     required this.phone,
     required this.role,
-    this.profileImage,
+    required this.createdAt, this.profileImage,
     this.profileImageUrl,
     this.loyaltyPoints = 0,
     this.badges = const [],
-    required this.createdAt,
     this.lastLoginAt,
     this.isOnline = false,
     this.isActive = true,
@@ -153,7 +152,7 @@ class User {
     if (map['badges'] != null) {
       if (map['badges'] is List) {
         badges = List<String>.from(
-          (map['badges'] as List).map((b) => b.toString())
+          (map['badges'] as List).map((b) => b.toString()),
         );
       } else if (map['badges'] is String) {
         badges = (map['badges'] as String)
@@ -170,7 +169,7 @@ class User {
       try {
         if (map['preferences'] is Map) {
           preferences = UserPreferences.fromMap(
-              Map<String, dynamic>.from(map['preferences']));
+              Map<String, dynamic>.from(map['preferences']),);
         }
       } catch (e) {
         preferences = null;

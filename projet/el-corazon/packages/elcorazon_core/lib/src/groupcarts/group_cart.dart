@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Participant d'un panier collaboratif — miroir de `MemberSerializer`.
 class GroupCartMember {

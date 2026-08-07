@@ -2,23 +2,23 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../services/app_service.dart';
-import '../../services/chat_service.dart';
-import '../../services/agora_call_service.dart';
-import '../../models/order.dart';
-import '../../models/message.dart';
-import '../../widgets/loading_widget.dart';
-import '../delivery/driver_profile_screen.dart';
-import '../delivery/settings_screen.dart';
-import 'call_screen.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/chat_service.dart';
+import 'package:elcora_dely/services/agora_call_service.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/models/message.dart';
+import 'package:elcora_dely/widgets/loading_widget.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcora_dely/screens/communication/call_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class ChatScreen extends StatefulWidget {
   final Order order;
   final String chatType; // 'customer' or 'support'
 
   const ChatScreen({
-    super.key,
-    required this.order,
+    required this.order, super.key,
     this.chatType = 'customer',
   });
 
@@ -79,7 +79,7 @@ class _ChatScreenState extends State<ChatScreen> {
       // S'abonner aux nouveaux messages en temps réel
       _subscribeToMessages();
     } catch (e) {
-      debugPrint('Erreur initialisation chat: $e');
+      Journal.trace('Erreur initialisation chat: $e');
       setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -105,7 +105,7 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       },
       onError: (error) {
-        debugPrint('Erreur stream messages: $error');
+        Journal.trace('Erreur stream messages: $error');
         if (mounted) {
           setState(() {
             _isConnected = false;
@@ -149,7 +149,6 @@ class _ChatScreenState extends State<ChatScreen> {
         senderId: currentUser.id,
         senderName: currentUser.name,
         content: content,
-        isFromDriver: true,
       );
 
       if (!success) {
@@ -162,7 +161,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _scrollToBottom();
       });
     } catch (e) {
-      debugPrint('Erreur envoi message: $e');
+      Journal.trace('Erreur envoi message: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -216,6 +215,8 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       }
 
+      if (!mounted) return;
+
       // Envoyer une notification d'appel via le chat
       final appService = Provider.of<AppService>(context, listen: false);
       final currentUser = appService.currentUser;
@@ -229,26 +230,24 @@ class _ChatScreenState extends State<ChatScreen> {
           content: isVideo
               ? '📹 Appel vidéo en cours...'
               : '📞 Appel vocal en cours...',
-          isFromDriver: true,
           type: MessageType.system,
         );
       }
 
       // Ouvrir l'écran d'appel
       if (mounted) {
-        Navigator.of(context).push(
+        unawaited(Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) => CallScreen(
               order: widget.order,
               callType: isVideo ? CallType.video : CallType.voice,
-              isIncoming: false,
               callerName: widget.chatType == 'customer' ? 'Client' : 'Support',
             ),
           ),
-        );
+        ));
       }
     } catch (e) {
-      debugPrint('Erreur démarrage appel: $e');
+      Journal.trace('Erreur démarrage appel: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

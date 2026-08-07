@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Statut de validation d'un document
 enum DocumentValidationStatus {
@@ -109,7 +109,7 @@ class DriverDocument {
     required this.id,
     required this.userId,
     required this.type,
-    this.status = DocumentValidationStatus.pending,
+    required this.uploadedAt, required this.createdAt, required this.updatedAt, this.status = DocumentValidationStatus.pending,
     this.fileUrl,
     this.fileName,
     this.fileType,
@@ -119,9 +119,6 @@ class DriverDocument {
     this.validationNotes,
     this.validatedAt,
     this.rejectionReason,
-    required this.uploadedAt,
-    required this.createdAt,
-    required this.updatedAt,
     this.driverName,
     this.driverEmail,
     this.driverPhone,
@@ -195,7 +192,7 @@ class DriverDocument {
         try {
           return DateTime.parse(date);
         } catch (e) {
-          debugPrint('Erreur parsing date: $e');
+          Journal.trace('Erreur parsing date: $e');
           return null;
         }
       }

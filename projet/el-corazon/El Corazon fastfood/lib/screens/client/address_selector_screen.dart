@@ -4,6 +4,7 @@ import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/widgets/address_card.dart';
 import 'package:elcora_fast/screens/client/address_management_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran de sélection rapide d'adresse avec preview des frais
 class AddressSelectorScreen extends StatefulWidget {
@@ -271,7 +272,7 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
     try {
       await context.read<AddressService>().selectAddress(address.id);
     } catch (e) {
-      debugPrint('Sélection non mémorisée : $e');
+      Journal.trace('Sélection non mémorisée : $e');
     }
     if (mounted) widget.onAddressSelected(address);
   }

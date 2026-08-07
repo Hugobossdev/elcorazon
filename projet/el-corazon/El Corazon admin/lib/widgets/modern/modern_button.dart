@@ -11,8 +11,7 @@ class ModernButton extends StatelessWidget {
   final bool isFullWidth;
 
   const ModernButton({
-    super.key,
-    required this.label,
+    required this.label, super.key,
     this.onPressed,
     this.icon,
     this.variant = ModernButtonVariant.primary,

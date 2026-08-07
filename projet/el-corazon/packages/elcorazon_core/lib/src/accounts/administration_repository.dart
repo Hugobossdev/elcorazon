@@ -1,7 +1,7 @@
-import '../network/api_client.dart';
-import 'admin_role.dart';
-import 'customer.dart';
-import 'customer_stats.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/accounts/admin_role.dart';
+import 'package:elcorazon_core/src/accounts/customer.dart';
+import 'package:elcorazon_core/src/accounts/customer_stats.dart';
 
 /// Administration des comptes — `/api/v1/administration/`,
 /// `/api/v1/restaurants/staff/` et la fiche client de `/api/v1/analytics/`

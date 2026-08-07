@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/performance_service.dart';
-import '../../services/error_handler_service.dart';
-import '../../services/app_service.dart';
-import '../../models/order.dart';
-import 'settings_screen.dart';
-import 'driver_profile_screen.dart';
+import 'package:elcora_dely/services/performance_service.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -588,7 +588,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Total des gains'),
+                const Text('Total des gains'),
                 Text(
                   '${totalEarnings.toStringAsFixed(2)} FCFA',
                   style: const TextStyle(
@@ -603,7 +603,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Livraisons complétées'),
+                const Text('Livraisons complétées'),
                 Text('${completedDeliveries.length}'),
               ],
             ),
@@ -611,7 +611,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Gain moyen par livraison'),
+                const Text('Gain moyen par livraison'),
                 Text(
                     '${(totalEarnings / completedDeliveries.length).toStringAsFixed(2)} FCFA'),
               ],

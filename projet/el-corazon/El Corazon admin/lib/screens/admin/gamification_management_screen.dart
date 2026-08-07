@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/gamification_service.dart';
-import '../../utils/dialog_helper.dart';
+import 'package:admin/services/gamification_service.dart';
+import 'package:admin/utils/dialog_helper.dart';
 
 class GamificationManagementScreen extends StatefulWidget {
   const GamificationManagementScreen({super.key});
@@ -280,7 +280,7 @@ class _AchievementsTab extends StatelessWidget {
                 onTap: () {
                   gamificationService.updateAchievement(
                     achievement['id'],
-                    isActive: !(achievement['is_active'] ?? true),
+                    isActive: !((achievement['is_active'] as bool?) ?? true),
                   );
                 },
               ),
@@ -555,7 +555,7 @@ class _BadgesTab extends StatelessWidget {
                 onTap: () {
                   gamificationService.updateBadge(
                     badge['id'],
-                    isActive: !(badge['is_active'] ?? true),
+                    isActive: !((badge['is_active'] as bool?) ?? true),
                   );
                 },
               ),
@@ -692,7 +692,7 @@ class _RewardsTab extends StatelessWidget {
                 onTap: () {
                   gamificationService.updateLoyaltyReward(
                     reward['id'],
-                    isActive: !(reward['is_active'] ?? true),
+                    isActive: !((reward['is_active'] as bool?) ?? true),
                   );
                 },
               ),

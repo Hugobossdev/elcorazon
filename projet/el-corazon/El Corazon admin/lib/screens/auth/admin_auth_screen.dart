@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/admin_auth_service.dart';
-import '../../widgets/custom_button.dart';
-import '../../widgets/custom_text_field.dart';
-import '../../widgets/loading_widget.dart';
-import '../../theme/modern_theme.dart';
+import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/widgets/custom_text_field.dart';
+import 'package:admin/widgets/loading_widget.dart';
+import 'package:admin/theme/modern_theme.dart';
 
 class AdminAuthScreen extends StatefulWidget {
   const AdminAuthScreen({super.key});
@@ -46,7 +47,7 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
     ).animate(CurvedAnimation(
       parent: _fadeController,
       curve: Curves.easeIn,
-    ));
+    ),);
 
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.2),
@@ -54,7 +55,7 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
     ).animate(CurvedAnimation(
       parent: _slideController,
       curve: Curves.easeOutCubic,
-    ));
+    ),);
 
     _fadeController.forward();
     _slideController.forward();
@@ -106,8 +107,14 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
           remember: _rememberMe,
         );
 
+        // La garde du dessus est antérieure à cette écriture-ci : l'écran a pu
+        // être démonté entre-temps.
+        if (!mounted) return;
+
         // Navigation vers le dashboard
-        Navigator.of(context).pushReplacementNamed('/admin-dashboard');
+        unawaited(
+          Navigator.of(context).pushReplacementNamed('/admin-dashboard'),
+        );
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -115,7 +122,7 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
               content: Row(
                 children: [
                   Icon(Icons.error_outline,
-                      color: Theme.of(context).colorScheme.onError),
+                      color: Theme.of(context).colorScheme.onError,),
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Text('Email ou mot de passe incorrect'),
@@ -139,7 +146,7 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
             content: Row(
               children: [
                 Icon(Icons.error_outline,
-                    color: Theme.of(context).colorScheme.onError),
+                    color: Theme.of(context).colorScheme.onError,),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text('Erreur de connexion: ${e.toString()}'),

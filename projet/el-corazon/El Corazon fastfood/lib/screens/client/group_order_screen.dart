@@ -51,7 +51,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
         await GroupCartService().initialize();
         if (mounted) _startDeadlineTimer();
       } catch (e) {
-        debugPrint('Error initializing group services: $e');
+        eccore.Journal.trace('Error initializing group services: $e');
       }
     });
   }

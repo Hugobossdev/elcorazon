@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../models/driver.dart';
-import '../../models/driver_document.dart';
-import '../../services/driver_document_service.dart' as svc;
-import '../../ui/ui.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/models/driver_document.dart';
+import 'package:admin/services/driver_document_service.dart' as svc;
+import 'package:admin/ui/ui.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DriverDocumentValidationScreen extends StatefulWidget {
   final Driver driver;
 
-  const DriverDocumentValidationScreen({super.key, required this.driver});
+  const DriverDocumentValidationScreen({required this.driver, super.key});
 
   @override
   State<DriverDocumentValidationScreen> createState() =>
@@ -43,7 +44,7 @@ class _DriverDocumentValidationScreenState
 
   @override
   void dispose() {
-    for (var controller in _notesControllers.values) {
+    for (final controller in _notesControllers.values) {
       controller.dispose();
     }
     super.dispose();
@@ -86,7 +87,7 @@ class _DriverDocumentValidationScreenState
           _error = 'Erreur lors du chargement: $e';
         });
       }
-      debugPrint('Erreur chargement documents: $e');
+      Journal.trace('Erreur chargement documents: $e');
     } finally {
       if (mounted) {
         setState(() {

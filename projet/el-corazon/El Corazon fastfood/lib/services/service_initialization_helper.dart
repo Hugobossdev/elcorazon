@@ -1,6 +1,7 @@
 import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/services/lazy_service_provider.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Helper pour initialiser les services à la demande
 class ServiceInitializationHelper {
@@ -18,22 +19,22 @@ class ServiceInitializationHelper {
         if (service is LazyInitializable) {
           final lazyService = service as LazyInitializable;
           if (lazyService.isInitialized) {
-            debugPrint('✅ Service ${T.toString()} déjà initialisé');
+            Journal.trace('✅ Service ${T.toString()} déjà initialisé');
             return;
           }
         }
       }
       
-      debugPrint('🔄 Initialisation du service ${T.toString()}...');
+      Journal.trace('🔄 Initialisation du service ${T.toString()}...');
       await initializer(service);
       
       if (service is LazyInitializable) {
         (service as LazyInitializable).markAsInitialized();
       }
       
-      debugPrint('✅ Service ${T.toString()} initialisé avec succès');
+      Journal.trace('✅ Service ${T.toString()} initialisé avec succès');
     } catch (e) {
-      debugPrint('❌ Erreur lors de l\'initialisation de ${T.toString()}: $e');
+      Journal.trace('❌ Erreur lors de l\'initialisation de ${T.toString()}: $e');
       // Ne pas faire échouer l'application si un service optionnel échoue
     }
   }
@@ -56,7 +57,7 @@ class ServiceInitializationHelper {
           if (stopOnError) {
             throw error;
           }
-          debugPrint('⚠️ Erreur dans ${task.name}: $error');
+          Journal.trace('⚠️ Erreur dans ${task.name}: $error');
         }),
       );
     }

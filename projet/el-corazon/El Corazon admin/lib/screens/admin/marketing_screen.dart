@@ -2,9 +2,9 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../services/marketing_service.dart';
-import '../../ui/ui.dart';
-import '../../utils/dialog_helper.dart';
+import 'package:admin/services/marketing_service.dart';
+import 'package:admin/ui/ui.dart';
+import 'package:admin/utils/dialog_helper.dart';
 
 /// Campagnes de notifications — rédiger, estimer, envoyer une fois.
 ///

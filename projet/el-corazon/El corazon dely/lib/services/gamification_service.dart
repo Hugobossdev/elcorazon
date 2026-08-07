@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class GamificationService extends ChangeNotifier {
   int _currentPoints = 125;
@@ -217,7 +218,7 @@ class GamificationService extends ChangeNotifier {
 
   // Vérifier si l'utilisateur peut monter de niveau
   void _checkLevelUp() {
-    int pointsForNextLevel = (_currentLevel * 100);
+    final int pointsForNextLevel = (_currentLevel * 100);
     if (_currentPoints >= pointsForNextLevel) {
       _currentLevel++;
       _levelProgress = (_currentPoints % 100) / 100.0;
@@ -229,22 +230,25 @@ class GamificationService extends ChangeNotifier {
 
   // Vérifier les achievements
   void _checkAchievements() {
-    for (var achievement in _achievements) {
-      if (!achievement['isUnlocked']) {
+    for (final achievement in _achievements) {
+      if (!(achievement['isUnlocked']! as bool)) {
         bool shouldUnlock = false;
         
         switch (achievement['id']) {
           case 3: // Explorateur
             achievement['progress'] = 7; // Simulé
-            shouldUnlock = achievement['progress'] >= achievement['target'];
+            shouldUnlock = (achievement['progress']! as int) >=
+                (achievement['target']! as int);
             break;
           case 4: // Série de victoires
             achievement['progress'] = _streakDays;
-            shouldUnlock = achievement['progress'] >= achievement['target'];
+            shouldUnlock = (achievement['progress']! as int) >=
+                (achievement['target']! as int);
             break;
           case 6: // Champion El Corazón
             achievement['progress'] = _currentLevel;
-            shouldUnlock = achievement['progress'] >= achievement['target'];
+            shouldUnlock = (achievement['progress']! as int) >=
+                (achievement['target']! as int);
             break;
         }
         
@@ -289,25 +293,25 @@ class GamificationService extends ChangeNotifier {
 
   // Notifications simulées
   void _showPointsNotification(int points, String reason) {
-    debugPrint('🎉 +$points points: $reason');
+    Journal.trace('🎉 +$points points: $reason');
   }
 
   void _showLevelUpNotification() {
-    debugPrint('🆙 Félicitations! Vous avez atteint le niveau $_currentLevel!');
+    Journal.trace('🆙 Félicitations! Vous avez atteint le niveau $_currentLevel!');
   }
 
   void _showAchievementUnlockedNotification(Map<String, dynamic> achievement) {
-    debugPrint('🏆 Achievement débloqué: ${achievement['title']}');
+    Journal.trace('🏆 Achievement débloqué: ${achievement['title']}');
   }
 
   void _showChallengeCompletedNotification(Map<String, dynamic> challenge) {
-    debugPrint('✅ Défi terminé: ${challenge['title']}');
+    Journal.trace('✅ Défi terminé: ${challenge['title']}');
   }
 
   // Événements de gamification
   void onOrderPlaced(double orderValue) {
     // Points basés sur la valeur de la commande
-    int points = (orderValue / 10).round();
+    final int points = (orderValue / 10).round();
     addPoints(points, 'Commande passée');
     
     // Mettre à jour les statistiques
@@ -315,7 +319,7 @@ class GamificationService extends ChangeNotifier {
     _streakDays++; // Simplifié, devrait vérifier les dates réelles
     
     // Mettre à jour les défis
-    updateChallengeProgress(1, _challenges[0]['progress'] + 1); // Défi weekend
+    updateChallengeProgress(1, (_challenges[0]['progress']! as int) + 1); // Défi weekend
     
     notifyListeners();
   }
@@ -325,8 +329,9 @@ class GamificationService extends ChangeNotifier {
     
     // Mettre à jour le progrès de l'achievement "Critique Culinaire"
     final criticAchievement = _achievements.firstWhere((a) => a['id'] == 5);
-    if (!criticAchievement['isUnlocked']) {
-      criticAchievement['progress'] = (criticAchievement['progress'] ?? 0) + 1;
+    if (!(criticAchievement['isUnlocked']! as bool)) {
+      criticAchievement['progress'] =
+          ((criticAchievement['progress'] as int?) ?? 0) + 1;
     }
   }
 
@@ -334,18 +339,19 @@ class GamificationService extends ChangeNotifier {
     addPoints(25, 'Application partagée');
     
     // Mettre à jour le défi "Partageur"
-    updateChallengeProgress(3, _challenges[2]['progress'] + 1);
+    updateChallengeProgress(3, (_challenges[2]['progress']! as int) + 1);
   }
 
   void onNewDishTried() {
     addPoints(15, 'Nouveau plat essayé');
     
     // Mettre à jour les défis et achievements
-    updateChallengeProgress(2, _challenges[1]['progress'] + 1);
+    updateChallengeProgress(2, (_challenges[1]['progress']! as int) + 1);
     
     final explorerAchievement = _achievements.firstWhere((a) => a['id'] == 3);
-    if (!explorerAchievement['isUnlocked']) {
-      explorerAchievement['progress'] = (explorerAchievement['progress'] ?? 0) + 1;
+    if (!(explorerAchievement['isUnlocked']! as bool)) {
+      explorerAchievement['progress'] =
+          ((explorerAchievement['progress'] as int?) ?? 0) + 1;
     }
   }
 
@@ -357,8 +363,10 @@ class GamificationService extends ChangeNotifier {
       'levelTitle': currentLevelTitle,
       'totalOrders': _totalOrders,
       'streakDays': _streakDays,
-      'achievementsUnlocked': _achievements.where((a) => a['isUnlocked']).length,
-      'challengesCompleted': _challenges.where((c) => !c['isActive']).length,
+      'achievementsUnlocked':
+          _achievements.where((a) => a['isUnlocked']! as bool).length,
+      'challengesCompleted':
+          _challenges.where((c) => !(c['isActive']! as bool)).length,
     };
   }
 }

@@ -5,6 +5,7 @@ import 'package:elcora_fast/models/loyalty_transaction.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran des récompenses et points de fidélité
 class RewardsScreen extends StatefulWidget {
@@ -30,7 +31,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
           forceRefresh: true,
         );
       } catch (e) {
-        debugPrint('Error initializing Gamification service: $e');
+        Journal.trace('Error initializing Gamification service: $e');
       }
     });
   }

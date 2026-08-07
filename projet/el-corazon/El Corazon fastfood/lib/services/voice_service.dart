@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class VoiceService extends ChangeNotifier {
   static final VoiceService _instance = VoiceService._internal();
@@ -24,7 +25,7 @@ class VoiceService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      debugPrint('Error initializing Voice Service: $e');
+      Journal.trace('Error initializing Voice Service: $e');
       _isAvailable = false;
       _isInitialized = false;
     }
@@ -57,7 +58,7 @@ class VoiceService extends ChangeNotifier {
       _isListening = false;
       notifyListeners();
     } catch (e) {
-      debugPrint('Error during voice recognition: $e');
+      Journal.trace('Error during voice recognition: $e');
       _isListening = false;
       notifyListeners();
     }
@@ -84,10 +85,10 @@ class VoiceService extends ChangeNotifier {
   Future<void> speak(String text) async {
     try {
       // Simulate TTS
-      // debugPrint('TTS: $text');
+      // Journal.trace('TTS: $text');
       await Future.delayed(const Duration(milliseconds: 100));
     } catch (e) {
-      debugPrint('Error in TTS: $e');
+      Journal.trace('Error in TTS: $e');
     }
   }
 

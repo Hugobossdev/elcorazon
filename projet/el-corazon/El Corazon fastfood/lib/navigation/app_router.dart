@@ -34,6 +34,7 @@ import 'package:elcora_fast/screens/client/driver_rating_screen.dart';
 import 'package:elcora_fast/screens/client/order_rating_screen.dart';
 import 'package:elcora_fast/models/payment_participant.dart';
 import 'package:elcora_fast/screens/client/social_groups_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Routeur principal de l'application
 class AppRouter {
@@ -128,7 +129,7 @@ class AppRouter {
           try {
             items = (args!['items'] as List).cast<CartItem>();
           } catch (e) {
-            debugPrint('Error casting items in checkout route: $e');
+            Journal.trace('Error casting items in checkout route: $e');
           }
         }
 

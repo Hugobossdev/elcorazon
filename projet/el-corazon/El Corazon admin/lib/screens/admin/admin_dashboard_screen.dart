@@ -1,26 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../../services/app_service.dart';
-import '../../services/analytics_service.dart';
-import '../../services/driver_management_service.dart';
-import '../../models/order.dart';
-import '../../models/menu_models.dart';
-import '../../models/driver.dart';
-import '../../core/utils/admin_helpers.dart';
-import '../../widgets/modern/enhanced_stat_card.dart';
-import '../../utils/dialog_helper.dart';
-import '../../utils/price_formatter.dart';
-import '../../theme/modern_theme.dart';
-import 'advanced_order_management_screen.dart';
-import 'analytics_screen.dart';
-import 'driver_management_screen.dart';
-import 'promotions_screen.dart';
-import 'send_notification_dialog.dart';
-import 'driver_documents_dashboard_screen.dart';
-import 'active_deliveries_screen.dart';
-import 'menu_management_screen.dart';
-import '../../ui/ui.dart';
+import 'package:admin/services/app_service.dart';
+import 'package:admin/models/user.dart';
+import 'package:admin/services/analytics_service.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/models/menu_models.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/core/utils/admin_helpers.dart';
+import 'package:admin/widgets/modern/enhanced_stat_card.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/utils/price_formatter.dart';
+import 'package:admin/theme/modern_theme.dart';
+import 'package:admin/screens/admin/advanced_order_management_screen.dart';
+import 'package:admin/screens/admin/analytics_screen.dart';
+import 'package:admin/screens/admin/driver_management_screen.dart';
+import 'package:admin/screens/admin/promotions_screen.dart';
+import 'package:admin/screens/admin/send_notification_dialog.dart';
+import 'package:admin/screens/admin/driver_documents_dashboard_screen.dart';
+import 'package:admin/screens/admin/active_deliveries_screen.dart';
+import 'package:admin/screens/admin/menu_management_screen.dart';
+import 'package:admin/ui/ui.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -87,7 +88,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   tabs: const [
                     Tab(
                         icon: Icon(Icons.dashboard_outlined),
-                        text: 'Vue d\'ensemble'),
+                        text: 'Vue d\'ensemble',),
                     Tab(icon: Icon(Icons.analytics_outlined), text: 'Analyses'),
                   ],
                 ),
@@ -97,7 +98,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   controller: _tabController,
                   children: [
                     _buildOverviewTab(context, currentUser, allOrders,
-                        menuItems, driverService),
+                        menuItems, driverService,),
                     _buildAnalyticsTab(context, analyticsService),
                   ],
                 ),
@@ -111,7 +112,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   Widget _buildOverviewTab(
     BuildContext context,
-    dynamic user,
+    User? user,
     List<Order> orders,
     List<MenuItem> menuItems,
     DriverManagementService driverService,
@@ -121,7 +122,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final activeDrivers = driverService.drivers
         .where((d) =>
             d.status == DriverStatus.available ||
-            d.status == DriverStatus.onDelivery)
+            d.status == DriverStatus.onDelivery,)
         .length;
 
     // Calculate additional stats
@@ -185,7 +186,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Widget _buildAnalyticsTab(
-      BuildContext context, AnalyticsService analyticsService) {
+      BuildContext context, AnalyticsService analyticsService,) {
     // Déclencher le chargement des données si elles sont vides et qu'on ne charge pas déjà
     // Utiliser addPostFrameCallback pour éviter les updates pendant le build
     if (analyticsService.analyticsData.isEmpty &&
@@ -195,7 +196,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       final startDate = endDate.subtract(const Duration(days: 7));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         analyticsService.loadAnalyticsData(
-            startDate: startDate, endDate: endDate);
+            startDate: startDate, endDate: endDate,);
       });
     }
 
@@ -229,7 +230,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                       final startDate =
                           endDate.subtract(const Duration(days: 7));
                       analyticsService.loadAnalyticsData(
-                          startDate: startDate, endDate: endDate);
+                          startDate: startDate, endDate: endDate,);
                     },
                     child: const Text('Réessayer'),
                   ),
@@ -240,13 +241,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             Column(
               children: [
                 _buildRevenueChart(
-                    context, analyticsService.analyticsData['revenue'] ?? {}),
+                    context, analyticsService.analyticsData['revenue'] ?? {},),
                 const SizedBox(height: 20),
                 _buildOrdersChart(
-                    context, analyticsService.analyticsData['orders'] ?? {}),
+                    context, analyticsService.analyticsData['orders'] ?? {},),
                 const SizedBox(height: 20),
                 _buildCategoryPerformance(context,
-                    analyticsService.analyticsData['categories'] ?? {}),
+                    analyticsService.analyticsData['categories'] ?? {},),
               ],
             ),
         ],
@@ -256,7 +257,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   // --- Widgets for Overview Tab ---
 
-  Widget _buildWelcomeCard(BuildContext context, dynamic user) {
+  Widget _buildWelcomeCard(BuildContext context, User? user) {
     final hour = DateTime.now().hour;
     final greeting = hour < 12
         ? 'Bonjour'
@@ -345,7 +346,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             : constraints.maxWidth > 700
                 ? 2
                 : 1;
-        final spacing = 16.0;
+        const spacing = 16.0;
         final width = (constraints.maxWidth - (crossAxisCount - 1) * spacing) /
             crossAxisCount;
 
@@ -381,7 +382,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const AdvancedOrderManagementScreen()),
+                        builder: (_) => const AdvancedOrderManagementScreen(),),
                   );
                 },
               ),
@@ -398,7 +399,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const DriverManagementScreen()),
+                        builder: (_) => const DriverManagementScreen(),),
                   );
                 },
               ),
@@ -458,7 +459,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const PromotionsScreen()));
+                        builder: (_) => const PromotionsScreen(),),);
               }),
               _buildActionButton(
                   context, 'Menu', Icons.restaurant_menu, sem.success, () {
@@ -466,7 +467,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const MenuManagementScreen()));
+                        builder: (_) => const MenuManagementScreen(),),);
               }),
               _buildActionButton(
                   context, 'Commandes', Icons.shopping_cart, sem.info, () {
@@ -475,14 +476,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                      builder: (_) => const AdvancedOrderManagementScreen()),
+                      builder: (_) => const AdvancedOrderManagementScreen(),),
                 );
               }),
               _buildActionButton(
                   context, 'Notifications', Icons.send, scheme.tertiary, () {
                 DialogHelper.showSafeDialog(
                     context: context,
-                    builder: (_) => const SendNotificationDialog());
+                    builder: (_) => const SendNotificationDialog(),);
               }),
               _buildActionButton(
                   context, 'Documents', Icons.verified_user, scheme.secondary,
@@ -491,24 +492,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     context,
                     MaterialPageRoute(
                         builder: (_) =>
-                            const DriverDocumentsDashboardScreen()));
+                            const DriverDocumentsDashboardScreen(),),);
               }),
               _buildActionButton(
                   context, 'Livraisons', Icons.local_shipping, sem.danger, () {
                 Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const ActiveDeliveriesScreen()));
+                        builder: (_) => const ActiveDeliveriesScreen(),),);
               }),
             ],
           );
-        }),
+        },),
       ],
     );
   }
 
   Widget _buildActionButton(BuildContext context, String label, IconData icon,
-      Color color, VoidCallback onTap) {
+      Color color, VoidCallback onTap,) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -556,7 +557,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                       context,
                       MaterialPageRoute(
                           builder: (_) =>
-                              const AdvancedOrderManagementScreen()),
+                              const AdvancedOrderManagementScreen(),),
                     );
                   }, // Navigate to full list
                   child: const Text('Voir tout'),
@@ -568,7 +569,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               const Center(
                   child: Padding(
                       padding: EdgeInsets.all(16),
-                      child: Text('Aucune commande récente')))
+                      child: Text('Aucune commande récente'),),)
             else
               ListView.separated(
                 shrinkWrap: true,
@@ -587,18 +588,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     title:
                         Text('CMD #${order.id.substring(0, 8).toUpperCase()}'),
                     subtitle: Text(
-                        '${AdminHelpers.formatRelativeTime(order.orderTime)} • ${order.items.length} articles'),
+                        '${AdminHelpers.formatRelativeTime(order.orderTime)} • ${order.items.length} articles',),
                     trailing: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(formatPrice(order.total),
                             style:
-                                const TextStyle(fontWeight: FontWeight.bold)),
+                                const TextStyle(fontWeight: FontWeight.bold),),
                         Text(order.status.displayName,
                             style: TextStyle(
                                 fontSize: 12,
-                                color: _getStatusColor(order.status))),
+                                color: _getStatusColor(order.status),),),
                       ],
                     ),
                   );
@@ -670,7 +671,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                       style: TextStyle(
                                         color: scheme.onPrimary,
                                         fontWeight: FontWeight.bold,
-                                      ))),
+                                      ),),),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -679,22 +680,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                                 children: [
                                   Text(product['menu_item_name'] ?? 'Produit',
                                       style: const TextStyle(
-                                          fontWeight: FontWeight.w600)),
+                                          fontWeight: FontWeight.w600,),),
                                   Text('${product['total_quantity']} vendus',
                                       style:
                                           theme.textTheme.bodySmall?.copyWith(
                                         color: scheme.onSurfaceVariant,
-                                      )),
+                                      ),),
                                 ],
                               ),
                             ),
                             Text(
                                 formatPrice((product['total_revenue'] as num)
-                                    .toDouble()),
+                                    .toDouble(),),
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   fontWeight: FontWeight.bold,
                                   color: sem.success,
-                                )),
+                                ),),
                           ],
                         ),
                       );
@@ -703,7 +704,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               ),
             ),
           );
-        });
+        },);
   }
 
   // Cache/Store for top selling items to avoid reload on every build
@@ -714,7 +715,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         .read<AnalyticsService>()
         .getTopSellingItems(
           startDate: DateTime.now().subtract(const Duration(days: 30)),
-          limit: 5,
         );
     return _topSellingItemsFuture!;
   }
@@ -744,7 +744,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       return const Card(
           child: Padding(
               padding: EdgeInsets.all(16),
-              child: Center(child: Text('Pas de données de revenus'))));
+              child: Center(child: Text('Pas de données de revenus')),),);
     }
 
     final sortedKeys = dailyRevenue.keys.toList()..sort();
@@ -773,7 +773,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               child: LineChart(
                 LineChartData(
                   gridData:
-                      const FlGridData(show: true, drawVerticalLine: false),
+                      const FlGridData(drawVerticalLine: false),
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
@@ -786,7 +786,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             return Padding(
                               padding: const EdgeInsets.only(top: 8.0),
                               child: Text('${date.day}/${date.month}',
-                                  style: const TextStyle(fontSize: 10)),
+                                  style: const TextStyle(fontSize: 10),),
                             );
                           }
                           return const SizedBox.shrink();
@@ -796,11 +796,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     ),
                     leftTitles: const AxisTitles(
                         sideTitles:
-                            SideTitles(showTitles: true, reservedSize: 40)),
-                    topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
+                            SideTitles(showTitles: true, reservedSize: 40),),
+                    topTitles: const AxisTitles(),
+                    rightTitles: const AxisTitles(),
                   ),
                   borderData: FlBorderData(show: false),
                   lineBarsData: [
@@ -810,12 +808,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                       color: Theme.of(context).primaryColor,
                       barWidth: 3,
                       isStrokeCapRound: true,
-                      dotData: const FlDotData(show: true),
                       belowBarData: BarAreaData(
                           show: true,
                           color: Theme.of(context)
                               .primaryColor
-                              .withValues(alpha: 0.1)),
+                              .withValues(alpha: 0.1),),
                     ),
                   ],
                 ),
@@ -833,7 +830,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       return const Card(
           child: Padding(
               padding: EdgeInsets.all(16),
-              child: Center(child: Text('Pas de données de commandes'))));
+              child: Center(child: Text('Pas de données de commandes')),),);
     }
     final sortedKeys = dailyOrders.keys.toList()..sort();
 
@@ -870,7 +867,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             return Padding(
                               padding: const EdgeInsets.only(top: 8.0),
                               child: Text('${date.day}/${date.month}',
-                                  style: const TextStyle(fontSize: 10)),
+                                  style: const TextStyle(fontSize: 10),),
                             );
                           }
                           return const SizedBox.shrink();
@@ -879,11 +876,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     ),
                     leftTitles: const AxisTitles(
                         sideTitles:
-                            SideTitles(showTitles: true, reservedSize: 30)),
-                    topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
+                            SideTitles(showTitles: true, reservedSize: 30),),
+                    topTitles: const AxisTitles(),
+                    rightTitles: const AxisTitles(),
                   ),
                   borderData: FlBorderData(show: false),
                   barGroups: sortedKeys.asMap().entries.map((entry) {
@@ -895,7 +890,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                           color: Theme.of(context).colorScheme.primary,
                           width: 16,
                           borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(4)),
+                              top: Radius.circular(4),),
                         ),
                       ],
                     );
@@ -910,13 +905,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Widget _buildCategoryPerformance(
-      BuildContext context, Map<String, dynamic> data) {
+      BuildContext context, Map<String, dynamic> data,) {
     final categoryCounts = data['categoryCounts'] as Map<String, int>? ?? {};
     if (categoryCounts.isEmpty) {
       return const Card(
           child: Padding(
               padding: EdgeInsets.all(16),
-              child: Center(child: Text('Pas de données de catégories'))));
+              child: Center(child: Text('Pas de données de catégories')),),);
     }
 
     final scheme = Theme.of(context).colorScheme;
@@ -982,10 +977,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             const SizedBox(width: 8),
                             Expanded(
                                 child: Text(entry.key,
-                                    style: const TextStyle(fontSize: 12))),
+                                    style: const TextStyle(fontSize: 12),),),
                             Text('${entry.value}',
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 12)),
+                                    fontWeight: FontWeight.bold, fontSize: 12,),),
                           ],
                         ),
                       );
@@ -1009,7 +1004,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             o.orderTime.day == now.day &&
             o.orderTime.month == now.month &&
             o.orderTime.year == now.year &&
-            o.status == OrderStatus.delivered)
+            o.status == OrderStatus.delivered,)
         .fold(0.0, (sum, o) => sum + o.total);
   }
 

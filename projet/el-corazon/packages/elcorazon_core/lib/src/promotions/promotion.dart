@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Nature de la remise — valeurs de `DiscountKind` côté serveur.
 ///

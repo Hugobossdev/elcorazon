@@ -2,7 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../models/address.dart';
+import 'package:elcora_dely/models/address.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class AddressService extends ChangeNotifier {
   static final AddressService _instance = AddressService._internal();
@@ -29,10 +30,10 @@ class AddressService extends ChangeNotifier {
       await _loadAddresses();
       _isInitialized = true;
       notifyListeners();
-      debugPrint(
+      Journal.trace(
           'AddressService: Initialisé avec ${_addresses.length} adresses');
     } catch (e) {
-      debugPrint('AddressService: Erreur d\'initialisation - $e');
+      Journal.trace('AddressService: Erreur d\'initialisation - $e');
     }
   }
 
@@ -58,7 +59,7 @@ class AddressService extends ChangeNotifier {
         _selectedAddress = defaultAddress ?? _addresses.first;
       }
     } catch (e) {
-      debugPrint('AddressService: Erreur de chargement des adresses - $e');
+      Journal.trace('AddressService: Erreur de chargement des adresses - $e');
     }
   }
 
@@ -75,7 +76,7 @@ class AddressService extends ChangeNotifier {
         await prefs.setString('selected_address_id', _selectedAddress!.id);
       }
     } catch (e) {
-      debugPrint('AddressService: Erreur de sauvegarde des adresses - $e');
+      Journal.trace('AddressService: Erreur de sauvegarde des adresses - $e');
     }
   }
 
@@ -125,10 +126,10 @@ class AddressService extends ChangeNotifier {
       await _saveAddresses();
       notifyListeners();
 
-      debugPrint('AddressService: Adresse ajoutée - ${newAddress.name}');
+      Journal.trace('AddressService: Adresse ajoutée - ${newAddress.name}');
       return newAddress;
     } catch (e) {
-      debugPrint('AddressService: Erreur d\'ajout d\'adresse - $e');
+      Journal.trace('AddressService: Erreur d\'ajout d\'adresse - $e');
       rethrow;
     }
   }
@@ -182,11 +183,11 @@ class AddressService extends ChangeNotifier {
       await _saveAddresses();
       notifyListeners();
 
-      debugPrint(
+      Journal.trace(
           'AddressService: Adresse mise à jour - ${updatedAddress.name}');
       return updatedAddress;
     } catch (e) {
-      debugPrint('AddressService: Erreur de mise à jour d\'adresse - $e');
+      Journal.trace('AddressService: Erreur de mise à jour d\'adresse - $e');
       rethrow;
     }
   }
@@ -217,9 +218,9 @@ class AddressService extends ChangeNotifier {
       await _saveAddresses();
       notifyListeners();
 
-      debugPrint('AddressService: Adresse supprimée - ${deletedAddress.name}');
+      Journal.trace('AddressService: Adresse supprimée - ${deletedAddress.name}');
     } catch (e) {
-      debugPrint('AddressService: Erreur de suppression d\'adresse - $e');
+      Journal.trace('AddressService: Erreur de suppression d\'adresse - $e');
       rethrow;
     }
   }
@@ -236,9 +237,9 @@ class AddressService extends ChangeNotifier {
       await _saveAddresses();
       notifyListeners();
 
-      debugPrint('AddressService: Adresse sélectionnée - ${address.name}');
+      Journal.trace('AddressService: Adresse sélectionnée - ${address.name}');
     } catch (e) {
-      debugPrint('AddressService: Erreur de sélection d\'adresse - $e');
+      Journal.trace('AddressService: Erreur de sélection d\'adresse - $e');
       rethrow;
     }
   }
@@ -251,9 +252,9 @@ class AddressService extends ChangeNotifier {
         isDefault: true,
       );
 
-      debugPrint('AddressService: Adresse définie comme défaut - $addressId');
+      Journal.trace('AddressService: Adresse définie comme défaut - $addressId');
     } catch (e) {
-      debugPrint(
+      Journal.trace(
           'AddressService: Erreur de définition d\'adresse par défaut - $e');
       rethrow;
     }

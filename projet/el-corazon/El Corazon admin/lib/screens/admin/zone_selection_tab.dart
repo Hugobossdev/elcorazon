@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../services/delivery_zone_service.dart';
-import 'zone_form_dialog.dart';
+import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/screens/admin/zone_form_dialog.dart';
 
 /// Sélection des zones desservies.
 ///

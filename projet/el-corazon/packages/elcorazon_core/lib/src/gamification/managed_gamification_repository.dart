@@ -1,5 +1,5 @@
-import '../models/money.dart';
-import '../network/api_client.dart';
+import 'package:elcorazon_core/src/models/money.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
 
 /// Succès vu du back-office — miroir de `ManagedAchievementSerializer`.
 ///

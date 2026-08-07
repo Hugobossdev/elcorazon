@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/user.dart' as app_user;
+import 'package:admin/models/user.dart' as app_user;
 
 /// Session du back-office, contre `/api/v1/auth/*` (Phase 6).
 ///
@@ -120,10 +120,10 @@ class AdminAuthService extends ChangeNotifier {
           .login(email: email, password: password);
       return _staff != null;
     } on eccore.WrongAccountTypeException {
-      debugPrint("AdminAuthService: ce compte n'est pas un compte du personnel");
+      eccore.Journal.trace("AdminAuthService: ce compte n'est pas un compte du personnel");
       return false;
     } on eccore.ApiException catch (e) {
-      debugPrint('AdminAuthService: connexion refusée — ${e.code}');
+      eccore.Journal.trace('AdminAuthService: connexion refusée — ${e.code}');
       return false;
     } finally {
       _isLoading = false;
@@ -194,7 +194,7 @@ class AdminAuthService extends ChangeNotifier {
     _lastActivity = DateTime.now();
     _inactivityTimer?.cancel();
     _inactivityTimer = Timer(_inactivityTimeout, () {
-      debugPrint('AdminAuthService: déconnexion automatique après inactivité');
+      eccore.Journal.trace('AdminAuthService: déconnexion automatique après inactivité');
       unawaited(logoutAdmin());
     });
   }

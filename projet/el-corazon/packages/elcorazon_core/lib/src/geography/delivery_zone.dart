@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Zone de livraison et son barème — miroir de `ManagedDeliveryZoneSerializer`.
 ///

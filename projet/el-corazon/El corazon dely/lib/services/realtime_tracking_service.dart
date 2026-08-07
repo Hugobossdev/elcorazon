@@ -5,8 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 
-import '../models/order.dart';
-import 'geocoding_service.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/services/geocoding_service.dart';
 
 /// Transport temps réel du livreur (Phase 6) — remplace intégralement
 /// `SupabaseRealtimeService`, supprimé avec cette tranche.
@@ -172,7 +172,7 @@ class RealtimeTrackingService extends ChangeNotifier {
     _emissionTimer?.cancel();
 
     if (!await _ensureLocationPermission()) {
-      debugPrint('⚠️ Position non autorisée : aucune émission de suivi.');
+      eccore.Journal.trace('⚠️ Position non autorisée : aucune émission de suivi.');
       return;
     }
 
@@ -211,7 +211,7 @@ class RealtimeTrackingService extends ChangeNotifier {
 
       await _reportPosition?.call(_currentPosition!);
     } catch (e) {
-      debugPrint('⚠️ Relevé de position impossible : $e');
+      eccore.Journal.trace('⚠️ Relevé de position impossible : $e');
     }
   }
 
@@ -292,7 +292,7 @@ class RealtimeTrackingService extends ChangeNotifier {
     _orderChannel = null;
     _trackedOrderId = null;
 
-    debugPrint('RealtimeTrackingService: Déconnecté');
+    eccore.Journal.trace('RealtimeTrackingService: Déconnecté');
   }
 
   @override

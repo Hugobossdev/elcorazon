@@ -656,7 +656,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
 
       _tabController.animateTo(0);
     } catch (e) {
-      debugPrint('Position indisponible : $e');
+      eccore.Journal.trace('Position indisponible : $e');
       if (mounted) {
         _showError('Position indisponible pour le moment.');
       }
@@ -756,7 +756,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
         _isSearching = false;
       });
     } catch (e) {
-      debugPrint('Erreur recherche Places: $e');
+      eccore.Journal.trace('Erreur recherche Places: $e');
       if (!mounted || token != _searchToken) return;
       setState(() => _isSearching = false);
     }
@@ -789,7 +789,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       // Retour à l'onglet formulaire
       _tabController.animateTo(0);
     } catch (e) {
-      debugPrint('Détail de lieu indisponible : $e');
+      eccore.Journal.trace('Détail de lieu indisponible : $e');
       if (mounted) _showError('Ce lieu n\'a pas pu être localisé.');
     } finally {
       if (mounted) setState(() => _isSearching = false);
@@ -833,7 +833,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     } catch (e) {
       // Serveur injoignable : on n'empêche pas l'enregistrement pour autant.
       // Le devis de commande refera la vérification, et lui seul fait foi.
-      debugPrint('Couverture non vérifiée avant enregistrement : $e');
+      eccore.Journal.trace('Couverture non vérifiée avant enregistrement : $e');
     }
 
     if (!mounted) return;

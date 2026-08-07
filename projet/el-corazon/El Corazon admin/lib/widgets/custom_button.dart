@@ -22,9 +22,7 @@ class CustomButton extends StatelessWidget {
   final Color? color;
 
   const CustomButton({
-    super.key,
-    required this.text,
-    required this.onPressed,
+    required this.text, required this.onPressed, super.key,
     this.isLoading = false,
     this.backgroundColor,
     this.textColor,
@@ -185,9 +183,7 @@ class CustomIconButton extends StatelessWidget {
   final String? tooltip;
 
   const CustomIconButton({
-    super.key,
-    required this.icon,
-    required this.onPressed,
+    required this.icon, required this.onPressed, super.key,
     this.backgroundColor,
     this.iconColor,
     this.size = 48,

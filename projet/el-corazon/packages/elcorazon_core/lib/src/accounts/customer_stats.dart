@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Fiche chiffrée d'un client — miroir de `CustomerStatsSerializer`
 /// (`GET /analytics/reports/customers/{id}/`).

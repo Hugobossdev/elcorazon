@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:elcora_fast/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Reçoit les messages quand l'app est fermée ou en arrière-plan. Doit être
 /// une fonction de premier niveau annotée `@pragma('vm:entry-point')` : elle
@@ -17,7 +18,7 @@ import 'package:elcora_fast/models/order.dart';
 /// message ne soit pas perdu et pour la trace.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  debugPrint('PushNotificationService: message en arrière-plan ${message.messageId}');
+  Journal.trace('PushNotificationService: message en arrière-plan ${message.messageId}');
 }
 
 /// Notifications de l'app client : locales (programmation, affichage) **et**
@@ -82,9 +83,9 @@ class PushNotificationService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
 
-      debugPrint('PushNotificationService: Service initialisé avec succès');
+      Journal.trace('PushNotificationService: Service initialisé avec succès');
     } catch (e) {
-      debugPrint('PushNotificationService: Erreur d\'initialisation - $e');
+      Journal.trace('PushNotificationService: Erreur d\'initialisation - $e');
     }
   }
 
@@ -96,14 +97,14 @@ class PushNotificationService extends ChangeNotifier {
       // antérieur le renvoie accordé d'office.
       final settings = await messaging.requestPermission();
       if (settings.authorizationStatus == AuthorizationStatus.denied) {
-        debugPrint('PushNotificationService: notifications push refusées');
+        Journal.trace('PushNotificationService: notifications push refusées');
         return;
       }
 
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       _fcmToken = await messaging.getToken();
-      debugPrint(
+      Journal.trace(
         'PushNotificationService: jeton FCM ${_fcmToken == null ? 'indisponible' : 'obtenu'}',
       );
 
@@ -120,7 +121,7 @@ class PushNotificationService extends ChangeNotifier {
       // Notamment quand aucun projet Firebase réel n'est configuré (voir
       // `lib/firebase_options.dart`) : l'app tourne sans push plutôt que de
       // refuser de démarrer.
-      debugPrint('PushNotificationService: FCM indisponible - $e');
+      Journal.trace('PushNotificationService: FCM indisponible - $e');
     }
   }
 
@@ -234,8 +235,8 @@ class PushNotificationService extends ChangeNotifier {
 
   /// Gère les clics sur les notifications locales
   void _onNotificationTapped(NotificationResponse response) {
-    debugPrint('PushNotificationService: Notification locale cliquée');
-    debugPrint('Payload: ${response.payload}');
+    Journal.trace('PushNotificationService: Notification locale cliquée');
+    Journal.trace('Payload: ${response.payload}');
 
     if (response.payload != null) {
       try {
@@ -243,7 +244,7 @@ class PushNotificationService extends ChangeNotifier {
         final notification = PushNotification.fromMap(data);
         _notificationController.add(notification);
       } catch (e) {
-        debugPrint('PushNotificationService: Erreur parsing payload - $e');
+        Journal.trace('PushNotificationService: Erreur parsing payload - $e');
       }
     }
   }

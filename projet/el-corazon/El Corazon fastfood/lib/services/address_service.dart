@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/repositories/django_address_repository.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Levée par toute écriture tentée sans session.
 ///
@@ -142,7 +143,7 @@ class AddressService extends ChangeNotifier {
       _repairSelection();
       await _saveToCache();
     } catch (e) {
-      debugPrint('AddressService: synchronisation impossible — $e');
+      Journal.trace('AddressService: synchronisation impossible — $e');
     } finally {
       _isSyncing = false;
       notifyListeners();
@@ -370,7 +371,7 @@ class AddressService extends ChangeNotifier {
       // Cache illisible (format changé, écriture interrompue) : on repart d'un
       // carnet vide, que la synchronisation remplira. Aucune raison de faire
       // échouer l'ouverture de l'application pour un cache.
-      debugPrint('AddressService: cache illisible, ignoré — $e');
+      Journal.trace('AddressService: cache illisible, ignoré — $e');
       _book = const [];
     }
   }
@@ -403,7 +404,7 @@ class AddressService extends ChangeNotifier {
         await prefs.setString(_selectedKey, selectedId);
       }
     } catch (e) {
-      debugPrint('AddressService: cache non écrit — $e');
+      Journal.trace('AddressService: cache non écrit — $e');
     }
   }
 
@@ -437,7 +438,7 @@ class AddressService extends ChangeNotifier {
     try {
       prefs = await SharedPreferences.getInstance();
     } catch (e) {
-      debugPrint('AddressService: reprise impossible, stockage illisible — $e');
+      Journal.trace('AddressService: reprise impossible, stockage illisible — $e');
       return remote;
     }
 
@@ -467,10 +468,10 @@ class AddressService extends ChangeNotifier {
         // Adresse sans coordonnées : le serveur la refuserait
         // (`location` obligatoire), et rien ici ne peut inventer le point. Ces
         // entrées ne pouvaient de toute façon servir à aucune commande.
-        debugPrint('AddressService: adresse locale sans point, non reprise.');
+        Journal.trace('AddressService: adresse locale sans point, non reprise.');
         continue;
       } catch (e) {
-        debugPrint('AddressService: adresse locale illisible, ignorée — $e');
+        Journal.trace('AddressService: adresse locale illisible, ignorée — $e');
         continue;
       }
 
@@ -488,14 +489,14 @@ class AddressService extends ChangeNotifier {
         if (local.isFavorite) _favoriteIds.add(created.id);
         adopted.add(created);
       } catch (e) {
-        debugPrint('AddressService: reprise de "${local.name}" échouée — $e');
+        Journal.trace('AddressService: reprise de "${local.name}" échouée — $e');
         allAdopted = false;
       }
     }
 
     if (allAdopted) await _forgetLegacyKeys(prefs);
     if (adopted.isNotEmpty) {
-      debugPrint('AddressService: ${adopted.length} adresse(s) locale(s) reprise(s).');
+      Journal.trace('AddressService: ${adopted.length} adresse(s) locale(s) reprise(s).');
     }
     return [...remote, ...adopted];
   }

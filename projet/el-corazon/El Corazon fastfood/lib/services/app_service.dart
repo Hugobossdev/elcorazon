@@ -173,7 +173,7 @@ class AppService extends ChangeNotifier {
     } catch (e) {
       // Le carnet est secondaire par rapport à l'identité : son échec ne doit
       // pas empêcher la connexion d'aboutir.
-      debugPrint('Carnet d\'adresses non synchronisé : $e');
+      eccore.Journal.trace('Carnet d\'adresses non synchronisé : $e');
     }
   }
 
@@ -213,7 +213,7 @@ class AppService extends ChangeNotifier {
       // commandes par `ws/orders/{id}/tracking/`, par commande suivie.
 
       if (kDebugMode) {
-        debugPrint(
+        eccore.Journal.trace(
           '⚡ AppService initialisé en ${stopwatch.elapsedMilliseconds}ms',
         );
       }
@@ -221,7 +221,7 @@ class AppService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ Erreur lors de l\'initialisation AppService: $e');
+      eccore.Journal.trace('❌ Erreur lors de l\'initialisation AppService: $e');
       _errorHandler.logError(
         'Erreur lors de l\'initialisation AppService',
         details: e,
@@ -239,7 +239,7 @@ class AppService extends ChangeNotifier {
         await _loadUserOrders();
       }
     } catch (e) {
-      debugPrint('⚠️ Erreur lors du chargement de la session: $e');
+      eccore.Journal.trace('⚠️ Erreur lors du chargement de la session: $e');
       _errorHandler.logError(
         'Erreur lors du chargement de la session',
         details: e,
@@ -267,7 +267,7 @@ class AppService extends ChangeNotifier {
       unawaited(_registerPushDeviceBestEffort());
       return true;
     } catch (e) {
-      debugPrint('Login error: $e');
+      eccore.Journal.trace('Login error: $e');
       rethrow;
     }
   }
@@ -291,7 +291,7 @@ class AppService extends ChangeNotifier {
         },
       );
     } catch (e) {
-      debugPrint('⚠️ Échec de l\'enregistrement du jeton FCM: $e');
+      eccore.Journal.trace('⚠️ Échec de l\'enregistrement du jeton FCM: $e');
     }
   }
 
@@ -331,7 +331,7 @@ class AppService extends ChangeNotifier {
       NotificationDatabaseService().clearSession();
       notifyListeners();
     } catch (e) {
-      debugPrint('Logout error: $e');
+      eccore.Journal.trace('Logout error: $e');
     }
   }
 
@@ -342,7 +342,7 @@ class AppService extends ChangeNotifier {
     try {
       await _container.read(eccore.authRepositoryProvider).unregisterDevice(token);
     } catch (e) {
-      debugPrint('⚠️ Échec du retrait du jeton FCM: $e');
+      eccore.Journal.trace('⚠️ Échec du retrait du jeton FCM: $e');
     }
   }
 
@@ -425,7 +425,7 @@ class AppService extends ChangeNotifier {
                 'item_count': cartItems.length,
               },
             )
-            .catchError((Object e) => debugPrint('Analytics indisponible: $e')),
+            .catchError((Object e) => eccore.Journal.trace('Analytics indisponible: $e')),
       );
 
       // Déclencher les notifications et gamification (inchangé, simulé
@@ -447,7 +447,7 @@ class AppService extends ChangeNotifier {
       notifyListeners();
       return remoteOrder.id;
     } catch (e) {
-      debugPrint('Error placing order from cart service: $e');
+      eccore.Journal.trace('Error placing order from cart service: $e');
       return '';
     }
   }
@@ -479,7 +479,7 @@ class AppService extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ Error loading menu items: $e');
+      eccore.Journal.trace('❌ Error loading menu items: $e');
       _errorHandler.logError('Erreur lors du chargement du menu', details: e);
       _menuItems = [];
       notifyListeners();
@@ -512,7 +512,7 @@ class AppService extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ Error loading menu categories: $e');
+      eccore.Journal.trace('❌ Error loading menu categories: $e');
       _errorHandler.logError(
         'Erreur lors du chargement des catégories',
         details: e,
@@ -530,7 +530,7 @@ class AppService extends ChangeNotifier {
       _orders = await DjangoOrderRepository().getUserOrders(_currentUser!.id);
       notifyListeners();
     } catch (e) {
-      debugPrint('Error loading user orders: $e');
+      eccore.Journal.trace('Error loading user orders: $e');
       _orders = [];
     }
   }

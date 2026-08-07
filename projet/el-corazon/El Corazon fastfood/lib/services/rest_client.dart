@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class RestClientException implements Exception {
   final String message;
@@ -57,7 +58,7 @@ class RestClient {
   Map<String, dynamic> _decode(http.Response resp) {
     final text = resp.body;
     if (kDebugMode) {
-      debugPrint('HTTP ${resp.request?.method} ${resp.request?.url} -> ${resp.statusCode}');
+      Journal.trace('HTTP ${resp.request?.method} ${resp.request?.url} -> ${resp.statusCode}');
     }
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw RestClientException(

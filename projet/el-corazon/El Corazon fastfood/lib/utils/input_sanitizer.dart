@@ -109,9 +109,9 @@ class InputSanitizer {
     // dans les noms propres africains/français (ex : N'Guessan, D'Almeida).
     // On bloque uniquement les combinaisons SQL réellement dangereuses.
     final sqlPatterns = [
-      r"(\bOR\b\s+\d+\s*=\s*\d+)", // OR 1=1
-      r"(\bAND\b\s+\d+\s*=\s*\d+)", // AND 1=1
-      r"(\bUNION\b.*\bSELECT\b)", // UNION SELECT
+      r'(\bOR\b\s+\d+\s*=\s*\d+)', // OR 1=1
+      r'(\bAND\b\s+\d+\s*=\s*\d+)', // AND 1=1
+      r'(\bUNION\b.*\bSELECT\b)', // UNION SELECT
       r"('\s*\bOR\b\s+')", // ' OR '
       r"('\s*\bAND\b\s+')", // ' AND '
       r"('\s*;\s*--)", // '; --

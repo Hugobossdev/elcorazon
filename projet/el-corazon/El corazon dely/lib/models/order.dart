@@ -23,16 +23,11 @@ class Order {
     required this.userId,
     required this.items,
     required this.subtotal,
-    this.deliveryFee = 5.0,
-    required this.total,
+    required this.total, required this.deliveryAddress, required this.paymentMethod, required this.orderTime, required this.createdAt, this.deliveryFee = 5.0,
     this.status = OrderStatus.pending,
-    required this.deliveryAddress,
     this.deliveryNotes,
     this.promoCode,
     this.discount = 0.0,
-    required this.paymentMethod,
-    required this.orderTime,
-    required this.createdAt,
     this.estimatedDeliveryTime,
     this.deliveryPersonId,
     this.statusUpdates = const [],
@@ -136,8 +131,9 @@ class Order {
     // Load order items from database structure
     List<OrderItem> items = [];
     if (map['order_items'] != null) {
-      final orderItemsData = map['order_items'] as List;
-      items = orderItemsData.map((itemData) {
+      final orderItemsData = map['order_items'] as List<dynamic>;
+      items = orderItemsData.map((element) {
+        final itemData = element as Map<String, dynamic>;
         return OrderItem(
           menuItemId:
               itemData['menu_item_id'] as String? ??

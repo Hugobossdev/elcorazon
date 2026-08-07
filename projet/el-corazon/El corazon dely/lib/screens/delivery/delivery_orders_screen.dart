@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../services/app_service.dart';
-import '../../utils/price_formatter.dart';
-import '../../services/error_handler_service.dart';
-import '../../models/order.dart';
-import 'real_time_tracking_screen.dart';
-import 'driver_profile_screen.dart';
-import 'settings_screen.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/utils/price_formatter.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 
 class DeliveryOrdersScreen extends StatefulWidget {
   const DeliveryOrdersScreen({super.key});
@@ -335,7 +335,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
               ),
               const SizedBox(height: 4),
               Text(
-                '${PriceFormatter.format(order.total)}',
+                PriceFormatter.format(order.total),
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -361,7 +361,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
         children: [
           Row(
             children: [
-              Icon(Icons.location_on, size: 16, color: Colors.red),
+              const Icon(Icons.location_on, size: 16, color: Colors.red),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -630,7 +630,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
 class DeliveryDetailsSheet extends StatefulWidget {
   final Order order;
 
-  const DeliveryDetailsSheet({super.key, required this.order});
+  const DeliveryDetailsSheet({required this.order, super.key});
 
   @override
   State<DeliveryDetailsSheet> createState() => _DeliveryDetailsSheetState();
@@ -716,7 +716,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
             ),
             _buildInfoRow(
               'Montant',
-              '${PriceFormatter.format(widget.order.total)}',
+              PriceFormatter.format(widget.order.total),
             ),
             _buildInfoRow(
               'Paiement',
@@ -750,7 +750,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Icon(Icons.location_on, color: Colors.red),
+                const Icon(Icons.location_on, color: Colors.red),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -864,7 +864,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
                       ),
                     ),
                     Text(
-                      '${PriceFormatter.format(item.totalPrice)}',
+                      PriceFormatter.format(item.totalPrice),
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ],
@@ -993,7 +993,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
         }
       }
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erreur lors de l\'appel: $e'),
@@ -1010,7 +1010,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
       final phoneNumber = _recipientPhone();
 
       if (phoneNumber == null || phoneNumber.isEmpty) {
-        if (mounted) {
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Numéro de téléphone non disponible'),
@@ -1042,7 +1042,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
         await launchUrl(smsUri);
       }
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erreur lors de l\'envoi du message: $e'),
@@ -1088,7 +1088,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
         if (canLaunchWaze) {
           await launchUrl(wazeUri, mode: LaunchMode.externalApplication);
         } else {
-          if (context.mounted) {
+          if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Aucune application de navigation trouvée'),
@@ -1099,7 +1099,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
         }
       }
     } catch (e) {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erreur lors de l\'ouverture de la navigation: $e'),

@@ -32,14 +32,17 @@ void main() {
     backing = {};
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_channel, (call) async {
+      // `MethodCall.arguments` est `dynamic` : on le type une fois ici plutôt
+      // que d'indexer un `dynamic` à chaque branche.
+      final arguments = call.arguments as Map<Object?, Object?>;
       switch (call.method) {
         case 'read':
-          return backing[call.arguments['key']];
+          return backing[arguments['key']];
         case 'write':
-          backing[call.arguments['key'] as String] = call.arguments['value'] as String;
+          backing[arguments['key']! as String] = arguments['value']! as String;
           return null;
         case 'delete':
-          backing.remove(call.arguments['key']);
+          backing.remove(arguments['key']);
           return null;
         default:
           return null;

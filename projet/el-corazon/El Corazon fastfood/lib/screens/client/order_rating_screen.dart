@@ -6,6 +6,7 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/driver_rating_service.dart';
 import 'package:elcora_fast/services/review_rating_service.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class OrderRatingScreen extends StatefulWidget {
   final Order order;
@@ -116,7 +117,7 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Error submitting ratings: $e');
+      Journal.trace('Error submitting ratings: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Une erreur est survenue')),

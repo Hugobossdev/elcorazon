@@ -1,27 +1,28 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/admin_auth_service.dart';
-import '../../widgets/loading_widget.dart';
-import '../../dialogs/notifications_dialog.dart';
-import '../../utils/dialog_helper.dart';
-import '../../ui/ui.dart';
-import 'admin_dashboard_screen.dart';
-import 'admin_roles_screen.dart';
-import 'advanced_order_management_screen.dart';
-import 'driver_management_screen.dart';
-import 'analytics_screen.dart';
-import 'category_management_screen.dart';
-import 'customization_management_screen.dart';
-import 'menu_management_screen.dart';
-import 'marketing_screen.dart';
-import 'promotions_screen.dart';
-import 'gamification_management_screen.dart';
-import 'client_management_screen.dart';
-import 'settings_screen.dart';
-import 'driver_map_screen.dart';
-import 'global_search_screen.dart';
-import 'active_deliveries_screen.dart';
-import 'driver_documents_dashboard_screen.dart';
+import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/widgets/loading_widget.dart';
+import 'package:admin/dialogs/notifications_dialog.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/ui/ui.dart';
+import 'package:admin/screens/admin/admin_dashboard_screen.dart';
+import 'package:admin/screens/admin/admin_roles_screen.dart';
+import 'package:admin/screens/admin/advanced_order_management_screen.dart';
+import 'package:admin/screens/admin/driver_management_screen.dart';
+import 'package:admin/screens/admin/analytics_screen.dart';
+import 'package:admin/screens/admin/category_management_screen.dart';
+import 'package:admin/screens/admin/customization_management_screen.dart';
+import 'package:admin/screens/admin/menu_management_screen.dart';
+import 'package:admin/screens/admin/marketing_screen.dart';
+import 'package:admin/screens/admin/promotions_screen.dart';
+import 'package:admin/screens/admin/gamification_management_screen.dart';
+import 'package:admin/screens/admin/client_management_screen.dart';
+import 'package:admin/screens/admin/settings_screen.dart';
+import 'package:admin/screens/admin/driver_map_screen.dart';
+import 'package:admin/screens/admin/global_search_screen.dart';
+import 'package:admin/screens/admin/active_deliveries_screen.dart';
+import 'package:admin/screens/admin/driver_documents_dashboard_screen.dart';
 
 // Modèle de données pour les groupes de navigation
 class NavigationGroup {
@@ -269,8 +270,8 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
   }
 
   String _getCurrentTitle() {
-    for (var group in _navigationGroups) {
-      for (var item in group.items) {
+    for (final group in _navigationGroups) {
+      for (final item in group.items) {
         if (item.index == _selectedIndex) {
           return item.title;
         }
@@ -400,7 +401,6 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
         border: Border(
           right: BorderSide(
             color: theme.dividerColor.withValues(alpha: 0.1),
-            width: 1,
           ),
         ),
         boxShadow: [
@@ -584,7 +584,6 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                 color: isSelected
                     ? primaryColor.withValues(alpha: 0.2)
                     : theme.colorScheme.surface.withValues(alpha: 0),
-                width: 1,
               ),
             ),
             child: Row(
@@ -653,7 +652,6 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                   color: isSelected
                       ? primaryColor.withValues(alpha: 0.2)
                       : theme.colorScheme.surface.withValues(alpha: 0),
-                  width: 1,
                 ),
               ),
               child: Icon(
@@ -671,7 +669,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
   }
 
   Widget _buildSidebarFooter(
-      BuildContext context, AdminAuthService adminAuth, ThemeData theme) {
+      BuildContext context, AdminAuthService adminAuth, ThemeData theme,) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -746,7 +744,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
   // ===========================================================================
 
   Widget _buildModernAppBar(
-      BuildContext context, AdminAuthService adminAuth, ThemeData theme) {
+      BuildContext context, AdminAuthService adminAuth, ThemeData theme,) {
     return Container(
       height: 80,
       padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -1047,7 +1045,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                 ListTile(
                   leading: Icon(Icons.logout_rounded, color: scheme.error),
                   title: Text('Déconnexion',
-                      style: TextStyle(color: scheme.error)),
+                      style: TextStyle(color: scheme.error),),
                   onTap: () => _logout(context),
                 ),
               ],
@@ -1079,7 +1077,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
     final adminAuth = Provider.of<AdminAuthService>(context, listen: false);
     await adminAuth.logoutAdmin();
     if (context.mounted) {
-      Navigator.of(context).pushReplacementNamed('/admin-login');
+      unawaited(Navigator.of(context).pushReplacementNamed('/admin-login'));
     }
   }
 }

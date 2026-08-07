@@ -1,5 +1,5 @@
-import '../network/api_client.dart';
-import 'campaign.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/notifications/campaign.dart';
 
 /// Campagnes de notifications — `/api/v1/notifications/campaigns/`
 /// (`backend/apps/notifications/backoffice.py`), sous `notifications.send`.

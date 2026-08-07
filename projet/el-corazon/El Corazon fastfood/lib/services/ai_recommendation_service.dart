@@ -7,6 +7,7 @@ import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/repositories/django_menu_repository.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class AIRecommendationService extends ChangeNotifier {
   static final AIRecommendationService _instance =
@@ -39,7 +40,7 @@ class AIRecommendationService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      debugPrint('Error initializing AIRecommendationService: $e');
+      Journal.trace('Error initializing AIRecommendationService: $e');
     }
   }
 
@@ -52,7 +53,7 @@ class AIRecommendationService extends ChangeNotifier {
     // 3. Recommandations contextuelles (heure, météo, saison)
     // 4. Recommandations populaires (items les plus commandés)
 
-    debugPrint(
+    Journal.trace(
       'AIRecommendationService: Modèles de recommandation initialisés',
     );
 
@@ -432,12 +433,12 @@ class AIRecommendationService extends ChangeNotifier {
           .toList();
 
       if (items.isEmpty) {
-        debugPrint('AIRecommendationService: aucun article disponible au catalogue');
+        Journal.trace('AIRecommendationService: aucun article disponible au catalogue');
       }
 
       return items;
     } catch (e) {
-      debugPrint('Error getting menu items: $e');
+      Journal.trace('Error getting menu items: $e');
       return [];
     }
   }

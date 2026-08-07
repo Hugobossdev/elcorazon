@@ -28,7 +28,7 @@ void main() {
 
   group('Total d’une ligne', () {
     test('prix multiplié par la quantité', () {
-      expect(article(prix: 2500, quantite: 3).totalPrice, 7500);
+      expect(article(quantite: 3).totalPrice, 7500);
     });
 
     test('une quantité nulle ne coûte rien', () {
@@ -59,9 +59,8 @@ void main() {
       // C1 : le supplément d'une option est un prix, et un prix se décide au
       // serveur. Le calculer ici donnerait un second montant, différent de
       // celui facturé.
-      final sans = article(prix: 2500, quantite: 2);
+      final sans = article(quantite: 2);
       final avec = article(
-        prix: 2500,
         quantite: 2,
         options: {'supplément': 'fromage'},
       );
@@ -152,7 +151,7 @@ void main() {
   group('Somme d’un panier', () {
     test('le sous-total additionne les lignes', () {
       final panier = [
-        article(prix: 2500, quantite: 2),
+        article(quantite: 2),
         article(prix: 1000, quantite: 3),
       ];
       final sousTotal = panier.fold<double>(0, (s, l) => s + l.totalPrice);

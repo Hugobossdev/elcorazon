@@ -38,10 +38,10 @@ class ErrorHandlerService extends ChangeNotifier {
     
     // Log en mode debug
     if (kDebugMode) {
-      debugPrint('🚨 Error: $message');
-      if (code != null) debugPrint('   Code: $code');
-      if (details != null) debugPrint('   Details: $details');
-      if (stackTrace != null) debugPrint('   StackTrace: $stackTrace');
+      Journal.trace('🚨 Error: $message');
+      if (code != null) Journal.trace('   Code: $code');
+      if (details != null) Journal.trace('   Details: $details');
+      if (stackTrace != null) Journal.trace('   StackTrace: $stackTrace');
     }
 
     notifyListeners();
@@ -187,7 +187,7 @@ class ErrorHandlerService extends ChangeNotifier {
             : delay;
 
         if (kDebugMode) {
-          debugPrint('⚠️ Tentative $attempts/$maxRetries échouée. Nouvelle tentative dans ${waitTime.inSeconds}s...');
+          Journal.trace('⚠️ Tentative $attempts/$maxRetries échouée. Nouvelle tentative dans ${waitTime.inSeconds}s...');
         }
 
         await Future.delayed(waitTime);

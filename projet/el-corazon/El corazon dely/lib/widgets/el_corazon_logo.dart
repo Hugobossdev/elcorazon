@@ -18,7 +18,7 @@ class ElCorazonLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     final logoColor = color ?? Theme.of(context).colorScheme.primary;
 
-    Widget logo = Column(
+    final Widget logo = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         // Icône principale avec moto de livraison
@@ -134,8 +134,7 @@ class ElCorazonAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onLogoTap;
 
   const ElCorazonAppBar({
-    super.key,
-    required this.title,
+    required this.title, super.key,
     this.actions,
     this.showLogo = true,
     this.onLogoTap,
@@ -164,7 +163,7 @@ class ElCorazonAppBar extends StatelessWidget implements PreferredSizeWidget {
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.delivery_dining,
                       size: 20,
                       color: Colors.white,
@@ -187,7 +186,7 @@ class ElCorazonAppBar extends StatelessWidget implements PreferredSizeWidget {
           Expanded(
             child: Text(
               title,
-              style: TextStyle(
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
                 fontSize: 18,
@@ -325,7 +324,7 @@ class _ElCorazonSplashLogoState extends State<ElCorazonSplashLogo>
                     // Rotation de la moto de livraison
                     Transform.rotate(
                       angle: _rotationAnimation.value * 0.1,
-                      child: Icon(
+                      child: const Icon(
                         Icons.delivery_dining,
                         size: 60,
                         color: Colors.white,

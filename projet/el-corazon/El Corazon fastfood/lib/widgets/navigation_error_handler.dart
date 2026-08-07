@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Widget pour gérer les erreurs de navigation
 class NavigationErrorHandler extends StatelessWidget {
@@ -44,7 +45,7 @@ class NavigationErrorHandler extends StatelessWidget {
     String error,
     User? user,
   ) {
-    debugPrint('Navigation Error: $error');
+    Journal.trace('Navigation Error: $error');
 
     // Afficher l'erreur à l'utilisateur
     showNavigationError(context, 'Erreur de navigation: $error');

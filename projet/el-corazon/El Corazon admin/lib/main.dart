@@ -2,27 +2,27 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'theme/modern_theme.dart';
+import 'package:admin/theme/modern_theme.dart';
 // Admin services uniquement
-import 'services/admin_auth_service.dart';
-import 'services/order_management_service.dart';
-import 'services/driver_management_service.dart';
-import 'services/analytics_service.dart';
-import 'services/role_management_service.dart';
-import 'services/category_management_service.dart';
-import 'services/customization_management_service.dart';
-import 'services/menu_service.dart';
-import 'services/app_service.dart';
-import 'services/promotion_service.dart';
-import 'services/marketing_service.dart';
-import 'services/payments_service.dart';
-import 'services/client_management_service.dart';
-import 'services/gamification_service.dart';
-import 'services/driver_schedule_service.dart';
-import 'services/driver_document_service.dart';
-import 'services/delivery_zone_service.dart';
-import 'screens/admin/admin_navigation_screen.dart';
-import 'screens/auth/admin_auth_screen.dart';
+import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/services/analytics_service.dart';
+import 'package:admin/services/role_management_service.dart';
+import 'package:admin/services/category_management_service.dart';
+import 'package:admin/services/customization_management_service.dart';
+import 'package:admin/services/menu_service.dart';
+import 'package:admin/services/app_service.dart';
+import 'package:admin/services/promotion_service.dart';
+import 'package:admin/services/marketing_service.dart';
+import 'package:admin/services/payments_service.dart';
+import 'package:admin/services/client_management_service.dart';
+import 'package:admin/services/gamification_service.dart';
+import 'package:admin/services/driver_schedule_service.dart';
+import 'package:admin/services/driver_document_service.dart';
+import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/screens/admin/admin_navigation_screen.dart';
+import 'package:admin/screens/auth/admin_auth_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart' hide Provider, Consumer;
 
@@ -41,10 +41,10 @@ void main() async {
 
   // Load environment variables
   try {
-    await dotenv.load(fileName: '.env');
-    debugPrint('Env file loaded successfully');
+    await dotenv.load();
+    Journal.trace('Env file loaded successfully');
   } catch (e) {
-    debugPrint('Error loading env file: $e');
+    Journal.trace('Error loading env file: $e');
   }
 
   // Override global HTTP client pour accepter les certificats (fix handshake error)

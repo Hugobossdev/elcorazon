@@ -15,7 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// permanente si `null` est traité comme une date dépassée. L'heure est donc
 /// injectée ici plutôt que lue à l'horloge.
 void main() {
-  final maintenant = DateTime(2026, 8, 6, 12, 0);
+  final maintenant = DateTime(2026, 8, 6, 12);
 
   Order commande({
     required String id,

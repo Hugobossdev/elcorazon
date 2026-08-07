@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/promotion_service.dart';
-import '../../utils/dialog_helper.dart';
-import '../../utils/price_formatter.dart';
+import 'package:admin/services/promotion_service.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 class PromotionsScreen extends StatefulWidget {
   const PromotionsScreen({super.key});

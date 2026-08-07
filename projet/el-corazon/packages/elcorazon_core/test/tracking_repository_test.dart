@@ -65,7 +65,7 @@ class _FakeServer implements HttpClientAdapter {
         },
         'last_position': _pingJson(),
         'estimated_delivery_at': '2026-07-29T10:25:00Z',
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.contains('/tracking/orders/order-sans-livreur/')) {
@@ -75,7 +75,7 @@ class _FakeServer implements HttpClientAdapter {
         'courier': <String, dynamic>{},
         'last_position': null,
         'estimated_delivery_at': null,
-      }, 200);
+      }, 200,);
     }
 
     throw UnimplementedError('Route non simulée : ${options.method} ${options.path}');

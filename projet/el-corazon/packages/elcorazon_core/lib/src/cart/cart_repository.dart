@@ -1,5 +1,5 @@
-import '../network/api_client.dart';
-import 'cart.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/cart/cart.dart';
 
 /// Accès à `/api/v1/carts/*` — voir `backend/apps/carts/{serializers,views}.py`.
 /// Réservé aux clients authentifiés (`IsCustomer` côté serveur) : passe par

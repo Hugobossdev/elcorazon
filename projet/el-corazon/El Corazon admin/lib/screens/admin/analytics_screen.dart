@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../../services/analytics_service.dart';
-import '../../widgets/loading_widget.dart';
-import '../../utils/price_formatter.dart';
-import '../../ui/ui.dart';
+import 'package:admin/services/analytics_service.dart';
+import 'package:admin/widgets/loading_widget.dart';
+import 'package:admin/utils/price_formatter.dart';
+import 'package:admin/ui/ui.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -192,7 +193,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                               setState(() {
                                 _startDate = date;
                               });
-                              _loadAnalytics();
+                              unawaited(_loadAnalytics());
                             }
                           },
                           borderRadius: BorderRadius.circular(8),
@@ -248,7 +249,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                               setState(() {
                                 _endDate = date;
                               });
-                              _loadAnalytics();
+                              unawaited(_loadAnalytics());
                             }
                           },
                           borderRadius: BorderRadius.circular(8),
@@ -365,7 +366,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                 ),
                 _buildStatCard(
                   'Taux de Complétion',
-                  '${orders['completionRate'].toStringAsFixed(1)}%',
+                  '${(orders['completionRate']! as num).toStringAsFixed(1)}%',
                   Icons.percent,
                   AdminColorTokens.semantic(Theme.of(context).colorScheme).warning,
                 ),
@@ -378,7 +379,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildStatCard(
-      String title, String value, IconData icon, Color color) {
+      String title, String value, IconData icon, Color color,) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Container(
@@ -599,7 +600,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     return LineChart(
       LineChartData(
         gridData: FlGridData(
-          show: true,
           drawVerticalLine: false,
           horizontalInterval: maxRevenue > 0 ? (maxRevenue / 5) : 1,
           getDrawingHorizontalLine: (value) {
@@ -651,10 +651,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ),
           ),
           topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+            
           ),
           rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+            
           ),
         ),
         borderData: FlBorderData(
@@ -671,7 +671,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             color: sem.success,
             barWidth: 3,
             isStrokeCapRound: true,
-            dotData: const FlDotData(show: true),
             belowBarData: BarAreaData(
               show: true,
               color: sem.success.withValues(alpha: 0.10),
@@ -757,14 +756,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ),
           ),
           topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+            
           ),
           rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+            
           ),
         ),
         gridData: FlGridData(
-          show: true,
           drawVerticalLine: false,
           horizontalInterval: maxValue > 0 ? (maxValue / 5) : 1,
           getDrawingHorizontalLine: (value) {
@@ -992,14 +990,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ),
           ),
           topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+            
           ),
           rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+            
           ),
         ),
         gridData: FlGridData(
-          show: true,
           drawVerticalLine: false,
           horizontalInterval: maxValue > 0 ? (maxValue / 5) : 1,
           getDrawingHorizontalLine: (value) {

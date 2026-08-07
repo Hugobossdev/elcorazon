@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/repositories/order_repository.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Options de filtre pour l'historique des commandes
 enum OrderFilter {
@@ -48,7 +49,7 @@ class OrderHistoryService extends ChangeNotifier {
       _orders = await _repository.getUserOrders(userId);
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ Erreur lors du chargement des commandes: $e');
+      Journal.trace('❌ Erreur lors du chargement des commandes: $e');
       rethrow;
     } finally {
       _setLoading(false);

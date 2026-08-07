@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 
-import '../auth/token_storage.dart';
-import 'api_exception.dart';
+import 'package:elcorazon_core/src/auth/token_storage.dart';
+import 'package:elcorazon_core/src/network/api_exception.dart';
 
 /// Client HTTP unique vers `/api/v1/` — attache le jeton d'accès, rafraîchit
 /// la session sur un 401 et traduit les réponses en [ApiException].
@@ -121,7 +121,7 @@ class ApiClient {
       handler.resolve(await dio.fetch(request));
     } on SessionExpiredException catch (cause) {
       handler.reject(
-        DioException(requestOptions: request, error: cause, type: DioExceptionType.unknown),
+        DioException(requestOptions: request, error: cause),
       );
     } catch (_) {
       handler.next(error);
@@ -172,7 +172,7 @@ class ApiClient {
 
   ApiException _mapDioError(DioException error) {
     if (error.error is SessionExpiredException) {
-      return ApiException(
+      return const ApiException(
         status: 401,
         code: 'session_expired',
         detail: 'Votre session a expiré, reconnectez-vous.',

@@ -1,4 +1,4 @@
-import 'reward.dart';
+import 'package:elcorazon_core/src/loyalty/reward.dart';
 
 /// Échange passé — miroir de `RewardRedemptionSerializer`. `promotionCode`
 /// est le code à recopier au panier ; il reste lisible ici même si la

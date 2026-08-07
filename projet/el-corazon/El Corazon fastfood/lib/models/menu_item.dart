@@ -1,5 +1,5 @@
-import 'package:flutter/foundation.dart';
 import 'package:elcora_fast/models/menu_category.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class MenuItem {
   final String id;
@@ -141,8 +141,8 @@ class MenuItem {
             categoryId = category.id;
           }
         } catch (e) {
-          debugPrint('⚠️ Erreur parsing category: $e');
-          debugPrint('   Category data: $categoryData');
+          Journal.trace('⚠️ Erreur parsing category: $e');
+          Journal.trace('   Category data: $categoryData');
         }
       }
     }
@@ -154,7 +154,7 @@ class MenuItem {
 
     // Log si categoryId est toujours vide (mais ne pas bloquer)
     if (categoryId.isEmpty) {
-      debugPrint(
+      Journal.trace(
         '⚠️ MenuItem.fromMap: category_id est vide pour l\'item ${map['id']} (${map['name']})',
       );
     }

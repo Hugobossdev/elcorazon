@@ -88,7 +88,7 @@ class SocialService extends ChangeNotifier {
       _error = e.status == 404
           ? 'Aucun groupe ne correspond à ce code.'
           : e.detail;
-      debugPrint('Social : adhésion refusée — ${e.code}');
+      eccore.Journal.trace('Social : adhésion refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -208,7 +208,7 @@ class SocialService extends ChangeNotifier {
       await action();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Social : lecture impossible — ${e.code}');
+      eccore.Journal.trace('Social : lecture impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -217,7 +217,7 @@ class SocialService extends ChangeNotifier {
 
   void _signaler(eccore.ApiException e, String quoi) {
     _error = e.detail;
-    debugPrint('Social : $quoi refusée — ${e.code}');
+    eccore.Journal.trace('Social : $quoi refusée — ${e.code}');
     notifyListeners();
   }
 }

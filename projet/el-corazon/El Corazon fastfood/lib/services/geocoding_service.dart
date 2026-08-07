@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcora_fast/config/api_config.dart';
 import 'package:elcora_fast/services/rest_client.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class GeocodingService extends ChangeNotifier {
   static final GeocodingService _instance = GeocodingService._internal();
@@ -18,7 +19,7 @@ class GeocodingService extends ChangeNotifier {
     try {
       final raw = address.trim();
       if (raw.isEmpty) {
-        debugPrint('GeocodingService: adresse vide, skip');
+        Journal.trace('GeocodingService: adresse vide, skip');
         return null;
       }
       // Vérifier le cache d'abord
@@ -37,9 +38,9 @@ class GeocodingService extends ChangeNotifier {
 
       // Log de débogage pour voir la structure de la réponse
       if (kDebugMode) {
-        debugPrint('GeocodingService: Réponse API - status: ${data['status']}');
+        Journal.trace('GeocodingService: Réponse API - status: ${data['status']}');
         if (data['results'] != null) {
-          debugPrint('GeocodingService: Nombre de résultats: ${(data['results'] as List).length}');
+          Journal.trace('GeocodingService: Nombre de résultats: ${(data['results'] as List).length}');
         }
       }
 
@@ -47,26 +48,26 @@ class GeocodingService extends ChangeNotifier {
         try {
           final results = data['results'] as List;
           if (results.isEmpty) {
-            debugPrint('GeocodingService: Liste de résultats vide');
+            Journal.trace('GeocodingService: Liste de résultats vide');
             return null;
           }
           
           final firstResult = results.first;
           if (firstResult is! Map<String, dynamic>) {
-            debugPrint('GeocodingService: firstResult n\'est pas un Map: ${firstResult.runtimeType}');
+            Journal.trace('GeocodingService: firstResult n\'est pas un Map: ${firstResult.runtimeType}');
             return null;
           }
           
           // Vérifier que geometry existe et est un Map
           final geometryValue = firstResult['geometry'];
           if (geometryValue == null) {
-            debugPrint('GeocodingService: geometry est null dans la réponse');
-            debugPrint('GeocodingService: Structure firstResult: $firstResult');
+            Journal.trace('GeocodingService: geometry est null dans la réponse');
+            Journal.trace('GeocodingService: Structure firstResult: $firstResult');
             return null;
           }
           
           if (geometryValue is! Map<String, dynamic>) {
-            debugPrint('GeocodingService: geometry n\'est pas un Map: ${geometryValue.runtimeType}');
+            Journal.trace('GeocodingService: geometry n\'est pas un Map: ${geometryValue.runtimeType}');
             return null;
           }
           
@@ -75,13 +76,13 @@ class GeocodingService extends ChangeNotifier {
           // Vérifier que location existe dans geometry
           final locationValue = geometry['location'];
           if (locationValue == null) {
-            debugPrint('GeocodingService: location est null dans geometry');
-            debugPrint('GeocodingService: Structure geometry: $geometry');
+            Journal.trace('GeocodingService: location est null dans geometry');
+            Journal.trace('GeocodingService: Structure geometry: $geometry');
             return null;
           }
           
           if (locationValue is! Map<String, dynamic>) {
-            debugPrint('GeocodingService: location n\'est pas un Map: ${locationValue.runtimeType}');
+            Journal.trace('GeocodingService: location n\'est pas un Map: ${locationValue.runtimeType}');
             return null;
           }
           
@@ -92,16 +93,16 @@ class GeocodingService extends ChangeNotifier {
           final lng = location['lng'];
           
           if (lat == null || lng == null) {
-            debugPrint(
+            Journal.trace(
               'GeocodingService: Coordonnées manquantes dans la réponse - lat: $lat, lng: $lng',
             );
-            debugPrint('GeocodingService: Structure location: $location');
+            Journal.trace('GeocodingService: Structure location: $location');
             return null;
           }
           
           // Vérifier que lat et lng sont des nombres
           if (lat is! num || lng is! num) {
-            debugPrint(
+            Journal.trace(
               'GeocodingService: Coordonnées ne sont pas des nombres - lat: ${lat.runtimeType} ($lat), lng: ${lng.runtimeType} ($lng)',
             );
             return null;
@@ -115,23 +116,23 @@ class GeocodingService extends ChangeNotifier {
           // Mettre en cache le résultat
           _addressCache[address] = latLng;
 
-          debugPrint(
+          Journal.trace(
             'GeocodingService: Adresse géocodée - $address -> $latLng',
           );
           return latLng;
         } catch (e, stackTrace) {
-          debugPrint('GeocodingService: Erreur lors du parsing de la réponse - $e');
-          debugPrint('GeocodingService: Stack trace: $stackTrace');
+          Journal.trace('GeocodingService: Erreur lors du parsing de la réponse - $e');
+          Journal.trace('GeocodingService: Stack trace: $stackTrace');
           return null;
         }
       } else {
-        debugPrint(
+        Journal.trace(
           'GeocodingService: Aucun résultat trouvé pour cette adresse (${data['status']})',
         );
         return null;
       }
     } catch (e) {
-      debugPrint('GeocodingService: Erreur de géocodage - $e');
+      Journal.trace('GeocodingService: Erreur de géocodage - $e');
       return null;
     }
   }
@@ -151,18 +152,18 @@ class GeocodingService extends ChangeNotifier {
         final results = data['results'] as List;
         final firstResult = results.first as Map<String, dynamic>;
         final address = firstResult['formatted_address'] as String;
-        debugPrint(
+        Journal.trace(
           'GeocodingService: Coordonnées inversées - $coordinates -> $address',
         );
         return address;
       } else {
-        debugPrint(
+        Journal.trace(
           'GeocodingService: Erreur de géocodage inverse - ${data['status']}',
         );
         return null;
       }
     } catch (e) {
-      debugPrint('GeocodingService: Erreur de géocodage inverse - $e');
+      Journal.trace('GeocodingService: Erreur de géocodage inverse - $e');
       return null;
     }
   }
@@ -211,18 +212,18 @@ class GeocodingService extends ChangeNotifier {
             ((firstElement['duration'] as Map<String, dynamic>)['value'] as num)
                 .toInt(); // en secondes
         final minutes = (duration / 60).round();
-        debugPrint(
+        Journal.trace(
           'GeocodingService: Temps de trajet calculé - $minutes minutes',
         );
         return minutes;
       } else {
-        debugPrint(
+        Journal.trace(
           'GeocodingService: Erreur de calcul de temps - ${data['status']}',
         );
         return null;
       }
     } catch (e) {
-      debugPrint('GeocodingService: Erreur de calcul de temps - $e');
+      Journal.trace('GeocodingService: Erreur de calcul de temps - $e');
       return null;
     }
   }
@@ -271,18 +272,18 @@ class GeocodingService extends ChangeNotifier {
           ),
         );
 
-        debugPrint(
+        Journal.trace(
           'GeocodingService: Directions obtenues - ${points.length} points',
         );
         return points;
       } else {
-        debugPrint(
+        Journal.trace(
           'GeocodingService: Erreur de directions - ${data['status']}',
         );
         return null;
       }
     } catch (e) {
-      debugPrint('GeocodingService: Erreur de directions - $e');
+      Journal.trace('GeocodingService: Erreur de directions - $e');
       return null;
     }
   }
@@ -290,6 +291,6 @@ class GeocodingService extends ChangeNotifier {
   /// Vide le cache de géocodage
   void clearCache() {
     _addressCache.clear();
-    debugPrint('GeocodingService: Cache vidé');
+    Journal.trace('GeocodingService: Cache vidé');
   }
 }

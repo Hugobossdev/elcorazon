@@ -55,7 +55,7 @@ class _FakeServer implements HttpClientAdapter {
         'next': null,
         'previous': null,
         'results': [_addressJson()],
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.endsWith('/profiles/addresses/') && options.method == 'POST') {
@@ -97,7 +97,7 @@ void main() {
     repository = AddressRepository(apiClient: apiClient);
   });
 
-  final draft = Address(
+  const draft = Address(
     label: 'Maison',
     kind: 'home',
     line1: 'Rue des Cocotiers',

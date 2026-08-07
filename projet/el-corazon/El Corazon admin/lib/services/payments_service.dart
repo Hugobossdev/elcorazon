@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Encaissements et remboursements — `/payments/*` (Phase 6).
 ///
@@ -62,7 +62,7 @@ class PaymentsService extends ChangeNotifier {
       _transactions = await _payments.listTransactions(status: status);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Paiements : chargement impossible — ${e.code}');
+      eccore.Journal.trace('Paiements : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -75,7 +75,7 @@ class PaymentsService extends ChangeNotifier {
       return await _payments.getTransactions(orderId: orderId);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Paiements : transactions indisponibles — ${e.code}');
+      eccore.Journal.trace('Paiements : transactions indisponibles — ${e.code}');
       return const [];
     }
   }
@@ -108,7 +108,7 @@ class PaymentsService extends ChangeNotifier {
       return rembourse;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Paiements : remboursement refusé — ${e.code}');
+      eccore.Journal.trace('Paiements : remboursement refusé — ${e.code}');
       notifyListeners();
       return null;
     }

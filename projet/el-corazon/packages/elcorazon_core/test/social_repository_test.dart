@@ -228,7 +228,7 @@ void main() {
     });
 
     test('toggleLike applique le compteur du serveur, sans incrément local', () async {
-      final before = Post.fromJson(_postJson(likesCount: 2));
+      final before = Post.fromJson(_postJson());
       final result = await repository.toggleLike('post-1');
       final after = before.withLike(liked: result.liked, likesCount: result.likesCount);
 

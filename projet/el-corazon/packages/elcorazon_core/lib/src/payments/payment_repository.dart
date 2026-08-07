@@ -1,7 +1,7 @@
-import '../models/money.dart';
-import '../network/api_client.dart';
-import 'split_payment.dart';
-import 'transaction.dart';
+import 'package:elcorazon_core/src/models/money.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/payments/split_payment.dart';
+import 'package:elcorazon_core/src/payments/transaction.dart';
 
 /// Accès à `/api/v1/payments/*` — voir
 /// `backend/apps/payments/{serializers,views,services}.py`. Le client ouvre

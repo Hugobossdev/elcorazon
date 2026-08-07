@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Position de l'appareil : permission et relevé, rien d'autre.
 ///
@@ -57,7 +58,7 @@ class LocationService extends ChangeNotifier {
       notifyListeners();
       return _currentPosition;
     } catch (e) {
-      debugPrint('Erreur de géolocalisation: $e');
+      Journal.trace('Erreur de géolocalisation: $e');
       return null;
     }
   }

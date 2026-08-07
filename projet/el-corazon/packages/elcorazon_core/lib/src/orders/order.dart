@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Ligne de commande figée — miroir de `OrderLineSerializer`
 /// (`backend/apps/orders/serializers.py`). Copie gelée au moment de la

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/category_management_service.dart';
-import '../../models/category.dart';
-import '../../widgets/custom_button.dart';
-import '../../utils/dialog_helper.dart';
-import '../../ui/ui.dart';
+import 'package:admin/services/category_management_service.dart';
+import 'package:admin/models/category.dart';
+import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/ui/ui.dart';
 
 class CategoryManagementScreen extends StatefulWidget {
   const CategoryManagementScreen({super.key});
@@ -162,7 +162,7 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-            category == null ? 'Nouvelle Catégorie' : 'Modifier Catégorie'),
+            category == null ? 'Nouvelle Catégorie' : 'Modifier Catégorie',),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -246,7 +246,7 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
                   SnackBar(
                     content: Text(success
                         ? 'Catégorie enregistrée'
-                        : 'Erreur lors de l\'enregistrement'),
+                        : 'Erreur lors de l\'enregistrement',),
                     backgroundColor: inverseSurfaceColor,
                   ),
                 );

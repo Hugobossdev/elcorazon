@@ -3,6 +3,7 @@ import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Livre-t-on à cette adresse, et à quel barème ?
 ///
@@ -58,7 +59,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
     } catch (e) {
       // Serveur injoignable : la vignette reste sur son indicateur de
       // chargement plutôt que d'annoncer un prix qu'on ne connaît pas.
-      debugPrint('DeliveryFeePreview: barème indisponible — $e');
+      Journal.trace('DeliveryFeePreview: barème indisponible — $e');
     }
   }
 

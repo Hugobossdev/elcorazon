@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 
-import '../models/money.dart';
-import '../network/api_client.dart';
-import 'category.dart';
-import 'menu_item.dart';
-import 'option_template.dart';
+import 'package:elcorazon_core/src/models/money.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/catalog/category.dart';
+import 'package:elcorazon_core/src/catalog/menu_item.dart';
+import 'package:elcorazon_core/src/catalog/option_template.dart';
 
 /// Écriture du catalogue — `/api/v1/catalog/manage/*`
 /// (`backend/apps/catalog/backoffice.py`).

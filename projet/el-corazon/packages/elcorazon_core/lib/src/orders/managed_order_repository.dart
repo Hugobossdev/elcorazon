@@ -1,5 +1,5 @@
-import '../network/api_client.dart';
-import 'order.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/orders/order.dart';
 
 /// Supervision des commandes — `/api/v1/orders/manage/`
 /// (`backend/apps/orders/backoffice.py`).

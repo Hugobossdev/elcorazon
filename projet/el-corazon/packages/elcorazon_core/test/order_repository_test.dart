@@ -75,7 +75,7 @@ class _FakeServer implements HttpClientAdapter {
                 'kind': 'fixed',
               },
         'is_orderable': true,
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.endsWith('/orders/') && options.method == 'POST') {
@@ -89,7 +89,7 @@ class _FakeServer implements HttpClientAdapter {
         'next': null,
         'previous': null,
         'results': [_orderJson()],
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.contains('/orders/order-1/cancel/')) {

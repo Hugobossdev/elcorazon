@@ -28,6 +28,9 @@ on:
       - "projet/el-corazon/El corazon dely/**"
       - "projet/el-corazon/El Corazon admin/**"
       - "projet/el-corazon/tools/**"
+      # Jeu de règles de lint partagé par les trois applications : le
+      # modifier change ce que la CI exige, il doit donc la déclencher.
+      - "projet/el-corazon/analysis_options.yaml"
       - ".github/workflows/flutter-ci.yml"
   pull_request:
     paths:
@@ -36,6 +39,9 @@ on:
       - "projet/el-corazon/El corazon dely/**"
       - "projet/el-corazon/El Corazon admin/**"
       - "projet/el-corazon/tools/**"
+      # Jeu de règles de lint partagé par les trois applications : le
+      # modifier change ce que la CI exige, il doit donc la déclencher.
+      - "projet/el-corazon/analysis_options.yaml"
       - ".github/workflows/flutter-ci.yml"
 
 env:
@@ -91,9 +97,14 @@ jobs:
       - run: flutter pub get
 
       - name: Analyse — aucun écart toléré
-        # Sans `--no-fatal-infos`, contrairement aux applications : le paquet est
-        # du code écrit pour cette architecture, il n'a aucune dette de style à
-        # traîner et doit le rester.
+        # Le paquet est du code écrit pour cette architecture : il n'a aucune
+        # dette de style à traîner et doit le rester.
+        #
+        # Ce job passait déjà sans `--no-fatal-infos`, mais il ne mesurait
+        # presque rien : le paquet déclarait `flutter_lints` sans jamais
+        # l'inclure, faute d'`analysis_options.yaml`. Il en a un depuis le lot 5,
+        # et partage le jeu de règles des trois applications — ce qui a révélé
+        # 161 diagnostics, tous traités.
         run: flutter analyze
 
       - name: Tests du contrat
@@ -104,6 +115,7 @@ jobs:
         # (`is_public`, `is_verified_purchase`, compteurs, identifiants
         # d'utilisateur).
         run: flutter test
+
 
   applications:
     name: ${{ matrix.nom }}
@@ -143,19 +155,24 @@ jobs:
 
       - run: flutter pub get
 
-      - name: Analyse — erreurs et avertissements bloquants
-        # `--no-fatal-infos` est délibéré, et c'est le seul compromis de ce
-        # workflow : les trois applications traînent des « info » de style
-        # (`use_build_context_synchronously`, `deprecated_member_use`,
-        # `curly_braces_in_flow_control_structures`) sur des écrans que la
-        # migration n'a pas encore touchés. Les traiter comme bloquantes
-        # rendrait la CI rouge dès sa création, donc inutile. Erreurs et
-        # avertissements, eux, restent fatals — c'est ce qui compte : les trois
-        # apps en sont à zéro et doivent y rester.
-        run: flutter analyze --no-fatal-infos
+      - name: Analyse — aucun écart toléré
+        # `--no-fatal-infos` a été retiré au lot 5. Sa justification — « les
+        # trois applications traînent des info de style sur des écrans que la
+        # migration n'a pas encore touchés » — ne tenait plus : les 56 « info »
+        # restantes venaient pour 46 d'entre elles du seul fait que `dely`
+        # n'activait aucune règle de lint.
+        #
+        # Les trois applications partagent désormais le même jeu de règles
+        # (`projet/el-corazon/analysis_options.yaml`, inclus par chacune), le
+        # plus exigeant des trois — celui de `fastfood`. L'alignement a fait
+        # apparaître 1 207 diagnostics, tous traités : les trois applications et
+        # le paquet partagé sont à **zéro**, et ce drapeau est ce qui les y
+        # maintient.
+        run: flutter analyze
 
       - name: Tests
         # Bloquant, sans exception. L'analyseur attrape ce qui ne compile pas ;
         # il ne dit rien d'un écran qui affiche le mauvais prix, ni d'une saisie
         # de carte bancaire qui reviendrait dans l'application du livreur.
         run: flutter test
+

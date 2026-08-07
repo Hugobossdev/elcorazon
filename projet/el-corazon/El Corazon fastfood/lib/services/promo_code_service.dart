@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:elcora_fast/models/promo_code.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class PromoCodeService extends ChangeNotifier {
   static final PromoCodeService _instance = PromoCodeService._internal();
@@ -31,10 +32,10 @@ class PromoCodeService extends ChangeNotifier {
       await _loadPromoCodeUsages();
       _isInitialized = true;
       notifyListeners();
-      debugPrint(
+      Journal.trace(
           'PromoCodeService: Initialisé avec ${_promoCodes.length} codes promo',);
     } catch (e) {
-      debugPrint('PromoCodeService: Erreur d\'initialisation - $e');
+      Journal.trace('PromoCodeService: Erreur d\'initialisation - $e');
     }
   }
 
@@ -48,7 +49,7 @@ class PromoCodeService extends ChangeNotifier {
           .map((json) => PromoCode.fromJson(jsonDecode(json)))
           .toList();
     } catch (e) {
-      debugPrint('PromoCodeService: Erreur de chargement des codes promo - $e');
+      Journal.trace('PromoCodeService: Erreur de chargement des codes promo - $e');
     }
   }
 
@@ -62,7 +63,7 @@ class PromoCodeService extends ChangeNotifier {
           .map((json) => PromoCodeUsage.fromJson(jsonDecode(json)))
           .toList();
     } catch (e) {
-      debugPrint(
+      Journal.trace(
           'PromoCodeService: Erreur de chargement des utilisations - $e',);
     }
   }
@@ -77,7 +78,7 @@ class PromoCodeService extends ChangeNotifier {
 
       await prefs.setStringList('promo_codes', promoCodesJson);
     } catch (e) {
-      debugPrint('PromoCodeService: Erreur de sauvegarde des codes promo - $e');
+      Journal.trace('PromoCodeService: Erreur de sauvegarde des codes promo - $e');
     }
   }
 
@@ -90,7 +91,7 @@ class PromoCodeService extends ChangeNotifier {
 
       await prefs.setStringList('promo_code_usages', usagesJson);
     } catch (e) {
-      debugPrint(
+      Journal.trace(
           'PromoCodeService: Erreur de sauvegarde des utilisations - $e',);
     }
   }
@@ -176,7 +177,7 @@ class PromoCodeService extends ChangeNotifier {
         isFreeDelivery: promoCode.type == PromoCodeType.freeDelivery,
       );
     } catch (e) {
-      debugPrint('PromoCodeService: Erreur de validation du code promo - $e');
+      Journal.trace('PromoCodeService: Erreur de validation du code promo - $e');
       return PromoCodeValidationResult(
         isValid: false,
         errorMessage: 'Erreur lors de la validation du code promo',
@@ -223,9 +224,9 @@ class PromoCodeService extends ChangeNotifier {
       await _savePromoCodeUsages();
       await _savePromoCodes();
 
-      debugPrint('PromoCodeService: Utilisation du code promo enregistrée');
+      Journal.trace('PromoCodeService: Utilisation du code promo enregistrée');
     } catch (e) {
-      debugPrint(
+      Journal.trace(
           'PromoCodeService: Erreur d\'enregistrement de l\'utilisation - $e',);
     }
   }
@@ -322,10 +323,10 @@ class PromoCodeService extends ChangeNotifier {
       await _savePromoCodes();
       notifyListeners();
 
-      debugPrint('PromoCodeService: Code promo créé - ${newPromoCode.code}');
+      Journal.trace('PromoCodeService: Code promo créé - ${newPromoCode.code}');
       return newPromoCode;
     } catch (e) {
-      debugPrint('PromoCodeService: Erreur de création du code promo - $e');
+      Journal.trace('PromoCodeService: Erreur de création du code promo - $e');
       rethrow;
     }
   }

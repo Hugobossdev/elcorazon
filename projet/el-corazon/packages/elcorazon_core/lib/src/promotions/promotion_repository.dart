@@ -1,6 +1,6 @@
-import '../models/money.dart';
-import '../network/api_client.dart';
-import 'promotion.dart';
+import 'package:elcorazon_core/src/models/money.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/promotions/promotion.dart';
 
 /// Codes promotionnels du back-office — `/api/v1/promotions/`
 /// (`backend/apps/promotions/backoffice.py`).

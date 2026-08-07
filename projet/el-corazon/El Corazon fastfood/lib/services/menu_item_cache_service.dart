@@ -1,8 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/repositories/django_menu_repository.dart';
 import 'package:elcora_fast/repositories/menu_repository.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Modèle pour un élément de menu en cache
 class CachedMenuItem {
@@ -94,13 +94,13 @@ class MenuItemCacheService {
       }
       
       if (items.isNotEmpty) {
-        debugPrint('📦 ${items.length} menu items chargés depuis le cache');
+        Journal.trace('📦 ${items.length} menu items chargés depuis le cache');
         return items;
       }
     }
 
     // Charger depuis le backend (avec requête optimisée)
-    debugPrint('🔄 Chargement des menu items depuis le backend...');
+    Journal.trace('🔄 Chargement des menu items depuis le backend...');
     final items = await _menuRepository.getMenuItems(categoryId: categoryId);
 
     // Mettre à jour le cache
@@ -111,7 +111,7 @@ class MenuItemCacheService {
       return items.where((item) => item.categoryId == categoryId).toList();
     }
     
-    debugPrint('✅ ${items.length} menu items chargés depuis la base de données');
+    Journal.trace('✅ ${items.length} menu items chargés depuis la base de données');
     return items;
   }
 
@@ -121,7 +121,7 @@ class MenuItemCacheService {
     if (!forceRefresh && _menuItemsCache.containsKey(id)) {
       final cached = _menuItemsCache[id]!;
       if (!cached.isExpired(_menuItemsExpiry)) {
-        debugPrint('📦 Menu item $id chargé depuis le cache');
+        Journal.trace('📦 Menu item $id chargé depuis le cache');
         return cached.item;
       }
     }
@@ -140,7 +140,7 @@ class MenuItemCacheService {
       
       return item;
     } catch (e) {
-      debugPrint('❌ Erreur chargement menu item $id: $e');
+      Journal.trace('❌ Erreur chargement menu item $id: $e');
       return null;
     }
   }
@@ -163,19 +163,19 @@ class MenuItemCacheService {
           .toList();
       
       if (categories.isNotEmpty) {
-        debugPrint('📦 ${categories.length} catégories chargées depuis le cache');
+        Journal.trace('📦 ${categories.length} catégories chargées depuis le cache');
         return categories;
       }
     }
 
     // Charger depuis le backend
-    debugPrint('🔄 Chargement des catégories depuis le backend...');
+    Journal.trace('🔄 Chargement des catégories depuis le backend...');
     final categories = await _menuRepository.getMenuCategories();
 
     // Mettre à jour le cache
     _updateCategoriesCache(categories);
 
-    debugPrint('✅ ${categories.length} catégories chargées depuis le backend');
+    Journal.trace('✅ ${categories.length} catégories chargées depuis le backend');
     return categories;
   }
 
@@ -190,7 +190,7 @@ class MenuItemCacheService {
       );
     }
     _menuItemsLastUpdate = DateTime.now();
-    debugPrint('💾 Cache des menu items mis à jour (${items.length} items)');
+    Journal.trace('💾 Cache des menu items mis à jour (${items.length} items)');
   }
 
   /// Met à jour le cache des catégories
@@ -203,7 +203,7 @@ class MenuItemCacheService {
       );
     }
     _categoriesLastUpdate = DateTime.now();
-    debugPrint('💾 Cache des catégories mis à jour (${categories.length} catégories)');
+    Journal.trace('💾 Cache des catégories mis à jour (${categories.length} catégories)');
   }
 
   /// Vérifie si le cache est expiré
@@ -215,21 +215,21 @@ class MenuItemCacheService {
   void invalidateMenuItemsCache() {
     _menuItemsCache.clear();
     _menuItemsLastUpdate = null;
-    debugPrint('🗑️ Cache des menu items invalidé');
+    Journal.trace('🗑️ Cache des menu items invalidé');
   }
 
   /// Invalide le cache des catégories
   void invalidateCategoriesCache() {
     _categoriesCache.clear();
     _categoriesLastUpdate = null;
-    debugPrint('🗑️ Cache des catégories invalidé');
+    Journal.trace('🗑️ Cache des catégories invalidé');
   }
 
   /// Invalide tout le cache
   void invalidateAllCache() {
     invalidateMenuItemsCache();
     invalidateCategoriesCache();
-    debugPrint('🗑️ Tout le cache invalidé');
+    Journal.trace('🗑️ Tout le cache invalidé');
   }
 
   /// Met à jour un menu item dans le cache
@@ -239,13 +239,13 @@ class MenuItemCacheService {
       cachedAt: DateTime.now(),
       categoryId: item.categoryId,
     );
-    debugPrint('💾 Menu item ${item.id} mis à jour dans le cache');
+    Journal.trace('💾 Menu item ${item.id} mis à jour dans le cache');
   }
 
   /// Supprime un menu item du cache
   void removeMenuItemFromCache(String itemId) {
     _menuItemsCache.remove(itemId);
-    debugPrint('🗑️ Menu item $itemId supprimé du cache');
+    Journal.trace('🗑️ Menu item $itemId supprimé du cache');
   }
 
   /// Obtient les statistiques du cache
@@ -291,19 +291,19 @@ class MenuItemCacheService {
     final categoriesRemoved = categoriesBefore - _categoriesCache.length;
 
     if (menuItemsRemoved > 0 || categoriesRemoved > 0) {
-      debugPrint('🧹 Nettoyage du cache: $menuItemsRemoved menu items, $categoriesRemoved catégories supprimés');
+      Journal.trace('🧹 Nettoyage du cache: $menuItemsRemoved menu items, $categoriesRemoved catégories supprimés');
     }
   }
 
   /// Précharge les menu items dans le cache
   Future<void> preloadMenuItems({String? categoryId}) async {
-    debugPrint('🔄 Préchargement des menu items...');
+    Journal.trace('🔄 Préchargement des menu items...');
     await getMenuItems(categoryId: categoryId, forceRefresh: true);
   }
 
   /// Précharge les catégories dans le cache
   Future<void> preloadCategories() async {
-    debugPrint('🔄 Préchargement des catégories...');
+    Journal.trace('🔄 Préchargement des catégories...');
     await getCategories(forceRefresh: true);
   }
 }

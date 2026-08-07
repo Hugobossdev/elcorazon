@@ -39,11 +39,8 @@ class Driver {
 
   Driver({
     required this.id,
-    this.authUserId,
+    required this.name, required this.email, required this.phone, required this.createdAt, this.authUserId,
     this.userId,
-    required this.name,
-    required this.email,
-    required this.phone,
     this.status = DriverStatus.offline,
     this.latitude,
     this.longitude,
@@ -52,7 +49,6 @@ class Driver {
     this.rating = 0.0,
     this.totalDeliveries = 0,
     this.totalEarnings = 0.0,
-    required this.createdAt,
     this.lastOnline,
     this.profileImageUrl,
     this.notes,

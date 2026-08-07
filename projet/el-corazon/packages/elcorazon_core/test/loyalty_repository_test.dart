@@ -72,7 +72,7 @@ class _FakeServer implements HttpClientAdapter {
         'lifetime_earned': 300,
         'lifetime_spent': 180,
         'last_activity_at': '2026-07-28T12:00:00Z',
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.endsWith('/loyalty/rewards/')) {
@@ -81,7 +81,7 @@ class _FakeServer implements HttpClientAdapter {
         'next': null,
         'previous': null,
         'results': [_rewardJson()],
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.endsWith('/loyalty/entries/')) {
@@ -100,7 +100,7 @@ class _FakeServer implements HttpClientAdapter {
             'created_at': '2026-07-28T12:00:00Z',
           },
         ],
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.endsWith('/loyalty/plans/')) {
@@ -109,7 +109,7 @@ class _FakeServer implements HttpClientAdapter {
         'next': null,
         'previous': null,
         'results': [_planJson()],
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.endsWith('/loyalty/subscriptions/subscribe/') && options.method == 'POST') {
@@ -117,7 +117,7 @@ class _FakeServer implements HttpClientAdapter {
         'subscription': _subscriptionJson(status: 'pending'),
         'checkout_url': 'https://paydunya.test/checkout/abc',
         'instructions': null,
-      }, 201);
+      }, 201,);
     }
 
     if (options.path.endsWith('/loyalty/subscriptions/sub-1/cancel/') && options.method == 'POST') {
@@ -139,7 +139,7 @@ class _FakeServer implements HttpClientAdapter {
           ),
           _subscriptionJson(),
         ],
-      }, 200);
+      }, 200,);
     }
 
     if (options.path.contains('/loyalty/rewards/reward-1/redeem/') && options.method == 'POST') {
@@ -153,7 +153,7 @@ class _FakeServer implements HttpClientAdapter {
         },
         'promotion': null,
         'balance': 20,
-      }, 201);
+      }, 201,);
     }
 
     throw UnimplementedError('Route non simulée : ${options.method} ${options.path}');

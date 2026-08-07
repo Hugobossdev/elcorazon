@@ -32,10 +32,10 @@ class SupportService extends ChangeNotifier {
 
     try {
       _tickets = await _repository.getTickets();
-      debugPrint('✅ Chargé ${_tickets.length} tickets de support');
+      eccore.Journal.trace('✅ Chargé ${_tickets.length} tickets de support');
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('❌ Chargement des tickets: ${e.code}');
+      eccore.Journal.trace('❌ Chargement des tickets: ${e.code}');
       _tickets = [];
     } finally {
       _isLoading = false;
@@ -50,7 +50,7 @@ class SupportService extends ChangeNotifier {
       _messages[ticketId] = await _repository.getMessages(ticketId);
       notifyListeners();
     } on eccore.ApiException catch (e) {
-      debugPrint('❌ Chargement du fil $ticketId: ${e.code}');
+      eccore.Journal.trace('❌ Chargement du fil $ticketId: ${e.code}');
     }
   }
 
@@ -73,11 +73,11 @@ class SupportService extends ChangeNotifier {
         description: description,
       );
       _tickets.insert(0, ticket);
-      debugPrint('✅ Ticket créé: ${ticket.id}');
+      eccore.Journal.trace('✅ Ticket créé: ${ticket.id}');
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('❌ Création du ticket: ${e.code}');
+      eccore.Journal.trace('❌ Création du ticket: ${e.code}');
       return false;
     } finally {
       _isLoading = false;
@@ -92,7 +92,7 @@ class SupportService extends ChangeNotifier {
       notifyListeners();
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('❌ Envoi du message sur $ticketId: ${e.code}');
+      eccore.Journal.trace('❌ Envoi du message sur $ticketId: ${e.code}');
       return false;
     }
   }

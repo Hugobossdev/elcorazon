@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../services/global_search_service.dart';
-import 'order_management_screen.dart';
-import 'menu_management_screen.dart';
-import 'client_management_screen.dart';
-import 'driver_management_screen.dart';
+import 'package:admin/services/global_search_service.dart';
+import 'package:admin/screens/admin/order_management_screen.dart';
+import 'package:admin/screens/admin/menu_management_screen.dart';
+import 'package:admin/screens/admin/client_management_screen.dart';
+import 'package:admin/screens/admin/driver_management_screen.dart';
 
 /// Catégories disponibles pour filtrer les résultats de recherche
 enum SearchCategory {

@@ -71,9 +71,7 @@ class OverlayLoadingWidget extends StatelessWidget {
   final String? message;
 
   const OverlayLoadingWidget({
-    super.key,
-    required this.child,
-    required this.isLoading,
+    required this.child, required this.isLoading, super.key,
     this.message,
   });
 
@@ -106,9 +104,7 @@ class PullToRefreshWrapper extends StatelessWidget {
   final Future<void> Function() onRefresh;
 
   const PullToRefreshWrapper({
-    super.key,
-    required this.child,
-    required this.onRefresh,
+    required this.child, required this.onRefresh, super.key,
   });
 
   @override
@@ -127,8 +123,7 @@ class ErrorWidget extends StatelessWidget {
   final IconData? icon;
 
   const ErrorWidget({
-    super.key,
-    required this.message,
+    required this.message, super.key,
     this.onRetry,
     this.icon,
   });
@@ -187,8 +182,7 @@ class EmptyStateWidget extends StatelessWidget {
   final VoidCallback? onAction;
 
   const EmptyStateWidget({
-    super.key,
-    required this.title,
+    required this.title, super.key,
     this.message,
     this.icon,
     this.actionText,

@@ -1,11 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../models/driver_document.dart';
-import '../../services/driver_document_service.dart' as svc;
-import '../../services/driver_management_service.dart';
-import 'driver_document_validation_screen.dart';
+import 'package:admin/models/driver_document.dart';
+import 'package:admin/services/driver_document_service.dart' as svc;
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/screens/admin/driver_document_validation_screen.dart';
 
-import '../../models/driver.dart';
+import 'package:admin/models/driver.dart';
 
 class DriverDocumentsDashboardScreen extends StatefulWidget {
   const DriverDocumentsDashboardScreen({super.key});
@@ -155,7 +156,7 @@ class _DriverDocumentsDashboardScreenState
   }
 
   Widget _buildDocumentList(List<DriverDocument> documents,
-      {required bool isPending}) {
+      {required bool isPending,}) {
     if (documents.isEmpty) {
       return Center(
         child: Column(
@@ -209,9 +210,7 @@ class _DriverDocumentsDashboardScreenState
               ],
             ),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () async {
-              _navigateToValidation(doc);
-            },
+            onTap: () => unawaited(_navigateToValidation(doc)),
           ),
         );
       },
@@ -240,9 +239,6 @@ class _DriverDocumentsDashboardScreenState
           phone: doc.driverPhone ?? '',
           status: DriverStatus.unavailable, // Statut par défaut
           isActive: false,
-          rating: 0,
-          totalDeliveries: 0,
-          totalEarnings: 0,
           createdAt: DateTime.now(),
         );
       }
@@ -257,7 +253,7 @@ class _DriverDocumentsDashboardScreenState
         ),
       );
       // Recharger les données au retour
-      _loadData();
+      unawaited(_loadData());
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

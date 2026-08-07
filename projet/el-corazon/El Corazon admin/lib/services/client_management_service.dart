@@ -1,10 +1,10 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import '../models/order.dart';
-import '../models/user.dart';
-import '../repositories/django_order_mapper.dart';
-import 'admin_auth_service.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/models/user.dart';
+import 'package:admin/repositories/django_order_mapper.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Dossiers clients — `/administration/customers/` (Phase 6).
 ///
@@ -68,7 +68,7 @@ class ClientManagementService extends ChangeNotifier {
       _clients = comptes.map(_toLocal).toList();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Clients : chargement impossible — ${e.code}');
+      eccore.Journal.trace('Clients : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -86,7 +86,7 @@ class ClientManagementService extends ChangeNotifier {
       return await _admin.customerStats(clientId);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Clients : fiche indisponible — ${e.code}');
+      eccore.Journal.trace('Clients : fiche indisponible — ${e.code}');
       return null;
     }
   }
@@ -99,7 +99,7 @@ class ClientManagementService extends ChangeNotifier {
       return commandes.map(DjangoOrderMapper.toLocal).toList();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Clients : historique indisponible — ${e.code}');
+      eccore.Journal.trace('Clients : historique indisponible — ${e.code}');
       return [];
     }
   }
@@ -119,7 +119,7 @@ class ClientManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Clients : blocage refusé — ${e.code}');
+      eccore.Journal.trace('Clients : blocage refusé — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -133,7 +133,7 @@ class ClientManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Clients : déblocage refusé — ${e.code}');
+      eccore.Journal.trace('Clients : déblocage refusé — ${e.code}');
       notifyListeners();
       return false;
     }

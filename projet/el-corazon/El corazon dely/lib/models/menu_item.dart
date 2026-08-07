@@ -170,7 +170,7 @@ class MenuItem {
       id: map['id'] ?? '',
       name: map['name'] ?? '',
       description: map['description'] ?? '',
-      price: map['price']?.toDouble() ?? 0.0,
+      price: (map['price'] as num?)?.toDouble() ?? 0.0,
       category: category,
       imageUrl: map['image_url'],
       isPopular: map['is_popular'] ?? false,
@@ -187,7 +187,7 @@ class MenuItem {
               [],
       calories: map['calories'] ?? 0,
       preparationTime: map['preparation_time'] ?? 15,
-      rating: map['rating']?.toDouble() ?? 0.0,
+      rating: (map['rating'] as num?)?.toDouble() ?? 0.0,
       reviewCount: map['review_count'] ?? 0,
     );
   }

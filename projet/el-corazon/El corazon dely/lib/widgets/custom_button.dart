@@ -14,9 +14,7 @@ class CustomButton extends StatelessWidget {
   final bool outlined;
 
   const CustomButton({
-    super.key,
-    required this.text,
-    required this.onPressed,
+    required this.text, required this.onPressed, super.key,
     this.isLoading = false,
     this.backgroundColor,
     this.textColor,
@@ -32,7 +30,7 @@ class CustomButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    Widget button = outlined
+    final Widget button = outlined
           ? OutlinedButton.icon(
               onPressed: isLoading ? null : onPressed,
               icon: isLoading
@@ -48,7 +46,7 @@ class CustomButton extends StatelessWidget {
                       ? Icon(icon, color: textColor ?? theme.primaryColor)
                       : const SizedBox.shrink()),
               label: isLoading
-                  ? Text('Chargement...')
+                  ? const Text('Chargement...')
                   : Text(
                       text,
                       style: theme.textTheme.labelLarge?.copyWith(
@@ -78,7 +76,7 @@ class CustomButton extends StatelessWidget {
                       ? Icon(icon, color: textColor ?? Colors.white)
                       : const SizedBox.shrink()),
               label: isLoading
-                  ? Text('Chargement...')
+                  ? const Text('Chargement...')
                   : Text(
                       text,
                       style: theme.textTheme.labelLarge?.copyWith(
@@ -124,9 +122,7 @@ class CustomIconButton extends StatelessWidget {
   final String? tooltip;
 
   const CustomIconButton({
-    super.key,
-    required this.icon,
-    required this.onPressed,
+    required this.icon, required this.onPressed, super.key,
     this.backgroundColor,
     this.iconColor,
     this.size = 48,

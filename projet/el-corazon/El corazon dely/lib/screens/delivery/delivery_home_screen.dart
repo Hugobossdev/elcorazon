@@ -1,18 +1,20 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/app_service.dart';
-import '../../utils/price_formatter.dart';
-import '../../services/address_service.dart';
-import '../../services/promo_code_service.dart';
-import '../../services/error_handler_service.dart';
-import '../../services/performance_service.dart';
-import '../../models/order.dart';
-import '../payments/earnings_screen.dart';
-import '../communication/chat_screen.dart';
-import 'real_time_tracking_screen.dart';
-import 'driver_profile_screen.dart';
-import 'settings_screen.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/utils/price_formatter.dart';
+import 'package:elcora_dely/services/address_service.dart';
+import 'package:elcora_dely/services/promo_code_service.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/services/performance_service.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/models/user.dart';
+import 'package:elcora_dely/screens/payments/earnings_screen.dart';
+import 'package:elcora_dely/screens/communication/chat_screen.dart';
+import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DeliveryHomeScreen extends StatefulWidget {
   const DeliveryHomeScreen({super.key});
@@ -117,14 +119,18 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       }
 
       // Initialiser les services optionnels (ne pas bloquer si échec)
+      if (!mounted) return;
+
       try {
         await Provider.of<AddressService>(
           context,
           listen: false,
         ).initialize().timeout(const Duration(seconds: 5));
       } catch (e) {
-        debugPrint('⚠️ AddressService initialization failed: $e');
+        Journal.trace('⚠️ AddressService initialization failed: $e');
       }
+
+      if (!mounted) return;
 
       try {
         await Provider.of<PromoCodeService>(
@@ -132,7 +138,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
           listen: false,
         ).initialize().timeout(const Duration(seconds: 5));
       } catch (e) {
-        debugPrint('⚠️ PromoCodeService initialization failed: $e');
+        Journal.trace('⚠️ PromoCodeService initialization failed: $e');
       }
 
       // Aucune initialisation de paiement : l'encaissement passe par le
@@ -145,17 +151,17 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
             .loadAvailableOrders(forceRefresh: true)
             .timeout(const Duration(seconds: 15));
       } catch (e) {
-        debugPrint('⚠️ Failed to load orders: $e');
+        Journal.trace('⚠️ Failed to load orders: $e');
         // Ne pas bloquer l'application si le chargement échoue
         // Les commandes seront chargées lors du rafraîchissement
       }
 
       if (mounted) {
-        debugPrint('✅ Services initialisés');
+        Journal.trace('✅ Services initialisés');
       }
     } catch (e) {
       if (mounted) {
-        debugPrint('❌ Erreur initialisation services: $e');
+        Journal.trace('❌ Erreur initialisation services: $e');
         final errorHandler = Provider.of<ErrorHandlerService>(
           context,
           listen: false,
@@ -334,7 +340,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                       .toList();
 
                   return RefreshIndicator(
-                    onRefresh: () => _refreshOrders(silent: false),
+                    onRefresh: () => _refreshOrders(),
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.all(16),
@@ -342,11 +348,11 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (_isRefreshing)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 16),
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 16),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
-                                children: const [
+                                children: [
                                   SizedBox(
                                     width: 16,
                                     height: 16,
@@ -414,7 +420,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
-  Widget _buildStatusCard(BuildContext context, user) {
+  Widget _buildStatusCard(BuildContext context, User user) {
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -492,7 +498,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Row(
@@ -574,7 +580,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, color: color, size: 20),
@@ -682,7 +688,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
+                    color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Center(
@@ -709,7 +715,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                 ),
                 Flexible(
                   child: Text(
-                    '${PriceFormatter.format(order.total)}',
+                    PriceFormatter.format(order.total),
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.bold,
@@ -820,7 +826,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: _getStatusColor(order.status).withOpacity(0.1),
+                    color: _getStatusColor(order.status).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Center(
@@ -854,7 +860,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                 ),
                 Flexible(
                   child: Text(
-                    '${PriceFormatter.format(order.total)}',
+                    PriceFormatter.format(order.total),
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
@@ -935,7 +941,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       final newStatus = !user.isOnline;
       await appService.updateOnlineStatus(newStatus);
 
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -951,7 +957,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         setState(() {});
       }
     } catch (e) {
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Erreur lors de la mise à jour du statut: $e'),
@@ -977,7 +983,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
 
       performanceService.stopTimer('accept_delivery');
 
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -995,7 +1001,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         setState(() {});
       }
     } catch (e) {
-      if (mounted) {
+      if (context.mounted) {
         final errorHandler = Provider.of<ErrorHandlerService>(
           context,
           listen: false,
@@ -1044,7 +1050,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
           return;
       }
 
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Commande mise à jour: ${nextStatus.displayName}'),
@@ -1055,7 +1061,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         await _refreshOrders(silent: true);
       }
     } catch (e) {
-      if (mounted) {
+      if (context.mounted) {
         final errorHandler = Provider.of<ErrorHandlerService>(
           context,
           listen: false,
@@ -1112,7 +1118,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ChatScreen(order: order, chatType: 'customer'),
+        builder: (context) => ChatScreen(order: order),
       ),
     );
   }

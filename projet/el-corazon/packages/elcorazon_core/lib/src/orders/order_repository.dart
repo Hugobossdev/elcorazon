@@ -1,6 +1,6 @@
-import '../network/api_client.dart';
-import 'order.dart';
-import 'order_quote.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/orders/order.dart';
+import 'package:elcorazon_core/src/orders/order_quote.dart';
 
 /// Accès à `/api/v1/orders/*` — voir
 /// `backend/apps/orders/{serializers,views,services}.py`. La commande est

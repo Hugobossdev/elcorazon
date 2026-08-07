@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Créneau planifié d'un livreur, tel que l'affiche l'écran de planning.
 ///
@@ -114,7 +114,7 @@ class DriverScheduleService extends ChangeNotifier {
       _schedules[driverId] = creneaux.map(DriverSchedule.fromRemote).toList();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Planning : chargement impossible — ${e.code}');
+      eccore.Journal.trace('Planning : chargement impossible — ${e.code}');
       // Pas de semaine inventée en cas d'échec : afficher « 9 h – 21 h » sur
       // une erreur réseau ferait croire à un planning qui n'existe pas.
       _schedules[driverId] = [];
@@ -180,7 +180,7 @@ class DriverScheduleService extends ChangeNotifier {
       // Le serveur refuse un créneau qui passe minuit : il s'écrit en deux
       // lignes, sur deux jours.
       _error = e.detail;
-      debugPrint('Planning : enregistrement refusé — ${e.code}');
+      eccore.Journal.trace('Planning : enregistrement refusé — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -194,7 +194,7 @@ class DriverScheduleService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Planning : suppression refusée — ${e.code}');
+      eccore.Journal.trace('Planning : suppression refusée — ${e.code}');
       notifyListeners();
       return false;
     }

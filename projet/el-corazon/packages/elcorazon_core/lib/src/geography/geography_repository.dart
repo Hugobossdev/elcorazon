@@ -1,6 +1,6 @@
-import '../network/api_client.dart';
-import 'city.dart';
-import 'zone_resolution.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/geography/city.dart';
+import 'package:elcorazon_core/src/geography/zone_resolution.dart';
 
 /// Accès à `/api/v1/geography/*` — voir `backend/apps/geography/views.py`.
 /// Public (`permission_classes = [AllowAny]`).

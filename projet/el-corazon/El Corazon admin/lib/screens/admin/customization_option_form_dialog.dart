@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/customization_management_service.dart';
-import '../../utils/price_formatter.dart';
+import 'package:admin/services/customization_management_service.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 class CustomizationOptionFormDialog extends StatefulWidget {
   final CustomizationOptionModel? option;
@@ -282,7 +282,6 @@ class _CustomizationOptionFormDialogState
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.max,
                   children: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),

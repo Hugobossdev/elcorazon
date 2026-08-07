@@ -29,12 +29,8 @@ class Address {
     required this.address,
     required this.city,
     required this.postalCode,
-    this.latitude,
+    required this.type, required this.isDefault, required this.createdAt, required this.updatedAt, this.latitude,
     this.longitude,
-    required this.type,
-    required this.isDefault,
-    required this.createdAt,
-    required this.updatedAt,
   });
 
   Address copyWith({

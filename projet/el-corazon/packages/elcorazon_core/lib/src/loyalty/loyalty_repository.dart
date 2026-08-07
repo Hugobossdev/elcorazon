@@ -1,9 +1,9 @@
-import '../network/api_client.dart';
-import 'points_account.dart';
-import 'points_entry.dart';
-import 'reward.dart';
-import 'reward_redemption.dart';
-import 'subscription.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/loyalty/points_account.dart';
+import 'package:elcorazon_core/src/loyalty/points_entry.dart';
+import 'package:elcorazon_core/src/loyalty/reward.dart';
+import 'package:elcorazon_core/src/loyalty/reward_redemption.dart';
+import 'package:elcorazon_core/src/loyalty/subscription.dart';
 
 /// Accès à `/api/v1/loyalty/*` — voir
 /// `backend/apps/loyalty/{serializers,views}.py`. Tout est en lecture seule

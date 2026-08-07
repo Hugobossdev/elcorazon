@@ -146,7 +146,7 @@ class RealtimeTrackingService extends ChangeNotifier {
 
     notifyListeners();
 
-    debugPrint('RealtimeTrackingService: Déconnecté');
+    eccore.Journal.trace('RealtimeTrackingService: Déconnecté');
   }
 
   /// Nettoie les ressources

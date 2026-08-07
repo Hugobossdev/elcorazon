@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Encaissement — miroir de `TransactionSerializer`
 /// (`backend/apps/payments/serializers.py`). Son statut n'évolue jamais sur la

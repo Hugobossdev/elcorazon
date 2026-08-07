@@ -1,8 +1,8 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import '../models/menu_models.dart';
-import 'admin_auth_service.dart';
+import 'package:admin/models/menu_models.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Option de la bibliothèque réutilisable — miroir local d'`OptionTemplate`.
 ///
@@ -161,7 +161,7 @@ class CustomizationManagementService extends ChangeNotifier {
       ];
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Personnalisations : chargement impossible — ${e.code}');
+      eccore.Journal.trace('Personnalisations : chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -194,7 +194,7 @@ class CustomizationManagementService extends ChangeNotifier {
       return locale;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Personnalisations : création refusée — ${e.code}');
+      eccore.Journal.trace('Personnalisations : création refusée — ${e.code}');
       notifyListeners();
       return null;
     }
@@ -217,7 +217,7 @@ class CustomizationManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Personnalisations : mise à jour refusée — ${e.code}');
+      eccore.Journal.trace('Personnalisations : mise à jour refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -235,7 +235,7 @@ class CustomizationManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Personnalisations : suppression refusée — ${e.code}');
+      eccore.Journal.trace('Personnalisations : suppression refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -269,7 +269,7 @@ class CustomizationManagementService extends ChangeNotifier {
       _error = e.status == 409
           ? 'Cette option figure déjà sur cet article.'
           : e.detail;
-      debugPrint('Personnalisations : application refusée — ${e.code}');
+      eccore.Journal.trace('Personnalisations : application refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -283,7 +283,7 @@ class CustomizationManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Personnalisations : retrait refusé — ${e.code}');
+      eccore.Journal.trace('Personnalisations : retrait refusé — ${e.code}');
       notifyListeners();
       return false;
     }

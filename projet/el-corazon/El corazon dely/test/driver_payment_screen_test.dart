@@ -37,7 +37,7 @@ void main() {
 
   group('Commande réglée en espèces', () {
     testWidgets('annonce le montant à encaisser', (tester) async {
-      await afficher(tester, commande(total: 4500));
+      await afficher(tester, commande());
 
       expect(find.text('À encaisser'), findsOneWidget);
       // Deux fois : en tête, et sur la ligne « Total » du récapitulatif.

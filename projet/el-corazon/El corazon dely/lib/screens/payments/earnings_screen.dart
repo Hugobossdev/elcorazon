@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/app_service.dart';
-import '../../services/error_handler_service.dart';
-import '../../models/order.dart';
-import '../../widgets/loading_widget.dart';
-import '../../widgets/custom_button.dart';
-import '../delivery/driver_profile_screen.dart';
-import '../delivery/settings_screen.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/widgets/loading_widget.dart';
+import 'package:elcora_dely/widgets/custom_button.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class EarningsScreen extends StatefulWidget {
   const EarningsScreen({super.key});
@@ -20,7 +21,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
   String _selectedPeriod = 'today';
 
   // Sample data - in real app, fetch from backend
-  Map<String, dynamic> _earningsData = {};
+  /// Gains par période — `calculateEarnings` les produit déjà en `num`, seul
+  /// le champ qui les retenait était typé `dynamic`.
+  Map<String, Map<String, num>> _earningsData = {};
   List<Map<String, dynamic>> _recentEarnings = [];
 
   @override
@@ -42,7 +45,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             .timeout(const Duration(seconds: 15));
       } catch (e) {
         // Continuer même si le chargement échoue, utiliser les données en cache
-        debugPrint('⚠️ Could not refresh orders, using cached data: $e');
+        Journal.trace('⚠️ Could not refresh orders, using cached data: $e');
       }
 
       final deliveries = appService.assignedDeliveries
@@ -164,7 +167,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       }
 
       // In real app, integrate with PayDunya for withdrawal
-      await appService.requestWithdrawal(totalEarnings);
+      await appService.requestWithdrawal(totalEarnings.toDouble());
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -184,7 +187,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
     }
   }
 
-  Map<String, dynamic> _getCurrentEarnings() {
+  Map<String, num> _getCurrentEarnings() {
     return _earningsData[_selectedPeriod] ?? {};
   }
 
@@ -352,9 +355,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
         ),
         child: Column(
           children: [
-            Text(
+            const Text(
               'Gains totaux',
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
@@ -541,6 +544,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildEarningItem(Map<String, dynamic> earning) {
+    // Les trois montants sont lus plusieurs fois : les typer une fois ici évite
+    // autant d'accès non typés, et fait dire au compilateur ce que la carte
+    // contient réellement.
+    final montant = earning['amount']! as num;
+    final pourboire = earning['tip']! as num;
+    final prime = earning['bonus']! as num;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -581,15 +591,15 @@ class _EarningsScreenState extends State<EarningsScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${(earning['amount'] + earning['tip'] + earning['bonus']).toStringAsFixed(0)} FCFA',
+                '${(montant + pourboire + prime).toStringAsFixed(0)} FCFA',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                 ),
               ),
-              if (earning['tip'] > 0)
+              if (pourboire > 0)
                 Text(
-                  '+${earning['tip'].toStringAsFixed(0)} FCFA pourboire',
+                  '+${pourboire.toStringAsFixed(0)} FCFA pourboire',
                   style: TextStyle(
                     color: Colors.green[600],
                     fontSize: 10,

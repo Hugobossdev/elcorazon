@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Récompense du catalogue de fidélité — miroir de `RewardSerializer`.
 class Reward {

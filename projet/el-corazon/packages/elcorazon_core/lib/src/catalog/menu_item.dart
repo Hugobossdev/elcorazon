@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Article du catalogue — miroir de `MenuItemSerializer`
 /// (`backend/apps/catalog/serializers.py`).

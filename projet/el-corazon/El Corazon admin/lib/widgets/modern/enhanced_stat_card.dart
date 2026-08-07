@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../theme/modern_theme.dart';
-import '../../ui/ui.dart';
+import 'package:admin/theme/modern_theme.dart';
+import 'package:admin/ui/ui.dart';
 
 /// Carte de statistique améliorée avec animations et gradients
 class EnhancedStatCard extends StatefulWidget {
@@ -15,11 +15,7 @@ class EnhancedStatCard extends StatefulWidget {
   final double? valueChange; // Pourcentage de changement
 
   const EnhancedStatCard({
-    super.key,
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
+    required this.title, required this.value, required this.icon, required this.color, super.key,
     this.subtitle,
     this.onTap,
     this.trailing,
@@ -107,7 +103,6 @@ class _EnhancedStatCardState extends State<EnhancedStatCard>
                     color: sem.shadow,
                     blurRadius: _isHovered ? 20 : 10,
                     offset: Offset(0, _isHovered ? 8 : 4),
-                    spreadRadius: 0,
                   ),
                 ],
               ),
@@ -256,8 +251,7 @@ class GlassCard extends StatelessWidget {
   final VoidCallback? onTap;
 
   const GlassCard({
-    super.key,
-    required this.child,
+    required this.child, super.key,
     this.padding,
     this.margin,
     this.borderRadius,
@@ -269,21 +263,19 @@ class GlassCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
-      margin: margin ?? const EdgeInsets.all(0),
+      margin: margin ?? EdgeInsets.zero,
       padding: padding ?? const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: theme.colorScheme.surface.withValues(alpha: 0.7),
         borderRadius: borderRadius ?? BorderRadius.circular(20),
         border: Border.all(
           color: theme.colorScheme.outline.withValues(alpha: 0.1),
-          width: 1,
         ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 20,
             offset: const Offset(0, 8),
-            spreadRadius: 0,
           ),
         ],
       ),
@@ -300,9 +292,7 @@ class ModernBadge extends StatelessWidget {
   final bool isPulsing;
 
   const ModernBadge({
-    super.key,
-    required this.text,
-    required this.color,
+    required this.text, required this.color, super.key,
     this.icon,
     this.isPulsing = false,
   });
@@ -314,7 +304,7 @@ class ModernBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3), width: 1),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

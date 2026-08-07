@@ -1,5 +1,4 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:flutter/foundation.dart';
 
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
@@ -152,10 +151,10 @@ class AdvancedSearchService {
           .map(DjangoMenuRepository.toLocalMenuItem)
           .toList();
 
-      debugPrint('✅ Recherche avancée: ${results.length} résultats trouvés');
+      eccore.Journal.trace('✅ Recherche avancée: ${results.length} résultats trouvés');
       return results;
     } on eccore.ApiException catch (e) {
-      debugPrint('❌ Erreur lors de la recherche avancée: ${e.code}');
+      eccore.Journal.trace('❌ Erreur lors de la recherche avancée: ${e.code}');
       throw Exception('Erreur lors de la recherche: ${e.detail}');
     }
   }

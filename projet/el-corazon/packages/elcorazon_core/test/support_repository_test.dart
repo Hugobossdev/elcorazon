@@ -53,7 +53,7 @@ class _FakeServer implements HttpClientAdapter {
         'next': null,
         'previous': null,
         'results': [_ticketJson(status: status ?? 'open')],
-      }, 200);
+      }, 200,);
     }
 
     if (path.endsWith('/support/tickets/') && options.method == 'POST') {
@@ -68,14 +68,14 @@ class _FakeServer implements HttpClientAdapter {
           'next': 'http://test.local/api/v1/support/tickets/ticket-1/messages/?page=2',
           'previous': null,
           'results': [_messageJson('message-1', 'customer', 'Bonjour, où est ma commande ?')],
-        }, 200);
+        }, 200,);
       }
       return _json({
         'count': 2,
         'next': null,
         'previous': null,
         'results': [_messageJson('message-2', 'staff', 'Nous regardons cela tout de suite.')],
-      }, 200);
+      }, 200,);
     }
 
     if (path.endsWith('/support/tickets/ticket-1/messages/') && options.method == 'POST') {
@@ -93,7 +93,7 @@ class _FakeServer implements HttpClientAdapter {
         'status': 'pending',
         'resolution': '',
         'created_at': '2026-07-28T12:05:00Z',
-      }, 201);
+      }, 201,);
     }
 
     if (path.endsWith('/support/returns/') && options.method == 'POST') {
@@ -105,7 +105,7 @@ class _FakeServer implements HttpClientAdapter {
         'refund_amount': {'amount': '2500', 'currency': 'XOF'},
         'status': 'pending',
         'created_at': '2026-07-28T12:10:00Z',
-      }, 201);
+      }, 201,);
     }
 
     if (path.endsWith('/support/returns/') && options.method == 'GET') {

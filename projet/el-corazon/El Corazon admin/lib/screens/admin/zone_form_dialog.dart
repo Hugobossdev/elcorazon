@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../services/delivery_zone_service.dart';
-import '../../widgets/custom_button.dart';
-import '../../widgets/custom_text_field.dart';
+import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/widgets/custom_text_field.dart';
 
 /// Édition du barème d'une zone de livraison.
 ///

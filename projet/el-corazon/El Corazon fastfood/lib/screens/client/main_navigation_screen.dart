@@ -10,6 +10,7 @@ import 'package:elcora_fast/screens/client/orders_screen.dart';
 import 'package:elcora_fast/screens/client/profile_screen.dart';
 import 'package:elcora_fast/screens/guest_welcome_screen.dart';
 import 'package:elcora_fast/screens/guest_contact_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran de navigation principal pour les clients
 class MainNavigationScreen extends StatefulWidget {
@@ -47,7 +48,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     if (_currentIndex == 0) {
       // Optionnel: demander confirmation avant de sortir
       // Pour l'instant, on ne fait rien (l'app reste ouverte)
-      debugPrint('Retour système ignoré sur l\'onglet Accueil');
+      Journal.trace('Retour système ignoré sur l\'onglet Accueil');
     } else {
       // Revenir à l'onglet Accueil
       setState(() {
@@ -90,7 +91,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     physics:
                         const NeverScrollableScrollPhysics(), // Empêcher le swipe
                     onPageChanged: (index) {
-                      debugPrint(
+                      Journal.trace(
                         'MainNavigationScreen: Page changed to index $index',
                       );
                       setState(() {

@@ -6,6 +6,7 @@ import 'package:elcora_fast/models/loyalty_transaction.dart';
 import 'package:elcora_fast/repositories/django_gamification_repository.dart';
 import 'package:elcora_fast/repositories/django_loyalty_repository.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Centralise la logique de fidélité (points, récompenses, historique) et de
 /// badges (Django, Phase 6) ; achievements/défis restent simulés côté client
@@ -126,7 +127,7 @@ class GamificationService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      debugPrint('Error initializing GamificationService: $e');
+      Journal.trace('Error initializing GamificationService: $e');
     }
   }
 
@@ -144,7 +145,7 @@ class GamificationService extends ChangeNotifier {
         orders.map((order) => {'created_at': order.createdAt.toIso8601String()}).toList(),
       );
     } catch (e) {
-      debugPrint('Error loading user stats: $e');
+      Journal.trace('Error loading user stats: $e');
     }
   }
 
@@ -157,7 +158,7 @@ class GamificationService extends ChangeNotifier {
       _currentLevel = _calculateLevel(_currentPoints);
       _levelProgress = _calculateLevelProgress(_currentPoints);
     } catch (e) {
-      debugPrint('Error loading loyalty balance: $e');
+      Journal.trace('Error loading loyalty balance: $e');
     }
   }
 
@@ -235,7 +236,7 @@ class GamificationService extends ChangeNotifier {
     try {
       _achievements = await _gamificationRepository.getAchievements();
     } catch (e) {
-      debugPrint('Error loading achievements: $e');
+      Journal.trace('Error loading achievements: $e');
       _achievements = [];
     }
   }
@@ -244,7 +245,7 @@ class GamificationService extends ChangeNotifier {
     try {
       _challenges = await _gamificationRepository.getChallenges();
     } catch (e) {
-      debugPrint('Error loading challenges: $e');
+      Journal.trace('Error loading challenges: $e');
       _challenges = [];
     }
   }
@@ -253,7 +254,7 @@ class GamificationService extends ChangeNotifier {
     try {
       _rewards = await _loyaltyRepository.getRewards();
     } catch (e) {
-      debugPrint('Error loading rewards: $e');
+      Journal.trace('Error loading rewards: $e');
       _rewards = [];
     }
   }
@@ -262,7 +263,7 @@ class GamificationService extends ChangeNotifier {
     try {
       _transactions = await _loyaltyRepository.getTransactions();
     } catch (e) {
-      debugPrint('Error loading loyalty transactions: $e');
+      Journal.trace('Error loading loyalty transactions: $e');
       _transactions = [];
     }
   }
@@ -272,7 +273,7 @@ class GamificationService extends ChangeNotifier {
       _badges = await _gamificationRepository.getBadges();
       notifyListeners();
     } catch (e) {
-      debugPrint('GamificationService._loadBadges: erreur - $e');
+      Journal.trace('GamificationService._loadBadges: erreur - $e');
       _badges = [];
       notifyListeners();
     }
@@ -322,7 +323,7 @@ class GamificationService extends ChangeNotifier {
     try {
       await _loadTransactions();
     } catch (e) {
-      debugPrint('Error refreshing transactions after redemption: $e');
+      Journal.trace('Error refreshing transactions after redemption: $e');
     }
 
     _pendingRewardIds.remove(reward.id);
@@ -333,7 +334,7 @@ class GamificationService extends ChangeNotifier {
 
   // Notifications simulées
   void _showLevelUpNotification() {
-    debugPrint('🆙 Félicitations! Vous avez atteint le niveau $_currentLevel!');
+    Journal.trace('🆙 Félicitations! Vous avez atteint le niveau $_currentLevel!');
   }
 
   /// Une commande vient d'être passée : rien n'est décidé ici.

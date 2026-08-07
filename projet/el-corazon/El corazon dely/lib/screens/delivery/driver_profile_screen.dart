@@ -1,10 +1,10 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/app_service.dart';
-import '../../services/error_handler_service.dart';
-import '../../models/user.dart';
-import '../../utils/validators.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/models/user.dart';
+import 'package:elcora_dely/utils/validators.dart';
 
 class DriverProfileScreen extends StatefulWidget {
   const DriverProfileScreen({super.key});
@@ -84,7 +84,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         _vehicleController.text = profile.vehicleType;
       }
     } catch (e) {
-      debugPrint('Erreur chargement données livreur: $e');
+      eccore.Journal.trace('Erreur chargement données livreur: $e');
       // On ne bloque pas l'UI, mais on loggue l'erreur
     } finally {
       if (mounted) {

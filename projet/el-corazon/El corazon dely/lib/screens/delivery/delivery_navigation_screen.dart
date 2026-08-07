@@ -1,19 +1,21 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/app_service.dart';
-import '../../services/error_handler_service.dart';
-import '../../services/performance_service.dart';
-import '../../models/order.dart';
-import 'delivery_home_screen.dart';
-import 'delivery_orders_screen.dart';
-import 'analytics_screen.dart';
-import 'address_management_screen.dart';
-import 'promo_codes_screen.dart';
-import 'settings_screen.dart';
-import 'driver_profile_screen.dart';
-import '../payments/earnings_screen.dart';
-import '../payments/driver_payment_screen.dart';
-import '../communication/chat_screen.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/services/performance_service.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/screens/delivery/delivery_home_screen.dart';
+import 'package:elcora_dely/screens/delivery/delivery_orders_screen.dart';
+import 'package:elcora_dely/screens/delivery/analytics_screen.dart';
+import 'package:elcora_dely/screens/delivery/address_management_screen.dart';
+import 'package:elcora_dely/screens/delivery/promo_codes_screen.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcora_dely/screens/payments/earnings_screen.dart';
+import 'package:elcora_dely/screens/payments/driver_payment_screen.dart';
+import 'package:elcora_dely/screens/communication/chat_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DeliveryNavigationScreen extends StatefulWidget {
   const DeliveryNavigationScreen({super.key});
@@ -47,6 +49,7 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
       await Provider.of<PerformanceService>(context, listen: false)
           .initialize()
           .timeout(const Duration(seconds: 10));
+      if (!mounted) return;
       await Provider.of<ErrorHandlerService>(context, listen: false)
           .initialize()
           .timeout(const Duration(seconds: 10));
@@ -439,14 +442,15 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
 
     if (shouldLogout == true) {
       try {
+        if (!mounted) return;
         final appService = Provider.of<AppService>(context, listen: false);
         await appService.logout();
 
         if (mounted) {
-          Navigator.of(context).pushNamedAndRemoveUntil(
+          unawaited(Navigator.of(context).pushNamedAndRemoveUntil(
             '/',
             (route) => false,
-          );
+          ));
         }
       } catch (e) {
         if (mounted) {
@@ -635,14 +639,13 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
         subtotal: 0.0,
         deliveryFee: 0.0,
         total: 0.0,
-        status: OrderStatus.pending,
         deliveryAddress: 'Adresse de test',
         paymentMethod: PaymentMethod.cash,
         orderTime: DateTime.now(),
         createdAt: DateTime.now(),
       );
     } catch (e) {
-      debugPrint('Error creating mock order: $e');
+      Journal.trace('Error creating mock order: $e');
       return null;
     }
   }

@@ -1,7 +1,7 @@
-import '../network/api_client.dart';
-import 'assignment.dart';
-import 'courier_profile.dart';
-import 'courier_shift.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/delivery/assignment.dart';
+import 'package:elcorazon_core/src/delivery/courier_profile.dart';
+import 'package:elcorazon_core/src/delivery/courier_shift.dart';
 
 /// Flotte vue par le personnel — `/api/v1/delivery/couriers/` et
 /// `/api/v1/delivery/orders/{id}/offer/`

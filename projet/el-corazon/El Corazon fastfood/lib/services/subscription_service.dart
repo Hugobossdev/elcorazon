@@ -39,7 +39,7 @@ class SubscriptionService extends ChangeNotifier {
       // 401 sur un écran public (catalogue visité sans compte) : pas un
       // incident, simplement aucun abonnement à afficher.
       if (!e.isUnauthorized) {
-        debugPrint('SubscriptionService: chargement impossible — $e');
+        eccore.Journal.trace('SubscriptionService: chargement impossible — $e');
       }
       _current = null;
     } finally {

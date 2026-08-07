@@ -1,5 +1,5 @@
 import 'package:intl/intl.dart';
-import '../constants/admin_constants.dart';
+import 'package:admin/core/constants/admin_constants.dart';
 
 /// Classe utilitaire contenant des méthodes helper pour l'application admin
 class AdminHelpers {
@@ -126,7 +126,7 @@ class AdminHelpers {
 
   /// Calcule le pourcentage de variation
   static double calculatePercentageChange(
-      double oldValue, double newValue) {
+      double oldValue, double newValue,) {
     if (oldValue == 0) return newValue > 0 ? 100 : 0;
     return ((newValue - oldValue) / oldValue) * 100;
   }

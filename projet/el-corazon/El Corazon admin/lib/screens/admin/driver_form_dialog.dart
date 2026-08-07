@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/driver_management_service.dart';
-import '../../models/driver.dart';
-import '../../widgets/custom_button.dart';
-import '../../widgets/custom_text_field.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/widgets/custom_text_field.dart';
 
 class DriverFormDialog extends StatefulWidget {
   final Driver? driver;
@@ -209,8 +209,7 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                             initialValue: _selectedVehicleType,
                             items: [
                               const DropdownMenuItem(
-                                  value: null,
-                                  child: Text('Sélectionner un type')),
+                                  child: Text('Sélectionner un type'),),
                               ...['Moto', 'Vélo', 'Voiture', 'Scooter']
                                   .map((type) {
                                 return DropdownMenuItem<String>(

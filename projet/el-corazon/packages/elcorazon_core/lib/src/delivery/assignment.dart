@@ -1,5 +1,5 @@
-import '../models/money.dart';
-import 'courier_profile.dart';
+import 'package:elcorazon_core/src/models/money.dart';
+import 'package:elcorazon_core/src/delivery/courier_profile.dart';
 
 /// Étapes d'une course — miroir de `DeliveryStatus`
 /// (`backend/apps/delivery/states.py`). Constantes de chaînes plutôt qu'une

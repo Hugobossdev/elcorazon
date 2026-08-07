@@ -16,6 +16,7 @@ import 'package:elcora_fast/services/push_notification_service.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
 import 'package:elcora_fast/services/subscription_service.dart';
 import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Service centralisé pour initialiser tous les services de l'application
 class ServiceInitializer {
@@ -31,7 +32,7 @@ class ServiceInitializer {
     if (_isInitialized) return;
 
     try {
-      debugPrint('🚀 Initialisation des services...');
+      Journal.trace('🚀 Initialisation des services...');
 
       // Capturer tous les services avant les gaps asynchrones
       final appService = Provider.of<AppService>(context, listen: false);
@@ -80,9 +81,9 @@ class ServiceInitializer {
       );
 
       _isInitialized = true;
-      debugPrint('✅ Tous les services initialisés avec succès');
+      Journal.trace('✅ Tous les services initialisés avec succès');
     } catch (e) {
-      debugPrint('❌ Erreur lors de l\'initialisation des services: $e');
+      Journal.trace('❌ Erreur lors de l\'initialisation des services: $e');
       rethrow;
     }
   }
@@ -95,7 +96,7 @@ class ServiceInitializer {
     required CartService cartService,
     required GamificationService gamificationService,
   }) async {
-    debugPrint('📱 Initialisation des services essentiels...');
+    Journal.trace('📱 Initialisation des services essentiels...');
 
     // Services de base
     await _initializeServiceWithoutContext(
@@ -114,7 +115,7 @@ class ServiceInitializer {
       () => gamificationService.initialize(),
     );
 
-    debugPrint('✅ Services essentiels initialisés');
+    Journal.trace('✅ Services essentiels initialisés');
   }
 
   /// Initialise les services avancés
@@ -122,7 +123,7 @@ class ServiceInitializer {
     required VoiceService voiceService,
     required CustomizationService customizationService,
   }) async {
-    debugPrint('🔧 Initialisation des services avancés...');
+    Journal.trace('🔧 Initialisation des services avancés...');
 
     // Services de fonctionnalités avancées
     await _initializeServiceWithoutContext(
@@ -132,7 +133,7 @@ class ServiceInitializer {
       () => customizationService.initialize(),
     );
 
-    debugPrint('✅ Services avancés initialisés');
+    Journal.trace('✅ Services avancés initialisés');
   }
 
   /// Initialise les services optionnels
@@ -143,7 +144,7 @@ class ServiceInitializer {
     required PushNotificationService pushNotificationService,
     required AIRecommendationService aiRecommendationService,
   }) async {
-    debugPrint('🎯 Initialisation des services optionnels...');
+    Journal.trace('🎯 Initialisation des services optionnels...');
 
     // Services sociaux et groupes
     await _initializeServiceWithoutContext(
@@ -181,7 +182,7 @@ class ServiceInitializer {
       () => aiRecommendationService.initialize(),
     );
 
-    debugPrint('✅ Services optionnels initialisés');
+    Journal.trace('✅ Services optionnels initialisés');
   }
 
   /// Initialise un service individuel sans BuildContext (pour éviter les gaps asynchrones)
@@ -191,7 +192,7 @@ class ServiceInitializer {
     try {
       await serviceInit();
     } catch (e) {
-      debugPrint('⚠️ Erreur lors de l\'initialisation d\'un service: $e');
+      Journal.trace('⚠️ Erreur lors de l\'initialisation d\'un service: $e');
       // Ne pas faire échouer l'initialisation complète pour un service optionnel
     }
   }
@@ -199,7 +200,7 @@ class ServiceInitializer {
   /// Initialise les services pour un utilisateur spécifique
   Future<void> initializeUserServices(BuildContext context, User user) async {
     try {
-      debugPrint(
+      Journal.trace(
         '👤 Initialisation des services pour l\'utilisateur: ${user.name}',
       );
 
@@ -231,9 +232,9 @@ class ServiceInitializer {
         ),
       );
 
-      debugPrint('✅ Services utilisateur initialisés');
+      Journal.trace('✅ Services utilisateur initialisés');
     } catch (e) {
-      debugPrint(
+      Journal.trace(
         '❌ Erreur lors de l\'initialisation des services utilisateur: $e',
       );
     }
@@ -242,7 +243,7 @@ class ServiceInitializer {
   /// Réinitialise tous les services
   Future<void> resetServices() async {
     _isInitialized = false;
-    debugPrint('🔄 Services réinitialisés');
+    Journal.trace('🔄 Services réinitialisés');
   }
 
   /// Vérifie l'état d'initialisation des services

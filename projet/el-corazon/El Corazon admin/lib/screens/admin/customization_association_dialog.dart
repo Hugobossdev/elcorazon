@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/customization_management_service.dart';
+import 'package:admin/services/customization_management_service.dart';
 
 class CustomizationAssociationDialog extends StatefulWidget {
   final String optionId;
   final String optionName;
 
   const CustomizationAssociationDialog({
-    super.key,
-    required this.optionId,
-    required this.optionName,
+    required this.optionId, required this.optionName, super.key,
   });
 
   @override
@@ -101,7 +99,7 @@ class _CustomizationAssociationDialogState
                           _searchQuery.isEmpty ||
                           item.name
                               .toLowerCase()
-                              .contains(_searchQuery.toLowerCase()))
+                              .contains(_searchQuery.toLowerCase()),)
                       .toList();
 
                   if (menuItems.isEmpty) {
@@ -125,7 +123,7 @@ class _CustomizationAssociationDialogState
                         final isAlreadyAssociated = service
                             .getOptionsForMenuItem(item.id)
                             .any((assoc) =>
-                                assoc.customizationOptionId == widget.optionId);
+                                assoc.customizationOptionId == widget.optionId,);
                         if (!isAlreadyAssociated) {
                           setState(() {
                             _selectedMenuItemId = value;
@@ -142,7 +140,7 @@ class _CustomizationAssociationDialogState
                         final isAlreadyAssociated = service
                             .getOptionsForMenuItem(item.id)
                             .any((assoc) =>
-                                assoc.customizationOptionId == widget.optionId);
+                                assoc.customizationOptionId == widget.optionId,);
 
                         final radioTile = isAlreadyAssociated
                             ? RadioListTile<String>(

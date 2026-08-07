@@ -1,7 +1,7 @@
-import '../models/money.dart';
-import '../network/api_client.dart';
-import 'delivery_zone.dart';
-import 'managed_city.dart';
+import 'package:elcorazon_core/src/models/money.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/geography/delivery_zone.dart';
+import 'package:elcorazon_core/src/geography/managed_city.dart';
 
 /// Géographie du back-office — `/api/v1/geography/manage/*`
 /// (`backend/apps/geography/backoffice.py`), réservée au **siège**.

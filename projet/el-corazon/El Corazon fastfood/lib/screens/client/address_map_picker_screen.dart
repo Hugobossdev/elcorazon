@@ -11,6 +11,7 @@ import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/places_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Résultat de la sélection de position
 class PickedLocation {
@@ -177,7 +178,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     final addressFuture = _geocodingService
         .reverseGeocode(position)
         .catchError((Object e) {
-      debugPrint('Géocodage inverse indisponible : $e');
+      Journal.trace('Géocodage inverse indisponible : $e');
       return null;
     });
 
@@ -192,7 +193,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
         longitude: position.longitude,
       );
     } catch (e) {
-      debugPrint('Couverture non résolue : $e');
+      Journal.trace('Couverture non résolue : $e');
       error = 'Impossible de vérifier la couverture de ce point.';
     }
 
@@ -299,7 +300,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
         _isSearching = false;
       });
     } catch (e) {
-      debugPrint('Recherche de lieu indisponible : $e');
+      Journal.trace('Recherche de lieu indisponible : $e');
       if (!mounted || token != _searchToken) return;
       setState(() => _isSearching = false);
     }

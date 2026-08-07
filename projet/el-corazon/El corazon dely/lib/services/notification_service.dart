@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_core/firebase_core.dart';
-import '../firebase_options.dart';
+import 'package:elcora_dely/firebase_options.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 // Background message handler must be a top-level function
 @pragma('vm:entry-point')
@@ -12,7 +13,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  debugPrint('Handling a background message: ${message.messageId}');
+  Journal.trace('Handling a background message: ${message.messageId}');
 }
 
 class NotificationService extends ChangeNotifier {
@@ -46,9 +47,7 @@ class NotificationService extends ChangeNotifier {
 
     const DarwinInitializationSettings initializationSettingsDarwin =
         DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
+      
     );
 
     const InitializationSettings initializationSettings =
@@ -81,11 +80,11 @@ class NotificationService extends ChangeNotifier {
       
       // Listen to foreground messages
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('Got a message whilst in the foreground!');
-        debugPrint('Message data: ${message.data}');
+        Journal.trace('Got a message whilst in the foreground!');
+        Journal.trace('Message data: ${message.data}');
 
         if (message.notification != null) {
-          debugPrint('Message also contained a notification: ${message.notification}');
+          Journal.trace('Message also contained a notification: ${message.notification}');
           
           // Show local notification
           showNotification(
@@ -98,30 +97,24 @@ class NotificationService extends ChangeNotifier {
       });
       
     } catch (e) {
-      debugPrint('Error initializing Firebase Messaging: $e');
+      Journal.trace('Error initializing Firebase Messaging: $e');
     }
 
     _loadNotifications();
   }
   
   Future<void> _requestPermission() async {
-    NotificationSettings settings = await _firebaseMessaging.requestPermission(
-      alert: true,
-      announcement: false,
-      badge: true,
-      carPlay: false,
-      criticalAlert: false,
-      provisional: false,
-      sound: true,
+    final NotificationSettings settings = await _firebaseMessaging.requestPermission(
+      
     );
 
-    debugPrint('User granted permission: ${settings.authorizationStatus}');
+    Journal.trace('User granted permission: ${settings.authorizationStatus}');
   }
   
   Future<void> _getToken() async {
     try {
       _fcmToken = await _firebaseMessaging.getToken();
-      debugPrint('FCM Token: ${_fcmToken == null ? 'indisponible' : 'obtenu'}');
+      Journal.trace('FCM Token: ${_fcmToken == null ? 'indisponible' : 'obtenu'}');
       // L'enregistrement auprès du backend (`/auth/devices/`) est fait par
       // `AppService`, qui seul sait si une session est ouverte : ce service ne
       // connaît que le jeton.
@@ -130,7 +123,7 @@ class NotificationService extends ChangeNotifier {
         _tokenRefreshController.add(token);
       });
     } catch (e) {
-      debugPrint('Error getting FCM token: $e');
+      Journal.trace('Error getting FCM token: $e');
     }
   }
 
@@ -336,7 +329,7 @@ class NotificationService extends ChangeNotifier {
   }
 
   void markAllAsRead() {
-    for (var notification in _notifications) {
+    for (final notification in _notifications) {
       notification['isRead'] = true;
     }
     _updateUnreadCount();
@@ -356,12 +349,13 @@ class NotificationService extends ChangeNotifier {
   }
 
   void _updateUnreadCount() {
-    _unreadCount = _notifications.where((n) => !n['isRead']).length;
+    _unreadCount =
+        _notifications.where((n) => !(n['isRead']! as bool)).length;
   }
 
   void _handleNotificationTap(NotificationResponse response) {
     // Gérer l'action quand l'utilisateur tape sur une notification
-    debugPrint('Notification tapped: ${response.payload}');
+    Journal.trace('Notification tapped: ${response.payload}');
   }
 
   // Planifier des notifications de rappel

@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Campagnes de notifications — `/notifications/campaigns/` (Phase 6).
 ///
@@ -60,7 +60,7 @@ class MarketingService extends ChangeNotifier {
       _campaigns = await _campaignsApi.list();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Marketing : campagnes indisponibles — ${e.code}');
+      eccore.Journal.trace('Marketing : campagnes indisponibles — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -86,7 +86,7 @@ class MarketingService extends ChangeNotifier {
       return cree;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Marketing : rédaction refusée — ${e.code}');
+      eccore.Journal.trace('Marketing : rédaction refusée — ${e.code}');
       notifyListeners();
       return null;
     }
@@ -120,7 +120,7 @@ class MarketingService extends ChangeNotifier {
           ? "Une campagne envoyée ne se modifie plus : l'historique afficherait "
                 "un texte que personne n'a reçu."
           : e.detail;
-      debugPrint('Marketing : modification refusée — ${e.code}');
+      eccore.Journal.trace('Marketing : modification refusée — ${e.code}');
       notifyListeners();
       return false;
     }
@@ -140,7 +140,7 @@ class MarketingService extends ChangeNotifier {
       return compte;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Marketing : estimation indisponible — ${e.code}');
+      eccore.Journal.trace('Marketing : estimation indisponible — ${e.code}');
       notifyListeners();
       return null;
     }
@@ -160,7 +160,7 @@ class MarketingService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Marketing : envoi refusé — ${e.code}');
+      eccore.Journal.trace('Marketing : envoi refusé — ${e.code}');
       notifyListeners();
       return false;
     }

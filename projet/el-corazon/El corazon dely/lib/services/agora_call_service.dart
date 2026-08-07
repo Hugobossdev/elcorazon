@@ -3,7 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../config/api_config.dart';
+import 'package:elcora_dely/config/api_config.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Service de gestion des appels vocaux/vidéo avec Agora
 class AgoraCallService extends ChangeNotifier {
@@ -66,7 +67,7 @@ class AgoraCallService extends ChangeNotifier {
   /// Initialise le moteur Agora RTC
   Future<bool> initialize() async {
     if (_isInitialized) {
-      debugPrint('✅ AgoraCallService: Déjà initialisé');
+      Journal.trace('✅ AgoraCallService: Déjà initialisé');
       return true;
     }
 
@@ -85,7 +86,7 @@ class AgoraCallService extends ChangeNotifier {
       _engine!.registerEventHandler(
         RtcEngineEventHandler(
           onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-            debugPrint(
+            Journal.trace(
               '✅ AgoraCallService: Canal rejoint avec succès - UID: ${connection.localUid}',
             );
             _isInCall = true;
@@ -95,7 +96,7 @@ class AgoraCallService extends ChangeNotifier {
             notifyListeners();
           },
           onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
-            debugPrint(
+            Journal.trace(
               '✅ AgoraCallService: Utilisateur distant rejoint - UID: $remoteUid',
             );
             _remoteUid = remoteUid;
@@ -109,7 +110,7 @@ class AgoraCallService extends ChangeNotifier {
                 int remoteUid,
                 UserOfflineReasonType reason,
               ) {
-                debugPrint(
+                Journal.trace(
                   '⚠️ AgoraCallService: Utilisateur distant déconnecté - UID: $remoteUid, Raison: $reason',
                 );
                 _remoteUid = null;
@@ -118,7 +119,7 @@ class AgoraCallService extends ChangeNotifier {
                 notifyListeners();
               },
           onLeaveChannel: (RtcConnection connection, RtcStats stats) {
-            debugPrint('✅ AgoraCallService: Canal quitté');
+            Journal.trace('✅ AgoraCallService: Canal quitté');
             _isInCall = false;
             _remoteUid = null;
             _currentChannelId = null;
@@ -127,7 +128,7 @@ class AgoraCallService extends ChangeNotifier {
             notifyListeners();
           },
           onError: (ErrorCodeType err, String msg) {
-            debugPrint(
+            Journal.trace(
               '❌ AgoraCallService: Erreur - Code: $err, Message: $msg',
             );
             _callEventController.add(CallEvent.error(msg));
@@ -139,7 +140,7 @@ class AgoraCallService extends ChangeNotifier {
                 ConnectionStateType state,
                 ConnectionChangedReasonType reason,
               ) {
-                debugPrint(
+                Journal.trace(
                   '🔄 AgoraCallService: État de connexion changé - État: $state, Raison: $reason',
                 );
                 if (state == ConnectionStateType.connectionStateDisconnected) {
@@ -158,11 +159,11 @@ class AgoraCallService extends ChangeNotifier {
       await _engine!.setDefaultAudioRouteToSpeakerphone(true);
 
       _isInitialized = true;
-      debugPrint('✅ AgoraCallService: Initialisé avec succès');
+      Journal.trace('✅ AgoraCallService: Initialisé avec succès');
       notifyListeners();
       return true;
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur d\'initialisation - $e');
+      Journal.trace('❌ AgoraCallService: Erreur d\'initialisation - $e');
       _isInitialized = false;
       return false;
     }
@@ -174,7 +175,7 @@ class AgoraCallService extends ChangeNotifier {
       // Permission microphone (toujours nécessaire)
       final micStatus = await Permission.microphone.request();
       if (!micStatus.isGranted) {
-        debugPrint('❌ AgoraCallService: Permission microphone refusée');
+        Journal.trace('❌ AgoraCallService: Permission microphone refusée');
         return false;
       }
 
@@ -182,15 +183,15 @@ class AgoraCallService extends ChangeNotifier {
       if (includeVideo) {
         final cameraStatus = await Permission.camera.request();
         if (!cameraStatus.isGranted) {
-          debugPrint('❌ AgoraCallService: Permission caméra refusée');
+          Journal.trace('❌ AgoraCallService: Permission caméra refusée');
           return false;
         }
       }
 
-      debugPrint('✅ AgoraCallService: Permissions accordées');
+      Journal.trace('✅ AgoraCallService: Permissions accordées');
       return true;
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur demande permissions - $e');
+      Journal.trace('❌ AgoraCallService: Erreur demande permissions - $e');
       return false;
     }
   }
@@ -205,7 +206,7 @@ class AgoraCallService extends ChangeNotifier {
     await _ensureInitialized();
 
     if (!_isInitialized || _engine == null) {
-      debugPrint('❌ AgoraCallService: Non initialisé');
+      Journal.trace('❌ AgoraCallService: Non initialisé');
       return false;
     }
 
@@ -234,7 +235,7 @@ class AgoraCallService extends ChangeNotifier {
       }
 
       // Options du canal
-      final channelMediaOptions = ChannelMediaOptions(
+      const channelMediaOptions = ChannelMediaOptions(
         clientRoleType: ClientRoleType.clientRoleBroadcaster,
         channelProfile: ChannelProfileType.channelProfileCommunication,
       );
@@ -249,12 +250,12 @@ class AgoraCallService extends ChangeNotifier {
         options: channelMediaOptions,
       );
 
-      debugPrint(
+      Journal.trace(
         '✅ AgoraCallService: Tentative de rejoindre le canal $channelId',
       );
       return true;
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur rejoindre canal - $e');
+      Journal.trace('❌ AgoraCallService: Erreur rejoindre canal - $e');
       _callEventController.add(CallEvent.error(e.toString()));
       return false;
     }
@@ -272,9 +273,9 @@ class AgoraCallService extends ChangeNotifier {
       _remoteUid = null;
       _isVideoEnabled = false;
       notifyListeners();
-      debugPrint('✅ AgoraCallService: Canal quitté');
+      Journal.trace('✅ AgoraCallService: Canal quitté');
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur quitter canal - $e');
+      Journal.trace('❌ AgoraCallService: Erreur quitter canal - $e');
     }
   }
 
@@ -286,11 +287,11 @@ class AgoraCallService extends ChangeNotifier {
       _isMuted = !_isMuted;
       await _engine!.muteLocalAudioStream(_isMuted);
       notifyListeners();
-      debugPrint(
+      Journal.trace(
         '✅ AgoraCallService: ${_isMuted ? "Micro coupé" : "Micro activé"}',
       );
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur toggle mute - $e');
+      Journal.trace('❌ AgoraCallService: Erreur toggle mute - $e');
     }
   }
 
@@ -302,11 +303,11 @@ class AgoraCallService extends ChangeNotifier {
       _isSpeakerOn = !_isSpeakerOn;
       await _engine!.setEnableSpeakerphone(_isSpeakerOn);
       notifyListeners();
-      debugPrint(
+      Journal.trace(
         '✅ AgoraCallService: ${_isSpeakerOn ? "Haut-parleur activé" : "Haut-parleur désactivé"}',
       );
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur toggle speaker - $e');
+      Journal.trace('❌ AgoraCallService: Erreur toggle speaker - $e');
     }
   }
 
@@ -319,11 +320,11 @@ class AgoraCallService extends ChangeNotifier {
       await _engine!.enableLocalVideo(_isVideoEnabled);
       await _engine!.muteLocalVideoStream(!_isVideoEnabled);
       notifyListeners();
-      debugPrint(
+      Journal.trace(
         '✅ AgoraCallService: ${_isVideoEnabled ? "Vidéo activée" : "Vidéo désactivée"}',
       );
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur toggle video - $e');
+      Journal.trace('❌ AgoraCallService: Erreur toggle video - $e');
     }
   }
 
@@ -335,11 +336,11 @@ class AgoraCallService extends ChangeNotifier {
       await _engine!.switchCamera();
       _isFrontCamera = !_isFrontCamera;
       notifyListeners();
-      debugPrint(
+      Journal.trace(
         '✅ AgoraCallService: Caméra changée - ${_isFrontCamera ? "Avant" : "Arrière"}',
       );
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur switch camera - $e');
+      Journal.trace('❌ AgoraCallService: Erreur switch camera - $e');
     }
   }
 
@@ -366,9 +367,9 @@ class AgoraCallService extends ChangeNotifier {
         _engine = null;
       }
 
-      _callEventController.close();
-      _remoteUidController.close();
-      _callStateController.close();
+      unawaited(_callEventController.close());
+      unawaited(_remoteUidController.close());
+      unawaited(_callStateController.close());
 
       _isInitialized = false;
       _isInCall = false;
@@ -376,9 +377,9 @@ class AgoraCallService extends ChangeNotifier {
       _localUid = null;
       _remoteUid = null;
 
-      debugPrint('✅ AgoraCallService: Ressources nettoyées');
+      Journal.trace('✅ AgoraCallService: Ressources nettoyées');
     } catch (e) {
-      debugPrint('❌ AgoraCallService: Erreur nettoyage - $e');
+      Journal.trace('❌ AgoraCallService: Erreur nettoyage - $e');
     }
   }
 }

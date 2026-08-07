@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../models/menu_models.dart';
-import '../../utils/dialog_helper.dart';
-import '../../widgets/custom_button.dart';
+import 'package:admin/models/menu_models.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/widgets/custom_button.dart';
 
 class OptionGroupsEditor extends StatefulWidget {
   final String menuItemId;
@@ -9,10 +9,7 @@ class OptionGroupsEditor extends StatefulWidget {
   final Function(List<MenuOptionGroup>) onChanged;
 
   const OptionGroupsEditor({
-    super.key,
-    required this.menuItemId,
-    required this.initialGroups,
-    required this.onChanged,
+    required this.menuItemId, required this.initialGroups, required this.onChanged, super.key,
   });
 
   @override
@@ -89,7 +86,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.delete,
-                            size: 20, color: Colors.red),
+                            size: 20, color: Colors.red,),
                         onPressed: () => _deleteGroup(index),
                       ),
                       const Icon(Icons.expand_more),
@@ -102,7 +99,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text('Choix disponibles:',
-                              style: TextStyle(fontWeight: FontWeight.w500)),
+                              style: TextStyle(fontWeight: FontWeight.w500),),
                           const SizedBox(height: 8),
                           ...group.options.asMap().entries.map((entry) {
                             final optIndex = entry.key;
@@ -118,7 +115,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                                       '+${option.priceModifier.toStringAsFixed(0)} FCFA',
                                       style: const TextStyle(
                                           fontWeight: FontWeight.bold,
-                                          color: Colors.green),
+                                          color: Colors.green,),
                                     ),
                                   IconButton(
                                     icon: const Icon(Icons.edit, size: 16),
@@ -127,7 +124,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                                   ),
                                   IconButton(
                                     icon: const Icon(Icons.close,
-                                        size: 16, color: Colors.red),
+                                        size: 16, color: Colors.red,),
                                     onPressed: () =>
                                         _deleteOption(index, optIndex),
                                   ),
@@ -205,7 +202,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Annuler')),
+                child: const Text('Annuler'),),
             FilledButton(
               onPressed: () {
                 if (nameController.text.isEmpty) return;
@@ -219,7 +216,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                     minSelection: int.parse(minController.text),
                     maxSelection: int.parse(maxController.text),
                     isRequired: isRequired,
-                  ));
+                  ),);
                 });
                 widget.onChanged(_groups);
                 Navigator.pop(context);
@@ -284,7 +281,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Annuler')),
+                child: const Text('Annuler'),),
             FilledButton(
               onPressed: () {
                 this.setState(() {
@@ -333,7 +330,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
             TextField(
               controller: priceController,
               decoration: const InputDecoration(
-                  labelText: 'Prix Supplémentaire (FCFA)'),
+                  labelText: 'Prix Supplémentaire (FCFA)',),
               keyboardType: TextInputType.number,
             ),
           ],
@@ -341,7 +338,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Annuler')),
+              child: const Text('Annuler'),),
           FilledButton(
             onPressed: () {
               if (nameController.text.isEmpty) return;
@@ -353,7 +350,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                     groupId: group.id,
                     name: nameController.text,
                     priceModifier: double.parse(priceController.text),
-                  ));
+                  ),);
                 _groups[groupIndex] = group.copyWith(options: newOptions);
               });
               widget.onChanged(_groups);
@@ -388,7 +385,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
             TextField(
               controller: priceController,
               decoration: const InputDecoration(
-                  labelText: 'Prix Supplémentaire (FCFA)'),
+                  labelText: 'Prix Supplémentaire (FCFA)',),
               keyboardType: TextInputType.number,
             ),
           ],
@@ -396,7 +393,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Annuler')),
+              child: const Text('Annuler'),),
           FilledButton(
             onPressed: () {
               setState(() {

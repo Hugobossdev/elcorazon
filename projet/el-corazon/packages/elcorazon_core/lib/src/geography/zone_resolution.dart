@@ -1,4 +1,4 @@
-import 'delivery_zone.dart';
+import 'package:elcorazon_core/src/geography/delivery_zone.dart';
 
 /// Réponse de `GET /geography/zones/resolve/` — miroir de
 /// `ZoneResolutionSerializer`.

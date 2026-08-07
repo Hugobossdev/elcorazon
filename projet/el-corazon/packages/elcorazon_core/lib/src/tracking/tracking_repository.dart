@@ -1,5 +1,5 @@
-import '../network/api_client.dart';
-import 'location_ping.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/tracking/location_ping.dart';
 
 /// Accès à `/api/v1/tracking/*` — voir `backend/apps/tracking/views.py`.
 ///

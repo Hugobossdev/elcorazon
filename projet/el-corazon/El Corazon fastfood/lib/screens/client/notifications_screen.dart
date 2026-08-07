@@ -7,6 +7,7 @@ import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'dart:convert';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran des notifications
 class NotificationsScreen extends StatefulWidget {
@@ -597,7 +598,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           payloadData = jsonDecode(notification.payload!);
         } catch (e) {
           // Si le payload n'est pas du JSON, essayer de l'interpréter comme une Map
-          debugPrint('Notification payload parsing error: $e');
+          Journal.trace('Notification payload parsing error: $e');
         }
       }
 
@@ -670,7 +671,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           break;
       }
     } catch (e) {
-      debugPrint('Error navigating from notification: $e');
+      Journal.trace('Error navigating from notification: $e');
     }
   }
 }

@@ -69,7 +69,7 @@ class GroupCartService extends ChangeNotifier {
       final ouvert = carts.where((cart) => cart.status == 'open' || cart.status == 'locked');
       _attach(ouvert.isEmpty ? null : ouvert.first);
     } on eccore.ApiException catch (e) {
-      debugPrint('GroupCartService: chargement impossible — ${e.code}');
+      eccore.Journal.trace('GroupCartService: chargement impossible — ${e.code}');
       _attach(null);
     } finally {
       _isLoading = false;
@@ -91,7 +91,7 @@ class GroupCartService extends ChangeNotifier {
       notifyListeners();
       return cart;
     } on eccore.ApiException catch (e) {
-      debugPrint('GroupCartService: ouverture refusée — ${e.code} (${e.detail})');
+      eccore.Journal.trace('GroupCartService: ouverture refusée — ${e.code} (${e.detail})');
       return null;
     }
   }
@@ -105,7 +105,7 @@ class GroupCartService extends ChangeNotifier {
       notifyListeners();
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('GroupCartService: adhésion refusée — ${e.code} (${e.detail})');
+      eccore.Journal.trace('GroupCartService: adhésion refusée — ${e.code} (${e.detail})');
       return false;
     }
   }
@@ -182,7 +182,7 @@ class GroupCartService extends ChangeNotifier {
       await refresh();
       return order;
     } on eccore.ApiException catch (e) {
-      debugPrint('GroupCartService: confirmation refusée — ${e.code} (${e.detail})');
+      eccore.Journal.trace('GroupCartService: confirmation refusée — ${e.code} (${e.detail})');
       return null;
     }
   }
@@ -216,7 +216,7 @@ class GroupCartService extends ChangeNotifier {
       notifyListeners();
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('GroupCartService: écriture refusée — ${e.code} (${e.detail})');
+      eccore.Journal.trace('GroupCartService: écriture refusée — ${e.code} (${e.detail})');
       return false;
     }
   }
@@ -258,7 +258,7 @@ class GroupCartService extends ChangeNotifier {
         _current = await _repository.getById(groupCartId);
         notifyListeners();
       } on eccore.ApiException catch (e) {
-        debugPrint('GroupCartService: relecture impossible — ${e.code}');
+        eccore.Journal.trace('GroupCartService: relecture impossible — ${e.code}');
       }
     });
   }

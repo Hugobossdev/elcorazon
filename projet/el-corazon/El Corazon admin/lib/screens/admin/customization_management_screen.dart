@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/customization_management_service.dart';
-import '../../utils/price_formatter.dart';
-import 'customization_option_form_dialog.dart';
-import 'customization_association_dialog.dart';
+import 'package:admin/services/customization_management_service.dart';
+import 'package:admin/utils/price_formatter.dart';
+import 'package:admin/screens/admin/customization_option_form_dialog.dart';
+import 'package:admin/screens/admin/customization_association_dialog.dart';
 
 class CustomizationManagementScreen extends StatefulWidget {
   const CustomizationManagementScreen({super.key});
@@ -86,7 +86,7 @@ class _CustomizationManagementScreenState
           }
 
           // Filtrer les options
-          var filteredOptions = service.options.where((option) {
+          final filteredOptions = service.options.where((option) {
             // Filtre par catégorie
             if (_selectedCategory != 'all' &&
                 option.category != _selectedCategory) {
@@ -104,7 +104,7 @@ class _CustomizationManagementScreenState
 
           // Grouper par catégorie
           final Map<String, List<CustomizationOptionModel>> groupedOptions = {};
-          for (var option in filteredOptions) {
+          for (final option in filteredOptions) {
             groupedOptions.putIfAbsent(option.category, () => []);
             groupedOptions[option.category]!.add(option);
           }
@@ -119,7 +119,6 @@ class _CustomizationManagementScreenState
                   border: Border(
                     bottom: BorderSide(
                       color: Theme.of(context).dividerColor,
-                      width: 1,
                     ),
                   ),
                 ),
@@ -281,7 +280,7 @@ class _CustomizationManagementScreenState
                                     context,
                                     option,
                                     service,
-                                  )),
+                                  ),),
                             ],
                           );
                         },

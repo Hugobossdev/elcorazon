@@ -1,8 +1,8 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart' hide Category;
 
-import '../models/category.dart';
-import 'admin_auth_service.dart';
+import 'package:admin/models/category.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Catégories du catalogue — `/api/v1/catalog/manage/categories/` (Phase 6).
 ///
@@ -41,11 +41,11 @@ class CategoryManagementService extends ChangeNotifier {
     try {
       final remote = await _catalog.categories(restaurantSlug: _restaurantSlug);
       _categories = remote.map(_toLocal).toList();
-      debugPrint('CategoryManagementService: ${_categories.length} catégorie(s)');
+      eccore.Journal.trace('CategoryManagementService: ${_categories.length} catégorie(s)');
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       _categories = [];
-      debugPrint('CategoryManagementService: chargement impossible — ${e.code}');
+      eccore.Journal.trace('CategoryManagementService: chargement impossible — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -58,7 +58,6 @@ class CategoryManagementService extends ChangeNotifier {
       name: remote.name,
       description: remote.description.isEmpty ? null : remote.description,
       displayOrder: remote.sortOrder,
-      isActive: true,
       emoji: remote.emoji,
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
@@ -100,7 +99,7 @@ class CategoryManagementService extends ChangeNotifier {
       return locale;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('CategoryManagementService: création refusée — ${e.code}');
+      eccore.Journal.trace('CategoryManagementService: création refusée — ${e.code}');
       return null;
     } finally {
       _isLoading = false;
@@ -146,7 +145,7 @@ class CategoryManagementService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('CategoryManagementService: mise à jour refusée — ${e.code}');
+      eccore.Journal.trace('CategoryManagementService: mise à jour refusée — ${e.code}');
       return false;
     } finally {
       _isLoading = false;
@@ -174,7 +173,7 @@ class CategoryManagementService extends ChangeNotifier {
       _error = e.status == 409
           ? 'Cette catégorie contient encore des articles.'
           : e.detail;
-      debugPrint('CategoryManagementService: suppression refusée — ${e.code}');
+      eccore.Journal.trace('CategoryManagementService: suppression refusée — ${e.code}');
       return false;
     } finally {
       _isLoading = false;
@@ -207,7 +206,7 @@ class CategoryManagementService extends ChangeNotifier {
       _categories = avant;
       _error = e.detail;
       notifyListeners();
-      debugPrint('CategoryManagementService: réordonnancement refusé — ${e.code}');
+      eccore.Journal.trace('CategoryManagementService: réordonnancement refusé — ${e.code}');
       return false;
     }
   }
@@ -219,7 +218,7 @@ class CategoryManagementService extends ChangeNotifier {
       final updatedCategory = category.copyWith(isActive: !category.isActive);
       return await updateCategory(updatedCategory);
     } catch (e) {
-      debugPrint(
+      eccore.Journal.trace(
         'CategoryManagementService: Erreur toggle statut catégorie - $e',
       );
       return false;
@@ -242,7 +241,7 @@ class CategoryManagementService extends ChangeNotifier {
         'active_items': articles.where((item) => item.isAvailable).length,
       };
     } on eccore.ApiException catch (e) {
-      debugPrint('CategoryManagementService: statistiques indisponibles — ${e.code}');
+      eccore.Journal.trace('CategoryManagementService: statistiques indisponibles — ${e.code}');
       return {'total_items': 0, 'active_items': 0};
     }
   }

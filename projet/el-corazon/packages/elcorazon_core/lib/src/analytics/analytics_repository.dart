@@ -1,4 +1,4 @@
-import '../network/api_client.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
 
 /// Accès à `/api/v1/analytics/events/` — voir `backend/apps/analytics/views.py`.
 ///

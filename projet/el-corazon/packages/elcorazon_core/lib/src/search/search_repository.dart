@@ -1,4 +1,4 @@
-import '../network/api_client.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
 
 /// Familles de résultats — valeurs de `SearchHit.kind` côté serveur.
 abstract final class SearchKind {

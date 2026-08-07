@@ -47,10 +47,10 @@ class ReviewRatingService extends ChangeNotifier {
 
     try {
       _reviews = await _repository.getReviews(menuItemId);
-      debugPrint('✅ Chargé ${_reviews.length} avis pour $menuItemId');
+      eccore.Journal.trace('✅ Chargé ${_reviews.length} avis pour $menuItemId');
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('❌ Chargement des avis: ${e.code}');
+      eccore.Journal.trace('❌ Chargement des avis: ${e.code}');
       _reviews = [];
     } finally {
       _isLoading = false;
@@ -77,7 +77,7 @@ class ReviewRatingService extends ChangeNotifier {
       );
       notifyListeners();
     } on eccore.ApiException catch (e) {
-      debugPrint('❌ Chargement de la note de $menuItemId: ${e.code}');
+      eccore.Journal.trace('❌ Chargement de la note de $menuItemId: ${e.code}');
     }
   }
 
@@ -103,11 +103,11 @@ class ReviewRatingService extends ChangeNotifier {
       );
       _reviews.insert(0, review);
       await loadRating(menuItemId);
-      debugPrint('✅ Avis déposé: ${review.id}');
+      eccore.Journal.trace('✅ Avis déposé: ${review.id}');
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('❌ Dépôt de l\'avis: ${e.code}');
+      eccore.Journal.trace('❌ Dépôt de l\'avis: ${e.code}');
       return false;
     } finally {
       _isLoading = false;

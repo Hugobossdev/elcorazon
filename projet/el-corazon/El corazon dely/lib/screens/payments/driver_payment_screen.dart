@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../models/order.dart';
+import 'package:elcora_dely/models/order.dart';
 
 /// Ce que le livreur doit encaisser — **en consultation seule**.
 ///
@@ -22,9 +22,7 @@ import '../../models/order.dart';
 /// dois-je encaisser en arrivant ?**
 class DriverPaymentScreen extends StatelessWidget {
   const DriverPaymentScreen({
-    super.key,
-    required this.order,
-    required this.amount,
+    required this.order, required this.amount, super.key,
   });
 
   final Order order;

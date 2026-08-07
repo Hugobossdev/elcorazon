@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
-import '../models/order.dart';
-import '../repositories/django_order_mapper.dart';
-import 'admin_auth_service.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/repositories/django_order_mapper.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Supervision des commandes — `/api/v1/orders/manage/` (Phase 6).
 ///
@@ -44,9 +44,9 @@ class OrderManagementService extends ChangeNotifier {
     try {
       final remote = await _orders.list();
       _allOrders = remote.map(DjangoOrderMapper.toLocal).toList();
-      debugPrint('OrderManagementService: ${_allOrders.length} commande(s)');
+      eccore.Journal.trace('OrderManagementService: ${_allOrders.length} commande(s)');
     } on eccore.ApiException catch (e) {
-      debugPrint('OrderManagementService: chargement impossible — ${e.code}');
+      eccore.Journal.trace('OrderManagementService: chargement impossible — ${e.code}');
       _allOrders = [];
     } finally {
       _setLoading(false);
@@ -75,7 +75,7 @@ class OrderManagementService extends ChangeNotifier {
       _replaceLocally(DjangoOrderMapper.toLocal(updated));
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('OrderManagementService: transition refusée — ${e.code}');
+      eccore.Journal.trace('OrderManagementService: transition refusée — ${e.code}');
       return false;
     }
   }
@@ -158,7 +158,7 @@ class OrderManagementService extends ChangeNotifier {
   /// ni le motif, tous deux exigés par le contrat : envoyer un appel incomplet
   /// échouerait en 400 sous les yeux de l'opérateur.
   Future<bool> processRefund(String orderId, double amount) async {
-    debugPrint('OrderManagementService: remboursement non branché ($orderId)');
+    eccore.Journal.trace('OrderManagementService: remboursement non branché ($orderId)');
     return false;
   }
 
@@ -172,7 +172,7 @@ class OrderManagementService extends ChangeNotifier {
       _replaceLocally(DjangoOrderMapper.toLocal(updated));
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('OrderManagementService: annulation refusée — ${e.code}');
+      eccore.Journal.trace('OrderManagementService: annulation refusée — ${e.code}');
       return false;
     }
   }
@@ -194,7 +194,7 @@ class OrderManagementService extends ChangeNotifier {
       await refresh();
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('OrderManagementService: affectation refusée — ${e.code}');
+      eccore.Journal.trace('OrderManagementService: affectation refusée — ${e.code}');
       return false;
     }
   }
@@ -296,7 +296,7 @@ class OrderManagementService extends ChangeNotifier {
       final remote = await _orders.list(status: DjangoOrderMapper.toRemoteStatus(status));
       return remote.map(DjangoOrderMapper.toLocal).toList();
     } on eccore.ApiException catch (e) {
-      debugPrint('OrderManagementService: filtre par statut impossible — ${e.code}');
+      eccore.Journal.trace('OrderManagementService: filtre par statut impossible — ${e.code}');
       return [];
     }
   }
@@ -307,7 +307,7 @@ class OrderManagementService extends ChangeNotifier {
       final remote = await _orders.list();
       return remote.take(limit).map(DjangoOrderMapper.toLocal).toList();
     } on eccore.ApiException catch (e) {
-      debugPrint('OrderManagementService: commandes récentes indisponibles — ${e.code}');
+      eccore.Journal.trace('OrderManagementService: commandes récentes indisponibles — ${e.code}');
       return [];
     }
   }
@@ -319,7 +319,7 @@ class OrderManagementService extends ChangeNotifier {
         .where((order) =>
             order.orderTime.year == today.year &&
             order.orderTime.month == today.month &&
-            order.orderTime.day == today.day)
+            order.orderTime.day == today.day,)
         .toList();
   }
 
@@ -332,7 +332,7 @@ class OrderManagementService extends ChangeNotifier {
     return _allOrders
         .where((order) =>
             order.orderTime.isAfter(startOfWeek) &&
-            order.orderTime.isBefore(endOfWeek))
+            order.orderTime.isBefore(endOfWeek),)
         .toList();
   }
 
@@ -342,7 +342,7 @@ class OrderManagementService extends ChangeNotifier {
     return _allOrders
         .where((order) =>
             order.orderTime.year == now.year &&
-            order.orderTime.month == now.month)
+            order.orderTime.month == now.month,)
         .toList();
   }
 
@@ -384,7 +384,7 @@ class OrderManagementService extends ChangeNotifier {
                 sum +
                 (order.total.isNaN || order.total.isInfinite
                     ? 0.0
-                    : order.total));
+                    : order.total),);
 
     final averageOrderValue =
         deliveredOrders > 0 ? totalRevenue / deliveredOrders : 0.0;
@@ -412,7 +412,7 @@ class OrderManagementService extends ChangeNotifier {
 
   /// Recharger les données (méthode publique)
   Future<void> refresh() async {
-    debugPrint('🔄 Rafraîchissement manuel des commandes...');
+    eccore.Journal.trace('🔄 Rafraîchissement manuel des commandes...');
     await _loadAllOrders();
   }
 
@@ -468,14 +468,14 @@ class OrderManagementService extends ChangeNotifier {
                 order.status == OrderStatus.cancelled);
       }).toList();
 
-      debugPrint('Archiving ${oldOrders.length} old orders');
+      eccore.Journal.trace('Archiving ${oldOrders.length} old orders');
 
       // Dans un vrai système, on pourrait déplacer ces commandes vers une table d'archive
       // Pour l'instant, on les laisse dans la base mais on les filtre dans l'interface
 
       return true;
     } catch (e) {
-      debugPrint('Error archiving orders: $e');
+      eccore.Journal.trace('Error archiving orders: $e');
       return false;
     }
   }
@@ -525,16 +525,22 @@ class OrderManagementService extends ChangeNotifier {
     final firstDay = trends.first;
     final lastDay = trends.last;
 
-    final orderGrowth = lastDay['total_orders'] - firstDay['total_orders'];
-    final revenueGrowth = lastDay['revenue'] - firstDay['revenue'];
+    // `trends` porte des `Map<String, dynamic>` : on type les quatre valeurs
+    // lues plutôt que de calculer sur du `dynamic`, où une clé absente
+    // n'échouerait qu'à l'exécution.
+    final commandesDebut = firstDay['total_orders']! as num;
+    final commandesFin = lastDay['total_orders']! as num;
+    final revenuDebut = firstDay['revenue']! as num;
+    final revenuFin = lastDay['revenue']! as num;
 
-    final orderGrowthPercent = firstDay['total_orders'] > 0
-        ? (orderGrowth / firstDay['total_orders']) * 100
-        : 0.0;
+    final orderGrowth = commandesFin - commandesDebut;
+    final revenueGrowth = revenuFin - revenuDebut;
 
-    final revenueGrowthPercent = firstDay['revenue'] > 0
-        ? (revenueGrowth / firstDay['revenue']) * 100
-        : 0.0;
+    final orderGrowthPercent =
+        commandesDebut > 0 ? (orderGrowth / commandesDebut) * 100 : 0.0;
+
+    final revenueGrowthPercent =
+        revenuDebut > 0 ? (revenueGrowth / revenuDebut) * 100 : 0.0;
 
     return {
       'trends': trends,
@@ -596,7 +602,7 @@ class OrderManagementService extends ChangeNotifier {
     }).toList();
 
     customerStats.sort((a, b) =>
-        (b['total_spent'] as double).compareTo(a['total_spent'] as double));
+        (b['total_spent'] as double).compareTo(a['total_spent'] as double),);
 
     return customerStats.take(limit).toList();
   }
@@ -620,7 +626,7 @@ class OrderManagementService extends ChangeNotifier {
           .map((e) => {
                 'name': e.key,
                 'quantity': e.value,
-              })
+              },)
           .toList(),
     };
   }
@@ -630,7 +636,7 @@ class OrderManagementService extends ChangeNotifier {
     final deliveredOrders = _allOrders
         .where((o) =>
             o.status == OrderStatus.delivered &&
-            o.estimatedDeliveryTime != null)
+            o.estimatedDeliveryTime != null,)
         .toList();
 
     if (deliveredOrders.isEmpty) {

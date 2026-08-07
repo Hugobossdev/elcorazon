@@ -64,14 +64,14 @@ class _FakeServer implements HttpClientAdapter {
           'next': null,
           'previous': null,
           'results': [_notificationJson(id: 'notif-2', isRead: true)],
-        }, 200);
+        }, 200,);
       }
       return _json({
         'count': 2,
         'next': 'http://test.local/api/v1/notifications/?page=2',
         'previous': null,
         'results': [_notificationJson(kind: kind ?? 'order_status')],
-      }, 200);
+      }, 200,);
     }
 
     throw UnimplementedError('Route non simulée : ${options.method} $path');

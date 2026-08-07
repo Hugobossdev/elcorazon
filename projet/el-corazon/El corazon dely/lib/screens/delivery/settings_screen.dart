@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../services/app_service.dart';
-import '../../services/location_service.dart';
-import 'driver_profile_screen.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/location_service.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -41,7 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _theme = prefs.getString('theme') ?? 'light';
       });
     } catch (e) {
-      debugPrint('Error loading settings: $e');
+      Journal.trace('Error loading settings: $e');
     }
   }
 
@@ -56,6 +57,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setBool('vibration_enabled', _vibrationEnabled);
       await prefs.setString('language', _language);
       await prefs.setString('theme', _theme);
+
+      if (!mounted) return;
 
       // Update services based on settings
       final locationService =
@@ -276,7 +279,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _saveSettings();
             },
           ),
-          ListTile(
+          const ListTile(
           ),
         ],
       ),
@@ -334,9 +337,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
             ),
           ),
-          ListTile(
-            title: const Text('Version'),
-            subtitle: const Text('1.0.0'),
+          const ListTile(
+            title: Text('Version'),
+            subtitle: Text('1.0.0'),
           ),
           ListTile(
             title: const Text('Politique de confidentialité'),
@@ -406,7 +409,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Provider.of<LocationService>(context, listen: false);
                 final hasPermission =
                     await locationService.requestLocationPermission();
-                if (mounted) {
+                if (context.mounted) {
                   if (hasPermission) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -424,7 +427,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   }
                 }
               } catch (e) {
-                if (mounted) {
+                if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Erreur: $e'),
@@ -447,32 +450,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Sélectionner la langue'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile<String>(
-              title: const Text('Français'),
-              value: 'fr',
-              groupValue: _language,
-              onChanged: (value) {
-                setState(() {
-                  _language = value!;
-                });
-                Navigator.pop(context);
-              },
-            ),
-            RadioListTile<String>(
-              title: const Text('English'),
-              value: 'en',
-              groupValue: _language,
-              onChanged: (value) {
-                setState(() {
-                  _language = value!;
-                });
-                Navigator.pop(context);
-              },
-            ),
-          ],
+        // La sélection est portée par le groupe et non plus par chaque tuile :
+        // `RadioListTile.groupValue` et `.onChanged` sont dépréciés depuis
+        // Flutter 3.32. Les deux tuiles faisaient le même traitement, il ne
+        // s'écrit donc plus qu'une fois.
+        content: RadioGroup<String>(
+          groupValue: _language,
+          onChanged: (value) {
+            setState(() {
+              _language = value!;
+            });
+            Navigator.pop(context);
+          },
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<String>(
+                title: Text('Français'),
+                value: 'fr',
+              ),
+              RadioListTile<String>(
+                title: Text('English'),
+                value: 'en',
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -483,32 +485,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Sélectionner le thème'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            RadioListTile<String>(
-              title: const Text('Clair'),
-              value: 'light',
-              groupValue: _theme,
-              onChanged: (value) {
-                setState(() {
-                  _theme = value!;
-                });
-                Navigator.pop(context);
-              },
-            ),
-            RadioListTile<String>(
-              title: const Text('Sombre'),
-              value: 'dark',
-              groupValue: _theme,
-              onChanged: (value) {
-                setState(() {
-                  _theme = value!;
-                });
-                Navigator.pop(context);
-              },
-            ),
-          ],
+        // Même migration que pour la langue — voir `_selectLanguage`.
+        content: RadioGroup<String>(
+          groupValue: _theme,
+          onChanged: (value) {
+            setState(() {
+              _theme = value!;
+            });
+            Navigator.pop(context);
+          },
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<String>(
+                title: Text('Clair'),
+                value: 'light',
+              ),
+              RadioListTile<String>(
+                title: Text('Sombre'),
+                value: 'dark',
+              ),
+            ],
+          ),
         ),
       ),
     );

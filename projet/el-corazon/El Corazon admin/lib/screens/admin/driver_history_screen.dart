@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../../services/driver_management_service.dart';
-import '../../services/order_management_service.dart';
-import '../../models/driver.dart';
-import '../../models/order.dart';
-import '../../widgets/custom_bar_chart.dart';
-import '../../utils/price_formatter.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/widgets/custom_bar_chart.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 class DriverHistoryScreen extends StatefulWidget {
   final Driver driver;
 
-  const DriverHistoryScreen({super.key, required this.driver});
+  const DriverHistoryScreen({required this.driver, super.key});
 
   @override
   State<DriverHistoryScreen> createState() => _DriverHistoryScreenState();
@@ -46,7 +46,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
             const Text('Historique', style: TextStyle(fontSize: 16)),
             Text(widget.driver.name,
                 style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.normal)),
+                    fontSize: 12, fontWeight: FontWeight.normal,),),
           ],
         ),
         bottom: TabBar(
@@ -189,7 +189,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
         _buildSummaryCard(stats),
         const SizedBox(height: 24),
         const Text('Commandes des 7 derniers jours',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(16),
@@ -201,7 +201,6 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
           child: CustomBarChart(
             data: dailyCounts,
             labels: days,
-            color: Colors.blue,
             height: 150,
           ),
         ),
@@ -227,14 +226,14 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
                     'Revenu',
                     PriceFormatter.format(stats['total_revenue'] is num ? (stats['total_revenue'] as num).toDouble() : 0.0),
                     Icons.monetization_on,
-                    Colors.green),
+                    Colors.green,),
                 _buildSummaryItem('Commandes', '${stats['total_orders']}',
-                    Icons.shopping_bag, Colors.blue),
+                    Icons.shopping_bag, Colors.blue,),
                 _buildSummaryItem(
                     'Taux Succès',
                     '${(stats['completion_rate'] as double).toInt()}%',
                     Icons.check_circle,
-                    Colors.orange),
+                    Colors.orange,),
               ],
             ),
           ],
@@ -244,7 +243,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
   }
 
   Widget _buildSummaryItem(
-      String label, String value, IconData icon, Color color) {
+      String label, String value, IconData icon, Color color,) {
     return Column(
       children: [
         Container(
@@ -257,7 +256,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
         ),
         const SizedBox(height: 8),
         Text(value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),),
         Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       ],
     );
@@ -305,7 +304,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
                 Text(
                   PriceFormatter.format(order.total),
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16),
+                      fontWeight: FontWeight.bold, fontSize: 16,),
                 ),
                 Text(
                   order.status.displayName,
@@ -355,7 +354,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
                 children: [
                   const Text('Performance Mensuelle (Courses / Semaine)',
                       style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),),
                   const SizedBox(height: 20),
                   CustomBarChart(
                     data: weeklyData.every((v) => v == 0)
@@ -363,15 +362,14 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
                         : weeklyData,
                     labels: weeklyLabels,
                     color: Colors.purple,
-                    height: 200,
                   ),
                   if (weeklyData.every((v) => v == 0))
                     const Padding(
                       padding: EdgeInsets.only(top: 8.0),
                       child: Center(
                           child: Text('Pas assez de données',
-                              style: TextStyle(color: Colors.grey))),
-                    )
+                              style: TextStyle(color: Colors.grey),),),
+                    ),
                 ],
               ),
             ),

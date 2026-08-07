@@ -2,8 +2,8 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../models/menu_models.dart';
-import 'admin_auth_service.dart';
+import 'package:admin/models/menu_models.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Écriture du catalogue — `/api/v1/catalog/manage/*` (Phase 6).
 ///
@@ -81,7 +81,7 @@ class MenuService extends ChangeNotifier {
       // ouvrir par Pillow. Un fichier renommé en `.jpg` sort donc en 400, et
       // non en image cassée découverte par un client.
       _error = e.detail;
-      debugPrint("MenuService: envoi d'image refusé — ${e.code}");
+      eccore.Journal.trace("MenuService: envoi d'image refusé — ${e.code}");
       notifyListeners();
       return null;
     }
@@ -96,7 +96,7 @@ class MenuService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint("MenuService: retrait d'image refusé — ${e.code}");
+      eccore.Journal.trace("MenuService: retrait d'image refusé — ${e.code}");
       notifyListeners();
       return false;
     }
@@ -117,7 +117,7 @@ class MenuService extends ChangeNotifier {
       return remote.map(_toLocalItem).toList();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('MenuService: chargement impossible — ${e.code}');
+      eccore.Journal.trace('MenuService: chargement impossible — ${e.code}');
       return [];
     } finally {
       if (notify) {
@@ -134,7 +134,7 @@ class MenuService extends ChangeNotifier {
       return _toLocalItem(remote);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('MenuService: article introuvable — ${e.code}');
+      eccore.Journal.trace('MenuService: article introuvable — ${e.code}');
       return null;
     }
   }
@@ -156,7 +156,7 @@ class MenuService extends ChangeNotifier {
       return _toLocalItem(created);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('MenuService: création refusée — ${e.code}');
+      eccore.Journal.trace('MenuService: création refusée — ${e.code}');
       return null;
     }
   }
@@ -177,7 +177,7 @@ class MenuService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('MenuService: mise à jour refusée — ${e.code}');
+      eccore.Journal.trace('MenuService: mise à jour refusée — ${e.code}');
       return false;
     }
   }
@@ -190,7 +190,7 @@ class MenuService extends ChangeNotifier {
       return true;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('MenuService: suppression refusée — ${e.code}');
+      eccore.Journal.trace('MenuService: suppression refusée — ${e.code}');
       return false;
     }
   }
@@ -209,7 +209,7 @@ class MenuService extends ChangeNotifier {
       return _toLocalGroup(created, group.menuItemId);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('MenuService: création de groupe refusée — ${e.code}');
+      eccore.Journal.trace('MenuService: création de groupe refusée — ${e.code}');
       return null;
     }
   }
@@ -254,7 +254,7 @@ class MenuService extends ChangeNotifier {
       return _toLocalOption(created, option.groupId);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint("MenuService: création d'option refusée — ${e.code}");
+      eccore.Journal.trace("MenuService: création d'option refusée — ${e.code}");
       return null;
     }
   }

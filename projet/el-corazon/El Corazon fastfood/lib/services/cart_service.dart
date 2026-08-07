@@ -105,7 +105,7 @@ class CartService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ Error initializing CartService: $e');
+      eccore.Journal.trace('❌ Error initializing CartService: $e');
     }
   }
 
@@ -130,7 +130,7 @@ class CartService extends ChangeNotifier {
       try {
         await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
       } catch (e) {
-        debugPrint('CartService: erreur lors du nettoyage distant - $e');
+        eccore.Journal.trace('CartService: erreur lors du nettoyage distant - $e');
       }
     }
 
@@ -160,12 +160,12 @@ class CartService extends ChangeNotifier {
     List<String> optionIds = const [],
   }) {
     if (quantity <= 0) {
-      debugPrint('⚠️ La quantité doit être supérieure à 0');
+      eccore.Journal.trace('⚠️ La quantité doit être supérieure à 0');
       return;
     }
 
     if (quantity > 999) {
-      debugPrint('⚠️ La quantité maximale est de 999');
+      eccore.Journal.trace('⚠️ La quantité maximale est de 999');
       quantity = 999;
     }
 
@@ -185,7 +185,7 @@ class CartService extends ChangeNotifier {
       final newQuantity = (currentQuantity + quantity).clamp(1, 999);
 
       _items[existingIndex] = existingItem.copyWith(quantity: newQuantity);
-      debugPrint(
+      eccore.Journal.trace(
         '✅ Quantité mise à jour: ${menuItem.name} ($currentQuantity → $newQuantity)',
       );
     } else {
@@ -201,7 +201,7 @@ class CartService extends ChangeNotifier {
       );
 
       _items.add(newItem);
-      debugPrint('✅ Article ajouté: ${menuItem.name} (quantité: $quantity)');
+      eccore.Journal.trace('✅ Article ajouté: ${menuItem.name} (quantité: $quantity)');
     }
 
     notifyListeners();
@@ -211,21 +211,21 @@ class CartService extends ChangeNotifier {
   /// Met à jour la quantité d'un article par son index
   void updateItemQuantity(int index, int newQuantity) {
     if (index < 0 || index >= _items.length) {
-      debugPrint('⚠️ Index invalide: $index');
+      eccore.Journal.trace('⚠️ Index invalide: $index');
       return;
     }
 
     if (newQuantity <= 0) {
       final itemName = _items[index].name;
       _items.removeAt(index);
-      debugPrint('✅ Article retiré: $itemName');
+      eccore.Journal.trace('✅ Article retiré: $itemName');
     } else if (newQuantity <= 999) {
       _items[index] = _items[index].copyWith(quantity: newQuantity);
-      debugPrint(
+      eccore.Journal.trace(
         '✅ Quantité mise à jour: ${_items[index].name} → $newQuantity',
       );
     } else {
-      debugPrint('⚠️ Quantité maximale de 999 atteinte');
+      eccore.Journal.trace('⚠️ Quantité maximale de 999 atteinte');
       return;
     }
 
@@ -236,13 +236,13 @@ class CartService extends ChangeNotifier {
   /// Retire un article par son index
   void removeItem(int index) {
     if (index < 0 || index >= _items.length) {
-      debugPrint('⚠️ Index invalide pour removeItem: $index');
+      eccore.Journal.trace('⚠️ Index invalide pour removeItem: $index');
       return;
     }
 
     final itemName = _items[index].name;
     _items.removeAt(index);
-    debugPrint('✅ Article retiré: $itemName');
+    eccore.Journal.trace('✅ Article retiré: $itemName');
     notifyListeners();
     _persistChanges();
   }
@@ -253,11 +253,11 @@ class CartService extends ChangeNotifier {
     _items.removeWhere((item) => item.id == cartItemId);
 
     if (_items.length < initialLength) {
-      debugPrint('✅ Article retiré par ID: $cartItemId');
+      eccore.Journal.trace('✅ Article retiré par ID: $cartItemId');
       notifyListeners();
       _persistChanges();
     } else {
-      debugPrint('⚠️ Aucun article trouvé avec l\'ID: $cartItemId');
+      eccore.Journal.trace('⚠️ Aucun article trouvé avec l\'ID: $cartItemId');
     }
   }
 
@@ -267,7 +267,7 @@ class CartService extends ChangeNotifier {
     _items.removeWhere((item) => item.menuItemId == menuItemId);
 
     if (_items.length < initialLength) {
-      debugPrint('✅ Articles retirés pour menuItemId: $menuItemId');
+      eccore.Journal.trace('✅ Articles retirés pour menuItemId: $menuItemId');
       notifyListeners();
       _persistChanges();
     }
@@ -279,14 +279,14 @@ class CartService extends ChangeNotifier {
     Map<String, dynamic>? customizations,
   ) {
     if (index < 0 || index >= _items.length) {
-      debugPrint('⚠️ Index invalide pour updateItemCustomizations: $index');
+      eccore.Journal.trace('⚠️ Index invalide pour updateItemCustomizations: $index');
       return;
     }
 
     final normalizedCustomizations = _normalizeCustomizations(customizations);
     _items[index] =
         _items[index].copyWith(customizations: normalizedCustomizations);
-    debugPrint('✅ Customizations mises à jour pour: ${_items[index].name}');
+    eccore.Journal.trace('✅ Customizations mises à jour pour: ${_items[index].name}');
     notifyListeners();
     _persistChanges();
   }
@@ -297,7 +297,7 @@ class CartService extends ChangeNotifier {
     _items.clear();
     _promoDiscount = 0.0;
     _promoCode = null;
-    debugPrint('✅ Panier vidé ($itemCount articles)');
+    eccore.Journal.trace('✅ Panier vidé ($itemCount articles)');
     notifyListeners();
     _persistChanges();
   }
@@ -306,20 +306,20 @@ class CartService extends ChangeNotifier {
   void incrementItemQuantity(String menuItemId) {
     final index = _items.indexWhere((item) => item.menuItemId == menuItemId);
     if (index < 0) {
-      debugPrint('⚠️ Article non trouvé pour increment: $menuItemId');
+      eccore.Journal.trace('⚠️ Article non trouvé pour increment: $menuItemId');
       return;
     }
 
     final currentQuantity = _items[index].quantity;
     if (currentQuantity < 999) {
       _items[index] = _items[index].copyWith(quantity: currentQuantity + 1);
-      debugPrint(
+      eccore.Journal.trace(
         '✅ Quantité incrémentée: ${_items[index].name} ($currentQuantity → ${currentQuantity + 1})',
       );
       notifyListeners();
       _persistChanges();
     } else {
-      debugPrint(
+      eccore.Journal.trace(
         '⚠️ Quantité maximale de 999 atteinte pour ${_items[index].name}',
       );
     }
@@ -329,7 +329,7 @@ class CartService extends ChangeNotifier {
   void decrementItemQuantity(String menuItemId) {
     final index = _items.indexWhere((item) => item.menuItemId == menuItemId);
     if (index < 0) {
-      debugPrint('⚠️ Article non trouvé pour decrement: $menuItemId');
+      eccore.Journal.trace('⚠️ Article non trouvé pour decrement: $menuItemId');
       return;
     }
 
@@ -338,12 +338,12 @@ class CartService extends ChangeNotifier {
 
     if (currentQuantity > 1) {
       _items[index] = _items[index].copyWith(quantity: currentQuantity - 1);
-      debugPrint(
+      eccore.Journal.trace(
         '✅ Quantité décrémentée: $itemName ($currentQuantity → ${currentQuantity - 1})',
       );
     } else {
       _items.removeAt(index);
-      debugPrint('✅ Article retiré (quantité = 0): $itemName');
+      eccore.Journal.trace('✅ Article retiré (quantité = 0): $itemName');
     }
 
     notifyListeners();
@@ -408,12 +408,12 @@ class CartService extends ChangeNotifier {
   /// Cette méthode est utilisée après validation via PromoCodeService
   void applyPromoDiscount({required String code, required double discount}) {
     if (discount < 0) {
-      debugPrint('⚠️ La remise ne peut pas être négative');
+      eccore.Journal.trace('⚠️ La remise ne peut pas être négative');
       return;
     }
     _promoCode = code;
     _promoDiscount = discount;
-    debugPrint(
+    eccore.Journal.trace(
       '✅ Remise appliquée: $_promoCode (-${discount.toStringAsFixed(2)} FCFA)',
     );
     notifyListeners();
@@ -440,7 +440,7 @@ class CartService extends ChangeNotifier {
     double orderAmount,
     List<String> categoryNames,
   ) async {
-    debugPrint(
+    eccore.Journal.trace(
         '⚠️ validatePromoCode est déprécié. Utilisez PromoCodeService directement via Provider.',);
     return false;
   }
@@ -507,7 +507,7 @@ class CartService extends ChangeNotifier {
                 .map((item) => CartItem.fromMap(item as Map<String, dynamic>))
                 .toList(),
           );
-        debugPrint(
+        eccore.Journal.trace(
           '✅ Cart chargé depuis le stockage local: ${_items.length} articles',
         );
       } else {
@@ -533,7 +533,7 @@ class CartService extends ChangeNotifier {
 
       _promoCode = _prefs?.getString(_promoCodeKey);
     } catch (e) {
-      debugPrint('❌ Erreur lors du chargement du panier local: $e');
+      eccore.Journal.trace('❌ Erreur lors du chargement du panier local: $e');
     }
   }
 
@@ -554,9 +554,9 @@ class CartService extends ChangeNotifier {
         await _prefs!.remove(_promoCodeKey);
       }
 
-      debugPrint('✅ Panier sauvegardé localement (${_items.length} articles)');
+      eccore.Journal.trace('✅ Panier sauvegardé localement (${_items.length} articles)');
     } catch (e) {
-      debugPrint('❌ Erreur lors de la sauvegarde du panier local: $e');
+      eccore.Journal.trace('❌ Erreur lors de la sauvegarde du panier local: $e');
     }
   }
 
@@ -620,7 +620,7 @@ class CartService extends ChangeNotifier {
       // Frais de livraison, code promo et remises n'existent pas dans le
       // panier Django (hors scope de cette tranche) — conservés tels quels.
 
-      debugPrint(
+      eccore.Journal.trace(
         '✅ Panier synchronisé depuis le backend (${_items.length} articles)',
       );
 
@@ -629,9 +629,9 @@ class CartService extends ChangeNotifier {
     } catch (e) {
       // Si erreur de connexion, on garde le panier local
       if (!_offlineSyncService.isOnline) {
-        debugPrint('📴 Mode hors ligne: utilisation du panier local');
+        eccore.Journal.trace('📴 Mode hors ligne: utilisation du panier local');
       } else {
-        debugPrint('CartService: erreur lors du chargement distant - $e');
+        eccore.Journal.trace('CartService: erreur lors du chargement distant - $e');
       }
     } finally {
       _isHydrating = false;
@@ -672,7 +672,7 @@ class CartService extends ChangeNotifier {
     }
 
     if (refused.isNotEmpty) {
-      debugPrint(
+      eccore.Journal.trace(
         '⚠️ Lignes refusées par le serveur, non synchronisées : ${refused.join(' ; ')}',
       );
     }
@@ -688,7 +688,7 @@ class CartService extends ChangeNotifier {
     } catch (e) {
       // Si erreur de connexion, sauvegarder hors ligne
       if (!_offlineSyncService.isOnline) {
-        debugPrint('📴 Mode hors ligne: sauvegarde du panier localement');
+        eccore.Journal.trace('📴 Mode hors ligne: sauvegarde du panier localement');
         await _offlineSyncService.saveCartUpdateOffline(
           _userId!,
           List<CartItem>.from(_items),
@@ -697,7 +697,7 @@ class CartService extends ChangeNotifier {
           _promoCode,
         );
       } else {
-        debugPrint(
+        eccore.Journal.trace(
           'CartService: erreur lors de la synchronisation distante - $e',
         );
       }
@@ -757,7 +757,7 @@ class CartService extends ChangeNotifier {
         await _replaceRemoteCart();
       }
     } catch (e) {
-      debugPrint(
+      eccore.Journal.trace(
           'CartService: erreur lors de la synchronisation initiale - $e',);
     } finally {
       _isSyncing = false;

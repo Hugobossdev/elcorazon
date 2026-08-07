@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Demande de retour — miroir de `ReturnRequestSerializer`. C'est une
 /// **demande**, pas un remboursement : le versement reste un geste humain

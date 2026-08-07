@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/app_service.dart';
+import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';
-import 'delivery/delivery_navigation_screen.dart';
+import 'package:elcora_dely/screens/delivery/delivery_navigation_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key, this.sessionReady});
@@ -60,7 +62,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   void _startSplashSequence() async {
     // Start logo animation
-    _logoController.forward();
+    unawaited(_logoController.forward());
 
     // Initialize AppService while splash is showing
     final initFuture = _initializeAppService();
@@ -68,7 +70,7 @@ class _SplashScreenState extends State<SplashScreen>
     // Wait a bit, then start text animation
     await Future.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
-    _textController.forward();
+    unawaited(_textController.forward());
 
     // Wait for total splash duration (minimum)
     await Future.delayed(const Duration(milliseconds: 1700));
@@ -96,7 +98,7 @@ class _SplashScreenState extends State<SplashScreen>
         await appService.initialize();
       }
     } catch (e) {
-      debugPrint('Error initializing AppService in Splash: $e');
+      Journal.trace('Error initializing AppService in Splash: $e');
     }
   }
 
@@ -239,11 +241,11 @@ class _SplashScreenState extends State<SplashScreen>
                     opacity: _textAnimation,
                     child: Column(
                       children: [
-                        SizedBox(
+                        const SizedBox(
                           width: 30,
                           height: 30,
                           child: CircularProgressIndicator(
-                            valueColor: const AlwaysStoppedAnimation<Color>(
+                            valueColor: AlwaysStoppedAnimation<Color>(
                               Colors.white,
                             ),
                             strokeWidth: 3,

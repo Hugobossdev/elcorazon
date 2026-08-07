@@ -1,6 +1,6 @@
-import '../network/api_client.dart';
-import 'post.dart';
-import 'social_group.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/social/post.dart';
+import 'package:elcorazon_core/src/social/social_group.dart';
 
 /// Accès à `/api/v1/social/*` — voir `backend/apps/social/{serializers,views}.py`.
 ///

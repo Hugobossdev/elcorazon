@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Option retenue sur une ligne de panier — miroir de
 /// `SelectedOptionSerializer` (`backend/apps/carts/serializers.py`).

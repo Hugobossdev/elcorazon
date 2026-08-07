@@ -14,6 +14,9 @@ class _FakeServer {
   _FakeServer(this._server) {
     _server.listen((request) async {
       connectionCount++;
+      // Le socket doit rester ouvert : c'est précisément ce que ce faux
+      // serveur simule. Il tombe avec `_server.close(force: true)`.
+      // ignore: close_sinks
       final socket = await WebSocketTransformer.upgrade(request);
       socket.add(jsonEncode({'seq': 1, 'type': 'tracking.position', 'lat': 6.13, 'lon': 1.22}));
     });
@@ -37,6 +40,9 @@ class _FakeServer {
 class _EchoServer {
   _EchoServer(this._server) {
     _server.listen((request) async {
+      // Le socket doit rester ouvert : c'est précisément ce que ce faux
+      // serveur simule. Il tombe avec `_server.close(force: true)`.
+      // ignore: close_sinks
       final socket = await WebSocketTransformer.upgrade(request);
       socket.listen((frame) {
         final message = jsonDecode(frame as String) as Map<String, dynamic>;
@@ -68,6 +74,9 @@ class _ForbiddenServer {
   _ForbiddenServer(this._server) {
     _server.listen((request) async {
       connectionCount++;
+      // Le socket doit rester ouvert : c'est précisément ce que ce faux
+      // serveur simule. Il tombe avec `_server.close(force: true)`.
+      // ignore: close_sinks
       final socket = await WebSocketTransformer.upgrade(request);
       await socket.close(4403, 'forbidden');
     });
@@ -132,7 +141,7 @@ void main() {
     expect(event.type, 'chat.message');
     expect(event.payload['text'], 'Je suis en bas');
     expect(event.payload['sender'], 'courier');
-  }, timeout: const Timeout(Duration(seconds: 10)));
+  }, timeout: const Timeout(Duration(seconds: 10)),);
 
   test('send avant connexion ne jette pas', () async {
     final channel = RealtimeChannel(
@@ -160,5 +169,5 @@ void main() {
     // qu'aucune tentative supplémentaire n'a eu lieu.
     await Future<void>.delayed(const Duration(seconds: 4));
     expect(server.connectionCount, 1);
-  }, timeout: const Timeout(Duration(seconds: 10)));
+  }, timeout: const Timeout(Duration(seconds: 10)),);
 }

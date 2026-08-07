@@ -1,5 +1,5 @@
-import '../network/api_client.dart';
-import 'report.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/analytics/report.dart';
 
 /// Rapports d'exploitation — `/api/v1/analytics/reports/*`
 /// (`backend/apps/analytics/views.py`), sous permission `analytics.read`.

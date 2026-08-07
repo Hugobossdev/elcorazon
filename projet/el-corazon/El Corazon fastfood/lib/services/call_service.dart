@@ -160,7 +160,7 @@ class CallService extends ChangeNotifier {
     _channel = channel;
     _subscription = channel.connect().listen(_onEvent);
 
-    debugPrint('CallService: file personnelle ouverte');
+    eccore.Journal.trace('CallService: file personnelle ouverte');
   }
 
   /// Les événements ne portent que l'essentiel ; l'appel complet est relu pour
@@ -188,7 +188,7 @@ class CallService extends ChangeNotifier {
       }
       notifyListeners();
     } on eccore.ApiException catch (e) {
-      debugPrint('CallService: relecture impossible — ${e.code}');
+      eccore.Journal.trace('CallService: relecture impossible — ${e.code}');
     }
   }
 
@@ -216,7 +216,7 @@ class CallService extends ChangeNotifier {
       notifyListeners();
       return call;
     } on eccore.ApiException catch (e) {
-      debugPrint('CallService: appel refusé — ${e.code} (${e.detail})');
+      eccore.Journal.trace('CallService: appel refusé — ${e.code} (${e.detail})');
       return null;
     }
   }
@@ -232,7 +232,7 @@ class CallService extends ChangeNotifier {
       notifyListeners();
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('CallService: décrochage refusé — ${e.code}');
+      eccore.Journal.trace('CallService: décrochage refusé — ${e.code}');
       return false;
     }
   }
@@ -241,7 +241,7 @@ class CallService extends ChangeNotifier {
     try {
       await _calls.decline(call.id);
     } on eccore.ApiException catch (e) {
-      debugPrint('CallService: refus impossible — ${e.code}');
+      eccore.Journal.trace('CallService: refus impossible — ${e.code}');
     }
     _currentCall = null;
     notifyListeners();
@@ -254,7 +254,7 @@ class CallService extends ChangeNotifier {
     try {
       await _calls.end(call.id);
     } on eccore.ApiException catch (e) {
-      debugPrint('CallService: raccrochage impossible — ${e.code}');
+      eccore.Journal.trace('CallService: raccrochage impossible — ${e.code}');
     }
 
     await _agoraService.leaveChannel();
@@ -277,7 +277,7 @@ class CallService extends ChangeNotifier {
         token: credentials.token,
       );
     } on eccore.ApiException catch (e) {
-      debugPrint('CallService: jeton RTC refusé — ${e.code}');
+      eccore.Journal.trace('CallService: jeton RTC refusé — ${e.code}');
       return false;
     }
   }
@@ -293,7 +293,7 @@ class CallService extends ChangeNotifier {
           .map((call) => Call.fromRemote(call, myUserId: _userId!))
           .toList();
     } on eccore.ApiException catch (e) {
-      debugPrint('CallService: historique indisponible — ${e.code}');
+      eccore.Journal.trace('CallService: historique indisponible — ${e.code}');
       return [];
     }
   }

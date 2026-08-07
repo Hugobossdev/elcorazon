@@ -70,9 +70,9 @@ class OfflineSyncService extends ChangeNotifier {
       _startSyncTimer();
       _isInitialized = true;
       notifyListeners();
-      debugPrint('✅ OfflineSyncService: Service initialisé avec succès');
+      eccore.Journal.trace('✅ OfflineSyncService: Service initialisé avec succès');
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur d\'initialisation - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur d\'initialisation - $e');
       _isInitialized = false;
     }
   }
@@ -80,14 +80,14 @@ class OfflineSyncService extends ChangeNotifier {
   /// Initialise le stockage SharedPreferences
   Future<void> _initializeStorage() async {
     _prefs = await SharedPreferences.getInstance();
-    debugPrint('✅ OfflineSyncService: SharedPreferences initialisé');
+    eccore.Journal.trace('✅ OfflineSyncService: SharedPreferences initialisé');
   }
 
   /// Initialise la base de données SQLite locale
   Future<void> _initializeDatabase() async {
     // SQLite n'est pas disponible sur web, utiliser seulement SharedPreferences
     if (kIsWeb) {
-      debugPrint('⚠️ OfflineSyncService: SQLite non disponible sur web, utilisation de SharedPreferences uniquement');
+      eccore.Journal.trace('⚠️ OfflineSyncService: SQLite non disponible sur web, utilisation de SharedPreferences uniquement');
       _database = null;
       return;
     }
@@ -103,13 +103,13 @@ class OfflineSyncService extends ChangeNotifier {
         onUpgrade: _onUpgrade,
       );
 
-      debugPrint('✅ OfflineSyncService: Base de données SQLite initialisée');
+      eccore.Journal.trace('✅ OfflineSyncService: Base de données SQLite initialisée');
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur initialisation DB - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur initialisation DB - $e');
       // Ne pas bloquer l'initialisation sur web, continuer avec SharedPreferences
       if (kIsWeb) {
         _database = null;
-        debugPrint('⚠️ OfflineSyncService: Continuation avec SharedPreferences uniquement');
+        eccore.Journal.trace('⚠️ OfflineSyncService: Continuation avec SharedPreferences uniquement');
       } else {
         rethrow;
       }
@@ -184,7 +184,7 @@ class OfflineSyncService extends ChangeNotifier {
     await db.execute('CREATE INDEX idx_pending_user_updates_user_id ON pending_user_updates(user_id)');
     await db.execute('CREATE INDEX idx_pending_cart_updates_user_id ON pending_cart_updates(user_id)');
 
-    debugPrint('✅ OfflineSyncService: Tables créées');
+    eccore.Journal.trace('✅ OfflineSyncService: Tables créées');
   }
 
   /// Met à jour la base de données lors d'un changement de version
@@ -197,7 +197,7 @@ class OfflineSyncService extends ChangeNotifier {
         await db.execute('ALTER TABLE pending_user_updates ADD COLUMN sync_attempts INTEGER DEFAULT 0');
         await db.execute('ALTER TABLE pending_cart_updates ADD COLUMN sync_attempts INTEGER DEFAULT 0');
       } catch (e) {
-        debugPrint('⚠️ OfflineSyncService: Colonnes déjà présentes ou erreur: $e');
+        eccore.Journal.trace('⚠️ OfflineSyncService: Colonnes déjà présentes ou erreur: $e');
       }
     }
   }
@@ -205,7 +205,7 @@ class OfflineSyncService extends ChangeNotifier {
   /// Charge les données stockées localement
   Future<void> _loadStoredData() async {
     if (!_isDatabaseAvailable) {
-      debugPrint('⚠️ OfflineSyncService: Base de données non disponible, chargement depuis SharedPreferences uniquement');
+      eccore.Journal.trace('⚠️ OfflineSyncService: Base de données non disponible, chargement depuis SharedPreferences uniquement');
       // Charger depuis SharedPreferences si disponible
       _lastSyncTime = _prefs?.getInt('last_sync_time') != null
           ? DateTime.fromMillisecondsSinceEpoch(_prefs!.getInt('last_sync_time')!)
@@ -262,10 +262,10 @@ class OfflineSyncService extends ChangeNotifier {
           ? DateTime.fromMillisecondsSinceEpoch(_prefs!.getInt('last_sync_time')!)
           : null;
 
-      debugPrint('✅ OfflineSyncService: Données chargées - ${_pendingOrders.length} commandes, ${_pendingUserUpdates.length} updates utilisateur, ${_pendingCartUpdates.length} updates panier');
+      eccore.Journal.trace('✅ OfflineSyncService: Données chargées - ${_pendingOrders.length} commandes, ${_pendingUserUpdates.length} updates utilisateur, ${_pendingCartUpdates.length} updates panier');
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur de chargement des données - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur de chargement des données - $e');
     }
   }
 
@@ -278,11 +278,11 @@ class OfflineSyncService extends ChangeNotifier {
                   !connectivityResults.contains(ConnectivityResult.none);
 
       if (wasOnline != _isOnline) {
-        debugPrint('📡 OfflineSyncService: Connectivité changée - ${_isOnline ? "En ligne" : "Hors ligne"}');
+        eccore.Journal.trace('📡 OfflineSyncService: Connectivité changée - ${_isOnline ? "En ligne" : "Hors ligne"}');
         
         if (_isOnline && !wasOnline) {
           // Connexion restaurée, synchroniser immédiatement
-          debugPrint('🔄 OfflineSyncService: Connexion restaurée, synchronisation en cours...');
+          eccore.Journal.trace('🔄 OfflineSyncService: Connexion restaurée, synchronisation en cours...');
           await _syncPendingData();
         }
         
@@ -290,7 +290,7 @@ class OfflineSyncService extends ChangeNotifier {
       }
     } catch (e) {
       _isOnline = false;
-      debugPrint('❌ OfflineSyncService: Erreur de vérification de connectivité - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur de vérification de connectivité - $e');
     }
   }
 
@@ -304,11 +304,11 @@ class OfflineSyncService extends ChangeNotifier {
                     !results.contains(ConnectivityResult.none);
 
         if (wasOnline != _isOnline) {
-          debugPrint('📡 OfflineSyncService: Connectivité changée - ${_isOnline ? "En ligne" : "Hors ligne"}');
+          eccore.Journal.trace('📡 OfflineSyncService: Connectivité changée - ${_isOnline ? "En ligne" : "Hors ligne"}');
           
           if (_isOnline && !wasOnline) {
             // Connexion restaurée, synchroniser immédiatement
-            debugPrint('🔄 OfflineSyncService: Connexion restaurée, synchronisation en cours...');
+            eccore.Journal.trace('🔄 OfflineSyncService: Connexion restaurée, synchronisation en cours...');
             await _syncPendingData();
           }
           
@@ -316,7 +316,7 @@ class OfflineSyncService extends ChangeNotifier {
         }
       },
       onError: (error) {
-        debugPrint('❌ OfflineSyncService: Erreur écoute connectivité - $error');
+        eccore.Journal.trace('❌ OfflineSyncService: Erreur écoute connectivité - $error');
       },
     );
   }
@@ -338,7 +338,7 @@ class OfflineSyncService extends ChangeNotifier {
     }
 
     try {
-      debugPrint('🔄 OfflineSyncService: Début de la synchronisation...');
+      eccore.Journal.trace('🔄 OfflineSyncService: Début de la synchronisation...');
       
       // Synchroniser les mises à jour panier
       await _syncPendingCartUpdates();
@@ -347,10 +347,10 @@ class OfflineSyncService extends ChangeNotifier {
       _lastSyncTime = DateTime.now();
       await _prefs?.setInt('last_sync_time', _lastSyncTime!.millisecondsSinceEpoch);
       
-      debugPrint('✅ OfflineSyncService: Synchronisation terminée');
+      eccore.Journal.trace('✅ OfflineSyncService: Synchronisation terminée');
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur de synchronisation - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur de synchronisation - $e');
     }
   }
 
@@ -406,10 +406,10 @@ class OfflineSyncService extends ChangeNotifier {
         // Retirer de la liste en attente
         _pendingCartUpdates.removeWhere((update) => update['id'] == updateId);
         
-        debugPrint('✅ OfflineSyncService: Mise à jour panier synchronisée - $updateId');
+        eccore.Journal.trace('✅ OfflineSyncService: Mise à jour panier synchronisée - $updateId');
       } catch (e) {
         final updateId = updateData['id'] as String;
-        debugPrint('❌ OfflineSyncService: Erreur sync panier $updateId - $e');
+        eccore.Journal.trace('❌ OfflineSyncService: Erreur sync panier $updateId - $e');
         
         // Incrémenter le nombre de tentatives
         await _incrementSyncAttempts('pending_cart_updates', updateId);
@@ -443,11 +443,11 @@ class OfflineSyncService extends ChangeNotifier {
         
         // Si trop de tentatives, marquer comme erreur permanente
         if (currentAttempts >= 10) {
-          debugPrint('⚠️ OfflineSyncService: Trop de tentatives pour $id, marqué comme erreur');
+          eccore.Journal.trace('⚠️ OfflineSyncService: Trop de tentatives pour $id, marqué comme erreur');
         }
       }
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur incrément tentatives - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur incrément tentatives - $e');
     }
   }
 
@@ -489,7 +489,7 @@ class OfflineSyncService extends ChangeNotifier {
 
       _pendingCartUpdates.add(updateData);
       
-      debugPrint('✅ OfflineSyncService: Mise à jour panier sauvegardée hors ligne - $updateId');
+      eccore.Journal.trace('✅ OfflineSyncService: Mise à jour panier sauvegardée hors ligne - $updateId');
       notifyListeners();
       
       // Essayer de synchroniser immédiatement si en ligne
@@ -497,7 +497,7 @@ class OfflineSyncService extends ChangeNotifier {
         await _syncPendingCartUpdates();
       }
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur sauvegarde panier - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur sauvegarde panier - $e');
       rethrow;
     }
   }
@@ -510,7 +510,7 @@ class OfflineSyncService extends ChangeNotifier {
       
       // Sur web, utiliser seulement le cache en mémoire
       if (!_isDatabaseAvailable) {
-        debugPrint('✅ OfflineSyncService: Menu mis en cache (mémoire uniquement) - ${items.length} items');
+        eccore.Journal.trace('✅ OfflineSyncService: Menu mis en cache (mémoire uniquement) - ${items.length} items');
         return;
       }
       
@@ -538,9 +538,9 @@ class OfflineSyncService extends ChangeNotifier {
       
       await batch.commit(noResult: true);
       
-      debugPrint('✅ OfflineSyncService: Menu mis en cache - ${items.length} items');
+      eccore.Journal.trace('✅ OfflineSyncService: Menu mis en cache - ${items.length} items');
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur cache menu - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur cache menu - $e');
     }
   }
 
@@ -551,7 +551,7 @@ class OfflineSyncService extends ChangeNotifier {
       if (_cachedMenuItems != null && _menuCacheTime != null) {
         final cacheAge = DateTime.now().difference(_menuCacheTime!);
         if (cacheAge < _cacheValidityDuration) {
-          debugPrint('✅ OfflineSyncService: Menu chargé depuis le cache mémoire - ${_cachedMenuItems!.length} items');
+          eccore.Journal.trace('✅ OfflineSyncService: Menu chargé depuis le cache mémoire - ${_cachedMenuItems!.length} items');
           return _cachedMenuItems;
         }
       }
@@ -563,7 +563,7 @@ class OfflineSyncService extends ChangeNotifier {
       if (_cachedMenuItems != null && _menuCacheTime != null) {
         final cacheAge = DateTime.now().difference(_menuCacheTime!);
         if (cacheAge < _cacheValidityDuration) {
-          debugPrint('✅ OfflineSyncService: Menu chargé depuis le cache mémoire');
+          eccore.Journal.trace('✅ OfflineSyncService: Menu chargé depuis le cache mémoire');
           return _cachedMenuItems;
         }
       }
@@ -576,7 +576,7 @@ class OfflineSyncService extends ChangeNotifier {
       );
       
       if (cachedData.isEmpty) {
-        debugPrint('⚠️ OfflineSyncService: Aucun menu en cache valide');
+        eccore.Journal.trace('⚠️ OfflineSyncService: Aucun menu en cache valide');
         return null;
       }
       
@@ -588,10 +588,10 @@ class OfflineSyncService extends ChangeNotifier {
       _cachedMenuItems = items;
       _menuCacheTime = DateTime.now();
       
-      debugPrint('✅ OfflineSyncService: Menu chargé depuis le cache DB - ${items.length} items');
+      eccore.Journal.trace('✅ OfflineSyncService: Menu chargé depuis le cache DB - ${items.length} items');
       return items;
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur chargement cache menu - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur chargement cache menu - $e');
       return null;
     }
   }
@@ -601,7 +601,7 @@ class OfflineSyncService extends ChangeNotifier {
     // Sur web, utiliser seulement le cache en mémoire
     if (!_isDatabaseAvailable) {
       _cachedCategories = categories;
-      debugPrint('✅ OfflineSyncService: Catégories mises en cache (mémoire uniquement) - ${categories.length} catégories');
+      eccore.Journal.trace('✅ OfflineSyncService: Catégories mises en cache (mémoire uniquement) - ${categories.length} catégories');
       return;
     }
 
@@ -609,26 +609,26 @@ class OfflineSyncService extends ChangeNotifier {
       // Filtrer les catégories invalides (avec id, name, displayName ou emoji null/vide)
       final validCategories = categories.where((category) {
         if (category.id.isEmpty) {
-          debugPrint('⚠️ OfflineSyncService: Catégorie ignorée - id vide: ${category.name}');
+          eccore.Journal.trace('⚠️ OfflineSyncService: Catégorie ignorée - id vide: ${category.name}');
           return false;
         }
         if (category.name.isEmpty) {
-          debugPrint('⚠️ OfflineSyncService: Catégorie ignorée - name vide: id=${category.id}');
+          eccore.Journal.trace('⚠️ OfflineSyncService: Catégorie ignorée - name vide: id=${category.id}');
           return false;
         }
         if (category.displayName.isEmpty) {
-          debugPrint('⚠️ OfflineSyncService: Catégorie ignorée - displayName vide: id=${category.id}, name=${category.name}');
+          eccore.Journal.trace('⚠️ OfflineSyncService: Catégorie ignorée - displayName vide: id=${category.id}, name=${category.name}');
           return false;
         }
         if (category.emoji.isEmpty) {
-          debugPrint('⚠️ OfflineSyncService: Catégorie ignorée - emoji vide: id=${category.id}, name=${category.name}');
+          eccore.Journal.trace('⚠️ OfflineSyncService: Catégorie ignorée - emoji vide: id=${category.id}, name=${category.name}');
           return false;
         }
         return true;
       }).toList();
       
       if (validCategories.isEmpty) {
-        debugPrint('⚠️ OfflineSyncService: Aucune catégorie valide à mettre en cache');
+        eccore.Journal.trace('⚠️ OfflineSyncService: Aucune catégorie valide à mettre en cache');
         return;
       }
       
@@ -648,7 +648,7 @@ class OfflineSyncService extends ChangeNotifier {
           
           // Vérifier que toMap() ne retourne pas de valeurs null pour les champs requis
           if (categoryMap['id'] == null || categoryMap['id'].toString().isEmpty) {
-            debugPrint('⚠️ OfflineSyncService: Catégorie ignorée - id null dans toMap(): ${category.name}');
+            eccore.Journal.trace('⚠️ OfflineSyncService: Catégorie ignorée - id null dans toMap(): ${category.name}');
             continue;
           }
           
@@ -663,23 +663,23 @@ class OfflineSyncService extends ChangeNotifier {
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
         } catch (e) {
-          debugPrint('⚠️ OfflineSyncService: Erreur lors de l\'insertion de la catégorie ${category.id}: $e');
+          eccore.Journal.trace('⚠️ OfflineSyncService: Erreur lors de l\'insertion de la catégorie ${category.id}: $e');
           // Continuer avec les autres catégories
         }
       }
       
       await batch.commit(noResult: true);
       
-      debugPrint('✅ OfflineSyncService: Catégories mises en cache - ${validCategories.length}/${categories.length} catégories valides');
+      eccore.Journal.trace('✅ OfflineSyncService: Catégories mises en cache - ${validCategories.length}/${categories.length} catégories valides');
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur cache catégories - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur cache catégories - $e');
       // Log plus de détails pour le débogage
       if (e.toString().contains('null')) {
-        debugPrint('   Détails: Une valeur null a été détectée. Vérifiez les catégories passées.');
-        debugPrint('   Nombre de catégories reçues: ${categories.length}');
+        eccore.Journal.trace('   Détails: Une valeur null a été détectée. Vérifiez les catégories passées.');
+        eccore.Journal.trace('   Nombre de catégories reçues: ${categories.length}');
         for (var i = 0; i < categories.length; i++) {
           final cat = categories[i];
-          debugPrint('   Catégorie $i: id=${cat.id}, name=${cat.name}, displayName=${cat.displayName}, emoji=${cat.emoji}');
+          eccore.Journal.trace('   Catégorie $i: id=${cat.id}, name=${cat.name}, displayName=${cat.displayName}, emoji=${cat.emoji}');
         }
       }
     }
@@ -690,7 +690,7 @@ class OfflineSyncService extends ChangeNotifier {
     // Sur web, retourner le cache en mémoire si disponible
     if (!_isDatabaseAvailable) {
       if (_cachedCategories != null) {
-        debugPrint('✅ OfflineSyncService: Catégories chargées depuis le cache mémoire - ${_cachedCategories!.length} catégories');
+        eccore.Journal.trace('✅ OfflineSyncService: Catégories chargées depuis le cache mémoire - ${_cachedCategories!.length} catégories');
         return _cachedCategories;
       }
       return null;
@@ -710,7 +710,7 @@ class OfflineSyncService extends ChangeNotifier {
       );
       
       if (cachedData.isEmpty) {
-        debugPrint('⚠️ OfflineSyncService: Aucune catégorie en cache valide');
+        eccore.Journal.trace('⚠️ OfflineSyncService: Aucune catégorie en cache valide');
         return null;
       }
       
@@ -721,10 +721,10 @@ class OfflineSyncService extends ChangeNotifier {
       
       _cachedCategories = categories;
       
-      debugPrint('✅ OfflineSyncService: Catégories chargées depuis le cache - ${categories.length} catégories');
+      eccore.Journal.trace('✅ OfflineSyncService: Catégories chargées depuis le cache - ${categories.length} catégories');
       return categories;
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur chargement cache catégories - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur chargement cache catégories - $e');
       return null;
     }
   }
@@ -732,11 +732,11 @@ class OfflineSyncService extends ChangeNotifier {
   /// Force la synchronisation immédiate
   Future<void> forceSync() async {
     if (!_isOnline) {
-      debugPrint('⚠️ OfflineSyncService: Impossible de synchroniser - hors ligne');
+      eccore.Journal.trace('⚠️ OfflineSyncService: Impossible de synchroniser - hors ligne');
       return;
     }
 
-    debugPrint('🔄 OfflineSyncService: Synchronisation forcée...');
+    eccore.Journal.trace('🔄 OfflineSyncService: Synchronisation forcée...');
     await _syncPendingData();
   }
 
@@ -769,10 +769,10 @@ class OfflineSyncService extends ChangeNotifier {
       
       await _prefs?.remove('last_sync_time');
       
-      debugPrint('✅ OfflineSyncService: Cache local vidé');
+      eccore.Journal.trace('✅ OfflineSyncService: Cache local vidé');
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur vidage cache - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur vidage cache - $e');
     }
   }
 
@@ -795,10 +795,10 @@ class OfflineSyncService extends ChangeNotifier {
       
       await _prefs?.remove('last_sync_time');
       
-      debugPrint('✅ OfflineSyncService: Toutes les données supprimées');
+      eccore.Journal.trace('✅ OfflineSyncService: Toutes les données supprimées');
       notifyListeners();
     } catch (e) {
-      debugPrint('❌ OfflineSyncService: Erreur suppression données - $e');
+      eccore.Journal.trace('❌ OfflineSyncService: Erreur suppression données - $e');
     }
   }
 

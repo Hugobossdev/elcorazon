@@ -99,7 +99,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       _addressController.text = address.fullAddress;
       await _calculateDeliveryFeeForAddress(address);
     } catch (e) {
-      debugPrint('Erreur chargement adresse: $e');
+      eccore.Journal.trace('Erreur chargement adresse: $e');
       _addressController.text = '';
     }
   }
@@ -144,7 +144,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       // commande non atteint, article devenu indisponible. Aucun montant de
       // secours n'est fabriqué : le bouton de commande reste inactif tant
       // qu'aucun devis n'est arrivé.
-      debugPrint('Devis de commande indisponible : $e');
+      eccore.Journal.trace('Devis de commande indisponible : $e');
       if (mounted) {
         setState(() {
           _deliveryBreakdown = null;
@@ -744,7 +744,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             : null,
       );
 
-      if (finalOrderId.isNotEmpty && mounted) {
+      // `context.mounted` et non `mounted` : le contexte utilisé ici est celui
+      // que la méthode reçoit en paramètre, pas celui de l'état.
+      if (finalOrderId.isNotEmpty && context.mounted) {
         cartService.clear();
         // Le paiement se règle par webhook signé, jamais par le retour de
         // cet écran (`apps/payments/services.py`) — la commande existe déjà

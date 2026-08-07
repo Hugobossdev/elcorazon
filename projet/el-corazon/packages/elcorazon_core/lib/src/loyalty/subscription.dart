@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Plan tarifé du catalogue — miroir de `SubscriptionPlanSerializer`.
 ///

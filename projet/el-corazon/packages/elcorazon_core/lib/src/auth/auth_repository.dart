@@ -1,6 +1,6 @@
-import '../models/user.dart';
-import '../network/api_client.dart';
-import 'token_storage.dart';
+import 'package:elcorazon_core/src/models/user.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/auth/token_storage.dart';
 
 /// Accès à `/api/v1/auth/*` — un seul endroit qui connaît la forme exacte du
 /// contrat (`backend/apps/accounts/urls.py`, `views.py`, `serializers.py`).

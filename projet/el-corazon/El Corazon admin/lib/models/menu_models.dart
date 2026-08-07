@@ -18,16 +18,13 @@ class MenuItem {
     required this.id,
     required this.categoryId,
     required this.name,
-    this.description,
-    required this.basePrice,
+    required this.basePrice, required this.createdAt, required this.updatedAt, this.description,
     this.imageUrl,
     this.isPopular = false,
     this.isVegetarian = false,
     this.isVegan = false,
     this.isAvailable = true,
     this.sortOrder = 0,
-    required this.createdAt,
-    required this.updatedAt,
     this.optionGroups = const [],
   });
 
@@ -106,7 +103,9 @@ class MenuItem {
           : DateTime.now(),
       optionGroups: map['option_groups'] != null
           ? List<MenuOptionGroup>.from(
-              map['option_groups']?.map((x) => MenuOptionGroup.fromMap(x)),
+              (map['option_groups'] as List<dynamic>).map(
+                (x) => MenuOptionGroup.fromMap(x as Map<String, dynamic>),
+              ),
             )
           : [],
     );
@@ -185,7 +184,9 @@ class MenuOptionGroup {
       sortOrder: map['sort_order'] ?? 0,
       options: map['options'] != null
           ? List<MenuOption>.from(
-              map['options']?.map((x) => MenuOption.fromMap(x)),
+              (map['options'] as List<dynamic>).map(
+                (x) => MenuOption.fromMap(x as Map<String, dynamic>),
+              ),
             )
           : [],
     );

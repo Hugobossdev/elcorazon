@@ -13,13 +13,10 @@ class Category {
   Category({
     required this.id,
     required this.name,
-    this.description,
+    required this.displayOrder, required this.createdAt, required this.updatedAt, this.description,
     this.imageUrl,
     this.emoji,
-    required this.displayOrder,
     this.isActive = true,
-    required this.createdAt,
-    required this.updatedAt,
   });
 
   Category copyWith({

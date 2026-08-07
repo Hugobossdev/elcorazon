@@ -1,13 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/client_management_service.dart';
-import '../../services/app_service.dart';
-import '../../models/user.dart';
-import '../../models/order.dart';
-import '../../widgets/custom_text_field.dart';
-import '../../utils/dialog_helper.dart';
-import '../../utils/price_formatter.dart';
-import '../../ui/ui.dart';
+import 'package:admin/services/client_management_service.dart';
+import 'package:admin/services/app_service.dart';
+import 'package:admin/models/user.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/widgets/custom_text_field.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/utils/price_formatter.dart';
+import 'package:admin/ui/ui.dart';
 
 class ClientManagementScreen extends StatefulWidget {
   const ClientManagementScreen({super.key});
@@ -199,7 +200,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                   .toList();
                               final totalSpent = orders
                                   .where(
-                                      (o) => o.status == OrderStatus.delivered)
+                                      (o) => o.status == OrderStatus.delivered,)
                                   .fold(0.0, (sum, o) => sum + o.total);
 
                               return Card(
@@ -366,7 +367,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
       return;
     }
 
-    DialogHelper.showSafeDialog(
+    unawaited(DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Détails du client: ${client.name}'),
@@ -417,7 +418,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
           ),
         ],
       ),
-    );
+    ),);
   }
 
   Widget _buildDetailRow(String label, String value) {
@@ -445,7 +446,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
 
     if (!mounted) return;
 
-    DialogHelper.showSafeDialog(
+    unawaited(DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Historique des commandes: ${client.name}'),
@@ -498,7 +499,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
           ),
         ],
       ),
-    );
+    ),);
   }
 
   IconData _getOrderStatusIcon(OrderStatus status) {
@@ -611,7 +612,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
 
     if (!mounted) return;
 
-    DialogHelper.showSafeDialog(
+    unawaited(DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
         // Note: on récupère les tokens ici car on est dans le builder du dialog
@@ -643,7 +644,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
           ),
         ],
       ),
-    );
+    ),);
   }
 
   Future<void> _exportClients() async {
@@ -656,12 +657,12 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
 
     for (final client in clients) {
       csvBuffer.writeln(
-          '${client.id},"${client.name}","${client.email}","${client.phone}",${client.isActive},${client.createdAt.toIso8601String()}');
+          '${client.id},"${client.name}","${client.email}","${client.phone}",${client.isActive},${client.createdAt.toIso8601String()}',);
     }
 
     final csvContent = csvBuffer.toString();
 
-    DialogHelper.showSafeDialog(
+    unawaited(DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Export CSV'),
@@ -697,6 +698,6 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
           ),
         ],
       ),
-    );
+    ),);
   }
 }

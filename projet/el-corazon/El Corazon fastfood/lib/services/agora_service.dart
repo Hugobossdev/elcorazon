@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:elcora_fast/config/api_config.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class AgoraService extends ChangeNotifier {
   static final AgoraService _instance = AgoraService._internal();
@@ -37,7 +38,7 @@ class AgoraService extends ChangeNotifier {
   /// Initialize Agora RTC Engine
   Future<bool> initialize() async {
     if (_isInitialized) {
-      debugPrint('AgoraService: Already initialized');
+      Journal.trace('AgoraService: Already initialized');
       return true;
     }
 
@@ -55,34 +56,34 @@ class AgoraService extends ChangeNotifier {
       _engine!.registerEventHandler(
         RtcEngineEventHandler(
           onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
-            debugPrint('AgoraService: Joined channel successfully');
+            Journal.trace('AgoraService: Joined channel successfully');
             _isInCall = true;
             _localUid = connection.localUid;
             _callStateController.add(true);
             notifyListeners();
           },
           onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
-            debugPrint('AgoraService: Remote user joined: $remoteUid');
+            Journal.trace('AgoraService: Remote user joined: $remoteUid');
             _remoteUid = remoteUid;
             _remoteUidController.add(remoteUid);
             notifyListeners();
           },
           onUserOffline: (RtcConnection connection, int remoteUid,
               UserOfflineReasonType reason,) {
-            debugPrint('AgoraService: Remote user offline: $remoteUid');
+            Journal.trace('AgoraService: Remote user offline: $remoteUid');
             _remoteUid = null;
             _remoteUidController.add(null);
             notifyListeners();
           },
           onLeaveChannel: (RtcConnection connection, RtcStats stats) {
-            debugPrint('AgoraService: Left channel');
+            Journal.trace('AgoraService: Left channel');
             _isInCall = false;
             _remoteUid = null;
             _callStateController.add(false);
             notifyListeners();
           },
           onError: (ErrorCodeType err, String msg) {
-            debugPrint('AgoraService: Error: $err - $msg');
+            Journal.trace('AgoraService: Error: $err - $msg');
           },
         ),
       );
@@ -92,11 +93,11 @@ class AgoraService extends ChangeNotifier {
       await _engine!.setDefaultAudioRouteToSpeakerphone(true);
 
       _isInitialized = true;
-      debugPrint('AgoraService: Initialized successfully');
+      Journal.trace('AgoraService: Initialized successfully');
       notifyListeners();
       return true;
     } catch (e) {
-      debugPrint('AgoraService: Error initializing: $e');
+      Journal.trace('AgoraService: Error initializing: $e');
       return false;
     }
   }
@@ -110,7 +111,7 @@ class AgoraService extends ChangeNotifier {
   /// d'UUID, qui peut entrer en collision et expulser un participant du canal.
   Future<bool> joinChannel(String channelId, {required String token, required int uid}) async {
     if (!_isInitialized || _engine == null) {
-      debugPrint('AgoraService: Not initialized');
+      Journal.trace('AgoraService: Not initialized');
       return false;
     }
 
@@ -130,10 +131,10 @@ class AgoraService extends ChangeNotifier {
         options: channelMediaOptions,
       );
 
-      debugPrint('AgoraService: Joining channel $channelId');
+      Journal.trace('AgoraService: Joining channel $channelId');
       return true;
     } catch (e) {
-      debugPrint('AgoraService: Error joining channel: $e');
+      Journal.trace('AgoraService: Error joining channel: $e');
       return false;
     }
   }
@@ -149,9 +150,9 @@ class AgoraService extends ChangeNotifier {
       _remoteUid = null;
       _isInCall = false;
       notifyListeners();
-      debugPrint('AgoraService: Left channel');
+      Journal.trace('AgoraService: Left channel');
     } catch (e) {
-      debugPrint('AgoraService: Error leaving channel: $e');
+      Journal.trace('AgoraService: Error leaving channel: $e');
     }
   }
 
@@ -163,9 +164,9 @@ class AgoraService extends ChangeNotifier {
       _isMuted = !_isMuted;
       await _engine!.muteLocalAudioStream(_isMuted);
       notifyListeners();
-      debugPrint('AgoraService: ${_isMuted ? "Muted" : "Unmuted"}');
+      Journal.trace('AgoraService: ${_isMuted ? "Muted" : "Unmuted"}');
     } catch (e) {
-      debugPrint('AgoraService: Error toggling mute: $e');
+      Journal.trace('AgoraService: Error toggling mute: $e');
     }
   }
 
@@ -177,9 +178,9 @@ class AgoraService extends ChangeNotifier {
       _isSpeakerOn = !_isSpeakerOn;
       await _engine!.setEnableSpeakerphone(_isSpeakerOn);
       notifyListeners();
-      debugPrint('AgoraService: Speaker ${_isSpeakerOn ? "ON" : "OFF"}');
+      Journal.trace('AgoraService: Speaker ${_isSpeakerOn ? "ON" : "OFF"}');
     } catch (e) {
-      debugPrint('AgoraService: Error toggling speaker: $e');
+      Journal.trace('AgoraService: Error toggling speaker: $e');
     }
   }
 

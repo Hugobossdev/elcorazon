@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Types de validation
 enum ValidationType {
@@ -102,9 +103,9 @@ class FormValidationService extends ChangeNotifier {
   Future<void> initialize() async {
     try {
       await _loadValidationConfigs();
-      debugPrint('FormValidationService initialized successfully');
+      Journal.trace('FormValidationService initialized successfully');
     } catch (e) {
-      debugPrint('Error initializing FormValidationService: $e');
+      Journal.trace('Error initializing FormValidationService: $e');
     }
   }
 
@@ -310,9 +311,9 @@ class FormValidationService extends ChangeNotifier {
         ],
       );
 
-      debugPrint('Validation configurations loaded successfully');
+      Journal.trace('Validation configurations loaded successfully');
     } catch (e) {
-      debugPrint('Error loading validation configurations: $e');
+      Journal.trace('Error loading validation configurations: $e');
     }
   }
 
@@ -393,7 +394,7 @@ class FormValidationService extends ChangeNotifier {
       notifyListeners();
       return result;
     } catch (e) {
-      debugPrint('Error validating form $formName: $e');
+      Journal.trace('Error validating form $formName: $e');
       return ValidationResult(
         isValid: false,
         errorMessage: 'Erreur lors de la validation: $e',

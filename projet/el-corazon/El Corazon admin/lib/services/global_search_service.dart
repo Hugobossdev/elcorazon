@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Un résultat de recherche, tel que l'affiche l'écran.
 ///
@@ -93,7 +93,7 @@ class GlobalSearchService extends ChangeNotifier {
       );
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Recherche : indisponible — ${e.code}');
+      eccore.Journal.trace('Recherche : indisponible — ${e.code}');
       return const GlobalSearchResults();
     } finally {
       _isSearching = false;

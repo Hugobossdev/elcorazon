@@ -1,15 +1,16 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
-import '../../utils/dialog_helper.dart';
-import '../../services/order_management_service.dart';
-import '../../services/driver_management_service.dart';
-import '../../models/order.dart';
-import '../../models/driver.dart';
-import '../../widgets/custom_button.dart';
-import '../../widgets/loading_widget.dart';
-import '../../utils/price_formatter.dart';
-import '../../ui/ui.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/widgets/loading_widget.dart';
+import 'package:admin/utils/price_formatter.dart';
+import 'package:admin/ui/ui.dart';
 
 enum OrderSortOption {
   dateAsc,
@@ -238,7 +239,7 @@ class _AdvancedOrderManagementScreenState
                 // Afficher un indicateur de chargement si en cours et liste vide
                 if (orderService.isLoading && orderService.allOrders.isEmpty) {
                   return const LoadingWidget(
-                      message: 'Chargement des commandes...');
+                      message: 'Chargement des commandes...',);
                 }
 
                 // Afficher un message si aucune commande et pas de chargement
@@ -285,28 +286,28 @@ class _AdvancedOrderManagementScreenState
                 switch (_tabController.index) {
                   case 0:
                     return SizedBox.expand(
-                        child: _buildOverviewTab(context, orderService));
+                        child: _buildOverviewTab(context, orderService),);
                   case 1:
                     return SizedBox.expand(
-                        child: _buildPendingOrdersTab(context, orderService));
+                        child: _buildPendingOrdersTab(context, orderService),);
                   case 2:
                     return SizedBox.expand(
-                        child: _buildConfirmedOrdersTab(context, orderService));
+                        child: _buildConfirmedOrdersTab(context, orderService),);
                   case 3:
                     return SizedBox.expand(
-                        child: _buildPreparingOrdersTab(context, orderService));
+                        child: _buildPreparingOrdersTab(context, orderService),);
                   case 4:
                     return SizedBox.expand(
-                        child: _buildReadyOrdersTab(context, orderService));
+                        child: _buildReadyOrdersTab(context, orderService),);
                   case 5:
                     return SizedBox.expand(
-                        child: _buildDeliveryOrdersTab(context, orderService));
+                        child: _buildDeliveryOrdersTab(context, orderService),);
                   case 6:
                     return SizedBox.expand(
-                        child: _buildStatisticsTab(context, orderService));
+                        child: _buildStatisticsTab(context, orderService),);
                   default:
                     return SizedBox.expand(
-                        child: _buildOverviewTab(context, orderService));
+                        child: _buildOverviewTab(context, orderService),);
                 }
               },
             ),
@@ -317,7 +318,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildOverviewTab(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     final stats = orderService.getOrderStats();
     final urgentOrders = orderService.urgentOrders;
     final overdueOrders = orderService.overdueOrders;
@@ -349,7 +350,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildPendingOrdersTab(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     // Charger directement depuis la base de données pour utiliser les valeurs dbValue
     return Consumer<OrderManagementService>(
       builder: (context, service, child) {
@@ -368,7 +369,7 @@ class _AdvancedOrderManagementScreenState
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red),
+                        size: 48, color: Colors.red,),
                     const SizedBox(height: 16),
                     Text('Erreur: ${snapshot.error}'),
                     const SizedBox(height: 16),
@@ -396,7 +397,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildConfirmedOrdersTab(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     // Charger directement depuis la base de données pour utiliser les valeurs dbValue
     return Consumer<OrderManagementService>(
       builder: (context, service, child) {
@@ -415,7 +416,7 @@ class _AdvancedOrderManagementScreenState
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red),
+                        size: 48, color: Colors.red,),
                     const SizedBox(height: 16),
                     Text('Erreur: ${snapshot.error}'),
                     const SizedBox(height: 16),
@@ -443,7 +444,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildPreparingOrdersTab(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     // Charger directement depuis la base de données pour utiliser les valeurs dbValue
     return Consumer<OrderManagementService>(
       builder: (context, service, child) {
@@ -462,7 +463,7 @@ class _AdvancedOrderManagementScreenState
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red),
+                        size: 48, color: Colors.red,),
                     const SizedBox(height: 16),
                     Text('Erreur: ${snapshot.error}'),
                     const SizedBox(height: 16),
@@ -490,7 +491,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildReadyOrdersTab(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     // Charger directement depuis la base de données pour utiliser les valeurs dbValue
     return Consumer<OrderManagementService>(
       builder: (context, service, child) {
@@ -509,7 +510,7 @@ class _AdvancedOrderManagementScreenState
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red),
+                        size: 48, color: Colors.red,),
                     const SizedBox(height: 16),
                     Text('Erreur: ${snapshot.error}'),
                     const SizedBox(height: 16),
@@ -537,7 +538,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildDeliveryOrdersTab(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     // Utiliser Consumer pour écouter les changements du service
     // Charger directement depuis la base de données pour utiliser les valeurs dbValue (snake_case)
     return Consumer<OrderManagementService>(
@@ -558,7 +559,7 @@ class _AdvancedOrderManagementScreenState
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red),
+                        size: 48, color: Colors.red,),
                     const SizedBox(height: 16),
                     Text('Erreur: ${snapshot.error}'),
                     const SizedBox(height: 16),
@@ -587,7 +588,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildStatisticsTab(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     final stats = orderService.getOrderStats();
     final performanceStats = orderService.getPerformanceStats();
 
@@ -656,7 +657,7 @@ class _AdvancedOrderManagementScreenState
           context,
           'Revenus totaux',
           PriceFormatter.format(
-              (stats['total_revenue'] as num?)?.toDouble() ?? 0.0),
+              (stats['total_revenue'] as num?)?.toDouble() ?? 0.0,),
           Icons.monetization_on,
           Theme.of(context).colorScheme.secondary,
         ),
@@ -664,7 +665,7 @@ class _AdvancedOrderManagementScreenState
           context,
           'Panier moyen',
           PriceFormatter.format(
-              (stats['average_order_value'] as num?)?.toDouble() ?? 0.0),
+              (stats['average_order_value'] as num?)?.toDouble() ?? 0.0,),
           Icons.shopping_cart,
           Theme.of(context).colorScheme.primary,
         ),
@@ -673,7 +674,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildStatCard(BuildContext context, String title, String value,
-      IconData icon, Color color) {
+      IconData icon, Color color,) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
       elevation: 4,
@@ -715,7 +716,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildAlertsSection(BuildContext context, List<Order> urgentOrders,
-      List<Order> overdueOrders) {
+      List<Order> overdueOrders,) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     return Card(
@@ -759,11 +760,11 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildRecentOrdersSection(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     // Charger directement depuis la base de données
     return Consumer<OrderManagementService>(
       builder: (context, service, child) {
-        final future = service.loadRecentOrdersFromDB(limit: 5);
+        final future = service.loadRecentOrdersFromDB();
 
         return FutureBuilder<List<Order>>(
           future: future,
@@ -821,7 +822,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildPerformanceSection(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     final performanceStats = orderService.getPerformanceStats();
 
     return Card(
@@ -877,7 +878,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildPerformanceItem(BuildContext context, String title, String value,
-      IconData icon, Color color) {
+      IconData icon, Color color,) {
     final scheme = Theme.of(context).colorScheme;
     return Column(
       children: [
@@ -916,29 +917,29 @@ class _AdvancedOrderManagementScreenState
             ),
             const SizedBox(height: 16),
             _buildStatRow(
-                context, 'Commandes totales', '${stats['total_orders'] ?? 0}'),
+                context, 'Commandes totales', '${stats['total_orders'] ?? 0}',),
             _buildStatRow(
-                context, 'En attente', '${stats['pending_orders'] ?? 0}'),
+                context, 'En attente', '${stats['pending_orders'] ?? 0}',),
             _buildStatRow(
-                context, 'Confirmées', '${stats['confirmed_orders'] ?? 0}'),
+                context, 'Confirmées', '${stats['confirmed_orders'] ?? 0}',),
             _buildStatRow(
-                context, 'En préparation', '${stats['preparing_orders'] ?? 0}'),
+                context, 'En préparation', '${stats['preparing_orders'] ?? 0}',),
             _buildStatRow(context, 'Prêtes', '${stats['ready_orders'] ?? 0}'),
             _buildStatRow(
-                context, 'Livrées', '${stats['delivered_orders'] ?? 0}'),
+                context, 'Livrées', '${stats['delivered_orders'] ?? 0}',),
             _buildStatRow(
-                context, 'Annulées', '${stats['cancelled_orders'] ?? 0}'),
+                context, 'Annulées', '${stats['cancelled_orders'] ?? 0}',),
             const Divider(),
             _buildStatRow(
                 context,
                 'Revenus totaux',
                 PriceFormatter.format(
-                    (stats['total_revenue'] as num?)?.toDouble() ?? 0.0)),
+                    (stats['total_revenue'] as num?)?.toDouble() ?? 0.0,),),
             _buildStatRow(
                 context,
                 'Panier moyen',
                 PriceFormatter.format(
-                    (stats['average_order_value'] as num?)?.toDouble() ?? 0.0)),
+                    (stats['average_order_value'] as num?)?.toDouble() ?? 0.0,),),
           ],
         ),
       ),
@@ -962,7 +963,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildPerformanceCards(
-      BuildContext context, Map<String, dynamic> performanceStats) {
+      BuildContext context, Map<String, dynamic> performanceStats,) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     return GridView.count(
@@ -999,7 +1000,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildPerformanceCard(BuildContext context, String title, String value,
-      IconData icon, Color color) {
+      IconData icon, Color color,) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
       elevation: 4,
@@ -1041,7 +1042,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildStatusDistribution(
-      BuildContext context, Map<String, dynamic> stats) {
+      BuildContext context, Map<String, dynamic> stats,) {
     final total = stats['total_orders'] as int? ?? 0;
     if (total == 0) return const SizedBox.shrink();
 
@@ -1107,7 +1108,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildStatusBar(
-      BuildContext context, String label, int count, int total, Color color) {
+      BuildContext context, String label, int count, int total, Color color,) {
     final percentage = total > 0 ? count / total : 0.0;
     final scheme = Theme.of(context).colorScheme;
 
@@ -1135,7 +1136,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildOrderEvolution(
-      BuildContext context, OrderManagementService orderService) {
+      BuildContext context, OrderManagementService orderService,) {
     final orders = orderService.allOrders;
 
     // Calculer les commandes par jour (7 derniers jours)
@@ -1210,7 +1211,6 @@ class _AdvancedOrderManagementScreenState
                           ),
                         ),
                         titlesData: FlTitlesData(
-                          show: true,
                           bottomTitles: AxisTitles(
                             sideTitles: SideTitles(
                               showTitles: true,
@@ -1258,14 +1258,13 @@ class _AdvancedOrderManagementScreenState
                             ),
                           ),
                           topTitles: const AxisTitles(
-                            sideTitles: SideTitles(showTitles: false),
+                            
                           ),
                           rightTitles: const AxisTitles(
-                            sideTitles: SideTitles(showTitles: false),
+                            
                           ),
                         ),
                         gridData: FlGridData(
-                          show: true,
                           drawVerticalLine: false,
                           horizontalInterval: maxValue > 0 ? (maxValue / 5) : 1,
                           getDrawingHorizontalLine: (value) {
@@ -1381,7 +1380,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildOrdersList(BuildContext context, List<Order> orders,
-      OrderManagementService orderService) {
+      OrderManagementService orderService,) {
     final affichees = _appliquerRechercheEtTri(orders);
 
     if (affichees.isEmpty) {
@@ -1402,7 +1401,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildOrderCard(
-      BuildContext context, Order order, OrderManagementService orderService) {
+      BuildContext context, Order order, OrderManagementService orderService,) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 4,
@@ -1548,7 +1547,7 @@ class _AdvancedOrderManagementScreenState
                               ),
                             ],
                           ),
-                        )),
+                        ),),
                     if (order.items.length > 3)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
@@ -1675,7 +1674,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildOrderListItem(
-      BuildContext context, Order order, OrderManagementService orderService) {
+      BuildContext context, Order order, OrderManagementService orderService,) {
     return ListTile(
       leading: CircleAvatar(
         backgroundColor:
@@ -1687,7 +1686,7 @@ class _AdvancedOrderManagementScreenState
       ),
       title: Text('Commande #${order.id.substring(0, 8).toUpperCase()}'),
       subtitle: Text(
-          '${order.status.displayName} • ${PriceFormatter.format(order.total)}'),
+          '${order.status.displayName} • ${PriceFormatter.format(order.total)}',),
       trailing: Text(_formatTime(order.orderTime)),
       onTap: () => _showOrderDetails(order),
     );
@@ -1761,7 +1760,7 @@ class _AdvancedOrderManagementScreenState
   void _showFilterDialog() {
     final screenSize = MediaQuery.of(context).size;
     final dialogWidth = (screenSize.width * 0.9).clamp(400.0, 500.0);
-    final dialogHeight = 300.0;
+    const dialogHeight = 300.0;
 
     DialogHelper.showSafeDialog(
       context: context,
@@ -1976,7 +1975,7 @@ class _AdvancedOrderManagementScreenState
                                     size: 16,
                                     color: Theme.of(context)
                                         .colorScheme
-                                        .onSurfaceVariant),
+                                        .onSurfaceVariant,),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Informations',
@@ -1992,13 +1991,13 @@ class _AdvancedOrderManagementScreenState
                             _buildDetailRow('Statut', order.status.displayName),
                             const SizedBox(height: 4),
                             _buildDetailRow(
-                                'Total', PriceFormatter.format(order.total)),
+                                'Total', PriceFormatter.format(order.total),),
                             const SizedBox(height: 4),
                             _buildDetailRow('Articles',
-                                '${order.items.length} article${order.items.length > 1 ? 's' : ''}'),
+                                '${order.items.length} article${order.items.length > 1 ? 's' : ''}',),
                             const SizedBox(height: 4),
                             _buildDetailRow('Méthode de paiement',
-                                order.paymentMethod.toString().split('.').last),
+                                order.paymentMethod.toString().split('.').last,),
                           ],
                         ),
                       ),
@@ -2049,7 +2048,7 @@ class _AdvancedOrderManagementScreenState
                                                 item.menuItemImage,
                                                 fit: BoxFit.cover,
                                                 errorBuilder: (context, error,
-                                                        stackTrace) =>
+                                                        stackTrace,) =>
                                                     Icon(
                                                   Icons.fastfood,
                                                   size: 20,
@@ -2118,7 +2117,7 @@ class _AdvancedOrderManagementScreenState
                                                 .map((customization) => Padding(
                                                       padding:
                                                           const EdgeInsets.only(
-                                                              bottom: 2),
+                                                              bottom: 2,),
                                                       child: Text(
                                                         '• $customization',
                                                         style: TextStyle(
@@ -2131,7 +2130,7 @@ class _AdvancedOrderManagementScreenState
                                                               FontStyle.italic,
                                                         ),
                                                       ),
-                                                    )),
+                                                    ),),
                                           ],
                                           if (item.notes != null &&
                                               item.notes!.isNotEmpty) ...[
@@ -2181,7 +2180,7 @@ class _AdvancedOrderManagementScreenState
                                   size: 16,
                                   color: Theme.of(context)
                                       .colorScheme
-                                      .onTertiaryContainer),
+                                      .onTertiaryContainer,),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
@@ -2217,7 +2216,7 @@ class _AdvancedOrderManagementScreenState
                                     size: 16,
                                     color: Theme.of(context)
                                         .colorScheme
-                                        .onPrimaryContainer),
+                                        .onPrimaryContainer,),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Adresse de livraison',
@@ -2290,9 +2289,9 @@ class _AdvancedOrderManagementScreenState
     if (availableDrivers.isEmpty) {
       final screenSize = MediaQuery.of(context).size;
       final dialogWidth = (screenSize.width * 0.9).clamp(400.0, 500.0);
-      final dialogHeight = 250.0;
+      const dialogHeight = 250.0;
 
-      DialogHelper.showSafeDialog(
+      unawaited(DialogHelper.showSafeDialog(
         context: context,
         builder: (context) => Dialog(
           child: SizedBox(
@@ -2362,7 +2361,7 @@ class _AdvancedOrderManagementScreenState
             ),
           ),
         ),
-      );
+      ),);
       return;
     }
 
@@ -2509,7 +2508,6 @@ class _AdvancedOrderManagementScreenState
                                         minHeight: 60,
                                       ),
                                       child: Row(
-                                        mainAxisSize: MainAxisSize.max,
                                         children: [
                                           // Statut du livreur
                                           Container(
@@ -2538,7 +2536,7 @@ class _AdvancedOrderManagementScreenState
                                                           fontSize: 14,
                                                           color: isSelected
                                                               ? Theme.of(
-                                                                      context)
+                                                                      context,)
                                                                   .colorScheme
                                                                   .onPrimaryContainer
                                                               : null,
@@ -2607,7 +2605,7 @@ class _AdvancedOrderManagementScreenState
                                                           .colorScheme
                                                           .onSurfaceVariant
                                                           .withValues(
-                                                              alpha: 0.85),
+                                                              alpha: 0.85,),
                                                       fontStyle:
                                                           FontStyle.italic,
                                                     ),
@@ -2815,7 +2813,7 @@ class _AdvancedOrderManagementScreenState
   }) async {
     final screenSize = MediaQuery.of(context).size;
     final dialogWidth = (screenSize.width * 0.9).clamp(400.0, 600.0);
-    final dialogHeight = 400.0;
+    const dialogHeight = 400.0;
     // Capturer les valeurs nécessaires avant le gap async
     final inverseSurfaceColor = Theme.of(context).colorScheme.inverseSurface;
 
@@ -2899,7 +2897,7 @@ class _AdvancedOrderManagementScreenState
                                     size: 16,
                                     color: Theme.of(context)
                                         .colorScheme
-                                        .onSurfaceVariant),
+                                        .onSurfaceVariant,),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(

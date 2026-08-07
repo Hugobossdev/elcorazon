@@ -1,0 +1,9 @@
+# Règles d'analyse du socle partagé.
+#
+# Le même jeu que les trois applications (`../../analysis_options.yaml`), et
+# c'est un rattrapage : ce paquet déclarait `flutter_lints` en dépendance de
+# développement sans jamais l'inclure, faute d'`analysis_options.yaml`. Son
+# « zéro diagnostic » mesurait donc surtout ce qu'on ne lui demandait pas —
+# alors que la CI l'analyse, elle, **sans** `--no-fatal-infos`, et que c'est le
+# code sur lequel les trois applications reposent.
+include: ../../analysis_options.yaml

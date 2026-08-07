@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class Order {
   final String id;
@@ -167,7 +167,7 @@ class Order {
                   notes: item['notes']?.toString(),
                 );
               } catch (e) {
-                debugPrint('⚠️ Erreur parsing order item: $e');
+                Journal.trace('⚠️ Erreur parsing order item: $e');
                 return null;
               }
             })

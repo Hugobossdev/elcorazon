@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/app_service.dart';
-import '../../services/promo_code_service.dart';
-import '../../services/error_handler_service.dart';
-import '../../services/performance_service.dart';
-import '../../models/promo_code.dart';
-import 'driver_profile_screen.dart';
-import 'settings_screen.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/promo_code_service.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/services/performance_service.dart';
+import 'package:elcora_dely/models/promo_code.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 
 class PromoCodesScreen extends StatefulWidget {
   const PromoCodesScreen({super.key});
@@ -29,6 +29,7 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
     try {
       await Provider.of<PromoCodeService>(context, listen: false).initialize();
     } catch (e) {
+      if (!mounted) return;
       Provider.of<ErrorHandlerService>(context, listen: false)
           .logError('Erreur initialisation codes promo', details: e);
     }
@@ -402,6 +403,8 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
         userId: userId,
       );
 
+      if (!mounted) return;
+
       Provider.of<PerformanceService>(context, listen: false)
           .stopTimer('apply_promo_code');
 
@@ -428,6 +431,7 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
         }
       }
     } catch (e) {
+      if (!mounted) return;
       Provider.of<ErrorHandlerService>(context, listen: false)
           .logError('Erreur application code promo', details: e);
       Provider.of<ErrorHandlerService>(context, listen: false)

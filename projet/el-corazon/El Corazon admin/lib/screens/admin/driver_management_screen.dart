@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/driver_management_service.dart';
-import '../../models/driver.dart';
-import '../../widgets/loading_widget.dart';
-import '../../utils/dialog_helper.dart';
-import 'driver_form_dialog.dart';
-import 'driver_history_screen.dart';
-import 'driver_schedule_screen.dart';
-import 'driver_detailed_stats_screen.dart';
-import 'driver_map_screen.dart';
-import '../../ui/ui.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/widgets/loading_widget.dart';
+import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/screens/admin/driver_form_dialog.dart';
+import 'package:admin/screens/admin/driver_history_screen.dart';
+import 'package:admin/screens/admin/driver_schedule_screen.dart';
+import 'package:admin/screens/admin/driver_detailed_stats_screen.dart';
+import 'package:admin/screens/admin/driver_map_screen.dart';
+import 'package:admin/ui/ui.dart';
 
 enum DriverSortOption { nameAsc, nameDesc, status, rating, deliveries }
 
@@ -88,11 +88,11 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                 Tab(icon: Icon(Icons.dashboard_outlined), text: 'Aperçu'),
                 Tab(
                     icon: Icon(Icons.check_circle_outline),
-                    text: 'Disponibles'),
+                    text: 'Disponibles',),
                 Tab(icon: Icon(Icons.delivery_dining), text: 'En course'),
                 Tab(
                     icon: Icon(Icons.offline_bolt_outlined),
-                    text: 'Hors ligne'),
+                    text: 'Hors ligne',),
                 Tab(icon: Icon(Icons.analytics_outlined), text: 'Stats'),
               ],
             ),
@@ -102,7 +102,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
               builder: (context, driverService, child) {
                 if (driverService.isLoading) {
                   return const LoadingWidget(
-                      message: 'Chargement des livreurs...');
+                      message: 'Chargement des livreurs...',);
                 }
 
                 return TabBarView(
@@ -110,13 +110,13 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                   children: [
                     _buildOverviewTab(context, driverService),
                     _buildDriverListTab(
-                        context, driverService, DriverStatus.available),
+                        context, driverService, DriverStatus.available,),
                     _buildDriverListTab(
-                        context, driverService, DriverStatus.onDelivery),
+                        context, driverService, DriverStatus.onDelivery,),
                     _buildDriverListTab(
-                        context, driverService, DriverStatus.offline),
+                        context, driverService, DriverStatus.offline,),
                     const DriverDetailedStatsScreen(
-                        driver: null), // Placeholder for global stats tab
+                        driver: null,), // Placeholder for global stats tab
                   ],
                 );
               },
@@ -180,7 +180,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   }
 
   Widget _buildOverviewTab(
-      BuildContext context, DriverManagementService driverService) {
+      BuildContext context, DriverManagementService driverService,) {
     final stats = driverService.getDriverStats();
 
     return ListView(
@@ -216,13 +216,13 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
         ),
         const SizedBox(height: 12),
         ...driverService.getTopRatedDrivers(limit: 3).map(
-            (driver) => _buildDriverListItem(context, driver, driverService)),
+            (driver) => _buildDriverListItem(context, driver, driverService),),
       ],
     );
   }
 
   Widget _buildDriverListTab(BuildContext context,
-      DriverManagementService service, DriverStatus status) {
+      DriverManagementService service, DriverStatus status,) {
     final drivers = service.getDriversByStatus(status);
 
     if (drivers.isEmpty) {
@@ -272,7 +272,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
           border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
           image: const DecorationImage(
             image: NetworkImage(
-                'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/World_map_blank_without_borders.svg/2000px-World_map_blank_without_borders.svg.png'),
+                'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/World_map_blank_without_borders.svg/2000px-World_map_blank_without_borders.svg.png',),
             fit: BoxFit.cover,
             opacity: 0.1,
           ),
@@ -318,7 +318,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                       BoxShadow(
                         blurRadius: 4,
                         color: sem.shadow.withValues(alpha: 0.35),
-                      )
+                      ),
                     ],
                   ),
                   child: CircleAvatar(
@@ -330,7 +330,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                       style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: _getStatusColor(driver.status)),
+                          color: _getStatusColor(driver.status),),
                     ),
                   ),
                 ),
@@ -382,7 +382,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   }
 
   Widget _buildStatCard(
-      String title, String value, IconData icon, Color color) {
+      String title, String value, IconData icon, Color color,) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     return Container(
@@ -424,7 +424,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   }
 
   Widget _buildDriverCard(
-      BuildContext context, Driver driver, DriverManagementService service) {
+      BuildContext context, Driver driver, DriverManagementService service,) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -495,7 +495,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                       context,
                       MaterialPageRoute(
                           builder: (_) =>
-                              DriverScheduleScreen(driver: driver))),
+                              DriverScheduleScreen(driver: driver),),),
                 ),
                 _buildActionButton(
                   context,
@@ -505,7 +505,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                       context,
                       MaterialPageRoute(
                           builder: (_) =>
-                              DriverDetailedStatsScreen(driver: driver))),
+                              DriverDetailedStatsScreen(driver: driver),),),
                 ),
                 _buildActionButton(
                   context,
@@ -514,7 +514,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                   () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => DriverHistoryScreen(driver: driver))),
+                          builder: (_) => DriverHistoryScreen(driver: driver),),),
                 ),
                 _buildActionButton(
                   context,
@@ -531,18 +531,18 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   }
 
   Widget _buildDriverListItem(
-      BuildContext context, Driver driver, DriverManagementService service) {
+      BuildContext context, Driver driver, DriverManagementService service,) {
     final scheme = Theme.of(context).colorScheme;
     return ListTile(
       onTap: () => Navigator.push(
           context,
           MaterialPageRoute(
-              builder: (_) => DriverDetailedStatsScreen(driver: driver))),
+              builder: (_) => DriverDetailedStatsScreen(driver: driver),),),
       leading: CircleAvatar(
         child: Text(driver.name[0]),
       ),
       title: Text(driver.name,
-          style: const TextStyle(fontWeight: FontWeight.bold)),
+          style: const TextStyle(fontWeight: FontWeight.bold),),
       subtitle: Text('${driver.totalDeliveries} livraisons'),
       trailing: Icon(
         Icons.chevron_right,
@@ -552,7 +552,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   }
 
   Widget _buildActionButton(
-      BuildContext context, IconData icon, String label, VoidCallback onTap) {
+      BuildContext context, IconData icon, String label, VoidCallback onTap,) {
     final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
@@ -564,7 +564,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
             Icon(icon, size: 20, color: scheme.onSurfaceVariant),
             const SizedBox(height: 4),
             Text(label,
-                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
+                style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),),
           ],
         ),
       ),
@@ -624,9 +624,9 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                 DropdownMenuItem(value: 'name', child: Text('Nom (A-Z)')),
                 DropdownMenuItem(value: 'nameDesc', child: Text('Nom (Z-A)')),
                 DropdownMenuItem(
-                    value: 'rating', child: Text('Meilleure Note')),
+                    value: 'rating', child: Text('Meilleure Note'),),
                 DropdownMenuItem(
-                    value: 'deliveries', child: Text('Plus de livraisons')),
+                    value: 'deliveries', child: Text('Plus de livraisons'),),
               ],
               onChanged: (value) {
                 if (value != null) {

@@ -3,8 +3,8 @@ import 'dart:convert';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-import '../auth/token_storage.dart';
-import 'realtime_event.dart';
+import 'package:elcorazon_core/src/auth/token_storage.dart';
+import 'package:elcorazon_core/src/realtime/realtime_event.dart';
 
 /// Canal temps réel générique (`ws/orders/{id}/tracking/`, `.../chat/`, ...) —
 /// voir `backend/common/consumers.py AuthorizedConsumer`. Le jeton d'accès est
@@ -34,6 +34,10 @@ class RealtimeChannel {
   Stream<RealtimeEvent> connect() {
     _closedByCaller = false;
     _hasRetried = false;
+    // Le contrôleur est retenu dans `_controller` et fermé par [close], que
+    // `onCancel` câble ici et que `_handleClosure` appelle sur une fermeture
+    // définitive. Le lint ne suit pas la fermeture au travers du champ.
+    // ignore: close_sinks
     final controller = StreamController<RealtimeEvent>.broadcast(onCancel: close);
     _controller = controller;
     unawaited(_open());

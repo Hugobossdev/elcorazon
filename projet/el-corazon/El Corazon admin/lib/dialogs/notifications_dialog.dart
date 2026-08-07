@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../services/app_service.dart';
+import 'package:admin/services/app_service.dart';
 import 'package:provider/provider.dart';
-import '../utils/price_formatter.dart';
-import '../ui/admin_color_tokens.dart';
+import 'package:admin/utils/price_formatter.dart';
+import 'package:admin/ui/admin_color_tokens.dart';
 
 class NotificationsDialog extends StatefulWidget {
   const NotificationsDialog({super.key});
@@ -222,7 +222,7 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
   }
 
   Widget _buildNotificationItem(
-      BuildContext context, Map<String, dynamic> notification) {
+      BuildContext context, Map<String, dynamic> notification,) {
     final timeAgo = _formatTimeAgo(notification['time'] as DateTime);
     final icon = notification['icon'] as IconData;
     final scheme = Theme.of(context).colorScheme;

@@ -5,44 +5,44 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:elcora_dely/l10n/app_localizations.dart';
 import 'package:elcorazon_core/elcorazon_core.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'theme.dart';
-import 'services/app_service.dart';
-import 'services/location_service.dart';
-import 'services/notification_service.dart';
-import 'services/gamification_service.dart';
-import 'services/realtime_tracking_service.dart';
-import 'services/address_service.dart';
-import 'services/promo_code_service.dart';
-import 'services/error_handler_service.dart';
-import 'services/performance_service.dart';
-import 'services/chat_service.dart';
-import 'services/agora_call_service.dart';
-import 'screens/splash_screen.dart';
+import 'package:elcora_dely/theme.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/location_service.dart';
+import 'package:elcora_dely/services/notification_service.dart';
+import 'package:elcora_dely/services/gamification_service.dart';
+import 'package:elcora_dely/services/realtime_tracking_service.dart';
+import 'package:elcora_dely/services/address_service.dart';
+import 'package:elcora_dely/services/promo_code_service.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/services/performance_service.dart';
+import 'package:elcora_dely/services/chat_service.dart';
+import 'package:elcora_dely/services/agora_call_service.dart';
+import 'package:elcora_dely/screens/splash_screen.dart';
 import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';
-import 'screens/delivery/delivery_navigation_screen.dart';
-import 'screens/delivery/real_time_tracking_screen.dart';
-import 'screens/communication/chat_screen.dart';
-import 'screens/payments/earnings_screen.dart';
+import 'package:elcora_dely/screens/delivery/delivery_navigation_screen.dart';
+import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
+import 'package:elcora_dely/screens/communication/chat_screen.dart';
+import 'package:elcora_dely/screens/payments/earnings_screen.dart';
 
 import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
+import 'package:elcora_dely/firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
     // Load environment variables
-    await dotenv.load(fileName: ".env");
-    debugPrint('✅ Environment variables loaded');
+    await dotenv.load();
+    Journal.trace('✅ Environment variables loaded');
 
     // Initialize core services only
     await _initializeCoreServices();
 
-    debugPrint('✅ Core services initialized successfully');
+    Journal.trace('✅ Core services initialized successfully');
   } catch (e, stackTrace) {
     final errorMessage = e.toString();
-    debugPrint('❌ Error initializing services: $errorMessage');
-    debugPrint('Stack trace: $stackTrace');
+    Journal.trace('❌ Error initializing services: $errorMessage');
+    Journal.trace('Stack trace: $stackTrace');
     // Continue with app launch even if some services fail
     // The app can work in offline mode or with cached data
   }
@@ -80,14 +80,14 @@ Future<void> _initializeCoreServices() async {
     // Initialize performance monitoring
     await PerformanceService().initialize();
   } catch (e) {
-    debugPrint('⚠️ Failed to initialize PerformanceService: ${e.toString()}');
+    Journal.trace('⚠️ Failed to initialize PerformanceService: ${e.toString()}');
   }
 
   try {
     // Initialize error handling
     await ErrorHandlerService().initialize();
   } catch (e) {
-    debugPrint('⚠️ Failed to initialize ErrorHandlerService: ${e.toString()}');
+    Journal.trace('⚠️ Failed to initialize ErrorHandlerService: ${e.toString()}');
   }
 
   try {
@@ -95,9 +95,9 @@ Future<void> _initializeCoreServices() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
-    debugPrint('✅ Firebase initialized successfully');
+    Journal.trace('✅ Firebase initialized successfully');
   } catch (e) {
-    debugPrint('⚠️ Failed to initialize Firebase: ${e.toString()}');
+    Journal.trace('⚠️ Failed to initialize Firebase: ${e.toString()}');
   }
 
   // Initialize other services lazily when needed

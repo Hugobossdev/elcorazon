@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Rapports d'exploitation — `/analytics/reports/*` (Phase 6).
 ///
@@ -60,7 +60,7 @@ class AnalyticsService extends ChangeNotifier {
       };
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Analytics : rapports indisponibles — ${e.code}');
+      eccore.Journal.trace('Analytics : rapports indisponibles — ${e.code}');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -106,7 +106,7 @@ class AnalyticsService extends ChangeNotifier {
       };
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Analytics : aperçu indisponible — ${e.code}');
+      eccore.Journal.trace('Analytics : aperçu indisponible — ${e.code}');
       notifyListeners();
       return _apercuVide();
     }
@@ -122,7 +122,7 @@ class AnalyticsService extends ChangeNotifier {
       );
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Analytics : chiffre d\'affaires indisponible — ${e.code}');
+      eccore.Journal.trace('Analytics : chiffre d\'affaires indisponible — ${e.code}');
       return _serieRevenus(const []);
     }
   }
@@ -140,7 +140,7 @@ class AnalyticsService extends ChangeNotifier {
       return _serieCommandes(revenus, statuts);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Analytics : commandes indisponibles — ${e.code}');
+      eccore.Journal.trace('Analytics : commandes indisponibles — ${e.code}');
       return _serieCommandes(const [], const []);
     }
   }
@@ -155,7 +155,7 @@ class AnalyticsService extends ChangeNotifier {
       );
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Analytics : catégories indisponibles — ${e.code}');
+      eccore.Journal.trace('Analytics : catégories indisponibles — ${e.code}');
       return _serieCategories(const []);
     }
   }
@@ -191,7 +191,7 @@ class AnalyticsService extends ChangeNotifier {
       ];
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Analytics : top ventes indisponible — ${e.code}');
+      eccore.Journal.trace('Analytics : top ventes indisponible — ${e.code}');
       return const [];
     }
   }
@@ -218,7 +218,7 @@ class AnalyticsService extends ChangeNotifier {
       };
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Analytics : livreurs indisponibles — ${e.code}');
+      eccore.Journal.trace('Analytics : livreurs indisponibles — ${e.code}');
       return {
         'driverDeliveries': <String, int>{},
         'driverEarnings': <String, double>{},

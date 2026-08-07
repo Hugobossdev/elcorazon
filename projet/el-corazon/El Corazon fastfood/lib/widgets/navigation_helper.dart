@@ -7,6 +7,7 @@ import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/promo_code.dart';
 import 'package:elcora_fast/models/payment_participant.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Helper pour faciliter la navigation entre les écrans
 class NavigationHelper {
@@ -125,7 +126,7 @@ class NavigationHelper {
   ) async {
     // Valider l'ID avant la navigation
     if (orderId.isEmpty) {
-      debugPrint('⚠️ Cannot navigate to delivery tracking: orderId is empty');
+      Journal.trace('⚠️ Cannot navigate to delivery tracking: orderId is empty');
       return;
     }
     try {

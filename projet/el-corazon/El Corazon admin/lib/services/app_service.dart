@@ -1,12 +1,12 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import '../models/category.dart' as app_models;
-import '../models/menu_models.dart';
-import '../models/order.dart';
-import '../models/user.dart';
-import '../repositories/django_order_mapper.dart';
-import 'admin_auth_service.dart';
+import 'package:admin/models/category.dart' as app_models;
+import 'package:admin/models/menu_models.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/models/user.dart';
+import 'package:admin/repositories/django_order_mapper.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Contexte partagé des écrans d'administration (Phase 6).
 ///
@@ -96,7 +96,7 @@ class AppService extends ChangeNotifier {
       _categories = categories.map(_toLocalCategory).toList();
     } on eccore.ApiException catch (e) {
       _error = e.detail;
-      debugPrint('Contexte : chargement partiel — ${e.code}');
+      eccore.Journal.trace('Contexte : chargement partiel — ${e.code}');
     } finally {
       // Marqué initialisé même en cas d'échec : sans cela, l'écran resterait
       // en chargement perpétuel sur une erreur de droits, sans rien afficher

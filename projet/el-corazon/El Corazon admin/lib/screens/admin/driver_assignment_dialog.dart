@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/driver_management_service.dart';
-import '../../services/order_management_service.dart';
-import '../../models/driver.dart';
-import '../../models/order.dart';
-import '../../widgets/custom_button.dart';
-import '../../utils/price_formatter.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 class DriverAssignmentDialog extends StatefulWidget {
   final Order order;
 
-  const DriverAssignmentDialog({super.key, required this.order});
+  const DriverAssignmentDialog({required this.order, super.key});
 
   @override
   State<DriverAssignmentDialog> createState() => _DriverAssignmentDialogState();

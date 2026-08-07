@@ -13,8 +13,7 @@ class ModernCard extends StatelessWidget {
   final Border? border;
 
   const ModernCard({
-    super.key,
-    required this.child,
+    required this.child, super.key,
     this.padding,
     this.margin,
     this.backgroundColor,
@@ -29,7 +28,7 @@ class ModernCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final card = Container(
-      margin: margin ?? const EdgeInsets.all(0),
+      margin: margin ?? EdgeInsets.zero,
       padding: padding ?? const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: backgroundColor ?? theme.colorScheme.surface,
@@ -38,7 +37,6 @@ class ModernCard extends StatelessWidget {
             border ??
             Border.all(
               color: theme.colorScheme.outline.withValues(alpha: 0.1),
-              width: 1,
             ),
         boxShadow:
             boxShadow ??
@@ -47,7 +45,6 @@ class ModernCard extends StatelessWidget {
                 color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 10,
                 offset: const Offset(0, 2),
-                spreadRadius: 0,
               ),
             ],
       ),
@@ -86,11 +83,7 @@ class StatCard extends StatelessWidget {
   final Widget? trailing;
 
   const StatCard({
-    super.key,
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
+    required this.title, required this.value, required this.icon, required this.color, super.key,
     this.subtitle,
     this.onTap,
     this.trailing,
@@ -163,9 +156,7 @@ class GradientCard extends StatelessWidget {
   final BorderRadius? borderRadius;
 
   const GradientCard({
-    super.key,
-    required this.child,
-    required this.colors,
+    required this.child, required this.colors, super.key,
     this.padding,
     this.margin,
     this.borderRadius,
@@ -174,7 +165,7 @@ class GradientCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: margin ?? const EdgeInsets.all(0),
+      margin: margin ?? EdgeInsets.zero,
       padding: padding ?? const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -188,7 +179,6 @@ class GradientCard extends StatelessWidget {
             color: colors.first.withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 8),
-            spreadRadius: 0,
           ),
         ],
       ),

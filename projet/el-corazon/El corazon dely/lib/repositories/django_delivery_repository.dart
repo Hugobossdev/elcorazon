@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import '../models/order.dart';
+import 'package:elcora_dely/models/order.dart';
 
 /// Une course telle que l'app la manipule : la course Django (`Assignment`) et
 /// la commande qu'elle porte, traduite dans le modèle `Order` local.
@@ -144,7 +144,7 @@ class DjangoDeliveryRepository {
       try {
         order = await _orders.getById(assignment.orderId);
       } catch (e) {
-        debugPrint('⚠️ Commande ${assignment.orderId} illisible : $e');
+        eccore.Journal.trace('⚠️ Commande ${assignment.orderId} illisible : $e');
       }
     }
     return Course(assignment: assignment, order: _toLocalOrder(assignment, order));

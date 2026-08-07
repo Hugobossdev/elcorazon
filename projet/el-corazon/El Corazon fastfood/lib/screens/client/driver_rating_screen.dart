@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:elcora_fast/services/driver_rating_service.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DriverRatingScreen extends StatefulWidget {
   final String orderId;
@@ -63,7 +64,7 @@ class _DriverRatingScreenState extends State<DriverRatingScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Error: $e');
+      Journal.trace('Error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Une erreur est survenue')),

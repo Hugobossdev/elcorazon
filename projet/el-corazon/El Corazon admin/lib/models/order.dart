@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class Order {
   final String id;
@@ -36,16 +36,11 @@ class Order {
     required this.userId,
     required this.items,
     required this.subtotal,
-    this.deliveryFee = 5.0,
-    required this.total,
+    required this.total, required this.deliveryAddress, required this.paymentMethod, required this.orderTime, required this.createdAt, this.deliveryFee = 5.0,
     this.status = OrderStatus.pending,
-    required this.deliveryAddress,
     this.deliveryNotes,
     this.promoCode,
     this.discount = 0.0,
-    required this.paymentMethod,
-    required this.orderTime,
-    required this.createdAt,
     this.estimatedDeliveryTime,
     this.deliveryPersonId,
     this.statusUpdates = const [],
@@ -189,7 +184,7 @@ class Order {
           return DateTime.parse(dateValue.toString());
         }
       } catch (e) {
-        debugPrint(
+        Journal.trace(
           '⚠️ Erreur parsing date: $e, value: $dateValue, using default',
         );
         return defaultValue;
@@ -214,7 +209,7 @@ class Order {
             '')
         .trim();
     if (deliveryAddress.isEmpty) {
-      debugPrint(
+      Journal.trace(
         '⚠️ Order.fromMap: delivery_address is empty for order $orderId, using default',
       );
       // Utiliser une adresse par défaut si vide pour éviter les erreurs
@@ -228,7 +223,7 @@ class Order {
     if (map['order_items'] != null) {
       if (map['order_items'] is List) {
         final itemsList = map['order_items'] as List;
-        debugPrint(
+        Journal.trace(
           '📦 Parsing ${itemsList.length} article(s) pour la commande ${orderId.substring(0, 8)}',
         );
 
@@ -241,13 +236,13 @@ class Order {
                 // Vérifier que l'item est valide
                 if (item == null) {
                   errorCount++;
-                  debugPrint('   ⚠️ Article null (ignoré)');
+                  Journal.trace('   ⚠️ Article null (ignoré)');
                   return null;
                 }
 
                 if (item is! Map<String, dynamic>) {
                   errorCount++;
-                  debugPrint(
+                  Journal.trace(
                     '   ⚠️ Article n\'est pas un Map: ${item.runtimeType} (ignoré)',
                   );
                   return null;
@@ -257,18 +252,18 @@ class Order {
                 successCount++;
                 // Log seulement le premier article pour éviter la verbosité
                 if (successCount == 1) {
-                  debugPrint(
+                  Journal.trace(
                     '   ✅ Premier article parsé: ${orderItem.quantity}x ${orderItem.menuItemName}',
                   );
                 }
                 return orderItem;
               } catch (e, stackTrace) {
                 errorCount++;
-                debugPrint('   ❌ Erreur parsing article: $e');
+                Journal.trace('   ❌ Erreur parsing article: $e');
                 // Log détaillé seulement pour le premier article en erreur
                 if (errorCount == 1) {
-                  debugPrint('      Stack trace: $stackTrace');
-                  debugPrint('      Données: ${item.toString()}');
+                  Journal.trace('      Stack trace: $stackTrace');
+                  Journal.trace('      Données: ${item.toString()}');
                 }
                 // Ne pas rethrow, mais retourner null pour continuer avec les autres articles
                 return null;
@@ -279,21 +274,21 @@ class Order {
 
         // Résumé du parsing
         if (errorCount > 0) {
-          debugPrint(
+          Journal.trace(
             '   ⚠️ Résumé: $successCount article(s) parsé(s), $errorCount erreur(s)',
           );
         } else {
-          debugPrint(
+          Journal.trace(
             '   ✅ Tous les articles parsés avec succès ($successCount total)',
           );
         }
       } else {
-        debugPrint(
+        Journal.trace(
           '⚠️ order_items n\'est pas une liste pour la commande ${orderId.substring(0, 8)}: ${map['order_items'].runtimeType}',
         );
       }
     } else {
-      debugPrint(
+      Journal.trace(
         '⚠️ Aucun order_items dans la commande ${orderId.substring(0, 8)}',
       );
       // Si aucun order_items, on créé quand même la commande avec une liste vide
@@ -302,7 +297,7 @@ class Order {
 
     // Validation: s'assurer qu'on a au moins un item ou que la commande peut exister sans items
     if (items.isEmpty) {
-      debugPrint('⚠️ Commande ${orderId.substring(0, 8)} créée sans articles');
+      Journal.trace('⚠️ Commande ${orderId.substring(0, 8)} créée sans articles');
     }
 
     // Parse status updates
@@ -329,7 +324,7 @@ class Order {
             .whereType<OrderStatusUpdate>()
             .toList();
       } catch (e) {
-        debugPrint('⚠️ Erreur parsing status_updates: $e');
+        Journal.trace('⚠️ Erreur parsing status_updates: $e');
       }
     }
 
@@ -429,7 +424,7 @@ class OrderItem {
   factory OrderItem.fromMap(Map<String, dynamic> map) {
     // Debug logging pour identifier les problèmes
     if (map['menu_item_id'] == null && map['menuItemId'] == null) {
-      debugPrint(
+      Journal.trace(
         '⚠️ OrderItem: menu_item_id manquant. Clés disponibles: ${map.keys.join(', ')}',
       );
     }
@@ -478,24 +473,24 @@ class OrderItem {
             }),
           );
         } catch (e) {
-          debugPrint('⚠️ Erreur parsing customizations: $e');
+          Journal.trace('⚠️ Erreur parsing customizations: $e');
           customizationsData = {};
         }
       } else if (map['customizations'] is String) {
         // Si c'est une chaîne JSON, essayer de la parser
         try {
           // Pour l'instant, on le laisse vide si c'est une chaîne
-          debugPrint(
+          Journal.trace(
             '⚠️ customizations est une chaîne, non parsé: ${map['customizations']}',
           );
         } catch (e) {
-          debugPrint('⚠️ Erreur parsing customizations string: $e');
+          Journal.trace('⚠️ Erreur parsing customizations string: $e');
         }
       }
     }
 
     // Convertir en Map<String, String> pour compatibilité, mais garder la structure originale
-    Map<String, String> customizationsMap = {};
+    final Map<String, String> customizationsMap = {};
     customizationsData.forEach((key, value) {
       if (value is List) {
         customizationsMap[key] = value.join(', ');
@@ -516,7 +511,7 @@ class OrderItem {
       }
       if (quantity <= 0) quantity = 1; // Valeur minimale
     } catch (e) {
-      debugPrint('⚠️ Erreur parsing quantity: $e, using default: 1');
+      Journal.trace('⚠️ Erreur parsing quantity: $e, using default: 1');
       quantity = 1;
     }
 
@@ -534,7 +529,7 @@ class OrderItem {
             0.0;
       }
     } catch (e) {
-      debugPrint('⚠️ Erreur parsing unitPrice: $e, using default: 0.0');
+      Journal.trace('⚠️ Erreur parsing unitPrice: $e, using default: 0.0');
       unitPrice = 0.0;
     }
 
@@ -554,7 +549,7 @@ class OrderItem {
         totalPrice = unitPrice * quantity;
       }
     } catch (e) {
-      debugPrint(
+      Journal.trace(
         '⚠️ Erreur parsing totalPrice: $e, calculating from unitPrice * quantity',
       );
       totalPrice = unitPrice * quantity;

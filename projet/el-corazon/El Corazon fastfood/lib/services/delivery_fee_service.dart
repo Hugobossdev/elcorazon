@@ -118,7 +118,7 @@ class DeliveryFeeService extends ChangeNotifier {
     } catch (e) {
       // Le devis, lui, a abouti : c'est lui qui fait foi. L'absence de nom
       // de zone n'est pas une raison de renoncer au montant exact.
-      debugPrint('DeliveryFeeService: zone non résolue — $e');
+      eccore.Journal.trace('DeliveryFeeService: zone non résolue — $e');
     }
 
     final breakdown = DeliveryFeeBreakdown.fromQuote(quote, zone: zone);

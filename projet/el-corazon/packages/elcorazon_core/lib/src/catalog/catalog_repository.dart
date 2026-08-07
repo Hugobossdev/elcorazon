@@ -1,7 +1,7 @@
-import '../network/api_client.dart';
-import 'category.dart';
-import 'menu_item.dart';
-import 'review.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/catalog/category.dart';
+import 'package:elcorazon_core/src/catalog/menu_item.dart';
+import 'package:elcorazon_core/src/catalog/review.dart';
 
 /// Accès à `/api/v1/catalog/*` et `/api/v1/restaurants/*` en lecture seule —
 /// voir `backend/apps/catalog/{serializers,views}.py`. Public

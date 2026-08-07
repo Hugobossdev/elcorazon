@@ -1,11 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_dely/l10n/app_localizations.dart';
-import '../../services/app_service.dart';
-import '../../widgets/custom_button.dart';
-import '../../widgets/custom_text_field.dart';
-import '../../widgets/loading_widget.dart';
-import '../../widgets/el_corazon_logo.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/widgets/custom_button.dart';
+import 'package:elcora_dely/widgets/custom_text_field.dart';
+import 'package:elcora_dely/widgets/loading_widget.dart';
+import 'package:elcora_dely/widgets/el_corazon_logo.dart';
 
 /// Connexion uniquement (Phase 6) : le backend Django n'a aucun endpoint de
 /// création de compte livreur — `/api/v1/auth/register/` ne crée que des
@@ -52,7 +53,9 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
 
       if (mounted) {
         // Navigate to delivery home screen
-        Navigator.pushReplacementNamed(context, '/delivery-home');
+        unawaited(
+          Navigator.pushReplacementNamed(context, '/delivery-home'),
+        );
       }
     } catch (e) {
       if (mounted) {

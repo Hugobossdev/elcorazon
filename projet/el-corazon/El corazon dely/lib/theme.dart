@@ -121,17 +121,14 @@ class FontSizes {
 
 ThemeData get lightTheme => ThemeData(
   useMaterial3: true,
-  colorScheme: ColorScheme.light(
+  colorScheme: const ColorScheme.light(
     primary: LightModeColors.lightPrimary,
-    onPrimary: LightModeColors.lightOnPrimary,
     primaryContainer: LightModeColors.lightPrimaryContainer,
     onPrimaryContainer: LightModeColors.lightOnPrimaryContainer,
     secondary: LightModeColors.lightSecondary,
-    onSecondary: LightModeColors.lightOnSecondary,
     tertiary: LightModeColors.lightTertiary,
     onTertiary: LightModeColors.lightOnTertiary,
     error: LightModeColors.lightError,
-    onError: LightModeColors.lightOnError,
     errorContainer: LightModeColors.lightErrorContainer,
     onErrorContainer: LightModeColors.lightOnErrorContainer,
     inversePrimary: LightModeColors.lightInversePrimary,
@@ -140,7 +137,7 @@ ThemeData get lightTheme => ThemeData(
     onSurface: LightModeColors.lightOnSurface,
   ),
   brightness: Brightness.light,
-  appBarTheme: AppBarTheme(
+  appBarTheme: const AppBarTheme(
     backgroundColor: LightModeColors.lightAppBarBackground,
     foregroundColor: LightModeColors.lightOnPrimaryContainer,
     elevation: 0,
@@ -211,13 +208,11 @@ ThemeData get lightTheme => ThemeData(
 
 ThemeData get darkTheme => ThemeData(
   useMaterial3: true,
-  colorScheme: ColorScheme.dark(
+  colorScheme: const ColorScheme.dark(
     primary: DarkModeColors.darkPrimary,
-    onPrimary: DarkModeColors.darkOnPrimary,
     primaryContainer: DarkModeColors.darkPrimaryContainer,
     onPrimaryContainer: DarkModeColors.darkOnPrimaryContainer,
     secondary: DarkModeColors.darkSecondary,
-    onSecondary: DarkModeColors.darkOnSecondary,
     tertiary: DarkModeColors.darkTertiary,
     onTertiary: DarkModeColors.darkOnTertiary,
     error: DarkModeColors.darkError,
@@ -230,7 +225,7 @@ ThemeData get darkTheme => ThemeData(
     onSurface: DarkModeColors.darkOnSurface,
   ),
   brightness: Brightness.dark,
-  appBarTheme: AppBarTheme(
+  appBarTheme: const AppBarTheme(
     backgroundColor: DarkModeColors.darkAppBarBackground,
     foregroundColor: DarkModeColors.darkOnPrimaryContainer,
     elevation: 0,

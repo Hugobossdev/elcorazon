@@ -5,14 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // (Supabase, ci-dessous) portent le même nom mais pas la même forme — voir
 // `_fromDjangoUser`, qui traduit le premier vers le second.
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import '../models/user.dart';
-import '../models/menu_item.dart';
-import '../models/order.dart';
-import '../repositories/django_delivery_repository.dart';
-import 'location_service.dart';
-import 'notification_service.dart';
-import 'gamification_service.dart';
-import 'realtime_tracking_service.dart';
+import 'package:elcora_dely/models/user.dart';
+import 'package:elcora_dely/models/menu_item.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/repositories/django_delivery_repository.dart';
+import 'package:elcora_dely/services/location_service.dart';
+import 'package:elcora_dely/services/notification_service.dart';
+import 'package:elcora_dely/services/gamification_service.dart';
+import 'package:elcora_dely/services/realtime_tracking_service.dart';
 
 class AppService extends ChangeNotifier {
   static AppService? _instance;
@@ -59,7 +59,7 @@ class AppService extends ChangeNotifier {
 
   User? _currentUser;
   bool _isInitialized = false;
-  List<MenuItem> _menuItems = [];
+  final List<MenuItem> _menuItems = [];
   List<Order> _orders = [];
   final List<MenuItem> _cartItems = [];
 
@@ -182,7 +182,7 @@ class AppService extends ChangeNotifier {
     // l'écran la montre avec tout ce qu'il lui faut (montants, articles,
     // transitions permises), que le message d'alerte ne porte pas.
     _courseOffersSubscription = tracking.courseOffers.listen((offer) {
-      debugPrint('📨 Course proposée : ${offer.reference} (${offer.restaurant})');
+      eccore.Journal.trace('📨 Course proposée : ${offer.reference} (${offer.restaurant})');
       unawaited(loadAvailableOrders(forceRefresh: true));
     });
   }
@@ -225,7 +225,7 @@ class AppService extends ChangeNotifier {
         },
       );
     } catch (e) {
-      debugPrint('⚠️ Échec de l\'enregistrement du jeton FCM: $e');
+      eccore.Journal.trace('⚠️ Échec de l\'enregistrement du jeton FCM: $e');
     }
   }
 
@@ -241,7 +241,7 @@ class AppService extends ChangeNotifier {
     try {
       await _container.read(eccore.authRepositoryProvider).unregisterDevice(token);
     } catch (e) {
-      debugPrint('⚠️ Échec du retrait du jeton FCM: $e');
+      eccore.Journal.trace('⚠️ Échec du retrait du jeton FCM: $e');
     }
   }
 
@@ -258,7 +258,7 @@ class AppService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      debugPrint('Error initializing AppService: $e');
+      eccore.Journal.trace('Error initializing AppService: $e');
       _isInitialized = true;
       notifyListeners();
     }
@@ -283,7 +283,7 @@ class AppService extends ChangeNotifier {
       _cartItems.clear();
       notifyListeners();
     } catch (e) {
-      debugPrint('Logout error: $e');
+      eccore.Journal.trace('Logout error: $e');
     }
   }
 
@@ -323,7 +323,7 @@ class AppService extends ChangeNotifier {
   Future<void> loadAvailableOrders({bool forceRefresh = false}) async {
     // Éviter les appels simultanés
     if (_isLoadingOrders) {
-      debugPrint('⚠️ loadAvailableOrders already in progress, skipping...');
+      eccore.Journal.trace('⚠️ loadAvailableOrders already in progress, skipping...');
       return;
     }
 
@@ -332,7 +332,7 @@ class AppService extends ChangeNotifier {
         _lastOrdersLoadTime != null &&
         DateTime.now().difference(_lastOrdersLoadTime!) <
             const Duration(seconds: 10)) {
-      debugPrint(
+      eccore.Journal.trace(
         '📦 Using cached orders (last loaded ${DateTime.now().difference(_lastOrdersLoadTime!).inSeconds}s ago)',
       );
       return;
@@ -364,13 +364,13 @@ class AppService extends ChangeNotifier {
           _currentUser = _currentUser!.copyWith(isOnline: _courierProfile!.isOnline);
         }
       } catch (e) {
-        debugPrint('⚠️ Dossier livreur illisible : $e');
+        eccore.Journal.trace('⚠️ Dossier livreur illisible : $e');
       }
 
       notifyListeners();
-      debugPrint('✅ ${courses.length} courses chargées');
+      eccore.Journal.trace('✅ ${courses.length} courses chargées');
     } catch (e) {
-      debugPrint('❌ Erreur de chargement des courses: $e');
+      eccore.Journal.trace('❌ Erreur de chargement des courses: $e');
       // Ne pas vider la liste en cas d'erreur, garder les données en cache
       rethrow;
     } finally {
@@ -511,7 +511,7 @@ class AppService extends ChangeNotifier {
   Future<void> acceptDelivery(String orderId) async {
     final course = _requireCourse(orderId);
     _rememberCourse(await _delivery.accept(course.assignmentId));
-    debugPrint('✅ Course acceptée pour la commande $orderId');
+    eccore.Journal.trace('✅ Course acceptée pour la commande $orderId');
   }
 
   /// Refuse une course proposée. Distinct d'une annulation : décliner une
@@ -602,7 +602,7 @@ class AppService extends ChangeNotifier {
         _courierProfile = await _delivery.profile();
         notifyListeners();
       } catch (e) {
-        debugPrint('Dossier livreur illisible après retrait : $e');
+        eccore.Journal.trace('Dossier livreur illisible après retrait : $e');
       }
     } on eccore.ApiException catch (e) {
       throw Exception(e.detail);
@@ -655,7 +655,7 @@ class AppService extends ChangeNotifier {
         headingDegrees: heading,
       );
     } catch (e) {
-      debugPrint('❌ Erreur mise à jour position: $e');
+      eccore.Journal.trace('❌ Erreur mise à jour position: $e');
       // Ne pas throw pour éviter de bloquer le suivi GPS
     }
   }

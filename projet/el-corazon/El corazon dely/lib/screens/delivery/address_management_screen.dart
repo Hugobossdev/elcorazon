@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/address_service.dart';
-import '../../services/error_handler_service.dart';
-import '../../services/performance_service.dart';
-import '../../models/address.dart';
-import 'driver_profile_screen.dart';
-import 'settings_screen.dart';
+import 'package:elcora_dely/services/address_service.dart';
+import 'package:elcora_dely/services/error_handler_service.dart';
+import 'package:elcora_dely/services/performance_service.dart';
+import 'package:elcora_dely/models/address.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 
 class AddressManagementScreen extends StatefulWidget {
   const AddressManagementScreen({super.key});
@@ -415,6 +415,8 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
           Provider.of<PerformanceService>(context, listen: false)
               .startTimer('delete_address');
         }
+
+        if (!mounted) return;
 
         await Provider.of<AddressService>(context, listen: false)
             .deleteAddress(address.id);

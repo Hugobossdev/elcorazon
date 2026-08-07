@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../models/driver.dart';
-import '../../models/order.dart'; // Import OrderStatus
-import '../../services/driver_management_service.dart';
-import '../../services/order_management_service.dart'; // Import Service
-import '../../widgets/custom_bar_chart.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/models/order.dart'; // Import OrderStatus
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/services/order_management_service.dart'; // Import Service
+import 'package:admin/widgets/custom_bar_chart.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DriverDetailedStatsScreen extends StatefulWidget {
   final Driver? driver;
 
-  const DriverDetailedStatsScreen({super.key, required this.driver});
+  const DriverDetailedStatsScreen({required this.driver, super.key});
 
   @override
   State<DriverDetailedStatsScreen> createState() =>
@@ -36,7 +37,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
 
       setState(() => _detailedStats = stats);
     } catch (e) {
-      debugPrint('Erreur chargement détails: $e');
+      Journal.trace('Erreur chargement détails: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -47,7 +48,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
     if (widget.driver == null) {
       return const Center(
           child: Text(
-              'Sélectionnez un livreur pour voir ses statistiques détaillées.'));
+              'Sélectionnez un livreur pour voir ses statistiques détaillées.',),);
     }
 
     return Scaffold(
@@ -64,7 +65,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                 final driverOrders = orderService.allOrders
                     .where((o) =>
                         o.deliveryPersonId == widget.driver!.userId ||
-                        o.deliveryPersonId == widget.driver!.id)
+                        o.deliveryPersonId == widget.driver!.id,)
                     .toList();
 
                 final weeklyData = List<double>.filled(7, 0);
@@ -76,7 +77,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                   'Jeu',
                   'Ven',
                   'Sam',
-                  'Dim'
+                  'Dim',
                 ];
                 final labels = <String>[];
 
@@ -108,13 +109,13 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                       const Text(
                         'Activité Hebdomadaire (Livrées)',
                         style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
+                            fontSize: 18, fontWeight: FontWeight.bold,),
                       ),
                       const SizedBox(height: 16),
                       Card(
                         elevation: 2,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
+                            borderRadius: BorderRadius.circular(16),),
                         child: Padding(
                           padding: const EdgeInsets.all(20),
                           child: Column(
@@ -125,10 +126,10 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                                 children: [
                                   Text('Livraisons',
                                       style: TextStyle(
-                                          fontWeight: FontWeight.w500)),
+                                          fontWeight: FontWeight.w500,),),
                                   Text('7 derniers jours',
                                       style: TextStyle(
-                                          color: Colors.grey, fontSize: 12)),
+                                          color: Colors.grey, fontSize: 12,),),
                                 ],
                               ),
                               const SizedBox(height: 20),
@@ -168,7 +169,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
         gradient: LinearGradient(
           colors: [
             Theme.of(context).primaryColor,
-            Theme.of(context).primaryColor.withValues(alpha: 0.8)
+            Theme.of(context).primaryColor.withValues(alpha: 0.8),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -198,7 +199,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                       style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor),
+                          color: Theme.of(context).primaryColor,),
                     )
                   : null,
             ),
@@ -213,14 +214,14 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                   style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white),
+                      color: Colors.white,),
                 ),
                 const SizedBox(height: 8),
                 Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
+                          horizontal: 8, vertical: 4,),
                       decoration: BoxDecoration(
                         color: Colors.black26,
                         borderRadius: BorderRadius.circular(10),
@@ -233,7 +234,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                             widget.driver!.rating.toStringAsFixed(1),
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontWeight: FontWeight.bold),
+                                fontWeight: FontWeight.bold,),
                           ),
                         ],
                       ),
@@ -271,19 +272,19 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
           children: [
             _buildRatingRow('Rapidité', timeRating),
             const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12), child: Divider()),
+                padding: EdgeInsets.symmetric(vertical: 12), child: Divider(),),
             _buildRatingRow(
               'Relation Client',
               serviceRating,
             ),
             const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12), child: Divider()),
+                padding: EdgeInsets.symmetric(vertical: 12), child: Divider(),),
             _buildRatingRow(
               'Soin du colis',
               conditionRating,
             ),
              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12), child: Divider()),
+                padding: EdgeInsets.symmetric(vertical: 12), child: Divider(),),
             Text(
               'Basé sur ${_detailedStats['total_reviews'] ?? 0} avis détaillés',
               style: TextStyle(color: Colors.grey[600], fontStyle: FontStyle.italic),
@@ -299,7 +300,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
       children: [
         Expanded(
             child: Text(label,
-                style: const TextStyle(fontWeight: FontWeight.w500))),
+                style: const TextStyle(fontWeight: FontWeight.w500),),),
         Text(
           rating.toStringAsFixed(1),
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),

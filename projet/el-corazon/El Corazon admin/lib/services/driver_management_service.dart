@@ -1,8 +1,8 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
-import '../models/driver.dart';
-import 'admin_auth_service.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Gestion de la flotte — `/api/v1/delivery/couriers/` (Phase 6).
 ///
@@ -94,9 +94,9 @@ class DriverManagementService extends ChangeNotifier {
       final remote = await _couriers.list();
       _drivers = remote.map(_toLocalDriver).toList()
         ..sort((a, b) => a.name.compareTo(b.name));
-      debugPrint('DriverManagementService: ${_drivers.length} livreur(s)');
+      eccore.Journal.trace('DriverManagementService: ${_drivers.length} livreur(s)');
     } on eccore.ApiException catch (e) {
-      debugPrint('DriverManagementService: chargement impossible — ${e.code}');
+      eccore.Journal.trace('DriverManagementService: chargement impossible — ${e.code}');
       _drivers = [];
     } finally {
       _isLoading = false;
@@ -174,7 +174,7 @@ class DriverManagementService extends ChangeNotifier {
       notifyListeners();
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('DriverManagementService: embauche refusée — ${e.code}');
+      eccore.Journal.trace('DriverManagementService: embauche refusée — ${e.code}');
       return false;
     }
   }
@@ -212,7 +212,7 @@ class DriverManagementService extends ChangeNotifier {
       }
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('DriverManagementService: instruction refusée — ${e.code}');
+      eccore.Journal.trace('DriverManagementService: instruction refusée — ${e.code}');
       return false;
     }
   }
@@ -225,7 +225,7 @@ class DriverManagementService extends ChangeNotifier {
       final remote = await _couriers.availableFor(orderId);
       return remote.map(_toLocalDriver).toList();
     } on eccore.ApiException catch (e) {
-      debugPrint('DriverManagementService: éligibles indisponibles — ${e.code}');
+      eccore.Journal.trace('DriverManagementService: éligibles indisponibles — ${e.code}');
       return [];
     }
   }
@@ -401,7 +401,7 @@ class DriverManagementService extends ChangeNotifier {
         'verification_status': courier.verificationStatus,
       };
     } on eccore.ApiException catch (e) {
-      debugPrint('DriverManagementService: statistiques indisponibles — ${e.code}');
+      eccore.Journal.trace('DriverManagementService: statistiques indisponibles — ${e.code}');
       return {};
     }
   }

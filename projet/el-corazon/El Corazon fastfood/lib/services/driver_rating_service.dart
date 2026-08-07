@@ -1,5 +1,4 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:flutter/foundation.dart';
 
 import 'package:elcora_fast/main.dart' show apiClient;
 
@@ -34,7 +33,7 @@ class DriverRatingService {
       );
       return true;
     } on eccore.ApiException catch (e) {
-      debugPrint('DriverRatingService: notation refusée — ${e.code} (${e.detail})');
+      eccore.Journal.trace('DriverRatingService: notation refusée — ${e.code} (${e.detail})');
       return false;
     }
   }
@@ -64,7 +63,7 @@ class DriverRatingService {
         count: count is int ? count : int.tryParse('$count') ?? 0,
       );
     } on eccore.ApiException catch (e) {
-      debugPrint('DriverRatingService: suivi indisponible — ${e.code}');
+      eccore.Journal.trace('DriverRatingService: suivi indisponible — ${e.code}');
       return null;
     }
   }

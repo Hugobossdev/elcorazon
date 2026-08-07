@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcora_fast/config/api_config.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class PlaceSuggestion {
   final String placeId;
@@ -81,7 +81,7 @@ class PlacesService {
     final status = data['status']?.toString() ?? '';
     if (status != 'OK') {
       // ZERO_RESULTS est courant
-      debugPrint('PlacesService.autocomplete status=$status');
+      Journal.trace('PlacesService.autocomplete status=$status');
       return const [];
     }
 
@@ -128,7 +128,7 @@ class PlacesService {
     final data = json.decode(resp.body) as Map<String, dynamic>;
     final status = data['status']?.toString() ?? '';
     if (status != 'OK') {
-      debugPrint('PlacesService.getDetails status=$status');
+      Journal.trace('PlacesService.getDetails status=$status');
       return null;
     }
 

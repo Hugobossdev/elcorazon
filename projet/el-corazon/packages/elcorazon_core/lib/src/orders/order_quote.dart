@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Décomposition d'un total avant de s'engager — miroir de
 /// `OrderQuoteSerializer` (`POST /orders/preview/`).

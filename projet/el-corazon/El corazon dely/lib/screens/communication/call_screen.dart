@@ -2,9 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
-import '../../services/agora_call_service.dart';
-import '../../models/order.dart';
-import '../../services/app_service.dart';
+import 'package:elcora_dely/services/agora_call_service.dart';
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/services/app_service.dart';
 
 /// Écran d'appel vocal/vidéo
 class CallScreen extends StatefulWidget {
@@ -14,9 +14,7 @@ class CallScreen extends StatefulWidget {
   final String? callerName;
 
   const CallScreen({
-    super.key,
-    required this.order,
-    required this.callType,
+    required this.order, required this.callType, super.key,
     this.isIncoming = false,
     this.callerName,
   });
@@ -61,6 +59,8 @@ class _CallScreenState extends State<CallScreen> {
           return;
         }
       }
+
+      if (!mounted) return;
 
       // Générer l'ID de canal et l'UID
       final channelId = AgoraCallService.generateChannelId(widget.order.id);
@@ -416,7 +416,7 @@ class _CallScreenState extends State<CallScreen> {
 class AgoraVideoView extends StatelessWidget {
   final VideoViewController controller;
 
-  const AgoraVideoView({super.key, required this.controller});
+  const AgoraVideoView({required this.controller, super.key});
 
   @override
   Widget build(BuildContext context) {

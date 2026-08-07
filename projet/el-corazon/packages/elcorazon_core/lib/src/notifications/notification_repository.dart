@@ -1,5 +1,5 @@
-import '../network/api_client.dart';
-import 'app_notification.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/notifications/app_notification.dart';
 
 /// Accès à `/api/v1/notifications/*` — voir
 /// `backend/apps/notifications/views.py`.

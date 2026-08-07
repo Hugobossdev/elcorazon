@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'admin_auth_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 
 /// Zone de livraison telle que l'affiche la carte de supervision.
 ///
@@ -263,7 +263,7 @@ class DeliveryZoneService extends ChangeNotifier {
           ? 'Les zones relèvent du siège : votre compte est rattaché à un '
                 'périmètre.'
           : e.detail;
-      debugPrint('Zones : chargement impossible — ${e.code}');
+      eccore.Journal.trace('Zones : chargement impossible — ${e.code}');
       _zones = [];
     } finally {
       _isLoading = false;
@@ -282,7 +282,7 @@ class DeliveryZoneService extends ChangeNotifier {
       final villes = await _geographie.cities();
       return {for (final ville in villes) ville.id: ville.name};
     } on eccore.ApiException catch (e) {
-      debugPrint('Zones : villes non nommées — ${e.code}');
+      eccore.Journal.trace('Zones : villes non nommées — ${e.code}');
       return const {};
     }
   }
@@ -398,7 +398,7 @@ class DeliveryZoneService extends ChangeNotifier {
           ? 'Les barèmes relèvent du siège : votre compte est rattaché à un '
                 'périmètre.'
           : e.detail;
-      debugPrint('Zones : écriture refusée — ${e.code}');
+      eccore.Journal.trace('Zones : écriture refusée — ${e.code}');
       return false;
     } finally {
       // Dans le `finally` : une écriture refusée qui laisserait la zone

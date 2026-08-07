@@ -232,7 +232,7 @@ class CustomizationService extends ChangeNotifier {
   CustomizationService._internal();
 
 
-  Map<String, List<CustomizationOption>> _itemOptions = {};
+  final Map<String, List<CustomizationOption>> _itemOptions = {};
   Map<String, List<CustomizationOption>> _defaultOptionsByName = {};
   final Map<String, ItemCustomization> _currentCustomizations = {};
   
@@ -271,7 +271,7 @@ class CustomizationService extends ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     } catch (e) {
-      debugPrint('Error initializing Customization Service: $e');
+      eccore.Journal.trace('Error initializing Customization Service: $e');
     }
   }
 
@@ -800,7 +800,7 @@ class CustomizationService extends ChangeNotifier {
     // D'abord, essayer de charger depuis la base de données si pas encore chargé
     final stored = _itemOptions[menuItemId];
     if (stored != null && stored.isNotEmpty) {
-      debugPrint(
+      eccore.Journal.trace(
           '✅ Options trouvées en cache pour $menuItemId: ${stored.length} options',);
       return stored;
     }
@@ -818,7 +818,7 @@ class CustomizationService extends ChangeNotifier {
               lowerName.contains(entry.key.toLowerCase()) ||
               entry.key.toLowerCase().contains(lowerName)) {
             defaults = entry.value;
-            debugPrint(
+            eccore.Journal.trace(
                 '✅ Options par défaut trouvées pour "$fallbackName" via variante "${entry.key}"',);
             break;
           }
@@ -828,13 +828,13 @@ class CustomizationService extends ChangeNotifier {
       if (defaults != null && defaults.isNotEmpty) {
         final cloned = defaults.map((opt) => opt.copyWith()).toList();
         _itemOptions[menuItemId] = cloned;
-        debugPrint(
+        eccore.Journal.trace(
             '✅ ${cloned.length} options par défaut chargées pour $menuItemId',);
         return cloned;
       }
     }
 
-    debugPrint(
+    eccore.Journal.trace(
         '⚠️ Aucune option trouvée pour $menuItemId (fallback: $fallbackName)',);
     _itemOptions.putIfAbsent(menuItemId, () => []);
     return _itemOptions[menuItemId]!;
@@ -859,12 +859,12 @@ class CustomizationService extends ChangeNotifier {
 
       if (options.isNotEmpty) {
         _itemOptions[menuItemId] = options;
-        debugPrint(
+        eccore.Journal.trace(
             '✅ Loaded ${options.length} customization options for menu item $menuItemId',);
         notifyListeners();
       }
     } catch (e) {
-      debugPrint('⚠️ Error loading customization options for $menuItemId: $e');
+      eccore.Journal.trace('⚠️ Error loading customization options for $menuItemId: $e');
     }
   }
 
@@ -925,7 +925,7 @@ class CustomizationService extends ChangeNotifier {
     final options =
         _getOptionsForMenuItem(menuItemId, fallbackName: menuItemName);
 
-    debugPrint(
+    eccore.Journal.trace(
         '🎂 Start customization pour $menuItemName ($menuItemId): ${options.length} options disponibles',);
 
     final Map<String, List<String>> defaultSelections = {};
@@ -961,7 +961,7 @@ class CustomizationService extends ChangeNotifier {
       }
     }
 
-    debugPrint('🎂 Sélections par défaut: $defaultSelections');
+    eccore.Journal.trace('🎂 Sélections par défaut: $defaultSelections');
 
     _currentCustomizations[sessionId] = ItemCustomization(
       itemId: sessionId,

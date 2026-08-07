@@ -172,7 +172,6 @@ class ModernTheme {
     brightness: Brightness.light,
     colorScheme: ColorScheme.light(
       primary: primary,
-      onPrimary: textOnPrimary,
       primaryContainer: primaryContainer,
       onPrimaryContainer: primaryDark,
       secondary: secondary,
@@ -180,7 +179,6 @@ class ModernTheme {
       tertiary: tertiary,
       onTertiary: textOnPrimary,
       error: error,
-      onError: textOnPrimary,
       surface: surface,
       onSurface: textPrimary,
       surfaceContainerHighest: surfaceContainerHighest,
@@ -208,7 +206,7 @@ class ModernTheme {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: border, width: 1),
+        side: const BorderSide(color: border),
       ),
       color: surface,
       margin: EdgeInsets.zero,
@@ -291,7 +289,6 @@ class ModernTheme {
       error: error,
       onError: textOnPrimary,
       surface: surfaceDark,
-      onSurface: Colors.white,
       surfaceContainerHighest: surfaceDarkVariant,
       onSurfaceVariant: Colors.white70,
       outline: Colors.white24,
@@ -317,7 +314,7 @@ class ModernTheme {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.1), width: 1),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
       ),
       color: surfaceDarkVariant,
     ),

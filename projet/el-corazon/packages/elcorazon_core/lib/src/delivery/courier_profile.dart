@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Ce que le client voit du livreur qui lui apporte sa commande — miroir de
 /// `CourierPublicSerializer` (`backend/apps/delivery/serializers.py`). Ni
@@ -50,18 +50,9 @@ class CourierProfile {
     required this.email,
     required this.restaurantSlug,
     required this.verificationStatus,
-    this.idDocument,
+    required this.vehicleType, required this.isOnline, required this.canAcceptOrders, required this.deliveriesCompleted, required this.deliveriesCancelled, required this.ratingAverage, required this.ratingCount, required this.createdAt, required this.updatedAt, this.idDocument,
     this.licenceDocument,
     this.vehicleDocument,
-    required this.vehicleType,
-    required this.isOnline,
-    required this.canAcceptOrders,
-    required this.deliveriesCompleted,
-    required this.deliveriesCancelled,
-    required this.ratingAverage,
-    required this.ratingCount,
-    required this.createdAt,
-    required this.updatedAt,
     this.verificationNotes = '',
     this.verifiedAt,
     this.vehiclePlate = '',

@@ -2,7 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../services/marketing_service.dart';
+import 'package:admin/services/marketing_service.dart';
 
 /// Envoi d'une notification de masse — une **campagne**, côté serveur.
 ///

@@ -1,6 +1,6 @@
-import '../network/api_client.dart';
-import '../orders/order.dart';
-import 'group_cart.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/orders/order.dart';
+import 'package:elcorazon_core/src/groupcarts/group_cart.dart';
 
 /// Accès à `/api/v1/group-carts/*` — voir `backend/apps/groupcarts/views.py`.
 ///

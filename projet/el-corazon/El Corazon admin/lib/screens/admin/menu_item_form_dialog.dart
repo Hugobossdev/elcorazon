@@ -3,12 +3,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
-import '../../models/menu_models.dart';
-import '../../models/category.dart';
-import '../../services/menu_service.dart';
-import '../../services/category_management_service.dart';
-import '../../widgets/custom_button.dart';
-import 'option_groups_editor.dart'; // Import du nouveau widget
+import 'package:admin/models/menu_models.dart';
+import 'package:admin/models/category.dart';
+import 'package:admin/services/menu_service.dart';
+import 'package:admin/services/category_management_service.dart';
+import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/screens/admin/option_groups_editor.dart'; // Import du nouveau widget
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class MenuItemFormDialog extends StatefulWidget {
   final MenuItem? menuItem;
@@ -247,7 +248,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
                       style: const TextStyle(
                           color: Colors.white,
                           fontSize: 20,
-                          fontWeight: FontWeight.bold),
+                          fontWeight: FontWeight.bold,),
                     ),
                   ),
                   TabBar(
@@ -259,7 +260,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
                       Tab(text: 'Informations', icon: Icon(Icons.info_outline)),
                       Tab(
                           text: 'Options & Variantes',
-                          icon: Icon(Icons.list_alt)),
+                          icon: Icon(Icons.list_alt),),
                     ],
                   ),
                 ],
@@ -330,7 +331,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
                       ? const Center(child: CircularProgressIndicator())
                       : (_apercu() == null
                           ? const Icon(Icons.add_photo_alternate,
-                              size: 40, color: Colors.grey)
+                              size: 40, color: Colors.grey,)
                           : null),
                 ),
               ),
@@ -358,7 +359,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
                           .map((c) => DropdownMenuItem(
                                 value: c.id,
                                 child: Text(c.name),
-                              ))
+                              ),)
                           .toList(),
                       onChanged: (value) =>
                           setState(() => _selectedCategoryId = value),
@@ -414,7 +415,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           ),
           const SizedBox(height: 24),
           const Text('Attributs',
-              style: TextStyle(fontWeight: FontWeight.bold)),
+              style: TextStyle(fontWeight: FontWeight.bold),),
           Wrap(
             spacing: 16,
             children: [
@@ -424,7 +425,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
                 onSelected: (val) => setState(() => _isAvailable = val),
                 avatar: Icon(
                     _isAvailable ? Icons.check_circle : Icons.circle_outlined,
-                    size: 18),
+                    size: 18,),
               ),
               FilterChip(
                 label: const Text('Populaire'),
@@ -476,10 +477,10 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
       
       // Créer des maps pour faciliter la recherche
       final existingGroupMap = {
-        for (var group in existingGroups) group.id: group
+        for (final group in existingGroups) group.id: group,
       };
       final newGroupMap = {
-        for (var group in _optionGroups.where((g) => g.id.isNotEmpty)) group.id: group
+        for (final group in _optionGroups.where((g) => g.id.isNotEmpty)) group.id: group,
       };
       
       // Identifier les groupes à supprimer (existent en DB mais plus dans la nouvelle liste)
@@ -488,12 +489,12 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           .toList();
       
       // Supprimer les groupes qui ne sont plus nécessaires (cascade supprime aussi les options)
-      for (var groupToDelete in groupsToDelete) {
+      for (final groupToDelete in groupsToDelete) {
         await menuService.deleteOptionGroup(groupToDelete.id);
       }
       
       // Traiter chaque groupe de la nouvelle liste
-      for (var newGroup in _optionGroups) {
+      for (final newGroup in _optionGroups) {
         // Vérifier si le groupe existe déjà dans la base de données
         final isExistingGroup = existingGroupMap.containsKey(newGroup.id);
         
@@ -513,7 +514,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           final createdGroup = await menuService.createOptionGroup(groupToCreate);
           
           if (createdGroup != null && newGroup.options.isNotEmpty) {
-            for (var option in newGroup.options) {
+            for (final option in newGroup.options) {
               // Créer toutes les options comme nouvelles (ignorer les IDs temporaires)
               final optionToCreate = MenuOption(
                 id: '', // Laisser la DB générer l'ID
@@ -537,10 +538,10 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           if (existingGroup != null) {
             final existingOptions = existingGroup.options;
             final existingOptionMap = {
-              for (var opt in existingOptions) opt.id: opt
+              for (final opt in existingOptions) opt.id: opt,
             };
             final newOptionMap = {
-              for (var opt in newGroup.options) opt.id: opt
+              for (final opt in newGroup.options) opt.id: opt,
             };
             
             // Supprimer les options qui ne sont plus dans la nouvelle liste
@@ -548,12 +549,12 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
                 .where((existing) => !newOptionMap.containsKey(existing.id))
                 .toList();
             
-            for (var optionToDelete in optionsToDelete) {
+            for (final optionToDelete in optionsToDelete) {
               await menuService.deleteOption(optionToDelete.id);
             }
             
             // Créer ou mettre à jour les options
-            for (var newOption in newGroup.options) {
+            for (final newOption in newGroup.options) {
               if (!existingOptionMap.containsKey(newOption.id)) {
                 // Nouvelle option : créer (ignorer l'ID temporaire)
                 final optionToCreate = MenuOption(
@@ -575,7 +576,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
         }
       }
     } catch (e) {
-      debugPrint('Erreur lors de la synchronisation des optionGroups: $e');
+      Journal.trace('Erreur lors de la synchronisation des optionGroups: $e');
       // Ne pas faire échouer la sauvegarde complète si la sync échoue
       // L'utilisateur pourra réessayer ou gérer manuellement
     }
@@ -623,7 +624,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
 
         // Sauvegarder les optionGroups séparément car Supabase ne gère pas les nested writes complexes
         if (success && _optionGroups.isNotEmpty) {
-          for (var group in _optionGroups) {
+          for (final group in _optionGroups) {
             // Créer le groupe sans l'ID temporaire (laisser la DB générer l'ID)
             final groupToCreate = MenuOptionGroup(
               id: '', // Laisser la DB générer l'ID
@@ -637,7 +638,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
             );
             final createdGroup = await menuService.createOptionGroup(groupToCreate);
             if (createdGroup != null && group.options.isNotEmpty) {
-              for (var option in group.options) {
+              for (final option in group.options) {
                 // Créer l'option sans l'ID temporaire (laisser la DB générer l'ID)
                 final optionToCreate = MenuOption(
                   id: '', // Laisser la DB générer l'ID
@@ -668,18 +669,18 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
                 content: Text('Article enregistré'),
-                backgroundColor: Colors.green),
+                backgroundColor: Colors.green,),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
                 content: Text('Erreur lors de l\'enregistrement'),
-                backgroundColor: Colors.red),
+                backgroundColor: Colors.red,),
           );
         }
       }
     } catch (e) {
-      debugPrint('Error saving item: $e');
+      Journal.trace('Error saving item: $e');
     }
   }
 }

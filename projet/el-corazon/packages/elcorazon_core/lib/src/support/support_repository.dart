@@ -1,8 +1,8 @@
-import '../models/money.dart';
-import '../network/api_client.dart';
-import 'complaint.dart';
-import 'return_request.dart';
-import 'support_ticket.dart';
+import 'package:elcorazon_core/src/models/money.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/support/complaint.dart';
+import 'package:elcorazon_core/src/support/return_request.dart';
+import 'package:elcorazon_core/src/support/support_ticket.dart';
 
 /// Accès à `/api/v1/support/*` — voir `backend/apps/support/{serializers,views}.py`.
 ///

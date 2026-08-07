@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/order_management_service.dart';
-import '../../services/driver_management_service.dart';
-import '../../models/order.dart';
-import '../../models/driver.dart';
-import 'driver_map_screen.dart';
-import '../../ui/ui.dart';
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/models/order.dart';
+import 'package:admin/models/driver.dart';
+import 'package:admin/screens/admin/driver_map_screen.dart';
+import 'package:admin/ui/ui.dart';
 
 class ActiveDeliveriesScreen extends StatefulWidget {
   const ActiveDeliveriesScreen({super.key});
@@ -146,7 +146,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                     selectedColor: sem.success.withValues(alpha: 0.20),
                     onSelected: (selected) {
                       setState(() =>
-                          _statusFilter = selected ? OrderStatus.ready : null);
+                          _statusFilter = selected ? OrderStatus.ready : null,);
                     },
                   ),
                   FilterChip(
@@ -156,7 +156,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                     selectedColor: sem.info.withValues(alpha: 0.20),
                     onSelected: (selected) {
                       setState(() => _statusFilter =
-                          selected ? OrderStatus.onTheWay : null);
+                          selected ? OrderStatus.onTheWay : null,);
                     },
                   ),
                 ],
@@ -302,7 +302,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                     child: Row(
                       children: [
                         Icon(Icons.warning_amber_rounded,
-                            color: scheme.tertiary, size: 20),
+                            color: scheme.tertiary, size: 20,),
                         const SizedBox(width: 8),
                         Text(
                           'Aucun livreur assigné',
@@ -422,7 +422,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
   }
 
   Future<void> _showAssignDriverDialog(
-      BuildContext context, Order order) async {
+      BuildContext context, Order order,) async {
     final driverService = context.read<DriverManagementService>();
     final orderService = context.read<OrderManagementService>();
     final availableDrivers = driverService.getAvailableDrivers();
@@ -451,7 +451,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                 ),
                 title: Text(driver.name),
                 subtitle: Text(
-                    '${driver.totalDeliveries} livraisons • ⭐ ${driver.rating}'),
+                    '${driver.totalDeliveries} livraisons • ⭐ ${driver.rating}',),
                 onTap: () async {
                   Navigator.pop(context);
                   if (driver.userId != null) {
@@ -459,7 +459,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                            content: Text('Livreur ${driver.name} assigné')),
+                            content: Text('Livreur ${driver.name} assigné'),),
                       );
                     }
                   }

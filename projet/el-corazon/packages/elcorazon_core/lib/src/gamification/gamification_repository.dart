@@ -1,7 +1,7 @@
-import '../network/api_client.dart';
-import 'achievement.dart';
-import 'badge.dart';
-import 'challenge.dart';
+import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/gamification/achievement.dart';
+import 'package:elcorazon_core/src/gamification/badge.dart';
+import 'package:elcorazon_core/src/gamification/challenge.dart';
 
 /// Accès à `/api/v1/gamification/*` — voir
 /// `backend/apps/gamification/{serializers,views}.py`. Entièrement en

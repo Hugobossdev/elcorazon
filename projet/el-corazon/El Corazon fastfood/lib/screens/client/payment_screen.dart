@@ -131,7 +131,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         });
       }
     } catch (e) {
-      debugPrint('PaymentScreen: erreur pendant le sondage - $e');
+      eccore.Journal.trace('PaymentScreen: erreur pendant le sondage - $e');
     }
   }
 

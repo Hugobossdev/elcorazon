@@ -101,7 +101,7 @@ class ChatService extends ChangeNotifier {
   Future<bool> sendMessage({required String orderId, required String message}) async {
     final channel = _channels[orderId];
     if (channel == null) {
-      debugPrint('ChatService: canal non ouvert pour la commande $orderId');
+      eccore.Journal.trace('ChatService: canal non ouvert pour la commande $orderId');
       return false;
     }
 
@@ -109,7 +109,7 @@ class ChatService extends ChangeNotifier {
       channel.send({'text': message});
       return true;
     } catch (e) {
-      debugPrint('ChatService: envoi impossible — $e');
+      eccore.Journal.trace('ChatService: envoi impossible — $e');
       return false;
     }
   }

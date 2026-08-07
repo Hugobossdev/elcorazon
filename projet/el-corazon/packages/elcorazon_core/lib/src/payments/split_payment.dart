@@ -1,4 +1,4 @@
-import '../models/money.dart';
+import 'package:elcorazon_core/src/models/money.dart';
 
 /// Part d'un paiement partagé — miroir de `SplitShareSerializer`.
 ///

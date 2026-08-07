@@ -15,10 +15,8 @@ class CustomTextField extends StatefulWidget {
   final int maxLines;
 
   const CustomTextField({
-    super.key,
-    required this.label,
+    required this.label, required this.controller, super.key,
     this.hint,
-    required this.controller,
     this.isPassword = false,
     this.keyboardType = TextInputType.text,
     this.prefixIcon,
@@ -147,9 +145,7 @@ class SearchTextField extends StatefulWidget {
   final VoidCallback? onClear;
 
   const SearchTextField({
-    super.key,
-    required this.hint,
-    required this.controller,
+    required this.hint, required this.controller, super.key,
     this.onChanged,
     this.onClear,
   });

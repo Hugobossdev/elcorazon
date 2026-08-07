@@ -2,7 +2,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import '../config/api_config.dart';
+import 'package:elcora_dely/config/api_config.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class GeocodingService extends ChangeNotifier {
   static final GeocodingService _instance = GeocodingService._internal();
@@ -32,32 +33,35 @@ class GeocodingService extends ChangeNotifier {
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final results = data['results'] as List<dynamic>? ?? const [];
 
-        if (data['status'] == 'OK' && data['results'].isNotEmpty) {
-          final location = data['results'][0]['geometry']['location'];
+        if (data['status'] == 'OK' && results.isNotEmpty) {
+          final premier = results.first as Map<String, dynamic>;
+          final geometry = premier['geometry'] as Map<String, dynamic>;
+          final location = geometry['location'] as Map<String, dynamic>;
           final latLng = LatLng(
-            location['lat'].toDouble(),
-            location['lng'].toDouble(),
+            (location['lat'] as num).toDouble(),
+            (location['lng'] as num).toDouble(),
           );
 
           // Mettre en cache le résultat
           _addressCache[address] = latLng;
 
-          debugPrint(
+          Journal.trace(
               'GeocodingService: Adresse géocodée - $address -> $latLng');
           return latLng;
         } else {
-          debugPrint(
+          Journal.trace(
               'GeocodingService: Erreur de géocodage - ${data['status']}');
           return null;
         }
       } else {
-        debugPrint('GeocodingService: Erreur HTTP - ${response.statusCode}');
+        Journal.trace('GeocodingService: Erreur HTTP - ${response.statusCode}');
         return null;
       }
     } catch (e) {
-      debugPrint('GeocodingService: Erreur de géocodage - $e');
+      Journal.trace('GeocodingService: Erreur de géocodage - $e');
       return null;
     }
   }
@@ -75,24 +79,27 @@ class GeocodingService extends ChangeNotifier {
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final results = data['results'] as List<dynamic>? ?? const [];
 
-        if (data['status'] == 'OK' && data['results'].isNotEmpty) {
-          final address = data['results'][0]['formatted_address'];
-          debugPrint(
+        if (data['status'] == 'OK' && results.isNotEmpty) {
+          final address =
+              (results.first as Map<String, dynamic>)['formatted_address']
+                  as String?;
+          Journal.trace(
               'GeocodingService: Coordonnées inversées - $coordinates -> $address');
           return address;
         } else {
-          debugPrint(
+          Journal.trace(
               'GeocodingService: Erreur de géocodage inverse - ${data['status']}');
           return null;
         }
       } else {
-        debugPrint('GeocodingService: Erreur HTTP - ${response.statusCode}');
+        Journal.trace('GeocodingService: Erreur HTTP - ${response.statusCode}');
         return null;
       }
     } catch (e) {
-      debugPrint('GeocodingService: Erreur de géocodage inverse - $e');
+      Journal.trace('GeocodingService: Erreur de géocodage inverse - $e');
       return null;
     }
   }
@@ -134,26 +141,30 @@ class GeocodingService extends ChangeNotifier {
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final rows = data['rows'] as List<dynamic>? ?? const [];
 
-        if (data['status'] == 'OK' && data['rows'].isNotEmpty) {
-          final duration = data['rows'][0]['elements'][0]['duration']
-              ['value']; // en secondes
+        if (data['status'] == 'OK' && rows.isNotEmpty) {
+          final premiere = rows.first as Map<String, dynamic>;
+          final element = (premiere['elements'] as List<dynamic>).first
+              as Map<String, dynamic>;
+          final duration = (element['duration'] as Map<String, dynamic>)['value']
+              as num; // en secondes
           final minutes = (duration / 60).round();
-          debugPrint(
+          Journal.trace(
               'GeocodingService: Temps de trajet calculé - $minutes minutes');
           return minutes;
         } else {
-          debugPrint(
+          Journal.trace(
               'GeocodingService: Erreur de calcul de temps - ${data['status']}');
           return null;
         }
       } else {
-        debugPrint('GeocodingService: Erreur HTTP - ${response.statusCode}');
+        Journal.trace('GeocodingService: Erreur HTTP - ${response.statusCode}');
         return null;
       }
     } catch (e) {
-      debugPrint('GeocodingService: Erreur de calcul de temps - $e');
+      Journal.trace('GeocodingService: Erreur de calcul de temps - $e');
       return null;
     }
   }
@@ -174,45 +185,47 @@ class GeocodingService extends ChangeNotifier {
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final routes = data['routes'] as List<dynamic>? ?? const [];
 
-        if (data['status'] == 'OK' && data['routes'].isNotEmpty) {
-          final route = data['routes'][0];
-          final legs = route['legs'];
-          final List<LatLng> points = [];
+        if (data['status'] == 'OK' && routes.isNotEmpty) {
+          final route = routes.first as Map<String, dynamic>;
+          final legs = route['legs'] as List<dynamic>;
+          final points = <LatLng>[];
 
-          for (var leg in legs) {
-            final steps = leg['steps'];
-            for (var step in steps) {
-              final startLocation = step['start_location'];
-              points.add(LatLng(
-                startLocation['lat'].toDouble(),
-                startLocation['lng'].toDouble(),
-              ));
+          LatLng point(Map<String, dynamic> coordonnees) => LatLng(
+                (coordonnees['lat'] as num).toDouble(),
+                (coordonnees['lng'] as num).toDouble(),
+              );
+
+          for (final leg in legs) {
+            final steps = (leg as Map<String, dynamic>)['steps'] as List<dynamic>;
+            for (final step in steps) {
+              final depart = (step as Map<String, dynamic>)['start_location']
+                  as Map<String, dynamic>;
+              points.add(point(depart));
             }
           }
 
           // Ajouter le point final
-          final endLocation = legs.last['end_location'];
-          points.add(LatLng(
-            endLocation['lat'].toDouble(),
-            endLocation['lng'].toDouble(),
-          ));
+          final arrivee = (legs.last as Map<String, dynamic>)['end_location']
+              as Map<String, dynamic>;
+          points.add(point(arrivee));
 
-          debugPrint(
+          Journal.trace(
               'GeocodingService: Directions obtenues - ${points.length} points');
           return points;
         } else {
-          debugPrint(
+          Journal.trace(
               'GeocodingService: Erreur de directions - ${data['status']}');
           return null;
         }
       } else {
-        debugPrint('GeocodingService: Erreur HTTP - ${response.statusCode}');
+        Journal.trace('GeocodingService: Erreur HTTP - ${response.statusCode}');
         return null;
       }
     } catch (e) {
-      debugPrint('GeocodingService: Erreur de directions - $e');
+      Journal.trace('GeocodingService: Erreur de directions - $e');
       return null;
     }
   }
@@ -220,7 +233,7 @@ class GeocodingService extends ChangeNotifier {
   /// Vide le cache de géocodage
   void clearCache() {
     _addressCache.clear();
-    debugPrint('GeocodingService: Cache vidé');
+    Journal.trace('GeocodingService: Cache vidé');
   }
 }
 

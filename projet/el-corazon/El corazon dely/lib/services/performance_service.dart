@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'dart:async';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Service de monitoring des performances
 class PerformanceService extends ChangeNotifier {
@@ -206,13 +207,13 @@ class PerformanceService extends ChangeNotifier {
   void logMetrics() {
     if (kDebugMode) {
       final report = getPerformanceReport();
-      debugPrint('📊 Performance Report:');
-      debugPrint('   Total operations: ${report.totalOperations}');
-      debugPrint(
+      Journal.trace('📊 Performance Report:');
+      Journal.trace('   Total operations: ${report.totalOperations}');
+      Journal.trace(
           '   Average duration: ${report.averageDuration.inMilliseconds}ms');
-      debugPrint('   Slowest operations:');
+      Journal.trace('   Slowest operations:');
       for (final metric in report.slowestOperations) {
-        debugPrint(
+        Journal.trace(
             '     ${metric.operation}: ${metric.duration.inMilliseconds}ms');
       }
     }
