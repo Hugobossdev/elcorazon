@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 // `_fromDjangoUser`, qui traduit le premier vers le second.
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_dely/models/user.dart';
-import 'package:elcora_dely/models/menu_item.dart';
 import 'package:elcora_dely/models/order.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/services/location_service.dart';
@@ -59,9 +58,7 @@ class AppService extends ChangeNotifier {
 
   User? _currentUser;
   bool _isInitialized = false;
-  final List<MenuItem> _menuItems = [];
   List<Order> _orders = [];
-  final List<MenuItem> _cartItems = [];
 
   // Services intégrés
   final LocationService _locationService = LocationService();
@@ -86,17 +83,9 @@ class AppService extends ChangeNotifier {
 
   // Getters
   User? get currentUser => _currentUser;
-  List<MenuItem> get menuItems => _menuItems.isNotEmpty ? _menuItems : [];
   List<Order> get orders => _orders;
-  List<MenuItem> get cartItems => _cartItems;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
-
-  // Obtenir les catégories uniques des items du menu
-  List<String> get categories {
-    if (_menuItems.isEmpty) return ['Burgers', 'Pizzas', 'Drinks', 'Desserts'];
-    return _menuItems.map((item) => item.category.displayName).toSet().toList();
-  }
 
   // Services getters
   LocationService get locationService => _locationService;
@@ -106,14 +95,6 @@ class AppService extends ChangeNotifier {
   bool get isAdmin => _currentUser?.role == UserRole.admin;
   bool get isDeliveryStaff => _currentUser?.role == UserRole.delivery;
   bool get isClient => _currentUser?.role == UserRole.client;
-
-  double get cartTotal {
-    return _cartItems.fold(0.0, (sum, item) => sum + item.price);
-  }
-
-  int get cartItemCount {
-    return _cartItems.length;
-  }
 
   @override
   void dispose() {
@@ -280,35 +261,10 @@ class AppService extends ChangeNotifier {
       // stockage sécurisé (Phase 6) ; `_currentUser` repasse à `null` via le
       // pont d'écoute (`_onSessionChanged`), pas ici directement.
       await _container.read(eccore.sessionProvider.notifier).logout();
-      _cartItems.clear();
       notifyListeners();
     } catch (e) {
       eccore.Journal.trace('Logout error: $e');
     }
-  }
-
-  // Cart methods
-  void addToCart(MenuItem menuItem) {
-    _cartItems.add(menuItem);
-    notifyListeners();
-  }
-
-  void removeFromCart(MenuItem menuItem) {
-    _cartItems.remove(menuItem);
-    notifyListeners();
-  }
-
-  void updateCartItemQuantity(MenuItem menuItem, int newQuantity) {
-    if (newQuantity <= 0) {
-      _cartItems.remove(menuItem);
-    }
-    // Pour simplifier, on ne gère pas les quantités différentes pour le moment
-    notifyListeners();
-  }
-
-  void clearCart() {
-    _cartItems.clear();
-    notifyListeners();
   }
 
   bool _isLoadingOrders = false;

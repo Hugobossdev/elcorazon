@@ -9,7 +9,6 @@ import 'package:elcora_dely/screens/delivery/delivery_home_screen.dart';
 import 'package:elcora_dely/screens/delivery/delivery_orders_screen.dart';
 import 'package:elcora_dely/screens/delivery/analytics_screen.dart';
 import 'package:elcora_dely/screens/delivery/address_management_screen.dart';
-import 'package:elcora_dely/screens/delivery/promo_codes_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
@@ -149,11 +148,6 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
             icon: Icons.location_on,
             title: 'Gestion des adresses',
             onTap: () => _navigateToAddressManagement(),
-          ),
-          _buildDrawerItem(
-            icon: Icons.local_offer,
-            title: 'Codes promo',
-            onTap: () => _navigateToPromoCodes(),
           ),
           _buildDrawerItem(
             icon: Icons.payment,
@@ -336,15 +330,6 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
     );
   }
 
-  void _navigateToPromoCodes() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const PromoCodesScreen(),
-      ),
-    );
-  }
-
   void _navigateToPayments() {
     final appService = Provider.of<AppService>(context, listen: false);
     final assignedDeliveries = appService.assignedDeliveries;
@@ -501,17 +486,6 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
                     onTap: () {
                       Navigator.pop(context);
                       _navigateToAddressManagement();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildQuickActionButton(
-                    icon: Icons.local_offer,
-                    title: 'Codes promo',
-                    onTap: () {
-                      Navigator.pop(context);
-                      _navigateToPromoCodes();
                     },
                   ),
                 ),
