@@ -6,7 +6,8 @@ import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/models/order.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/utils/price_formatter.dart';
@@ -2366,7 +2367,7 @@ class _AdvancedOrderManagementScreenState
     }
 
     // Livreur sélectionné
-    Driver? selectedDriver;
+    eccore.CourierProfile? selectedDriver;
 
     final screenSize = MediaQuery.of(context).size;
     final dialogWidth = (screenSize.width * 0.9).clamp(500.0, 800.0);
@@ -2514,7 +2515,7 @@ class _AdvancedOrderManagementScreenState
                                             width: 12,
                                             height: 12,
                                             decoration: BoxDecoration(
-                                              color: driver.status.color,
+                                              color: driver.statut.couleur,
                                               shape: BoxShape.circle,
                                             ),
                                           ),
@@ -2529,7 +2530,7 @@ class _AdvancedOrderManagementScreenState
                                                   children: [
                                                     Expanded(
                                                       child: Text(
-                                                        driver.name,
+                                                        driver.fullName,
                                                         style: TextStyle(
                                                           fontWeight:
                                                               FontWeight.bold,
@@ -2565,7 +2566,7 @@ class _AdvancedOrderManagementScreenState
                                                     ),
                                                     const SizedBox(width: 4),
                                                     Text(
-                                                      driver.rating
+                                                      driver.ratingAverage
                                                           .toStringAsFixed(1),
                                                       style: TextStyle(
                                                         fontSize: 12,
@@ -2584,7 +2585,7 @@ class _AdvancedOrderManagementScreenState
                                                     ),
                                                     const SizedBox(width: 4),
                                                     Text(
-                                                      '${driver.totalDeliveries} livraisons',
+                                                      '${driver.deliveriesCompleted} livraisons',
                                                       style: TextStyle(
                                                         fontSize: 12,
                                                         color: Theme.of(context)
@@ -2594,23 +2595,22 @@ class _AdvancedOrderManagementScreenState
                                                     ),
                                                   ],
                                                 ),
-                                                if (driver.vehicleType !=
-                                                    null) ...[
-                                                  const SizedBox(height: 4),
-                                                  Text(
-                                                    'Véhicule: ${driver.vehicleType}',
-                                                    style: TextStyle(
-                                                      fontSize: 11,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant
-                                                          .withValues(
-                                                              alpha: 0.85,),
-                                                      fontStyle:
-                                                          FontStyle.italic,
-                                                    ),
+                                                ...[
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  'Véhicule: ${driver.vehicleType}',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant
+                                                        .withValues(
+                                                            alpha: 0.85,),
+                                                    fontStyle:
+                                                        FontStyle.italic,
                                                   ),
-                                                ],
+                                                ),
+                                              ],
                                               ],
                                             ),
                                           ),
@@ -2657,8 +2657,7 @@ class _AdvancedOrderManagementScreenState
 
                                   // Assigner le livreur
                                   // Vérifier que le driver a un userId avant d'assigner
-                                  if (selectedDriver!.userId == null ||
-                                      selectedDriver!.userId!.isEmpty) {
+                                  if (selectedDriver!.id.isEmpty) {
                                     if (context.mounted) {
                                       final scheme =
                                           Theme.of(context).colorScheme;
@@ -2699,7 +2698,7 @@ class _AdvancedOrderManagementScreenState
                                   final success =
                                       await orderService.assignDriver(
                                     order.id,
-                                    selectedDriver!.userId!,
+                                    selectedDriver!.id,
                                   );
 
                                   if (success) {
@@ -2732,7 +2731,7 @@ class _AdvancedOrderManagementScreenState
                                               const SizedBox(width: 8),
                                               Expanded(
                                                 child: Text(
-                                                  'Livreur ${selectedDriver!.name} assigné avec succès',
+                                                  'Livreur ${selectedDriver!.fullName} assigné avec succès',
                                                   style: TextStyle(
                                                     color:
                                                         scheme.onInverseSurface,

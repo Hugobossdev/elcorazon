@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/driver_schedule_service.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/statut_livreur.dart';
 
 /// Écran de gestion des horaires d'un livreur
 class DriverScheduleScreen extends StatefulWidget {
-  final Driver driver;
+  final eccore.CourierProfile driver;
 
   const DriverScheduleScreen({
     required this.driver, super.key,
@@ -131,7 +132,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
               radius: 30,
               backgroundColor: theme.colorScheme.primaryContainer,
               child: Text(
-                widget.driver.name.substring(0, 1).toUpperCase(),
+                widget.driver.fullName.substring(0, 1).toUpperCase(),
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
@@ -146,7 +147,7 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.driver.name,
+                  widget.driver.fullName,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 22,
@@ -175,13 +176,13 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
                 Row(
                   children: [
                     Icon(Icons.circle,
-                        color: widget.driver.isActive
+                        color: widget.driver.estValide
                             ? Colors.greenAccent
                             : Colors.orangeAccent,
                         size: 12,),
                     const SizedBox(width: 8),
                     Text(
-                      widget.driver.isActive
+                      widget.driver.estValide
                           ? 'En service'
                           : 'Hors service',
                       style: const TextStyle(

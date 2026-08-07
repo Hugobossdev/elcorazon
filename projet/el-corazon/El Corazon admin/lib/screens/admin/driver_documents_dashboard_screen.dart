@@ -6,7 +6,7 @@ import 'package:admin/services/driver_document_service.dart' as svc;
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/screens/admin/driver_document_validation_screen.dart';
 
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 class DriverDocumentsDashboardScreen extends StatefulWidget {
   const DriverDocumentsDashboardScreen({super.key});
@@ -215,27 +215,14 @@ class _DriverDocumentsDashboardScreenState
   Future<void> _navigateToValidation(PieceLivreur doc) async {
     final driverService = context.read<DriverManagementService>();
     
-    // Essayer de trouver le livreur dans la liste chargée
-    Driver? driver;
-    try {
-      driver = driverService.drivers.firstWhere(
-        (d) => d.userId == doc.courierId || d.id == doc.courierId,
-      );
-    } catch (_) {
-      // Si non trouvé dans la liste (ex: pas chargé), créer un objet temporaire
-      // ou idéalement charger le livreur spécifique
-      if (doc.nomLivreur != null) {
-        driver = Driver(
-          id: doc.courierId,
-          userId: doc.courierId,
-          authUserId: doc.courierId,
-          name: doc.nomLivreur!,
-          email: doc.emailLivreur ?? '',
-          phone: '',
-          status: DriverStatus.unavailable, // Statut par défaut
-          isActive: false,
-          createdAt: DateTime.now(),
-        );
+    // Un dossier fictif était fabriqué quand la liste ne contenait pas le
+    // livreur : l'écran de validation s'ouvrait alors sur un dossier inexistant,
+    // dont aucune action n'aurait abouti.
+    eccore.CourierProfile? driver;
+    for (final dossier in driverService.drivers) {
+      if (dossier.id == doc.courierId) {
+        driver = dossier;
+        break;
       }
     }
 

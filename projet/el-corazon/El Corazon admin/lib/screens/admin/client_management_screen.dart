@@ -196,7 +196,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                             itemBuilder: (context, index) {
                               final client = _filteredClients[index];
                               final orders = appService.allOrders
-                                  .where((o) => o.userId == client.id)
+                                  .where((o) => o.id == client.id)
                                   .toList();
                               final totalSpent = orders
                                   .where(

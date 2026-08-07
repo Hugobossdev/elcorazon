@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/driver_management_service.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/screens/admin/driver_form_dialog.dart';
@@ -45,7 +46,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       if (!mounted) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -89,7 +90,6 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                 Tab(
                     icon: Icon(Icons.check_circle_outline),
                     text: 'Disponibles',),
-                Tab(icon: Icon(Icons.delivery_dining), text: 'En course'),
                 Tab(
                     icon: Icon(Icons.offline_bolt_outlined),
                     text: 'Hors ligne',),
@@ -110,11 +110,9 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                   children: [
                     _buildOverviewTab(context, driverService),
                     _buildDriverListTab(
-                        context, driverService, DriverStatus.available,),
+                        context, driverService, StatutLivreur.disponible,),
                     _buildDriverListTab(
-                        context, driverService, DriverStatus.onDelivery,),
-                    _buildDriverListTab(
-                        context, driverService, DriverStatus.offline,),
+                        context, driverService, StatutLivreur.horsLigne,),
                     const DriverDetailedStatsScreen(
                         driver: null,), // Placeholder for global stats tab
                   ],
@@ -222,7 +220,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   }
 
   Widget _buildDriverListTab(BuildContext context,
-      DriverManagementService service, DriverStatus status,) {
+      DriverManagementService service, StatutLivreur status,) {
     final drivers = service.getDriversByStatus(status);
 
     if (drivers.isEmpty) {
@@ -238,7 +236,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
             ),
             const SizedBox(height: 16),
             Text(
-              'Aucun livreur ${status.displayName.toLowerCase()}',
+              'Aucun livreur ${status.libelle.toLowerCase()}',
               style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 16),
             ),
           ],
@@ -254,7 +252,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
     );
   }
 
-  Widget _buildMockMap(BuildContext context, List<Driver> drivers) {
+  Widget _buildMockMap(BuildContext context, List<eccore.CourierProfile> drivers) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     return InkWell(
@@ -324,13 +322,13 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                   child: CircleAvatar(
                     radius: 14,
                     backgroundColor:
-                        _getStatusColor(driver.status).withValues(alpha: 0.2),
+                        _getStatusColor(driver.statut).withValues(alpha: 0.2),
                     child: Text(
-                      driver.name[0],
+                      driver.fullName[0],
                       style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: _getStatusColor(driver.status),),
+                          color: _getStatusColor(driver.statut),),
                     ),
                   ),
                 ),
@@ -424,7 +422,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   }
 
   Widget _buildDriverCard(
-      BuildContext context, Driver driver, DriverManagementService service,) {
+      BuildContext context, eccore.CourierProfile driver, DriverManagementService service,) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -442,24 +440,24 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
               leading: CircleAvatar(
                 radius: 24,
                 backgroundColor:
-                    _getStatusColor(driver.status).withValues(alpha: 0.1),
+                    _getStatusColor(driver.statut).withValues(alpha: 0.1),
                 child: Text(
-                  driver.name[0].toUpperCase(),
+                  driver.fullName[0].toUpperCase(),
                   style: TextStyle(
-                    color: _getStatusColor(driver.status),
+                    color: _getStatusColor(driver.statut),
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
               title: Text(
-                driver.name,
+                driver.fullName,
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               subtitle: Row(
                 children: [
                   Icon(Icons.star, size: 14, color: scheme.tertiary),
                   Text(
-                    ' ${driver.rating.toStringAsFixed(1)} • ${driver.totalDeliveries} courses',
+                    ' ${driver.ratingAverage.toStringAsFixed(1)} • ${driver.deliveriesCompleted} courses',
                     style: TextStyle(
                       color: scheme.onSurfaceVariant,
                       fontSize: 12,
@@ -470,13 +468,13 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
               trailing: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: _getStatusColor(driver.status).withValues(alpha: 0.1),
+                  color: _getStatusColor(driver.statut).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  driver.status.displayName,
+                  driver.statut.libelle,
                   style: TextStyle(
-                    color: _getStatusColor(driver.status),
+                    color: _getStatusColor(driver.statut),
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
@@ -531,7 +529,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   }
 
   Widget _buildDriverListItem(
-      BuildContext context, Driver driver, DriverManagementService service,) {
+      BuildContext context, eccore.CourierProfile driver, DriverManagementService service,) {
     final scheme = Theme.of(context).colorScheme;
     return ListTile(
       onTap: () => Navigator.push(
@@ -539,11 +537,11 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
           MaterialPageRoute(
               builder: (_) => DriverDetailedStatsScreen(driver: driver),),),
       leading: CircleAvatar(
-        child: Text(driver.name[0]),
+        child: Text(driver.fullName[0]),
       ),
-      title: Text(driver.name,
+      title: Text(driver.fullName,
           style: const TextStyle(fontWeight: FontWeight.bold),),
-      subtitle: Text('${driver.totalDeliveries} livraisons'),
+      subtitle: Text('${driver.deliveriesCompleted} livraisons'),
       trailing: Icon(
         Icons.chevron_right,
         color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
@@ -571,17 +569,15 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
     );
   }
 
-  Color _getStatusColor(DriverStatus status) {
+  Color _getStatusColor(StatutLivreur status) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     switch (status) {
-      case DriverStatus.available:
+      case StatutLivreur.disponible:
         return sem.success;
-      case DriverStatus.onDelivery:
-        return sem.warning;
-      case DriverStatus.offline:
+      case StatutLivreur.horsLigne:
         return scheme.onSurfaceVariant;
-      case DriverStatus.unavailable:
+      case StatutLivreur.indisponible:
         return sem.danger;
     }
   }
@@ -595,16 +591,16 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
           mainAxisSize: MainAxisSize.min,
           children: [
             // Filtrer par statut
-            DropdownButtonFormField<DriverStatus>(
+            DropdownButtonFormField<StatutLivreur>(
               decoration: const InputDecoration(
                 labelText: 'Statut',
                 border: OutlineInputBorder(),
                 prefixIcon: Icon(Icons.filter_alt),
               ),
-              items: DriverStatus.values.map((status) {
+              items: StatutLivreur.values.map((status) {
                 return DropdownMenuItem(
                   value: status,
-                  child: Text(status.displayName),
+                  child: Text(status.libelle),
                 );
               }).toList(),
               onChanged: (status) {
@@ -659,7 +655,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
     );
   }
 
-  void _editDriver(Driver driver) {
+  void _editDriver(eccore.CourierProfile driver) {
     DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => DriverFormDialog(driver: driver),

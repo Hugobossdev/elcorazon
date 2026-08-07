@@ -3,13 +3,13 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/models/order.dart';
 import 'package:admin/widgets/custom_bar_chart.dart';
 import 'package:admin/utils/price_formatter.dart';
 
 class DriverHistoryScreen extends StatefulWidget {
-  final Driver driver;
+  final eccore.CourierProfile driver;
 
   const DriverHistoryScreen({required this.driver, super.key});
 
@@ -44,7 +44,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Historique', style: TextStyle(fontSize: 16)),
-            Text(widget.driver.name,
+            Text(widget.driver.fullName,
                 style: const TextStyle(
                     fontSize: 12, fontWeight: FontWeight.normal,),),
           ],
@@ -131,7 +131,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
   }
 
   List<Order> _getDriverOrders(List<Order> allOrders) {
-    final driverUserId = widget.driver.userId ?? widget.driver.id;
+    final driverUserId = widget.driver.id;
 
     return allOrders.where((order) {
       if (order.deliveryPersonId != driverUserId &&

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/driver_management_service.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/custom_text_field.dart';
 
 class DriverFormDialog extends StatefulWidget {
-  final Driver? driver;
+  final eccore.CourierProfile? driver;
 
   const DriverFormDialog({super.key, this.driver});
 
@@ -31,7 +32,7 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
   /// sélecteur alimenté par `/restaurants/`.
   static const String _restaurantSlug = 'el-corazon-lome';
 
-  DriverStatus _selectedStatus = DriverStatus.available;
+  StatutLivreur _selectedStatus = StatutLivreur.disponible;
   String? _selectedVehicleType;
   List<String> _selectedZones = [];
   bool _isLoading = false;
@@ -54,12 +55,11 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
 
   void _initializeWithDriver() {
     final driver = widget.driver!;
-    _nameController.text = driver.name;
+    _nameController.text = driver.fullName;
     _emailController.text = driver.email;
-    _phoneController.text = driver.phone;
     _vehicleNumberController.text =
-        driver.licensePlate ?? ''; // vehicleNumber n'est pas défini
-    _selectedStatus = driver.status;
+        driver.vehiclePlate;
+    _selectedStatus = driver.statut;
     _selectedVehicleType = driver.vehicleType;
     _selectedZones = <String>[]; // assignedZones n'est pas défini
   }
@@ -255,20 +255,20 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                           constraints: const BoxConstraints(
                             minHeight: 56,
                           ),
-                          child: DropdownButtonFormField<DriverStatus>(
+                          child: DropdownButtonFormField<StatutLivreur>(
                             decoration: const InputDecoration(
                               labelText: 'Statut du livreur',
                               border: OutlineInputBorder(),
                             ),
                             initialValue: _selectedStatus,
-                            items: DriverStatus.values.map((status) {
-                              return DropdownMenuItem<DriverStatus>(
+                            items: StatutLivreur.values.map((status) {
+                              return DropdownMenuItem<StatutLivreur>(
                                 value: status,
                                 child: Row(
                                   children: [
-                                    Icon(status.icon), // emoji n'est pas défini
+                                    Icon(status.icone), // emoji n'est pas défini
                                     const SizedBox(width: 8),
-                                    Text(status.displayName),
+                                    Text(status.libelle),
                                   ],
                                 ),
                               );
@@ -489,7 +489,7 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
         // et ils demandent des permissions distinctes.
         success = await driverService.setVerification(
           widget.driver!.id,
-          _selectedStatus == DriverStatus.unavailable ? 'suspended' : 'approved',
+          _selectedStatus == StatutLivreur.indisponible ? 'suspended' : 'approved',
         );
       }
 

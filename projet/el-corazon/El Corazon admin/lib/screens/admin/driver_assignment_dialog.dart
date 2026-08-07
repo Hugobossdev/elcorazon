@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/models/order.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/utils/price_formatter.dart';
@@ -17,7 +18,7 @@ class DriverAssignmentDialog extends StatefulWidget {
 }
 
 class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
-  Driver? _selectedDriver;
+  eccore.CourierProfile? _selectedDriver;
   bool _isLoading = false;
   String? _error;
 
@@ -119,9 +120,7 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
                     // Filtrer les livreurs disponibles
                     final availableDrivers = driverService.drivers
                         .where(
-                          (driver) =>
-                              driver.status == DriverStatus.available ||
-                              driver.status == DriverStatus.onDelivery,
+                          (driver) => driver.statut == StatutLivreur.disponible,
                         )
                         .toList();
 
@@ -210,7 +209,7 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
                         const Divider(height: 1),
                         // Liste des livreurs
                         Expanded(
-                          child: RadioGroup<Driver>(
+                          child: RadioGroup<eccore.CourierProfile>(
                             groupValue: _selectedDriver,
                             onChanged: (value) {
                               setState(() {
@@ -239,10 +238,10 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
                                     constraints: const BoxConstraints(
                                       minHeight: 56,
                                     ),
-                                    child: RadioListTile<Driver>(
+                                    child: RadioListTile<eccore.CourierProfile>(
                                       value: driver,
                                       title: Text(
-                                        driver.name,
+                                        driver.fullName,
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           color: isSelected
@@ -260,44 +259,44 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
                                           Row(
                                             children: [
                                               Icon(
-                                                driver.status.icon,
+                                                driver.statut.icone,
                                                 size: 14,
                                                 color: _getStatusColor(
-                                                  driver.status,
+                                                  driver.statut,
                                                 ),
                                               ),
                                               const SizedBox(width: 4),
                                               Text(
-                                                driver.status.displayName,
+                                                driver.statut.libelle,
                                                 style: TextStyle(
                                                   fontSize: 12,
                                                   color: _getStatusColor(
-                                                    driver.status,
+                                                    driver.statut,
                                                   ),
                                                 ),
                                               ),
                                             ],
                                           ),
-                                          if (driver.vehicleType != null) ...[
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              children: [
-                                                Icon(
-                                                  Icons.motorcycle,
-                                                  size: 14,
+                                          ...[
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                Icons.motorcycle,
+                                                size: 14,
+                                                color: Colors.grey[600],
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                driver.vehicleType,
+                                                style: TextStyle(
+                                                  fontSize: 12,
                                                   color: Colors.grey[600],
                                                 ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  driver.vehicleType!,
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: Colors.grey[600],
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
+                                              ),
+                                            ],
+                                          ),
+                                        ],
                                         ],
                                       ),
                                       secondary: CircleAvatar(
@@ -305,7 +304,7 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
                                           context,
                                         ).colorScheme.primary,
                                         child: Text(
-                                          driver.name
+                                          driver.fullName
                                               .substring(0, 1)
                                               .toUpperCase(),
                                           style: TextStyle(
@@ -380,15 +379,13 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
     );
   }
 
-  Color _getStatusColor(DriverStatus status) {
+  Color _getStatusColor(StatutLivreur status) {
     switch (status) {
-      case DriverStatus.available:
+      case StatutLivreur.disponible:
         return Colors.green;
-      case DriverStatus.onDelivery:
-        return Colors.orange;
-      case DriverStatus.offline:
+      case StatutLivreur.horsLigne:
         return Colors.grey;
-      case DriverStatus.unavailable:
+      case StatutLivreur.indisponible:
         return Colors.red;
     }
   }
@@ -405,7 +402,7 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
       final orderService = context.read<OrderManagementService>();
 
       // Utiliser user_id si disponible, sinon utiliser l'id du driver
-      final driverId = _selectedDriver!.userId ?? _selectedDriver!.id;
+      final driverId = _selectedDriver!.id;
 
       final success = await orderService.assignDriver(
         widget.order.id,
@@ -419,7 +416,7 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Livreur ${_selectedDriver!.name} assigné avec succès',
+              'Livreur ${_selectedDriver!.fullName} assigné avec succès',
             ),
             backgroundColor: Colors.green,
           ),

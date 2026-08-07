@@ -4,7 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/geocoding_service.dart' as geocoding;
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/models/order.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
@@ -19,10 +20,10 @@ class DriverMapScreen extends StatefulWidget {
 }
 
 class _DriverMapScreenState extends State<DriverMapScreen> {
-  final Map<String, Driver> _selectedDrivers = {};
+  final Map<String, eccore.CourierProfile> _selectedDrivers = {};
   bool _showAllDrivers = true;
   String? _selectedZone;
-  DriverStatus? _statusFilter;
+  StatutLivreur? _statusFilter;
   bool _showOrders = true;
   bool _showRoutes = true;
   GoogleMapController? _mapController;
@@ -161,8 +162,8 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                       Padding(
                         padding: const EdgeInsets.only(left: 8),
                         child: Chip(
-                          label: Text(_statusFilter!.displayName),
-                          avatar: Icon(_statusFilter!.icon, size: 18),
+                          label: Text(_statusFilter!.libelle),
+                          avatar: Icon(_statusFilter!.icone, size: 18),
                           onDeleted: () {
                             setState(() {
                               _statusFilter = null;
@@ -179,13 +180,11 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                   runSpacing: 4,
                   children: [
                     _buildLegendItem(
-                        DriverStatus.available, 'Disponible', Colors.green,),
+                        StatutLivreur.disponible, 'Disponible', Colors.green,),
                     _buildLegendItem(
-                        DriverStatus.onDelivery, 'En livraison', Colors.orange,),
+                        StatutLivreur.horsLigne, 'Hors ligne', Colors.grey,),
                     _buildLegendItem(
-                        DriverStatus.offline, 'Hors ligne', Colors.grey,),
-                    _buildLegendItem(
-                        DriverStatus.unavailable, 'Indisponible', Colors.red,),
+                        StatutLivreur.indisponible, 'Indisponible', Colors.red,),
                   ],
                 ),
               ],
@@ -213,13 +212,13 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                   // Filtrer les livreurs qui sont dans la zone sélectionnée
                   filteredDrivers = filteredDrivers.where((driver) {
                     // Si le livreur n'a pas de position, l'exclure
-                    if (driver.latitude == null || driver.longitude == null) {
+                    if (driver.lastLatitude == null || driver.lastLongitude == null) {
                       return false;
                     }
                     // Vérifier si le livreur est dans le polygone de la zone
                     return _isPointInPolygon(
-                      driver.latitude!,
-                      driver.longitude!,
+                      driver.lastLatitude!,
+                      driver.lastLongitude!,
                       selectedZone.polygon,
                     );
                   }).toList();
@@ -227,7 +226,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
 
                 if (_statusFilter != null) {
                   filteredDrivers = filteredDrivers
-                      .where((driver) => driver.status == _statusFilter)
+                      .where((driver) => driver.statut == _statusFilter)
                       .toList();
                 }
 
@@ -281,9 +280,9 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                       Consumer<DriverManagementService>(
                         builder: (context, service, child) {
                           final onlineCount = service.drivers
-                              .where((d) =>
-                                  d.status == DriverStatus.available ||
-                                  d.status == DriverStatus.onDelivery,)
+                              .where(
+                                (d) => d.statut == StatutLivreur.disponible,
+                              )
                               .length;
                           return Text(
                             '$onlineCount en ligne',
@@ -325,15 +324,15 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: _getStatusColor(driver.status),
+                                backgroundColor: _getStatusColor(driver.statut),
                                 child: Icon(
-                                  driver.status.icon,
+                                  driver.statut.icone,
                                   color: Colors.white,
                                   size: 20,
                                 ),
                               ),
                               title: Text(
-                                driver.name,
+                                driver.fullName,
                                 style: const TextStyle(
                                     fontWeight: FontWeight.bold,),
                               ),
@@ -341,17 +340,16 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    driver.status.displayName,
+                                    driver.statut.libelle,
                                     style: TextStyle(
-                                      color: _getStatusColor(driver.status),
+                                      color: _getStatusColor(driver.statut),
                                       fontSize: 12,
                                     ),
                                   ),
-                                  if (driver.vehicleType != null)
-                                    Text(
-                                      driver.vehicleType!,
-                                      style: const TextStyle(fontSize: 12),
-                                    ),
+                                  Text(
+                                    driver.vehicleType,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
                                 ],
                               ),
                               trailing: Container(
@@ -391,29 +389,26 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  Widget _buildMapView(List<Driver> drivers, List<Order> orders) {
+  Widget _buildMapView(List<eccore.CourierProfile> drivers, List<Order> orders) {
     final Set<Marker> markers = {};
     final Set<Polyline> polylines = {};
 
     // Marqueurs pour les livreurs
     for (final driver in drivers) {
-      if (driver.latitude != null && driver.longitude != null) {
+      if (driver.lastLatitude != null && driver.lastLongitude != null) {
         markers.add(
           Marker(
             markerId: MarkerId('driver_${driver.id}'),
-            position: LatLng(driver.latitude!, driver.longitude!),
+            position: LatLng(driver.lastLatitude!, driver.lastLongitude!),
             infoWindow: InfoWindow(
-              title: driver.name,
+              title: driver.fullName,
               snippet:
-                  '${driver.status.displayName} - ${driver.vehicleType ?? "Véhicule"}',
+                  '${driver.statut.libelle} - ${driver.vehicleType}',
               onTap: () => _showDriverInfo(driver),
             ),
             icon: BitmapDescriptor.defaultMarkerWithHue(
-              _getMarkerHue(driver.status),
+              _getMarkerHue(driver.statut),
             ),
-            rotation: driver.status == DriverStatus.onDelivery
-                ? 45.0
-                : 0.0, // Rotation pour livreurs en course
           ),
         );
       }
@@ -426,24 +421,19 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
       for (final order in orders) {
         // Si la commande a un livreur assigné et qu'il est en livraison
         if (order.deliveryPersonId != null) {
-          final driver = drivers.firstWhere(
-            (d) => d.id == order.deliveryPersonId,
-            orElse: () => drivers.firstWhere(
-              (d) => d.userId == order.deliveryPersonId,
-              orElse: () => drivers.firstWhere(
-                (d) => d.authUserId == order.deliveryPersonId,
-                orElse: () => Driver(
-                  id: '',
-                  name: 'Livreur inconnu',
-                  email: '',
-                  phone: '',
-                  createdAt: DateTime.now(),
-                ),
-              ),
-            ),
-          );
+          // La même recherche était écrite trois fois, imbriquée, avant de
+          // retomber sur un livreur fictif nommé « Livreur inconnu » dont la
+          // position était nulle : le marqueur n'était donc jamais posé. Une
+          // recherche qui admet l'absence dit la même chose, en clair.
+          eccore.CourierProfile? driver;
+          for (final dossier in drivers) {
+            if (dossier.id == order.deliveryPersonId) {
+              driver = dossier;
+              break;
+            }
+          }
 
-          if (driver.latitude != null && driver.longitude != null) {
+          if (driver != null && driver.aUnePosition) {
             // Géocoder l'adresse de livraison si nécessaire
             _geocodeAndAddOrderMarker(
               order,
@@ -476,7 +466,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   }
 
   Widget _buildMapWidget(
-      Set<Marker> markers, Set<Polyline> polylines, List<Driver> drivers,) {
+      Set<Marker> markers, Set<Polyline> polylines, List<eccore.CourierProfile> drivers,) {
     return GoogleMap(
       initialCameraPosition: _initialPosition,
       markers: markers,
@@ -498,7 +488,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
 
   Future<void> _geocodeAndAddOrderMarker(
     Order order,
-    Driver driver,
+    eccore.CourierProfile driver,
     Set<Marker> markers,
     Set<Polyline> polylines,
     geocoding.GeocodingService geocodingService,
@@ -531,10 +521,10 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
 
         // Ajouter itinéraire si demandé
         if (_showRoutes &&
-            driver.latitude != null &&
-            driver.longitude != null) {
+            driver.lastLatitude != null &&
+            driver.lastLongitude != null) {
           final driverLatLng =
-              geocoding.LatLng(driver.latitude!, driver.longitude!);
+              geocoding.LatLng(driver.lastLatitude!, driver.lastLongitude!);
           final directions = await geocodingService.getDirections(
             driverLatLng,
             deliveryLocation,
@@ -566,26 +556,26 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     }
   }
 
-  void _fitBounds(List<Driver> drivers) {
+  void _fitBounds(List<eccore.CourierProfile> drivers) {
     if (_mapController == null || drivers.isEmpty) return;
 
     final validDrivers = drivers
-        .where((d) => d.latitude != null && d.longitude != null)
+        .where((d) => d.lastLatitude != null && d.lastLongitude != null)
         .toList();
 
     if (validDrivers.isEmpty) return;
 
-    double minLat = validDrivers.first.latitude!;
-    double maxLat = validDrivers.first.latitude!;
-    double minLng = validDrivers.first.longitude!;
-    double maxLng = validDrivers.first.longitude!;
+    double minLat = validDrivers.first.lastLatitude!;
+    double maxLat = validDrivers.first.lastLatitude!;
+    double minLng = validDrivers.first.lastLongitude!;
+    double maxLng = validDrivers.first.lastLongitude!;
 
     for (final driver in validDrivers) {
-      if (driver.latitude != null && driver.longitude != null) {
-        minLat = minLat < driver.latitude! ? minLat : driver.latitude!;
-        maxLat = maxLat > driver.latitude! ? maxLat : driver.latitude!;
-        minLng = minLng < driver.longitude! ? minLng : driver.longitude!;
-        maxLng = maxLng > driver.longitude! ? maxLng : driver.longitude!;
+      if (driver.lastLatitude != null && driver.lastLongitude != null) {
+        minLat = minLat < driver.lastLatitude! ? minLat : driver.lastLatitude!;
+        maxLat = maxLat > driver.lastLatitude! ? maxLat : driver.lastLatitude!;
+        minLng = minLng < driver.lastLongitude! ? minLng : driver.lastLongitude!;
+        maxLng = maxLng > driver.lastLongitude! ? maxLng : driver.lastLongitude!;
       }
     }
 
@@ -609,7 +599,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildInfoRow('Statut', order.status.displayName),
-            _buildInfoRow('Client ID', order.userId.substring(0, 8)),
+            _buildInfoRow('Client ID', order.id.substring(0, 8)),
             _buildInfoRow('Adresse', order.deliveryAddress),
             _buildInfoRow('Montant', '${order.total} CFA'),
             _buildInfoRow('Date',
@@ -629,20 +619,18 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  double _getMarkerHue(DriverStatus status) {
+  double _getMarkerHue(StatutLivreur status) {
     switch (status) {
-      case DriverStatus.available:
+      case StatutLivreur.disponible:
         return BitmapDescriptor.hueGreen;
-      case DriverStatus.onDelivery:
-        return BitmapDescriptor.hueOrange;
-      case DriverStatus.offline:
+      case StatutLivreur.horsLigne:
         return BitmapDescriptor.hueViolet; // Grey not available as hue
-      case DriverStatus.unavailable:
+      case StatutLivreur.indisponible:
         return BitmapDescriptor.hueRed;
     }
   }
 
-  Widget _buildLegendItem(DriverStatus status, String label, Color color) {
+  Widget _buildLegendItem(StatutLivreur status, String label, Color color) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -664,40 +652,36 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  Color _getStatusColor(DriverStatus status) {
+  Color _getStatusColor(StatutLivreur status) {
     switch (status) {
-      case DriverStatus.available:
+      case StatutLivreur.disponible:
         return Colors.green;
-      case DriverStatus.onDelivery:
-        return Colors.orange;
-      case DriverStatus.offline:
+      case StatutLivreur.horsLigne:
         return Colors.grey;
-      case DriverStatus.unavailable:
+      case StatutLivreur.indisponible:
         return Colors.red;
     }
   }
 
-  void _showDriverInfo(Driver driver) {
+  void _showDriverInfo(eccore.CourierProfile driver) {
     DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(driver.name),
+        title: Text(driver.fullName),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildInfoRow('Statut', driver.status.displayName),
+            _buildInfoRow('Statut', driver.statut.libelle),
             _buildInfoRow('Email', driver.email),
-            _buildInfoRow('Téléphone', driver.phone),
-            if (driver.vehicleType != null)
-              _buildInfoRow('Véhicule', driver.vehicleType!),
-            if (driver.latitude != null && driver.longitude != null)
+            _buildInfoRow('Véhicule', driver.vehicleType),
+            if (driver.lastLatitude != null && driver.lastLongitude != null)
               _buildInfoRow(
                 'Position',
-                '${driver.latitude!.toStringAsFixed(4)}, ${driver.longitude!.toStringAsFixed(4)}',
+                '${driver.lastLatitude!.toStringAsFixed(4)}, ${driver.lastLongitude!.toStringAsFixed(4)}',
               ),
-            _buildInfoRow('Note', driver.rating.toStringAsFixed(1)),
-            _buildInfoRow('Livraisons', '${driver.totalDeliveries}'),
+            _buildInfoRow('Note', driver.ratingAverage.toStringAsFixed(1)),
+            _buildInfoRow('Livraisons', '${driver.deliveriesCompleted}'),
           ],
         ),
         actions: [
@@ -746,20 +730,20 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  void _centerOnDriver(Driver driver) {
-    if (driver.latitude != null &&
-        driver.longitude != null &&
+  void _centerOnDriver(eccore.CourierProfile driver) {
+    if (driver.lastLatitude != null &&
+        driver.lastLongitude != null &&
         _mapController != null) {
       _mapController!.animateCamera(
         CameraUpdate.newLatLngZoom(
-          LatLng(driver.latitude!, driver.longitude!),
+          LatLng(driver.lastLatitude!, driver.lastLongitude!),
           15,
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Position non disponible pour ${driver.name}'),
+          content: Text('Position non disponible pour ${driver.fullName}'),
         ),
       );
     }
@@ -864,7 +848,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                             constraints: const BoxConstraints(
                               minHeight: 56,
                             ),
-                            child: DropdownButtonFormField<DriverStatus>(
+                            child: DropdownButtonFormField<StatutLivreur>(
                               initialValue: _statusFilter,
                               decoration: const InputDecoration(
                                 border: OutlineInputBorder(),
@@ -873,16 +857,16 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                               items: [
                                 const DropdownMenuItem(
                                     child: Text('Tous'),),
-                                ...DriverStatus.values
+                                ...StatutLivreur.values
                                     .map((status) => DropdownMenuItem(
                                           value: status,
                                           child: Row(
                                             children: [
-                                              Icon(status.icon,
+                                              Icon(status.icone,
                                                   size: 18,
-                                                  color: status.color,),
+                                                  color: status.couleur,),
                                               const SizedBox(width: 8),
-                                              Text(status.displayName),
+                                              Text(status.libelle),
                                             ],
                                           ),
                                         ),),

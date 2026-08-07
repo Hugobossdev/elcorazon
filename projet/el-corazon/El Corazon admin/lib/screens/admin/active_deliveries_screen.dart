@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/models/order.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/screens/admin/driver_map_screen.dart';
 import 'package:admin/ui/ui.dart';
 
@@ -76,20 +76,10 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                           itemCount: activeOrders.length,
                           itemBuilder: (context, index) {
                             final order = activeOrders[index];
-                            final driver = order.deliveryPersonId != null
-                                ? driverService.drivers.firstWhere(
-                                    (d) => d.userId == order.deliveryPersonId,
-                                    orElse: () => Driver(
-                                      id: 'unknown',
-                                      name: 'Inconnu',
-                                      email: '',
-                                      phone: '',
-                                      status: DriverStatus.unavailable,
-                                      createdAt: DateTime.now(),
-                                      isActive: false,
-                                    ),
-                                  )
-                                : null;
+                            final driver = _livreurDe(
+                              driverService,
+                              order.deliveryPersonId,
+                            );
 
                             return _buildDeliveryCard(context, order, driver);
                           },
@@ -168,7 +158,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
     );
   }
 
-  Widget _buildDeliveryCard(BuildContext context, Order order, Driver? driver) {
+  Widget _buildDeliveryCard(BuildContext context, Order order, eccore.CourierProfile? driver) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final statusColor = _getStatusColor(context, order.status);
@@ -273,23 +263,18 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                 if (driver != null) ...[
                   CircleAvatar(
                     radius: 16,
-                    backgroundImage: driver.profileImageUrl != null
-                        ? NetworkImage(driver.profileImageUrl!)
-                        : null,
-                    child: driver.profileImageUrl == null
-                        ? Text(driver.name[0].toUpperCase())
-                        : null,
+                    child: Text(driver.fullName[0].toUpperCase()),
                   ),
                   const SizedBox(width: 8),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        driver.name,
+                        driver.fullName,
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        driver.phone,
+                        driver.vehicleType,
                         style: TextStyle(
                           color: scheme.onSurfaceVariant,
                           fontSize: 12,
@@ -447,23 +432,21 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
               final driver = availableDrivers[index];
               return ListTile(
                 leading: CircleAvatar(
-                  child: Text(driver.name[0]),
+                  child: Text(driver.fullName[0]),
                 ),
-                title: Text(driver.name),
+                title: Text(driver.fullName),
                 subtitle: Text(
-                    '${driver.totalDeliveries} livraisons • ⭐ ${driver.rating}',),
+                    '${driver.deliveriesCompleted} livraisons • ⭐ ${driver.ratingAverage}',),
                 onTap: () async {
                   Navigator.pop(context);
-                  if (driver.userId != null) {
-                    await orderService.assignDriver(order.id, driver.userId!);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                            content: Text('Livreur ${driver.name} assigné'),),
-                      );
-                    }
+                  await orderService.assignDriver(order.id, driver.id);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text('Livreur ${driver.fullName} assigné'),),
+                    );
                   }
-                },
+                                },
               );
             },
           ),
@@ -476,5 +459,20 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
         ],
       ),
     );
+  }
+
+  /// Le dossier du livreur affecté à cette commande, ou `null`.
+  ///
+  /// Un dossier fictif nommé « Inconnu » était fabriqué quand la liste ne le
+  /// contenait pas — l'écran affichait alors un livreur qui n'existe pas.
+  eccore.CourierProfile? _livreurDe(
+    DriverManagementService service,
+    String? livreurId,
+  ) {
+    if (livreurId == null) return null;
+    for (final dossier in service.drivers) {
+      if (dossier.id == livreurId) return dossier;
+    }
+    return null;
   }
 }

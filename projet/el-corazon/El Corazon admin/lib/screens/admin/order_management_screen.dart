@@ -798,7 +798,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _buildDetailRow('Client:', order.userId, Icons.person),
+                      _buildDetailRow('Client:', order.id, Icons.person),
                       const SizedBox(height: 12),
                       _buildDetailRow(
                         'Adresse:',

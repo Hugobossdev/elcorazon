@@ -7,7 +7,7 @@ import 'package:admin/services/analytics_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/models/order.dart';
 import 'package:admin/models/menu_models.dart';
-import 'package:admin/models/driver.dart';
+import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/core/utils/admin_helpers.dart';
 import 'package:admin/widgets/modern/enhanced_stat_card.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -120,9 +120,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final todayRevenue = _calculateTodayRevenue(orders);
     final totalOrders = orders.length;
     final activeDrivers = driverService.drivers
-        .where((d) =>
-            d.status == DriverStatus.available ||
-            d.status == DriverStatus.onDelivery,)
+        .where((d) => d.statut == StatutLivreur.disponible)
         .length;
 
     // Calculate additional stats

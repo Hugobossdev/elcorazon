@@ -1,7 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/driver.dart';
+import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Gestion de la flotte — `/api/v1/delivery/couriers/` (Phase 6).
@@ -20,22 +22,22 @@ import 'package:admin/services/admin_auth_service.dart';
 class DriverManagementService extends ChangeNotifier {
   eccore.ManagedCourierRepository get _couriers =>
       eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient);
-  List<Driver> _drivers = [];
+  List<eccore.CourierProfile> _drivers = [];
   bool _isLoading = false;
-  DriverStatus? _statusFilter;
+  StatutLivreur? _statusFilter;
   String? _sortOption;
   String _searchQuery = '';
 
-  List<Driver> get drivers => _drivers;
+  List<eccore.CourierProfile> get drivers => _drivers;
   bool get isLoading => _isLoading;
 
   /// Liste filtrée et triée des livreurs
-  List<Driver> get filteredDrivers {
+  List<eccore.CourierProfile> get filteredDrivers {
     var filtered = _drivers;
 
     // Filtrer par statut
     if (_statusFilter != null) {
-      filtered = filtered.where((d) => d.status == _statusFilter).toList();
+      filtered = filtered.where((d) => d.statut == _statusFilter).toList();
     }
 
     // Filtrer par recherche
@@ -43,13 +45,12 @@ class DriverManagementService extends ChangeNotifier {
       filtered = filtered
           .where(
             (driver) =>
-                driver.name.toLowerCase().contains(
+                driver.fullName.toLowerCase().contains(
                       _searchQuery.toLowerCase(),
                     ) ||
                 driver.email.toLowerCase().contains(
                       _searchQuery.toLowerCase(),
-                    ) ||
-                driver.phone.contains(_searchQuery),
+                    ),
           )
           .toList();
     }
@@ -58,22 +59,22 @@ class DriverManagementService extends ChangeNotifier {
     if (_sortOption != null) {
       switch (_sortOption) {
         case 'name':
-          filtered.sort((a, b) => a.name.compareTo(b.name));
+          filtered.sort((a, b) => a.fullName.compareTo(b.fullName));
           break;
         case 'nameDesc':
-          filtered.sort((a, b) => b.name.compareTo(a.name));
+          filtered.sort((a, b) => b.fullName.compareTo(a.fullName));
           break;
         case 'status':
           filtered.sort(
-            (a, b) => a.status.toString().compareTo(b.status.toString()),
+            (a, b) => a.statut.name.compareTo(b.statut.name),
           );
           break;
         case 'rating':
-          filtered.sort((a, b) => b.rating.compareTo(a.rating));
+          filtered.sort((a, b) => b.ratingAverage.compareTo(a.ratingAverage));
           break;
         case 'deliveries':
           filtered.sort(
-            (a, b) => b.totalDeliveries.compareTo(a.totalDeliveries),
+            (a, b) => b.deliveriesCompleted.compareTo(a.deliveriesCompleted),
           );
           break;
       }
@@ -92,8 +93,8 @@ class DriverManagementService extends ChangeNotifier {
 
     try {
       final remote = await _couriers.list();
-      _drivers = remote.map(_toLocalDriver).toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
+      _drivers = remote
+        ..sort((a, b) => a.fullName.compareTo(b.fullName));
       eccore.Journal.trace('DriverManagementService: ${_drivers.length} livreur(s)');
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('DriverManagementService: chargement impossible — ${e.code}');
@@ -102,46 +103,6 @@ class DriverManagementService extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
-  }
-
-  /// Dossier livreur du contrat → modèle local.
-  ///
-  /// Les compteurs et la note viennent du dossier : ils étaient auparavant
-  /// recalculés à partir des commandes, à chaque chargement d'écran.
-  Driver _toLocalDriver(eccore.CourierProfile courier) {
-    return Driver(
-      id: courier.id,
-      userId: courier.id,
-      name: courier.fullName,
-      email: courier.email,
-      phone: '',
-      status: _toLocalStatus(courier),
-      latitude: courier.lastLatitude,
-      longitude: courier.lastLongitude,
-      vehicleType: courier.vehicleType,
-      licensePlate: courier.vehiclePlate,
-      rating: courier.ratingAverage,
-      totalDeliveries: courier.deliveriesCompleted,
-      totalEarnings: courier.totalEarnings?.toMajorUnits() ?? 0,
-      createdAt: courier.createdAt,
-      lastOnline: courier.lastLocationAt,
-      isActive: courier.verificationStatus == 'approved',
-    );
-  }
-
-  /// Statut d'affichage.
-  ///
-  /// `onDelivery` n'est pas déductible du dossier : une course en cours est une
-  /// information de `delivery/assignments/`, pas du profil. L'ancienne version
-  /// ne le déduisait pas davantage — elle mettait « disponible » dès que le
-  /// livreur était en ligne.
-  DriverStatus _toLocalStatus(eccore.CourierProfile courier) {
-    if (courier.verificationStatus == 'suspended' ||
-        courier.verificationStatus == 'rejected') {
-      return DriverStatus.unavailable;
-    }
-    if (courier.canAcceptOrders) return DriverStatus.available;
-    return courier.isOnline ? DriverStatus.unavailable : DriverStatus.offline;
   }
 
   /// Embauche un livreur : le compte **et** son dossier, en une requête
@@ -169,8 +130,8 @@ class DriverManagementService extends ChangeNotifier {
         phone: phone,
         vehiclePlate: vehiclePlate,
       );
-      _drivers = [..._drivers, _toLocalDriver(created)]
-        ..sort((a, b) => a.name.compareTo(b.name));
+      _drivers = [..._drivers, created]
+        ..sort((a, b) => a.fullName.compareTo(b.fullName));
       notifyListeners();
       return true;
     } on eccore.ApiException catch (e) {
@@ -207,7 +168,7 @@ class DriverManagementService extends ChangeNotifier {
       );
       final index = _drivers.indexWhere((driver) => driver.id == driverId);
       if (index != -1) {
-        _drivers[index] = _toLocalDriver(updated);
+        _drivers[index] = updated;
         notifyListeners();
       }
       return true;
@@ -220,10 +181,10 @@ class DriverManagementService extends ChangeNotifier {
   /// Livreurs éligibles pour une commande, du plus proche au plus loin.
   ///
   /// L'éligibilité est calculée par le serveur : la liste ne se filtre pas ici.
-  Future<List<Driver>> availableForOrder(String orderId) async {
+  Future<List<eccore.CourierProfile>> availableForOrder(String orderId) async {
     try {
       final remote = await _couriers.availableFor(orderId);
-      return remote.map(_toLocalDriver).toList();
+      return remote;
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('DriverManagementService: éligibles indisponibles — ${e.code}');
       return [];
@@ -231,37 +192,29 @@ class DriverManagementService extends ChangeNotifier {
   }
 
   /// Obtenir les livreurs disponibles
-  List<Driver> getAvailableDrivers() {
+  List<eccore.CourierProfile> getAvailableDrivers() {
     return _drivers
         .where(
           (driver) =>
-              driver.status == DriverStatus.available && driver.isActive,
+              driver.statut == StatutLivreur.disponible && driver.estValide,
         )
         .toList();
   }
 
   /// Obtenir les livreurs en livraison
-  List<Driver> getOnDeliveryDrivers() {
-    return _drivers
-        .where(
-          (driver) =>
-              driver.status == DriverStatus.onDelivery && driver.isActive,
-        )
-        .toList();
-  }
 
   /// Obtenir les livreurs hors ligne
-  List<Driver> getOfflineDrivers() {
+  List<eccore.CourierProfile> getOfflineDrivers() {
     return _drivers
         .where(
-          (driver) => driver.status == DriverStatus.offline && driver.isActive,
+          (driver) => driver.statut == StatutLivreur.horsLigne && driver.estValide,
         )
         .toList();
   }
 
   /// Obtenir les livreurs actifs
-  List<Driver> getActiveDrivers() {
-    return _drivers.where((driver) => driver.isActive).toList();
+  List<eccore.CourierProfile> getActiveDrivers() {
+    return _drivers.where((driver) => driver.estValide).toList();
   }
 
   /// Rechercher des livreurs
@@ -271,15 +224,15 @@ class DriverManagementService extends ChangeNotifier {
   }
 
   /// Obtenir les livreurs par statut
-  List<Driver> getDriversByStatus(DriverStatus status) {
+  List<eccore.CourierProfile> getDriversByStatus(StatutLivreur statut) {
     return _drivers
-        .where((driver) => driver.status == status && driver.isActive)
+        .where((driver) => driver.statut == statut && driver.estValide)
         .toList();
   }
 
   /// Filtrer par statut
-  void filterByStatus(DriverStatus? status) {
-    _statusFilter = status;
+  void filterByStatus(StatutLivreur? statut) {
+    _statusFilter = statut;
     notifyListeners();
   }
 
@@ -290,30 +243,33 @@ class DriverManagementService extends ChangeNotifier {
   }
 
   /// Obtenir les livreurs les mieux notés
-  List<Driver> getTopRatedDrivers({int limit = 10}) {
-    final sortedDrivers = List<Driver>.from(_drivers);
-    sortedDrivers.sort((a, b) => b.rating.compareTo(a.rating));
+  List<eccore.CourierProfile> getTopRatedDrivers({int limit = 10}) {
+    final sortedDrivers = List<eccore.CourierProfile>.from(_drivers);
+    sortedDrivers.sort((a, b) => b.ratingAverage.compareTo(a.ratingAverage));
     return sortedDrivers.take(limit).toList();
   }
 
   /// Obtenir les livreurs les plus actifs
-  List<Driver> getMostActiveDrivers({int limit = 10}) {
-    final sortedDrivers = List<Driver>.from(_drivers);
+  List<eccore.CourierProfile> getMostActiveDrivers({int limit = 10}) {
+    final sortedDrivers = List<eccore.CourierProfile>.from(_drivers);
     sortedDrivers.sort(
-      (a, b) => b.totalDeliveries.compareTo(a.totalDeliveries),
+      (a, b) => b.deliveriesCompleted.compareTo(a.deliveriesCompleted),
     );
     return sortedDrivers.take(limit).toList();
   }
 
   /// Obtenir les livreurs qui gagnent le plus
-  List<Driver> getTopEarningDrivers({int limit = 10}) {
-    final sortedDrivers = List<Driver>.from(_drivers);
-    sortedDrivers.sort((a, b) => b.totalEarnings.compareTo(a.totalEarnings));
+  List<eccore.CourierProfile> getTopEarningDrivers({int limit = 10}) {
+    final sortedDrivers = List<eccore.CourierProfile>.from(_drivers);
+    sortedDrivers.sort(
+      (a, b) => (b.totalEarnings?.amountMinor ?? 0)
+          .compareTo(a.totalEarnings?.amountMinor ?? 0),
+    );
     return sortedDrivers.take(limit).toList();
   }
 
   /// Obtenir les livreurs proches d'une position
-  List<Driver> getDriversNearLocation(
+  List<eccore.CourierProfile> getDriversNearLocation(
     double latitude,
     double longitude, {
     double maxDistanceKm = 10.0,
@@ -321,13 +277,14 @@ class DriverManagementService extends ChangeNotifier {
     return _drivers
         .where(
           (driver) =>
-              driver.latitude != null &&
-              driver.longitude != null &&
-              driver.isNearTo(
-                latitude,
-                longitude,
-                maxDistanceKm: maxDistanceKm,
-              ),
+              driver.aUnePosition &&
+              _distanceKm(
+                    driver.lastLatitude!,
+                    driver.lastLongitude!,
+                    latitude,
+                    longitude,
+                  ) <=
+                  maxDistanceKm,
         )
         .toList();
   }
@@ -335,26 +292,26 @@ class DriverManagementService extends ChangeNotifier {
   /// Obtenir les statistiques des livreurs
   Map<String, dynamic> getDriverStats() {
     final totalDrivers = _drivers.length;
-    final activeDrivers = _drivers.where((d) => d.isActive).length;
+    final activeDrivers = _drivers.where((d) => d.estValide).length;
     final availableDrivers =
-        _drivers.where((d) => d.status == DriverStatus.available).length;
-    final onDeliveryDrivers =
-        _drivers.where((d) => d.status == DriverStatus.onDelivery).length;
+        _drivers.where((d) => d.statut == StatutLivreur.disponible).length;
     final offlineDrivers =
-        _drivers.where((d) => d.status == DriverStatus.offline).length;
+        _drivers.where((d) => d.statut == StatutLivreur.horsLigne).length;
 
     final averageRating = _drivers.isNotEmpty
-        ? _drivers.map((d) => d.rating).reduce((a, b) => a + b) /
+        ? _drivers.map((d) => d.ratingAverage).reduce((a, b) => a + b) /
             _drivers.length
         : 0.0;
 
     final totalDeliveries = _drivers.fold(
       0,
-      (sum, driver) => sum + driver.totalDeliveries,
+      (sum, driver) => sum + driver.deliveriesCompleted,
     );
-    final totalEarnings = _drivers.fold(
-      0.0,
-      (sum, driver) => sum + driver.totalEarnings,
+    // Les gains sont des montants : on somme en unité mineure, sans passer par
+    // un flottant intermédiaire.
+    final totalEarnings = _drivers.fold<int>(
+      0,
+      (sum, driver) => sum + (driver.totalEarnings?.amountMinor ?? 0),
     );
 
     return {
@@ -362,7 +319,6 @@ class DriverManagementService extends ChangeNotifier {
       'active_drivers': activeDrivers,
       'online_drivers': activeDrivers,
       'available_drivers': availableDrivers,
-      'busy_drivers': onDeliveryDrivers,
       'offline_drivers': offlineDrivers,
       'average_rating': averageRating,
       'total_deliveries': totalDeliveries,
@@ -404,5 +360,29 @@ class DriverManagementService extends ChangeNotifier {
       eccore.Journal.trace('DriverManagementService: statistiques indisponibles — ${e.code}');
       return {};
     }
+  }
+
+  /// Distance à vol d'oiseau en kilomètres (haversine).
+  ///
+  /// Le modèle local portait un `isNearTo` ; le dossier livreur du socle ne
+  /// décrit que des données, le calcul revient donc à l'appelant.
+  static double _distanceKm(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) {
+    const rayonTerrestreKm = 6371.0;
+    double radians(double degres) => degres * math.pi / 180;
+
+    final dLat = radians(lat2 - lat1);
+    final dLon = radians(lon2 - lon1);
+    final h = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(radians(lat1)) *
+            math.cos(radians(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+
+    return rayonTerrestreKm * 2 * math.asin(math.sqrt(h));
   }
 }

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/documents_livreur.dart';
 import 'package:admin/services/driver_document_service.dart' as svc;
 import 'package:admin/ui/ui.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DriverDocumentValidationScreen extends StatefulWidget {
-  final Driver driver;
+  final eccore.CourierProfile driver;
 
   const DriverDocumentValidationScreen({required this.driver, super.key});
 
@@ -56,7 +56,7 @@ class _DriverDocumentValidationScreenState
     });
 
     try {
-      final userId = widget.driver.userId ?? widget.driver.id;
+      final userId = widget.driver.id;
       if (userId.isEmpty) {
         throw Exception('L\'ID utilisateur du livreur n\'est pas disponible');
       }
@@ -314,7 +314,7 @@ class _DriverDocumentValidationScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Validation des documents - ${widget.driver.name}'),
+        title: Text('Validation des documents - ${widget.driver.fullName}'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -331,7 +331,7 @@ class _DriverDocumentValidationScreenState
                       radius: 30,
                       backgroundColor: Theme.of(context).colorScheme.primary,
                       child: Text(
-                        widget.driver.name.substring(0, 1).toUpperCase(),
+                        widget.driver.fullName.substring(0, 1).toUpperCase(),
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onPrimary,
                           fontWeight: FontWeight.bold,
@@ -345,14 +345,14 @@ class _DriverDocumentValidationScreenState
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            widget.driver.name,
+                            widget.driver.fullName,
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 18,
                             ),
                           ),
                           Text(widget.driver.email),
-                          Text(widget.driver.phone),
+                          Text(widget.driver.vehicleType),
                         ],
                       ),
                     ),

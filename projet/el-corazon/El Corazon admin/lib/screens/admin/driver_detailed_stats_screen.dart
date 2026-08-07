@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:admin/models/driver.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/models/order.dart'; // Import OrderStatus
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart'; // Import Service
@@ -8,7 +8,7 @@ import 'package:admin/widgets/custom_bar_chart.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class DriverDetailedStatsScreen extends StatefulWidget {
-  final Driver? driver;
+  final eccore.CourierProfile? driver;
 
   const DriverDetailedStatsScreen({required this.driver, super.key});
 
@@ -53,7 +53,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.driver!.name),
+        title: Text(widget.driver!.fullName),
         elevation: 0,
       ),
       body: _isLoading
@@ -64,7 +64,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                 // Calculer les données réelles pour le graphique
                 final driverOrders = orderService.allOrders
                     .where((o) =>
-                        o.deliveryPersonId == widget.driver!.userId ||
+                        o.deliveryPersonId == widget.driver!.id ||
                         o.deliveryPersonId == widget.driver!.id,)
                     .toList();
 
@@ -190,18 +190,14 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
             backgroundColor: Colors.white,
             child: CircleAvatar(
               radius: 34,
-              backgroundImage: widget.driver!.profileImageUrl != null
-                  ? NetworkImage(widget.driver!.profileImageUrl!)
-                  : null,
-              child: widget.driver!.profileImageUrl == null
-                  ? Text(
-                      widget.driver!.name[0],
-                      style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Theme.of(context).primaryColor,),
-                    )
-                  : null,
+              child: Text(
+                widget.driver!.fullName[0],
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).primaryColor,
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 16),
@@ -210,7 +206,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.driver!.name,
+                  widget.driver!.fullName,
                   style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
@@ -231,7 +227,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                           const Icon(Icons.star, color: Colors.amber, size: 16),
                           const SizedBox(width: 4),
                           Text(
-                            widget.driver!.rating.toStringAsFixed(1),
+                            widget.driver!.ratingAverage.toStringAsFixed(1),
                             style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,),
@@ -241,7 +237,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      '${widget.driver!.totalDeliveries} livraisons',
+                      '${widget.driver!.deliveriesCompleted} livraisons',
                       style: const TextStyle(color: Colors.white70),
                     ),
                   ],
@@ -256,9 +252,9 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
 
   Widget _buildDetailedRatings() {
     // Utiliser les vraies stats si disponibles, sinon utiliser le rating global ou 0
-    final timeRating = (_detailedStats['avg_time_rating'] as num?)?.toDouble() ?? widget.driver!.rating;
-    final serviceRating = (_detailedStats['avg_service_rating'] as num?)?.toDouble() ?? widget.driver!.rating;
-    final conditionRating = (_detailedStats['avg_condition_rating'] as num?)?.toDouble() ?? widget.driver!.rating;
+    final timeRating = (_detailedStats['avg_time_rating'] as num?)?.toDouble() ?? widget.driver!.ratingAverage;
+    final serviceRating = (_detailedStats['avg_service_rating'] as num?)?.toDouble() ?? widget.driver!.ratingAverage;
+    final conditionRating = (_detailedStats['avg_condition_rating'] as num?)?.toDouble() ?? widget.driver!.ratingAverage;
 
     return Card(
       elevation: 0,
