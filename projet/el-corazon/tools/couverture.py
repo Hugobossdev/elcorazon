@@ -58,7 +58,10 @@ RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CIBLES: dict[str, tuple[str, float]] = {
     "packages/elcorazon_core": ("elcorazon_core", 55.0),
     "El Corazon fastfood": ("elcora_fast", 3.0),
-    "El corazon dely": ("elcora_dely", 1.0),
+    # Relevé de 1,0 à 2,5 au lot 3 : le test de traduction des courses
+    # (`django_delivery_repository_test.dart`) a porté la couverture réelle à
+    # 2,79 %. C'est le cliquet qui se resserre, comme prévu.
+    "El corazon dely": ("elcora_dely", 2.5),
     "El Corazon admin": ("admin", 0.9),
 }
 
