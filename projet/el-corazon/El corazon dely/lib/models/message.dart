@@ -1,14 +1,16 @@
+/// Message de discussion, tel que l'écran l'affiche.
+///
+/// Modèle de vue local, et non un doublon d'entité : le socle ne porte pas de
+/// domaine « discussion ». Le transport, lui, vient bien de lui —
+/// `ChatService` ouvre un `RealtimeChannel` et compose ces objets à partir des
+/// trames reçues.
+///
+/// Ce que le relais transmet d'un message, et rien de plus : un texte, un
+/// horodatage et le côté d'où il vient. Le lot 3 a retiré `toJson`,
+/// `fromJson`, `imageUrl` et le type de message — aucun n'avait d'appelant, et
+/// le dernier laissait croire qu'on pouvait marquer un message « système »
+/// alors que le relais n'en connaît pas.
 class Message {
-  final String id;
-  final String orderId;
-  final String senderId;
-  final String senderName;
-  final String content;
-  final DateTime timestamp;
-  final bool isFromDriver;
-  final String? imageUrl;
-  final MessageType type;
-
   Message({
     required this.id,
     required this.orderId,
@@ -17,40 +19,21 @@ class Message {
     required this.content,
     required this.timestamp,
     required this.isFromDriver,
-    this.imageUrl,
-    this.type = MessageType.text,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'order_id': orderId,
-      'sender_id': senderId,
-      'sender_name': senderName,
-      'content': content,
-      'timestamp': timestamp.toIso8601String(),
-      'is_from_driver': isFromDriver,
-      'image_url': imageUrl,
-      'type': type.name,
-    };
-  }
+  /// Numéro de séquence de la trame — le relais n'attribue pas d'identifiant.
+  final String id;
+  final String orderId;
 
-  factory Message.fromJson(Map<String, dynamic> json) {
-    return Message(
-      id: json['id'] as String,
-      orderId: json['order_id'] as String,
-      senderId: json['sender_id'] as String,
-      senderName: json['sender_name'] as String,
-      content: json['content'] as String,
-      timestamp: DateTime.parse(json['timestamp'] as String),
-      isFromDriver: json['is_from_driver'] as bool,
-      imageUrl: json['image_url'] as String?,
-      type: MessageType.values.firstWhere(
-        (e) => e.name == json['type'],
-        orElse: () => MessageType.text,
-      ),
-    );
-  }
+  /// Le rôle tient lieu d'identité : le relais ne diffuse aucun identifiant
+  /// d'utilisateur.
+  final String senderId;
+  final String senderName;
+  final String content;
+  final DateTime timestamp;
+
+  /// De quel côté placer la bulle.
+  final bool isFromDriver;
 
   @override
   bool operator ==(Object other) {
@@ -62,14 +45,6 @@ class Message {
   int get hashCode => id.hashCode;
 
   @override
-  String toString() {
-    return 'Message(id: $id, content: $content, timestamp: $timestamp)';
-  }
-}
-
-enum MessageType {
-  text,
-  image,
-  location,
-  system,
+  String toString() =>
+      'Message(id: $id, content: $content, timestamp: $timestamp)';
 }

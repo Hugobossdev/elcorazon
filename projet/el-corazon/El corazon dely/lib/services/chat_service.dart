@@ -113,16 +113,15 @@ class ChatService extends ChangeNotifier {
     return controller.stream;
   }
 
-  /// Publie un message. Ni l'émetteur, ni son nom, ni le drapeau « livreur » ne
-  /// voyagent : le serveur les déduit de la connexion.
+  /// Publie un message.
+  ///
+  /// Seul le texte voyage : l'émetteur, son nom et le drapeau « livreur » sont
+  /// déduits de la connexion par le serveur. La signature les acceptait
+  /// jusqu'au lot 3 et les ignorait en silence — un appelant pouvait croire
+  /// marquer un message « système » sans qu'il n'en soit rien.
   Future<bool> sendMessage({
     required String orderId,
     required String content,
-    String? senderId,
-    String? senderName,
-    bool isFromDriver = true,
-    String? imageUrl,
-    MessageType type = MessageType.text,
   }) async {
     final channel = _channels[orderId];
     if (channel == null) {

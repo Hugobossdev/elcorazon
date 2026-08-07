@@ -146,8 +146,6 @@ class _ChatScreenState extends State<ChatScreen> {
       // Envoyer le message via ChatService
       final success = await _chatService.sendMessage(
         orderId: widget.order.id,
-        senderId: currentUser.id,
-        senderName: currentUser.fullName,
         content: content,
       );
 
@@ -223,14 +221,14 @@ class _ChatScreenState extends State<ChatScreen> {
 
       if (currentUser != null) {
         // Envoyer un message système pour notifier l'appel
+        // Ce message part comme un message ordinaire du livreur : le relais
+        // ne connaît pas de type « système ». La signature laissait croire le
+        // contraire jusqu'au lot 3.
         await _chatService.sendMessage(
           orderId: widget.order.id,
-          senderId: currentUser.id,
-          senderName: currentUser.fullName,
           content: isVideo
               ? '📹 Appel vidéo en cours...'
               : '📞 Appel vocal en cours...',
-          type: MessageType.system,
         );
       }
 
