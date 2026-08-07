@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:admin/models/driver_document.dart';
+import 'package:admin/presentation/documents_livreur.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Pièces justificatives des livreurs — `/delivery/couriers/` (Phase 6).
@@ -88,36 +88,29 @@ class DriverDocumentService extends ChangeNotifier {
   /// Le statut porté par chaque ligne est celui **du dossier** : c'est la seule
   /// décision qui existe, et faire semblant qu'il y en a trois laisserait
   /// croire qu'on peut approuver une pièce isolément.
-  List<DriverDocument> documentsOf(eccore.CourierProfile courier) {
-    final statut = _statut(courier.verificationStatus);
-    final maintenant = DateTime.now();
+  List<PieceLivreur> documentsOf(eccore.CourierProfile courier) {
+    final statut = StatutVerification.depuisServeur(courier.verificationStatus);
+    final notes = courier.verificationNotes.isEmpty ? null : courier.verificationNotes;
 
-    DriverDocument ligne(DocumentType type, String? url) {
-      return DriverDocument(
-        id: '${courier.id}:${type.name}',
-        userId: courier.id,
-        type: type,
-        status: statut,
-        fileUrl: url,
-        validationNotes: courier.verificationNotes.isEmpty
-            ? null
-            : courier.verificationNotes,
-        validatedAt: courier.verifiedAt,
-        rejectionReason: statut == DocumentValidationStatus.rejected
-            ? courier.verificationNotes
-            : null,
-        uploadedAt: courier.createdAt,
-        createdAt: courier.createdAt,
-        updatedAt: maintenant,
-        driverName: courier.fullName,
-        driverEmail: courier.email,
+    PieceLivreur ligne(PieceDossier piece, String? url) {
+      return PieceLivreur(
+        courierId: courier.id,
+        piece: piece,
+        statut: statut,
+        url: url,
+        notes: notes,
+        decideeLe: courier.verifiedAt,
+        motifDeRefus: statut == StatutVerification.refuse ? notes : null,
+        deposeeLe: courier.createdAt,
+        nomLivreur: courier.fullName,
+        emailLivreur: courier.email,
       );
     }
 
     return [
-      ligne(DocumentType.identity, courier.idDocument),
-      ligne(DocumentType.license, courier.licenceDocument),
-      ligne(DocumentType.registration, courier.vehicleDocument),
+      ligne(PieceDossier.identite, courier.idDocument),
+      ligne(PieceDossier.permis, courier.licenceDocument),
+      ligne(PieceDossier.carteGrise, courier.vehicleDocument),
     ];
   }
 
@@ -164,15 +157,4 @@ class DriverDocumentService extends ChangeNotifier {
     }
   }
 
-  DocumentValidationStatus _statut(String verification) {
-    switch (verification) {
-      case 'approved':
-        return DocumentValidationStatus.approved;
-      case 'rejected':
-      case 'suspended':
-        return DocumentValidationStatus.rejected;
-      default:
-        return DocumentValidationStatus.pending;
-    }
-  }
 }

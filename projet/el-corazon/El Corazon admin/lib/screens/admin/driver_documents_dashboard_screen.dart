@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:admin/models/driver_document.dart';
+import 'package:admin/presentation/documents_livreur.dart';
 import 'package:admin/services/driver_document_service.dart' as svc;
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/screens/admin/driver_document_validation_screen.dart';
@@ -23,8 +23,8 @@ class _DriverDocumentsDashboardScreenState
   late TabController _tabController;
   bool _isLoading = false;
 
-  List<DriverDocument> _pendingDocuments = [];
-  List<DriverDocument> _attentionDocuments = [];
+  List<PieceLivreur> _pendingDocuments = [];
+  List<PieceLivreur> _attentionDocuments = [];
 
   @override
   void initState() {
@@ -53,7 +53,7 @@ class _DriverDocumentsDashboardScreenState
           .toList();
       final attention = _documentService.incompleteCouriers
           .expand(_documentService.documentsOf)
-          .where((doc) => doc.fileUrl == null)
+          .where((doc) => doc.url == null)
           .toList();
 
       setState(() {
@@ -155,7 +155,7 @@ class _DriverDocumentsDashboardScreenState
     );
   }
 
-  Widget _buildDocumentList(List<DriverDocument> documents,
+  Widget _buildDocumentList(List<PieceLivreur> documents,
       {required bool isPending,}) {
     if (documents.isEmpty) {
       return Center(
@@ -189,24 +189,19 @@ class _DriverDocumentsDashboardScreenState
             leading: CircleAvatar(
               backgroundColor: isPending ? Colors.orange[100] : Colors.red[100],
               child: Icon(
-                _getIconForType(doc.type),
+                _getIconForType(doc.piece),
                 color: isPending ? Colors.orange[800] : Colors.red[800],
               ),
             ),
-            title: Text(doc.type.displayName),
+            title: Text(doc.piece.libelle),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Livreur: ${doc.driverName ?? "Inconnu"}',
+                  'Livreur: ${doc.nomLivreur ?? "Inconnu"}',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
-                Text('Date: ${_formatDate(doc.updatedAt)}'),
-                if (doc.status == DocumentValidationStatus.expired)
-                  Text(
-                    'Expiré le: ${_formatDate(doc.expiryDate!)}',
-                    style: const TextStyle(color: Colors.red),
-                  ),
+                Text('Date: ${_formatDate(doc.deposeeLe)}'),
               ],
             ),
             trailing: const Icon(Icons.chevron_right),
@@ -217,26 +212,26 @@ class _DriverDocumentsDashboardScreenState
     );
   }
 
-  Future<void> _navigateToValidation(DriverDocument doc) async {
+  Future<void> _navigateToValidation(PieceLivreur doc) async {
     final driverService = context.read<DriverManagementService>();
     
     // Essayer de trouver le livreur dans la liste chargée
     Driver? driver;
     try {
       driver = driverService.drivers.firstWhere(
-        (d) => d.userId == doc.userId || d.id == doc.userId,
+        (d) => d.userId == doc.courierId || d.id == doc.courierId,
       );
     } catch (_) {
       // Si non trouvé dans la liste (ex: pas chargé), créer un objet temporaire
       // ou idéalement charger le livreur spécifique
-      if (doc.driverName != null) {
+      if (doc.nomLivreur != null) {
         driver = Driver(
-          id: doc.userId,
-          userId: doc.userId,
-          authUserId: doc.userId,
-          name: doc.driverName!,
-          email: doc.driverEmail ?? '',
-          phone: doc.driverPhone ?? '',
+          id: doc.courierId,
+          userId: doc.courierId,
+          authUserId: doc.courierId,
+          name: doc.nomLivreur!,
+          email: doc.emailLivreur ?? '',
+          phone: '',
           status: DriverStatus.unavailable, // Statut par défaut
           isActive: false,
           createdAt: DateTime.now(),
@@ -265,17 +260,13 @@ class _DriverDocumentsDashboardScreenState
     }
   }
 
-  IconData _getIconForType(DocumentType type) {
+  IconData _getIconForType(PieceDossier type) {
     switch (type) {
-      case DocumentType.license:
+      case PieceDossier.permis:
         return Icons.drive_eta;
-      case DocumentType.identity:
+      case PieceDossier.identite:
         return Icons.badge;
-      case DocumentType.vehicle:
-        return Icons.directions_car;
-      case DocumentType.insurance:
-        return Icons.security;
-      case DocumentType.registration:
+      case PieceDossier.carteGrise:
         return Icons.description;
     }
   }

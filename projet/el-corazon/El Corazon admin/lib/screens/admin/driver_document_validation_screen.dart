@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:admin/models/driver.dart';
-import 'package:admin/models/driver_document.dart';
+import 'package:admin/presentation/documents_livreur.dart';
 import 'package:admin/services/driver_document_service.dart' as svc;
 import 'package:admin/ui/ui.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
@@ -22,15 +22,14 @@ class _DriverDocumentValidationScreenState
       svc.DriverDocumentService();
 
   // Documents chargés depuis la base de données
-  final Map<DocumentType, DriverDocument?> _documents = {};
+  final Map<PieceDossier, PieceLivreur?> _documents = {};
 
 
   // Notes de validation
-  final Map<DocumentType, TextEditingController> _notesControllers = {
-    DocumentType.license: TextEditingController(),
-    DocumentType.identity: TextEditingController(),
-    DocumentType.vehicle: TextEditingController(),
-    DocumentType.insurance: TextEditingController(),
+  final Map<PieceDossier, TextEditingController> _notesControllers = {
+    PieceDossier.permis: TextEditingController(),
+    PieceDossier.identite: TextEditingController(),
+    PieceDossier.carteGrise: TextEditingController(),
   };
 
   bool _isLoading = false;
@@ -73,10 +72,10 @@ class _DriverDocumentValidationScreenState
       // carte grise laissait le compte dans un état que personne ne savait
       // lire — le livreur pouvait-il travailler ?
       for (final doc in _documentService.documentsOf(courier)) {
-        _documents[doc.type] = doc;
-        final controller = _notesControllers[doc.type];
-        if (controller != null && doc.validationNotes != null) {
-          controller.text = doc.validationNotes!;
+        _documents[doc.piece] = doc;
+        final controller = _notesControllers[doc.piece];
+        if (controller != null && doc.notes != null) {
+          controller.text = doc.notes!;
         }
       }
 
@@ -98,8 +97,8 @@ class _DriverDocumentValidationScreenState
   }
 
   Future<void> _validateDocument(
-    DocumentType type,
-    DocumentValidationStatus status,
+    PieceDossier type,
+    StatutVerification status,
     String notes,
   ) async {
     // Capturer les valeurs nécessaires avant le gap async
@@ -117,7 +116,7 @@ class _DriverDocumentValidationScreenState
       return;
     }
 
-    if (status == DocumentValidationStatus.rejected && notes.trim().isEmpty) {
+    if (status == StatutVerification.refuse && notes.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(
@@ -134,12 +133,12 @@ class _DriverDocumentValidationScreenState
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
-          status == DocumentValidationStatus.approved
+          status == StatutVerification.approuve
               ? 'Confirmer l\'approbation'
               : 'Confirmer le rejet',
         ),
         content: Text(
-          status == DocumentValidationStatus.approved
+          status == StatutVerification.approuve
               ? 'Êtes-vous sûr de vouloir approuver ce document ?'
               : 'Êtes-vous sûr de vouloir rejeter ce document ?',
         ),
@@ -151,13 +150,13 @@ class _DriverDocumentValidationScreenState
           ElevatedButton(
             onPressed: () => Navigator.of(context).pop(true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: status == DocumentValidationStatus.approved
+              backgroundColor: status == StatutVerification.approuve
                   ? sem.success
                   : sem.danger,
               foregroundColor: scheme.onPrimary,
             ),
             child: Text(
-              status == DocumentValidationStatus.approved
+              status == StatutVerification.approuve
                   ? 'Approuver'
                   : 'Rejeter',
             ),
@@ -177,14 +176,14 @@ class _DriverDocumentValidationScreenState
       // renseigne soi-même ne trace rien. La décision porte sur le **dossier**,
       // pas sur la pièce affichée.
       bool success = false;
-      if (status == DocumentValidationStatus.approved) {
+      if (status == StatutVerification.approuve) {
         success = await _documentService.approveCourier(
-          document.userId,
+          document.courierId,
           notes: notes,
         );
-      } else if (status == DocumentValidationStatus.rejected) {
+      } else if (status == StatutVerification.refuse) {
         success = await _documentService.rejectCourier(
-          document.userId,
+          document.courierId,
           notes.isNotEmpty ? notes : 'Dossier non conforme',
         );
       }
@@ -197,9 +196,9 @@ class _DriverDocumentValidationScreenState
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Document ${type.displayName} ${status.displayName}',
+                'Document ${type.libelle} ${status.libelle}',
               ),
-              backgroundColor: status == DocumentValidationStatus.approved
+              backgroundColor: status == StatutVerification.approuve
                   ? sem.success
                   : sem.danger,
             ),
@@ -224,10 +223,10 @@ class _DriverDocumentValidationScreenState
     }
   }
 
-  Future<void> _viewDocument(DriverDocument document) async {
-    if (document.fileUrl == null) return;
+  Future<void> _viewDocument(PieceLivreur document) async {
+    if (document.url == null) return;
 
-    final url = document.fileUrl!;
+    final url = document.url!;
     final isImage = url.toLowerCase().endsWith('.jpg') ||
         url.toLowerCase().endsWith('.jpeg') ||
         url.toLowerCase().endsWith('.png') ||
@@ -305,10 +304,10 @@ class _DriverDocumentValidationScreenState
     }
   }
 
-  DocumentValidationStatus _getDocumentStatus(DocumentType type) {
+  StatutVerification _getDocumentStatus(PieceDossier type) {
     final doc = _documents[type];
-    if (doc == null) return DocumentValidationStatus.pending;
-    return doc.status;
+    if (doc == null) return StatutVerification.enAttente;
+    return doc.statut;
   }
 
   @override
@@ -387,36 +386,28 @@ class _DriverDocumentValidationScreenState
               )
             else ...[
               _buildDocumentCard(
-                DocumentType.license,
+                PieceDossier.permis,
                 'Permis de conduire',
                 Icons.drive_eta,
-                _getDocumentStatus(DocumentType.license),
-                _notesControllers[DocumentType.license]!,
-                _documents[DocumentType.license],
+                _getDocumentStatus(PieceDossier.permis),
+                _notesControllers[PieceDossier.permis]!,
+                _documents[PieceDossier.permis],
               ),
               _buildDocumentCard(
-                DocumentType.identity,
+                PieceDossier.identite,
                 'Pièce d\'identité',
                 Icons.badge,
-                _getDocumentStatus(DocumentType.identity),
-                _notesControllers[DocumentType.identity]!,
-                _documents[DocumentType.identity],
+                _getDocumentStatus(PieceDossier.identite),
+                _notesControllers[PieceDossier.identite]!,
+                _documents[PieceDossier.identite],
               ),
               _buildDocumentCard(
-                DocumentType.vehicle,
-                'Documents du véhicule',
+                PieceDossier.carteGrise,
+                'Carte grise',
                 Icons.directions_car,
-                _getDocumentStatus(DocumentType.vehicle),
-                _notesControllers[DocumentType.vehicle]!,
-                _documents[DocumentType.vehicle],
-              ),
-              _buildDocumentCard(
-                DocumentType.insurance,
-                'Assurance',
-                Icons.security,
-                _getDocumentStatus(DocumentType.insurance),
-                _notesControllers[DocumentType.insurance]!,
-                _documents[DocumentType.insurance],
+                _getDocumentStatus(PieceDossier.carteGrise),
+                _notesControllers[PieceDossier.carteGrise]!,
+                _documents[PieceDossier.carteGrise],
               ),
             ],
           ],
@@ -426,12 +417,12 @@ class _DriverDocumentValidationScreenState
   }
 
   Widget _buildDocumentCard(
-    DocumentType type,
+    PieceDossier type,
     String title,
     IconData icon,
-    DocumentValidationStatus status,
+    StatutVerification status,
     TextEditingController notesController,
-    DriverDocument? document,
+    PieceLivreur? document,
   ) {
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -468,7 +459,7 @@ class _DriverDocumentValidationScreenState
                   color: Theme.of(context).colorScheme.outlineVariant,
                 ),
               ),
-              child: document?.fileUrl != null
+              child: document?.url != null
                   ? Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -479,23 +470,13 @@ class _DriverDocumentValidationScreenState
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          document!.fileName ?? 'Document',
+                          document!.piece.libelle,
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.onSurface,
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        if (document.fileSize != null) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            '${(document.fileSize! / 1024).toStringAsFixed(1)} KB',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
                         const SizedBox(height: 8),
                         ElevatedButton.icon(
                           onPressed: () => _viewDocument(document),
@@ -539,7 +520,7 @@ class _DriverDocumentValidationScreenState
                       ),
                     ),
             ),
-            if (document?.rejectionReason != null) ...[
+            if (document?.motifDeRefus != null) ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(12),
@@ -560,7 +541,7 @@ class _DriverDocumentValidationScreenState
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Raison du rejet: ${document!.rejectionReason}',
+                        'Raison du rejet: ${document!.motifDeRefus}',
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onErrorContainer,
                           fontSize: 12,
@@ -593,7 +574,7 @@ class _DriverDocumentValidationScreenState
                       ? null
                       : () => _validateDocument(
                             type,
-                            DocumentValidationStatus.rejected,
+                            StatutVerification.refuse,
                             notesController.text,
                           ),
                   icon: const Icon(Icons.close),
@@ -608,7 +589,7 @@ class _DriverDocumentValidationScreenState
                       ? null
                       : () => _validateDocument(
                             type,
-                            DocumentValidationStatus.approved,
+                            StatutVerification.approuve,
                             notesController.text,
                           ),
                   icon: const Icon(Icons.check),
@@ -628,28 +609,24 @@ class _DriverDocumentValidationScreenState
     );
   }
 
-  Widget _buildStatusChip(DocumentValidationStatus status) {
+  Widget _buildStatusChip(StatutVerification status) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     Color color;
     String label;
 
     switch (status) {
-      case DocumentValidationStatus.pending:
+      case StatutVerification.enAttente:
         color = sem.warning;
         label = 'En attente';
         break;
-      case DocumentValidationStatus.approved:
+      case StatutVerification.approuve:
         color = sem.success;
         label = 'Approuvé';
         break;
-      case DocumentValidationStatus.rejected:
+      case StatutVerification.refuse:
         color = sem.danger;
         label = 'Rejeté';
-        break;
-      case DocumentValidationStatus.expired:
-        color = sem.danger;
-        label = 'Expiré';
         break;
     }
 
