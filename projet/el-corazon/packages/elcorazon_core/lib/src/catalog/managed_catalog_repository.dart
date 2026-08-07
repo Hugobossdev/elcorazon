@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:elcorazon_core/src/models/money.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/catalog/managed_category.dart';
+import 'package:elcorazon_core/src/catalog/managed_menu_item.dart';
 import 'package:elcorazon_core/src/catalog/menu_item.dart';
 import 'package:elcorazon_core/src/catalog/option_template.dart';
 
@@ -88,10 +89,10 @@ class ManagedCatalogRepository {
 
   // --------------------------------------------------------------- articles
 
-  Future<List<MenuItem>> menuItems({String? restaurantSlug, String? categoryId}) {
+  Future<List<ManagedMenuItem>> menuItems({String? restaurantSlug, String? categoryId}) {
     return _collect(
       '/catalog/manage/items/',
-      MenuItem.fromJson,
+      ManagedMenuItem.fromJson,
       queryParameters: {
         if (restaurantSlug != null) 'restaurant__slug': restaurantSlug,
         if (categoryId != null) 'category': categoryId,
@@ -99,12 +100,12 @@ class ManagedCatalogRepository {
     );
   }
 
-  Future<MenuItem> getMenuItem(String menuItemId) async {
+  Future<ManagedMenuItem> getMenuItem(String menuItemId) async {
     final response = await apiClient.get('/catalog/manage/items/$menuItemId/');
-    return MenuItem.fromJson(response.data as Map<String, dynamic>);
+    return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<MenuItem> createMenuItem({
+  Future<ManagedMenuItem> createMenuItem({
     required String restaurantSlug,
     required String categoryId,
     required String name,
@@ -141,10 +142,10 @@ class ManagedCatalogRepository {
         'sort_order': sortOrder,
       },
     );
-    return MenuItem.fromJson(response.data as Map<String, dynamic>);
+    return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
   }
 
-  Future<MenuItem> updateMenuItem({
+  Future<ManagedMenuItem> updateMenuItem({
     required String menuItemId,
     String? name,
     String? description,
@@ -178,7 +179,7 @@ class ManagedCatalogRepository {
         if (sortOrder != null) 'sort_order': sortOrder,
       },
     );
-    return MenuItem.fromJson(response.data as Map<String, dynamic>);
+    return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
   }
 
   /// Retire un article de la carte.
@@ -211,7 +212,7 @@ class ManagedCatalogRepository {
   /// L'article doit **exister** : il n'y a pas d'image sans article à qui
   /// l'attacher. Pour une création, l'ordre est donc « créer, puis envoyer
   /// l'image ».
-  Future<MenuItem> uploadMenuItemImage({
+  Future<ManagedMenuItem> uploadMenuItemImage({
     required String menuItemId,
     required String filename,
     required List<int> bytes,
@@ -227,7 +228,7 @@ class ManagedCatalogRepository {
         ),
       }),
     );
-    return MenuItem.fromJson(response.data as Map<String, dynamic>);
+    return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
   }
 
   /// Retire l'image d'un article.
@@ -236,12 +237,12 @@ class ManagedCatalogRepository {
   /// transmettre, et un formulaire multipart ne sait pas exprimer « vide » —
   /// il ne sait qu'omettre le champ, ce que le serveur lirait comme « ne pas y
   /// toucher ». L'ancien fichier est effacé par le serveur.
-  Future<MenuItem> clearMenuItemImage(String menuItemId) async {
+  Future<ManagedMenuItem> clearMenuItemImage(String menuItemId) async {
     final response = await apiClient.patch(
       '/catalog/manage/items/$menuItemId/',
       data: const {'image': null},
     );
-    return MenuItem.fromJson(response.data as Map<String, dynamic>);
+    return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
   }
 
   // ------------------------------------------------------ groupes d'options

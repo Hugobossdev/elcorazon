@@ -106,10 +106,10 @@ class AppService extends ChangeNotifier {
 
   // --------------------------------------------------------- traduction
 
-  MenuItem _toLocalMenuItem(eccore.MenuItem remote) {
+  MenuItem _toLocalMenuItem(eccore.ManagedMenuItem remote) {
     return MenuItem(
       id: remote.id,
-      categoryId: remote.categorySlug,
+      categoryId: remote.categoryId,
       name: remote.name,
       description: remote.description.isEmpty ? null : remote.description,
       basePrice: remote.price.toMajorUnits(),

@@ -21,6 +21,7 @@ export 'src/catalog/catalog_repository.dart';
 export 'src/catalog/category.dart';
 export 'src/catalog/managed_catalog_repository.dart';
 export 'src/catalog/managed_category.dart';
+export 'src/catalog/managed_menu_item.dart';
 export 'src/catalog/menu_item.dart';
 export 'src/catalog/option_template.dart';
 export 'src/catalog/review.dart';
