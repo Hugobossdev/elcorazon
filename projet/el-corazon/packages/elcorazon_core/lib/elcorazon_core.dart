@@ -29,6 +29,7 @@ export 'src/delivery/courier_profile.dart';
 export 'src/delivery/courier_shift.dart';
 export 'src/delivery/delivery_repository.dart';
 export 'src/delivery/managed_courier_repository.dart';
+export 'src/diagnostics/journal.dart';
 export 'src/directions/directions_repository.dart';
 export 'src/directions/geo_point.dart';
 export 'src/directions/route_info.dart';
