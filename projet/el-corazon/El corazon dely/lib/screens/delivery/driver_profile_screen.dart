@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
-import 'package:elcora_dely/models/user.dart';
 import 'package:elcora_dely/utils/validators.dart';
 
 class DriverProfileScreen extends StatefulWidget {
@@ -51,8 +50,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     final user = appService.currentUser;
 
     if (user != null) {
-      _nameController.text = user.name;
-      _phoneController.text = user.phone;
+      _nameController.text = user.fullName;
+      _phoneController.text = user.phone ?? '';
       _emailController.text = user.email;
       
       await _loadDriverData(user.id);
@@ -205,7 +204,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildProfileHeader(user),
+                  _buildProfileHeader(user, isOnline: appService.isOnline),
                   const SizedBox(height: 24),
                   if (_isLoadingDriverData)
                     const Center(child: Padding(
@@ -234,7 +233,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     );
   }
 
-  Widget _buildProfileHeader(User user) {
+  // `isOnline` vient du dossier livreur, pas du compte.
+  Widget _buildProfileHeader(eccore.User user, {required bool isOnline}) {
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -260,7 +260,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   // Le dossier ne porte pas de photo : le contrat ne l'expose
                   // qu'au client qui suit sa livraison (`CourierPublic`).
                   child: Text(
-                    user.name.substring(0, 2).toUpperCase(),
+                    user.fullName.substring(0, 2).toUpperCase(),
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
@@ -289,7 +289,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              user.name,
+              user.fullName,
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 24,
@@ -308,7 +308,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: user.isOnline ? Colors.green : Colors.grey,
+                color: isOnline ? Colors.green : Colors.grey,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -324,7 +324,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    user.isOnline ? 'En ligne' : 'Hors ligne',
+                    isOnline ? 'En ligne' : 'Hors ligne',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,
@@ -485,7 +485,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     );
   }
 
-  Widget _buildStatsSection(User user) {
+  Widget _buildStatsSection(eccore.User user) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

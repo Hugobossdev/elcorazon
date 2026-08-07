@@ -133,7 +133,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               radius: 30,
               backgroundColor: Theme.of(context).colorScheme.primary,
               child: Text(
-                user?.name.substring(0, 2).toUpperCase() ?? 'DR',
+                user?.fullName.substring(0, 2).toUpperCase() ?? 'DR',
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -141,7 +141,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             title: Text(
-              user?.name ?? 'Livreur',
+              user?.fullName ?? 'Livreur',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             subtitle: Text(user?.email ?? 'driver@fasteat.ci'),

@@ -6,13 +6,12 @@ import 'package:elcora_dely/utils/price_formatter.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/performance_service.dart';
 import 'package:elcora_dely/models/order.dart';
-import 'package:elcora_dely/models/user.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
 import 'package:elcora_dely/screens/communication/chat_screen.dart';
 import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal, User;
 
 class DeliveryHomeScreen extends StatefulWidget {
   const DeliveryHomeScreen({super.key});
@@ -170,8 +169,10 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
               return IconButton(
                 onPressed: () => _toggleOnlineStatus(context),
                 icon: Icon(
-                  user.isOnline ? Icons.online_prediction : Icons.offline_pin,
-                  color: user.isOnline ? Colors.green : Colors.grey,
+                  appService.isOnline
+                      ? Icons.online_prediction
+                      : Icons.offline_pin,
+                  color: appService.isOnline ? Colors.green : Colors.grey,
                 ),
               );
             },
@@ -343,7 +344,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                                 ],
                               ),
                             ),
-                          _buildStatusCard(context, user),
+                          _buildStatusCard(context, user, isOnline: appService.isOnline),
                           const SizedBox(height: 20),
                           _buildStatsCard(context, assignedDeliveries),
                           const SizedBox(height: 20),
@@ -395,7 +396,13 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
-  Widget _buildStatusCard(BuildContext context, User user) {
+  // Le statut « en ligne » vient du dossier livreur, pas du compte : il est
+  // passé en paramètre plutôt que lu sur `user`, où il était recopié.
+  Widget _buildStatusCard(
+    BuildContext context,
+    User user, {
+    required bool isOnline,
+  }) {
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -405,7 +412,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           gradient: LinearGradient(
-            colors: user.isOnline
+            colors: isOnline
                 ? [Colors.green, Colors.teal]
                 : [Colors.grey[600]!, Colors.grey[800]!],
           ),
@@ -419,11 +426,11 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                   radius: 30,
                   backgroundColor: Colors.white,
                   child: Text(
-                    user.name.substring(0, 2).toUpperCase(),
+                    user.fullName.substring(0, 2).toUpperCase(),
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: user.isOnline ? Colors.green : Colors.grey[600],
+                      color: isOnline ? Colors.green : Colors.grey[600],
                     ),
                   ),
                 ),
@@ -433,7 +440,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Bonjour, ${user.name}! 🛵',
+                        'Bonjour, ${user.fullName}! 🛵',
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -447,7 +454,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                             width: 8,
                             height: 8,
                             decoration: BoxDecoration(
-                              color: user.isOnline
+                              color: isOnline
                                   ? Colors.greenAccent
                                   : Colors.grey[400],
                               shape: BoxShape.circle,
@@ -455,7 +462,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            user.isOnline ? 'En ligne' : 'Hors ligne',
+                            isOnline ? 'En ligne' : 'Hors ligne',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 14,
@@ -469,7 +476,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            if (!user.isOnline)
+            if (!isOnline)
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -913,7 +920,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
 
     try {
       // Mettre à jour le statut dans la base de données
-      final newStatus = !user.isOnline;
+      final newStatus = !appService.isOnline;
       await appService.updateOnlineStatus(newStatus);
 
       if (context.mounted) {

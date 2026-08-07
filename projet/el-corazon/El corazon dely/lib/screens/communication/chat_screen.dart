@@ -147,7 +147,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final success = await _chatService.sendMessage(
         orderId: widget.order.id,
         senderId: currentUser.id,
-        senderName: currentUser.name,
+        senderName: currentUser.fullName,
         content: content,
       );
 
@@ -226,7 +226,7 @@ class _ChatScreenState extends State<ChatScreen> {
         await _chatService.sendMessage(
           orderId: widget.order.id,
           senderId: currentUser.id,
-          senderName: currentUser.name,
+          senderName: currentUser.fullName,
           content: isVideo
               ? '📹 Appel vidéo en cours...'
               : '📞 Appel vocal en cours...',

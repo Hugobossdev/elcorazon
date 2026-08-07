@@ -201,7 +201,7 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
                     radius: 30,
                     backgroundColor: Colors.white,
                     child: Text(
-                      user?.name.substring(0, 2).toUpperCase() ?? 'DR',
+                      user?.fullName.substring(0, 2).toUpperCase() ?? 'DR',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -212,7 +212,7 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  user?.name ?? 'Livreur',
+                  user?.fullName ?? 'Livreur',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -236,7 +236,7 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: user?.isOnline == true ? Colors.green : Colors.grey,
+                    color: appService.isOnline ? Colors.green : Colors.grey,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
@@ -252,7 +252,7 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        user?.isOnline == true ? 'En ligne' : 'Hors ligne',
+                        appService.isOnline ? 'En ligne' : 'Hors ligne',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 12,

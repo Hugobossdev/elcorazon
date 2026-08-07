@@ -14,7 +14,6 @@ import 'package:elcora_dely/l10n/app_localizations_fr.dart';
 import 'package:elcora_dely/main.dart';
 import 'package:elcora_dely/models/message.dart';
 import 'package:elcora_dely/models/order.dart';
-import 'package:elcora_dely/models/user.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';
 import 'package:elcora_dely/screens/communication/call_screen.dart';

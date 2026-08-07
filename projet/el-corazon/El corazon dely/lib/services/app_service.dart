@@ -1,11 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// Alias explicite : `eccore.User` (backend Django) et le `User` local
-// (Supabase, ci-dessous) portent le même nom mais pas la même forme — voir
-// `_fromDjangoUser`, qui traduit le premier vers le second.
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_dely/models/user.dart';
 import 'package:elcora_dely/models/order.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/services/location_service.dart';
@@ -55,7 +51,7 @@ class AppService extends ChangeNotifier {
   late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
   late final StreamSubscription<String> _tokenRefreshSubscription;
 
-  User? _currentUser;
+  eccore.User? _currentUser;
   bool _isInitialized = false;
   List<Order> _orders = [];
 
@@ -80,7 +76,7 @@ class AppService extends ChangeNotifier {
       );
 
   // Getters
-  User? get currentUser => _currentUser;
+  eccore.User? get currentUser => _currentUser;
   List<Order> get orders => _orders;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
@@ -89,9 +85,6 @@ class AppService extends ChangeNotifier {
   LocationService get locationService => _locationService;
   NotificationService get notificationService => _notificationService;
   RealtimeTrackingService get trackingService => RealtimeTrackingService();
-  bool get isAdmin => _currentUser?.role == UserRole.admin;
-  bool get isDeliveryStaff => _currentUser?.role == UserRole.delivery;
-  bool get isClient => _currentUser?.role == UserRole.client;
 
   @override
   void dispose() {
@@ -101,15 +94,12 @@ class AppService extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Pont entre la session Riverpod (backend Django, source de vérité de
-  /// l'identité — Phase 6) et le `_currentUser` local que le reste de cette
-  /// classe lit encore. C'est le seul endroit qui traduit l'un vers l'autre :
-  /// tout le reste d'`AppService` continue de lire `_currentUser` sans savoir
-  /// d'où il vient.
+  /// Recopie la session Riverpod (source de vérité de l'identité) dans le
+  /// champ que le reste de cette classe lit. Ce pont ne traduit plus rien
+  /// depuis le lot 3 : c'est la même entité de part et d'autre.
   void _onSessionChanged(AsyncValue<eccore.User?> next) {
-    final djangoUser = next.value;
     final wasConnected = _currentUser != null;
-    _currentUser = djangoUser == null ? null : _fromDjangoUser(djangoUser);
+    _currentUser = next.value;
 
     // La file des courses et l'émission de position suivent la session, pas un
     // écran : un livreur connecté reste joignable et reste suivi même quand il
@@ -165,22 +155,6 @@ class AppService extends ChangeNotifier {
     });
   }
 
-  /// Le compte de fidélité, les badges et le statut « en ligne » n'existent
-  /// pas dans `UserSerializer` — ce sont des domaines pas encore migrés
-  /// (fidélité, livraison). Ils gardent leur valeur par défaut tant que ces
-  /// domaines n'ont pas leur tour ; ce n'est pas un oubli.
-  User _fromDjangoUser(eccore.User djangoUser) {
-    return User(
-      id: djangoUser.id,
-      name: djangoUser.fullName,
-      email: djangoUser.email,
-      phone: djangoUser.phone ?? '',
-      role: UserRole.delivery,
-      profileImage: djangoUser.avatar,
-      createdAt: djangoUser.createdAt,
-    );
-  }
-
   /// Appelée par `SplashScreen` une fois que `sessionProvider` a fini de
   /// restaurer la session (Phase 6) — `_currentUser` est donc déjà à jour via
   /// le pont ci-dessus, il n'y a plus à interroger Supabase pour savoir si un
@@ -229,7 +203,7 @@ class AppService extends ChangeNotifier {
       // il transporte, il ne compose pas de commande — et la liste de *toutes*
       // les commandes, que l'implémentation Supabase chargeait quand personne
       // n'était connecté, n'était visible que parce que la base était ouverte.
-      if (_currentUser?.role == UserRole.delivery) {
+      if (_currentUser != null) {
         await loadAvailableOrders();
       }
 
@@ -313,9 +287,6 @@ class AppService extends ChangeNotifier {
       // se déduit pas des courses, il se lit.
       try {
         _courierProfile = await _delivery.profile();
-        if (_currentUser != null) {
-          _currentUser = _currentUser!.copyWith(isOnline: _courierProfile!.isOnline);
-        }
       } catch (e) {
         eccore.Journal.trace('⚠️ Dossier livreur illisible : $e');
       }
@@ -411,6 +382,12 @@ class AppService extends ChangeNotifier {
   /// [loadAvailableOrders] n'a pas tourné.
   eccore.CourierProfile? get courierProfile => _courierProfile;
 
+  /// Statut « en ligne » du livreur. Il vit dans le dossier livreur et nulle
+  /// part ailleurs : il était auparavant recopié dans le `User` local à chaque
+  /// lecture du dossier, une duplication qu'un troisième chemin d'écriture
+  /// aurait laissée se désynchroniser en silence.
+  bool get isOnline => _courierProfile?.isOnline ?? false;
+
   /// L1 — l'éligibilité est décidée par le serveur : être « en ligne » ne
   /// suffit pas si le dossier n'est pas validé. Ne jamais la recomposer ici.
   bool get canAcceptOrders => _courierProfile?.canAcceptOrders ?? false;
@@ -449,7 +426,7 @@ class AppService extends ChangeNotifier {
   );
 
   List<Order> _ordersWhereCourse(bool Function(Course) predicate) {
-    if (_currentUser?.role != UserRole.delivery) return [];
+    if (_currentUser == null) return [];
     return [
       for (final course in _coursesByOrderId.values)
         if (predicate(course)) course.order,
@@ -521,7 +498,7 @@ class AppService extends ChangeNotifier {
       final updated = await _container
           .read(eccore.authRepositoryProvider)
           .updateProfile(fullName: fullName, phone: phone);
-      _currentUser = _fromDjangoUser(updated);
+      _currentUser = updated;
       notifyListeners();
     } on eccore.ApiException catch (e) {
       throw Exception(e.detail);
@@ -570,10 +547,6 @@ class AppService extends ChangeNotifier {
   /// relire le dossier après cet appel plutôt que supposer.
   Future<void> updateOnlineStatus(bool isOnline) async {
     _courierProfile = await _delivery.setOnline(isOnline: isOnline);
-
-    if (_currentUser != null) {
-      _currentUser = _currentUser!.copyWith(isOnline: _courierProfile!.isOnline);
-    }
     notifyListeners();
   }
 
