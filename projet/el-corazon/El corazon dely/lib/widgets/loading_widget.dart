@@ -24,7 +24,7 @@ class LoadingWidget extends StatelessWidget {
             width: size,
             height: size,
             child: CircularProgressIndicator(
-              color: color ?? theme.primaryColor,
+              color: color ?? theme.colorScheme.primary,
               strokeWidth: 3,
             ),
           ),
@@ -71,19 +71,23 @@ class OverlayLoadingWidget extends StatelessWidget {
   final String? message;
 
   const OverlayLoadingWidget({
-    super.key,
-    required this.child,
-    required this.isLoading,
+    required this.child, required this.isLoading, super.key,
     this.message,
   });
 
   @override
   Widget build(BuildContext context) {
+    // IMPORTANT: Stack nécessite des contraintes de taille pour que Positioned fonctionne
     return Stack(
+      // fit: StackFit.expand pour que le Stack prenne toute la taille du parent
+      fit: StackFit.expand,
       children: [
         child,
         if (isLoading)
+          // Container avec width et height définis garantit une taille définie
           Container(
+            width: double.infinity,
+            height: double.infinity,
             color: Colors.black.withValues(alpha: 0.5),
             child: LoadingWidget(
               message: message ?? 'Chargement...',
@@ -100,16 +104,14 @@ class PullToRefreshWrapper extends StatelessWidget {
   final Future<void> Function() onRefresh;
 
   const PullToRefreshWrapper({
-    super.key,
-    required this.child,
-    required this.onRefresh,
+    required this.child, required this.onRefresh, super.key,
   });
 
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
       onRefresh: onRefresh,
-      color: Theme.of(context).primaryColor,
+      color: Theme.of(context).colorScheme.primary,
       child: child,
     );
   }
@@ -121,8 +123,7 @@ class ErrorWidget extends StatelessWidget {
   final IconData? icon;
 
   const ErrorWidget({
-    super.key,
-    required this.message,
+    required this.message, super.key,
     this.onRetry,
     this.icon,
   });
@@ -155,12 +156,12 @@ class ErrorWidget extends StatelessWidget {
               ElevatedButton(
                 onPressed: onRetry,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: theme.primaryColor,
+                  backgroundColor: theme.colorScheme.primary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: Text(
+                child: const Text(
                   'Réessayer',
                   style: TextStyle(color: Colors.white),
                 ),
@@ -181,8 +182,7 @@ class EmptyStateWidget extends StatelessWidget {
   final VoidCallback? onAction;
 
   const EmptyStateWidget({
-    super.key,
-    required this.title,
+    required this.title, super.key,
     this.message,
     this.icon,
     this.actionText,
@@ -228,14 +228,14 @@ class EmptyStateWidget extends StatelessWidget {
               ElevatedButton(
                 onPressed: onAction,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: theme.primaryColor,
+                  backgroundColor: theme.colorScheme.primary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 child: Text(
                   actionText!,
-                  style: TextStyle(color: Colors.white),
+                  style: const TextStyle(color: Colors.white),
                 ),
               ),
             ],

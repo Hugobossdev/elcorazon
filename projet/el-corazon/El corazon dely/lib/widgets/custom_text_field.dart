@@ -15,10 +15,8 @@ class CustomTextField extends StatefulWidget {
   final int maxLines;
 
   const CustomTextField({
-    super.key,
-    required this.label,
+    required this.label, required this.controller, super.key,
     this.hint,
-    required this.controller,
     this.isPassword = false,
     this.keyboardType = TextInputType.text,
     this.prefixIcon,
@@ -69,7 +67,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
             prefixIcon: widget.prefixIcon != null
                 ? Icon(
                     widget.prefixIcon,
-                    color: theme.primaryColor,
+                    color: theme.colorScheme.primary,
                   )
                 : null,
             suffixIcon: widget.isPassword
@@ -89,7 +87,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
                         onPressed: widget.onSuffixTap,
                         icon: Icon(
                           widget.suffixIcon,
-                          color: theme.primaryColor,
+                          color: theme.colorScheme.primary,
                         ),
                       )
                     : null,
@@ -110,7 +108,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
-                color: theme.primaryColor,
+                color: theme.colorScheme.primary,
                 width: 2,
               ),
             ),
@@ -140,19 +138,52 @@ class _CustomTextFieldState extends State<CustomTextField> {
   }
 }
 
-class SearchTextField extends StatelessWidget {
+class SearchTextField extends StatefulWidget {
   final String hint;
   final TextEditingController controller;
   final void Function(String)? onChanged;
   final VoidCallback? onClear;
 
   const SearchTextField({
-    super.key,
-    required this.hint,
-    required this.controller,
+    required this.hint, required this.controller, super.key,
     this.onChanged,
     this.onClear,
   });
+
+  @override
+  State<SearchTextField> createState() => _SearchTextFieldState();
+}
+
+class _SearchTextFieldState extends State<SearchTextField> {
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _hasText = widget.controller.text.isNotEmpty;
+    widget.controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    if (!mounted) return;
+    final hasText = widget.controller.text.isNotEmpty;
+    if (hasText != _hasText) {
+      // Reporter setState après le build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.controller.text.isNotEmpty == hasText) {
+          setState(() {
+            _hasText = hasText;
+          });
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -168,11 +199,11 @@ class SearchTextField extends StatelessWidget {
         ),
       ),
       child: TextField(
-        controller: controller,
-        onChanged: onChanged,
+        controller: widget.controller,
+        onChanged: widget.onChanged,
         style: theme.textTheme.bodyLarge,
         decoration: InputDecoration(
-          hintText: hint,
+          hintText: widget.hint,
           hintStyle: theme.textTheme.bodyLarge?.copyWith(
             color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
           ),
@@ -180,12 +211,12 @@ class SearchTextField extends StatelessWidget {
             Icons.search,
             color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
           ),
-          suffixIcon: controller.text.isNotEmpty
+          suffixIcon: _hasText
               ? IconButton(
-                  onPressed: onClear ??
+                  onPressed: widget.onClear ??
                       () {
-                        controller.clear();
-                        onChanged?.call('');
+                        widget.controller.clear();
+                        widget.onChanged?.call('');
                       },
                   icon: Icon(
                     Icons.clear,

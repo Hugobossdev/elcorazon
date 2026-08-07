@@ -4,20 +4,20 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
-import '../../services/app_service.dart';
-import '../../services/directions_service.dart';
-import '../../services/geocoding_service.dart' as geocoding;
-import '../../models/order.dart';
-import '../../widgets/loading_widget.dart';
-import 'driver_profile_screen.dart';
-import 'settings_screen.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/directions_service.dart';
+import 'package:elcora_dely/services/geocoding_service.dart' as geocoding;
+import 'package:elcora_dely/models/order.dart';
+import 'package:elcora_dely/widgets/loading_widget.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class RealTimeTrackingScreen extends StatefulWidget {
   final Order order;
 
   const RealTimeTrackingScreen({
-    super.key,
-    required this.order,
+    required this.order, super.key,
   });
 
   @override
@@ -88,14 +88,14 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
         if (customerLatLng != null) {
           // Convertir geocoding.LatLng en google_maps_flutter.LatLng
           _customerLocation = LatLng(customerLatLng.latitude, customerLatLng.longitude);
-          debugPrint('✅ Coordonnées client obtenues: $_customerLocation');
+          Journal.trace('✅ Coordonnées client obtenues: $_customerLocation');
         } else {
           // Fallback: utiliser des coordonnées par défaut si le géocodage échoue
           _customerLocation = const LatLng(5.3599, -4.0083);
-          debugPrint('⚠️ Utilisation de coordonnées par défaut pour le client');
+          Journal.trace('⚠️ Utilisation de coordonnées par défaut pour le client');
         }
       } catch (e) {
-        debugPrint('❌ Erreur géocodage adresse client: $e');
+        Journal.trace('❌ Erreur géocodage adresse client: $e');
         // Fallback: utiliser des coordonnées par défaut
         _customerLocation = const LatLng(5.3599, -4.0083);
       }
@@ -160,7 +160,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
               CameraUpdate.newLatLng(_driverLocation!),
             );
           } catch (e) {
-            debugPrint('Error updating camera: $e');
+            Journal.trace('Error updating camera: $e');
           }
         }
 
@@ -184,7 +184,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
         }
       },
       onError: (error) {
-        debugPrint('Error in position stream: $error');
+        Journal.trace('Error in position stream: $error');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -238,7 +238,6 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       final routeInfo = await _directionsService.getRoute(
         origin: _driverLocation!,
         destination: _customerLocation!,
-        mode: 'driving',
       );
 
       if (routeInfo != null && mounted) {
@@ -251,13 +250,15 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
         });
 
         // Mettre à jour le polyline avec la vraie route
-        await _updateRoutePolyline(routeInfo.polylinePoints);
+        // Le socle rend le tracé en `GeoPoint`, sans dépendance à la
+        // cartographie ; la carte le veut en `LatLng`.
+        await _updateRoutePolyline(routeInfo.polylinePoints.enLatLng);
       } else {
         // Fallback: utiliser le calcul Haversine si l'API échoue
         _calculateRouteFallback();
       }
     } catch (e) {
-      debugPrint('❌ Erreur calcul route avec Directions API: $e');
+      Journal.trace('❌ Erreur calcul route avec Directions API: $e');
       
       // Fallback: utiliser le calcul Haversine
       _calculateRouteFallback();
@@ -284,7 +285,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       // Estimation basée sur la distance (vitesse moyenne: 30 km/h en ville)
       // Ajouter 5 minutes pour le ramassage
       const averageSpeedKmh = 30.0;
-      final minutesPerKm = 60.0 / averageSpeedKmh;
+      const minutesPerKm = 60.0 / averageSpeedKmh;
       final estimatedMinutes = (distance * minutesPerKm).round() + 5;
       final duration = Duration(minutes: estimatedMinutes.clamp(5, 60));
 
@@ -300,7 +301,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       // Créer un polyline simple (ligne droite)
       _updateRoutePolyline([_driverLocation!, _customerLocation!]);
     } catch (e) {
-      debugPrint('❌ Erreur calcul route fallback: $e');
+      Journal.trace('❌ Erreur calcul route fallback: $e');
     }
   }
 
@@ -328,7 +329,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
           CameraUpdate.newLatLngBounds(bounds, 100),
         );
       } catch (e) {
-        debugPrint('Erreur ajustement caméra: $e');
+        Journal.trace('Erreur ajustement caméra: $e');
       }
     }
   }
@@ -541,9 +542,6 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
                     markers: _markers,
                     polylines: _polylines,
                     myLocationEnabled: true,
-                    myLocationButtonEnabled: true,
-                    zoomControlsEnabled: true,
-                    mapToolbarEnabled: true,
                   ),
                 ),
 

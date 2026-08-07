@@ -1,382 +1,86 @@
-import 'dart:math' as math;
-import 'package:flutter/foundation.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcora_fast/config/api_config.dart';
-import 'package:elcora_fast/services/rest_client.dart';
+import 'package:elcorazon_core/elcorazon_core.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
-/// Service de gestion des directions et calculs de distance/temps avec Google Directions API
-class DirectionsService extends ChangeNotifier {
-  static final DirectionsService _instance = DirectionsService._internal();
+export 'package:elcorazon_core/elcorazon_core.dart'
+    show DirectionsException, DistanceTimeInfo, GeoPoint, RouteInfo;
+
+/// Adaptation entre les `LatLng` de la carte et le dépôt d'itinéraires du socle.
+///
+/// Le calcul lui-même vit dans `DirectionsRepository` (`elcorazon_core`) depuis
+/// le lot 2.3 : cette application et celle du livreur en portaient chacune une
+/// copie, à 86 % identiques, dont les tracés et les caches se maintenaient
+/// séparément. Il ne reste ici que la conversion des coordonnées et la lecture
+/// de la clé API, qui sont propres à l'application.
+///
+/// Ce n'est plus un `ChangeNotifier` : l'ancien l'était sans jamais appeler
+/// `notifyListeners`, et aucun arbre de providers ne l'enregistrait.
+class DirectionsService {
   factory DirectionsService() => _instance;
-  DirectionsService._internal();
+  DirectionsService._();
 
-  // Cache pour éviter les appels répétés
-  final Map<String, RouteInfo> _routeCache = {};
-  final RestClient _rest = const RestClient();
+  static final DirectionsService _instance = DirectionsService._();
 
-  /// Obtient les informations complètes d'un itinéraire (distance, temps, polyline)
+  DirectionsRepository? _depot;
+
+  /// La clé est relue à chaque appel, comme avant ce lot : `dotenv` peut ne pas
+  /// être encore chargé quand l'écran construit le service, et une clé lue une
+  /// seule fois trop tôt resterait vide pour toute la session. Le dépôt — donc
+  /// son cache — n'est reconstruit que si la clé a réellement changé.
+  DirectionsRepository get _depotCourant {
+    final cle = ApiConfig.googleMapsApiKey;
+    final existant = _depot;
+    if (existant != null && existant.apiKey == cle) return existant;
+    return _depot = DirectionsRepository(apiKey: cle);
+  }
+
+  /// Itinéraire complet entre deux points.
   ///
-  /// [origin] : Point de départ
-  /// [destination] : Point d'arrivée
-  /// [waypoints] : Points intermédiaires (optionnel)
-  /// [mode] : Mode de transport (driving, walking, bicycling, transit)
-  ///
-  /// Retourne un objet RouteInfo avec distance, durée et polyline
+  /// Rend `null` si la clé Google n'est pas configurée — l'appelant retombe
+  /// alors sur son tracé de repli, ce qu'il faisait déjà : l'ancienne version
+  /// levait dans ce cas, et les deux écrans traitaient l'exception exactement
+  /// comme ils traitent aujourd'hui l'absence de résultat.
   Future<RouteInfo?> getRoute({
     required LatLng origin,
     required LatLng destination,
     List<LatLng>? waypoints,
     String mode = 'driving',
-  }) async {
-    try {
-      // Créer une clé de cache
-      final cacheKey = _generateCacheKey(origin, destination, waypoints, mode);
-
-      // Vérifier le cache
-      if (_routeCache.containsKey(cacheKey)) {
-        final cached = _routeCache[cacheKey]!;
-        // Utiliser le cache si moins de 5 minutes
-        if (DateTime.now().difference(cached.timestamp).inMinutes < 5) {
-          debugPrint('✅ DirectionsService: Route récupérée du cache');
-          return cached;
-        } else {
-          _routeCache.remove(cacheKey);
-        }
-      }
-
-      // Construire l'URL de l'API
-      final apiKey = ApiConfig.googleMapsApiKey;
-      if (apiKey.isEmpty || apiKey == 'YOUR_GOOGLE_MAPS_API_KEY') {
-        throw Exception('Clé API Google Maps non configurée');
-      }
-
-      final base = Uri.https('maps.googleapis.com', '/maps/api/directions/json');
-final qp = <String, String>{
-        'origin': '${origin.latitude},${origin.longitude}',
-        'destination': '${destination.latitude},${destination.longitude}',
-        'mode': mode,
-        'key': apiKey,
-      };
-
-      // Ajouter les waypoints si fournis
-      if (waypoints != null && waypoints.isNotEmpty) {
-        final waypointsStr =
-            waypoints.map((wp) => '${wp.latitude},${wp.longitude}').join('|');
-        qp['waypoints'] = waypointsStr;
-      }
-
-      debugPrint('🔄 DirectionsService: Requête à Google Directions API...');
-
-      final data = await _rest.getJson(base.replace(queryParameters: qp));
-
-      if (data['status'] == 'OK' && (data['routes'] as List).isNotEmpty) {
-        final route = (data['routes'] as List).first as Map<String, dynamic>;
-        final leg = (route['legs'] as List).first as Map<String, dynamic>;
-
-        // Extraire la distance (en mètres)
-        final distanceValue =
-            ((leg['distance'] as Map<String, dynamic>)['value'] as num).toInt();
-        final distanceKm = distanceValue / 1000.0;
-
-        // Extraire la durée (en secondes)
-        final durationValue =
-            ((leg['duration'] as Map<String, dynamic>)['value'] as num).toInt();
-        final durationMinutes = (durationValue / 60).round();
-
-        // Extraire la durée dans le trafic si disponible
-        int? durationInTrafficMinutes;
-        if (leg['duration_in_traffic'] != null) {
-          final durationInTrafficValue = ((leg['duration_in_traffic']
-                  as Map<String, dynamic>)['value'] as num)
-              .toInt();
-          durationInTrafficMinutes = (durationInTrafficValue / 60).round();
-        }
-
-        // Extraire le polyline encodé
-        final overviewPolyline = (route['overview_polyline']
-            as Map<String, dynamic>)['points'] as String;
-
-        // Décoder le polyline en liste de points LatLng
-        final polylinePoints = _decodePolyline(overviewPolyline);
-
-        // Créer l'objet RouteInfo
-        final routeInfo = RouteInfo(
-          distanceKm: distanceKm,
-          distanceMeters: distanceValue,
-          durationMinutes: durationMinutes,
-          durationInTrafficMinutes: durationInTrafficMinutes,
-          polylinePoints: polylinePoints,
-          encodedPolyline: overviewPolyline,
-          timestamp: DateTime.now(),
-        );
-
-        // Mettre en cache
-        _routeCache[cacheKey] = routeInfo;
-
-        debugPrint(
-          '✅ DirectionsService: Route calculée - ${distanceKm.toStringAsFixed(2)} km, $durationMinutes min',
-        );
-
-        return routeInfo;
-      } else {
-        final status = data['status'] as String;
-        final errorMessage =
-            data['error_message'] as String? ?? 'Erreur inconnue';
-        debugPrint('❌ DirectionsService: Erreur API - $status: $errorMessage');
-
-        // Gérer les erreurs spécifiques
-        if (status == 'ZERO_RESULTS') {
-          throw Exception('Aucun itinéraire trouvé entre ces points');
-        } else if (status == 'NOT_FOUND') {
-          throw Exception('Point de départ ou d\'arrivée introuvable');
-        } else if (status == 'OVER_QUERY_LIMIT') {
-          throw Exception('Quota API dépassé. Veuillez réessayer plus tard');
-        } else if (status == 'REQUEST_DENIED') {
-          throw Exception('Requête refusée. Vérifiez votre clé API');
-        } else if (status == 'INVALID_REQUEST') {
-          throw Exception('Requête invalide: $errorMessage');
-        } else {
-          throw Exception('Erreur API: $status - $errorMessage');
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ DirectionsService: Erreur calcul route - $e');
-      rethrow;
-    }
+  }) {
+    return _depotCourant.getRoute(
+      origin: origin.enGeoPoint,
+      destination: destination.enGeoPoint,
+      waypoints: waypoints?.map((p) => p.enGeoPoint).toList(),
+      mode: mode,
+    );
   }
 
-  /// Calcule uniquement la distance et le temps entre deux points
-  /// Plus rapide que getRoute car utilise Distance Matrix API
+  /// Distance et durée seules, sans tracé.
   Future<DistanceTimeInfo?> getDistanceAndTime({
     required LatLng origin,
     required LatLng destination,
     String mode = 'driving',
-  }) async {
-    try {
-      final apiKey = ApiConfig.googleMapsApiKey;
-      if (apiKey.isEmpty || apiKey == 'YOUR_GOOGLE_MAPS_API_KEY') {
-        throw Exception('Clé API Google Maps non configurée');
-      }
-
-      final base = Uri.https('maps.googleapis.com', '/maps/api/distancematrix/json');
-final qp = <String, String>{
-        'origins': '${origin.latitude},${origin.longitude}',
-        'destinations': '${destination.latitude},${destination.longitude}',
-        'mode': mode,
-        'key': apiKey,
-      };
-
-      debugPrint(
-        '🔄 DirectionsService: Requête à Google Distance Matrix API...',
-      );
-
-      final data = await _rest.getJson(base.replace(queryParameters: qp));
-
-      if (data['status'] == 'OK' && (data['rows'] as List).isNotEmpty) {
-        final firstRow = (data['rows'] as List).first as Map<String, dynamic>;
-        final elements = firstRow['elements'] as List;
-        final element = elements[0] as Map<String, dynamic>;
-
-        if (element['status'] == 'OK') {
-          final distance = element['distance'] as Map<String, dynamic>;
-          final distanceValue = (distance['value'] as num).toInt();
-          final distanceKm = distanceValue / 1000.0;
-
-          final duration = element['duration'] as Map<String, dynamic>;
-          final durationValue = (duration['value'] as num).toInt();
-          final durationMinutes = (durationValue / 60).round();
-
-          // Durée dans le trafic si disponible
-          int? durationInTrafficMinutes;
-          if (element['duration_in_traffic'] != null) {
-            final durationInTraffic =
-                element['duration_in_traffic'] as Map<String, dynamic>;
-            final durationInTrafficValue =
-                (durationInTraffic['value'] as num).toInt();
-            durationInTrafficMinutes = (durationInTrafficValue / 60).round();
-          }
-
-          debugPrint(
-            '✅ DirectionsService: Distance/Temps calculés - ${distanceKm.toStringAsFixed(2)} km, $durationMinutes min',
-          );
-
-          return DistanceTimeInfo(
-            distanceKm: distanceKm,
-            distanceMeters: distanceValue,
-            durationMinutes: durationMinutes,
-            durationInTrafficMinutes: durationInTrafficMinutes,
-          );
-        } else {
-          throw Exception(
-            'Impossible de calculer la distance: ${element['status']}',
-          );
-        }
-      } else {
-        throw Exception('Erreur API: ${data['status']}');
-      }
-    } catch (e) {
-      debugPrint('❌ DirectionsService: Erreur calcul distance/temps - $e');
-      rethrow;
-    }
+  }) {
+    return _depotCourant.getDistanceAndTime(
+      origin: origin.enGeoPoint,
+      destination: destination.enGeoPoint,
+      mode: mode,
+    );
   }
 
-  /// Décode un polyline encodé en liste de points LatLng
-  List<LatLng> _decodePolyline(String encoded) {
-    final List<LatLng> points = [];
-    int index = 0;
-    int lat = 0;
-    int lng = 0;
+  /// Distance à vol d'oiseau en kilomètres — repli hors ligne.
+  double calculateStraightLineDistance(LatLng point1, LatLng point2) =>
+      _depotCourant.straightLineDistanceKm(point1.enGeoPoint, point2.enGeoPoint);
 
-    while (index < encoded.length) {
-      int shift = 0;
-      int result = 0;
-      int byte;
-
-      do {
-        byte = encoded.codeUnitAt(index++) - 63;
-        result |= (byte & 0x1F) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-
-      final dlat = ((result & 1) != 0) ? ~(result >> 1) : (result >> 1);
-      lat += dlat;
-
-      shift = 0;
-      result = 0;
-
-      do {
-        byte = encoded.codeUnitAt(index++) - 63;
-        result |= (byte & 0x1F) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-
-      final dlng = ((result & 1) != 0) ? ~(result >> 1) : (result >> 1);
-      lng += dlng;
-
-      points.add(LatLng(lat / 1e5, lng / 1e5));
-    }
-
-    return points;
-  }
-
-  /// Génère une clé de cache unique
-  String _generateCacheKey(
-    LatLng origin,
-    LatLng destination,
-    List<LatLng>? waypoints,
-    String mode,
-  ) {
-    final waypointsStr =
-        waypoints?.map((wp) => '${wp.latitude},${wp.longitude}').join('|') ??
-            '';
-    return '${origin.latitude},${origin.longitude}_${destination.latitude},${destination.longitude}_${waypointsStr}_$mode';
-  }
-
-  /// Vide le cache
-  void clearCache() {
-    _routeCache.clear();
-    debugPrint('✅ DirectionsService: Cache vidé');
-  }
-
-  /// Calcule la distance en ligne droite (Haversine) comme fallback
-  double calculateStraightLineDistance(LatLng point1, LatLng point2) {
-    const double earthRadius = 6371.0; // Rayon de la Terre en km
-
-    final double lat1Rad = point1.latitude * (3.14159265359 / 180);
-    final double lat2Rad = point2.latitude * (3.14159265359 / 180);
-    final double deltaLatRad =
-        (point2.latitude - point1.latitude) * (3.14159265359 / 180);
-    final double deltaLngRad =
-        (point2.longitude - point1.longitude) * (3.14159265359 / 180);
-
-    final double a = math.sin(deltaLatRad / 2) * math.sin(deltaLatRad / 2) +
-        math.cos(lat1Rad) *
-            math.cos(lat2Rad) *
-            math.sin(deltaLngRad / 2) *
-            math.sin(deltaLngRad / 2);
-    final double c = 2 * math.asin(math.sqrt(a));
-
-    return earthRadius * c;
-  }
+  /// Vide le cache des itinéraires.
+  void clearCache() => _depotCourant.clearCache();
 }
 
-/// Informations complètes sur un itinéraire
-class RouteInfo {
-  final double distanceKm;
-  final int distanceMeters;
-  final int durationMinutes;
-  final int? durationInTrafficMinutes;
-  final List<LatLng> polylinePoints;
-  final String encodedPolyline;
-  final DateTime timestamp;
-
-  RouteInfo({
-    required this.distanceKm,
-    required this.distanceMeters,
-    required this.durationMinutes,
-    required this.polylinePoints,
-    required this.encodedPolyline,
-    required this.timestamp,
-    this.durationInTrafficMinutes,
-  });
-
-  /// Durée à utiliser (avec trafic si disponible, sinon durée normale)
-  int get effectiveDurationMinutes =>
-      durationInTrafficMinutes ?? durationMinutes;
-
-  /// Formatage de la distance
-  String get formattedDistance {
-    if (distanceKm < 1) {
-      return '${distanceMeters}m';
-    } else {
-      return '${distanceKm.toStringAsFixed(1)} km';
-    }
-  }
-
-  /// Formatage de la durée
-  String get formattedDuration {
-    if (effectiveDurationMinutes < 60) {
-      return '${effectiveDurationMinutes}min';
-    } else {
-      final hours = effectiveDurationMinutes ~/ 60;
-      final minutes = effectiveDurationMinutes % 60;
-      return '${hours}h ${minutes}min';
-    }
-  }
+extension LatLngEnGeoPoint on LatLng {
+  GeoPoint get enGeoPoint => GeoPoint(latitude, longitude);
 }
 
-/// Informations de distance et temps (sans polyline)
-class DistanceTimeInfo {
-  final double distanceKm;
-  final int distanceMeters;
-  final int durationMinutes;
-  final int? durationInTrafficMinutes;
-
-  DistanceTimeInfo({
-    required this.distanceKm,
-    required this.distanceMeters,
-    required this.durationMinutes,
-    this.durationInTrafficMinutes,
-  });
-
-  int get effectiveDurationMinutes =>
-      durationInTrafficMinutes ?? durationMinutes;
-
-  String get formattedDistance {
-    if (distanceKm < 1) {
-      return '${distanceMeters}m';
-    } else {
-      return '${distanceKm.toStringAsFixed(1)} km';
-    }
-  }
-
-  String get formattedDuration {
-    if (effectiveDurationMinutes < 60) {
-      return '${effectiveDurationMinutes}min';
-    } else {
-      final hours = effectiveDurationMinutes ~/ 60;
-      final minutes = effectiveDurationMinutes % 60;
-      return '${hours}h ${minutes}min';
-    }
-  }
+extension GeoPointsEnLatLng on List<GeoPoint> {
+  /// Tracé du socle, sous la forme qu'attend `Polyline`.
+  List<LatLng> get enLatLng =>
+      map((p) => LatLng(p.latitude, p.longitude)).toList();
 }

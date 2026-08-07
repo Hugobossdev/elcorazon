@@ -96,7 +96,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         caseSensitive: false,
       );
       if (!uuidPattern.hasMatch(widget.orderId)) {
-        debugPrint('⚠️ Order ID format may be invalid: ${widget.orderId}');
+        eccore.Journal.trace('⚠️ Order ID format may be invalid: ${widget.orderId}');
         // On continue quand même, car certains IDs peuvent avoir un format différent
       }
 
@@ -127,7 +127,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      debugPrint('❌ Error loading order details: $e');
+      eccore.Journal.trace('❌ Error loading order details: $e');
       setState(() {
         _isLoading = false;
         _errorMessage =
@@ -180,7 +180,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         _calculateDeliveryStats();
       }
     } on eccore.ApiException catch (e) {
-      debugPrint('Suivi indisponible : ${e.code}');
+      eccore.Journal.trace('Suivi indisponible : ${e.code}');
     }
   }
 
@@ -197,7 +197,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         });
       }
     } catch (e) {
-      debugPrint('⚠️ Error loading driver rating: $e');
+      eccore.Journal.trace('⚠️ Error loading driver rating: $e');
     }
   }
 
@@ -213,7 +213,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         _updateMapMarkers();
       }
     } catch (e) {
-      debugPrint('⚠️ Error geocoding delivery address: $e');
+      eccore.Journal.trace('⚠️ Error geocoding delivery address: $e');
     }
   }
 
@@ -323,7 +323,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
           _polylines = {
             Polyline(
               polylineId: const PolylineId('route'),
-              points: routeInfo.polylinePoints,
+              // Le socle rend le tracé en `GeoPoint`, sans dépendance à la
+              // cartographie ; la carte le veut en `LatLng`.
+              points: routeInfo.polylinePoints.enLatLng,
               color: Theme.of(context).colorScheme.primary,
               width: 5,
             ),
@@ -342,7 +344,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         });
       }
     } catch (e) {
-      debugPrint('⚠️ Error getting directions: $e');
+      eccore.Journal.trace('⚠️ Error getting directions: $e');
     }
   }
 
@@ -511,7 +513,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       final currentUser = appService.currentUser;
 
       if (currentUser == null) {
-        debugPrint('⚠️ User not logged in, cannot start tracking');
+        eccore.Journal.trace('⚠️ User not logged in, cannot start tracking');
         return;
       }
 
@@ -560,11 +562,11 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
           }
         },
         onError: (error) {
-          debugPrint('❌ Error in order updates stream: $error');
+          eccore.Journal.trace('❌ Error in order updates stream: $error');
           _attemptReconnect();
         },
         onDone: () {
-          debugPrint('⚠️ Order updates stream closed, attempting reconnect');
+          eccore.Journal.trace('⚠️ Order updates stream closed, attempting reconnect');
           _attemptReconnect();
         },
       );
@@ -609,12 +611,12 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
           }
         },
         onError: (error) {
-          debugPrint('❌ Error in delivery location stream: $error');
+          eccore.Journal.trace('❌ Error in delivery location stream: $error');
           // Tenter une reconnexion automatique
           _attemptReconnect();
         },
         onDone: () {
-          debugPrint(
+          eccore.Journal.trace(
             '⚠️ Delivery location stream closed, attempting reconnect',
           );
           _attemptReconnect();
@@ -638,9 +640,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         },
       );
 
-      debugPrint('✅ Started real-time tracking for order: ${widget.orderId}');
+      eccore.Journal.trace('✅ Started real-time tracking for order: ${widget.orderId}');
     } catch (e) {
-      debugPrint('❌ Error starting tracking: $e');
+      eccore.Journal.trace('❌ Error starting tracking: $e');
     }
   }
 
@@ -685,7 +687,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         );
       }
     } catch (e) {
-      debugPrint('❌ Erreur lors de la reconnexion: $e');
+      eccore.Journal.trace('❌ Erreur lors de la reconnexion: $e');
       if (mounted) {
         setState(() => _isReconnecting = false);
         // Réessayer après un délai plus long
@@ -710,7 +712,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
           await _geocodingService!.geocodeAddress(_order!.deliveryAddress);
 
       if (deliveryCoords == null) {
-        debugPrint('⚠️ Could not geocode delivery address');
+        eccore.Journal.trace('⚠️ Could not geocode delivery address');
         return;
       }
 
@@ -741,7 +743,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         }
       }
     } catch (e) {
-      debugPrint('❌ Error calculating estimated delivery time: $e');
+      eccore.Journal.trace('❌ Error calculating estimated delivery time: $e');
     }
   }
 
@@ -1454,7 +1456,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
             trafficEnabled: true,
           );
         } catch (e) {
-          debugPrint('❌ Erreur lors du chargement de Google Maps: $e');
+          eccore.Journal.trace('❌ Erreur lors du chargement de Google Maps: $e');
           return Container(
             color: Colors.red[50],
             child: Center(
