@@ -24,6 +24,7 @@ import 'package:elcorazon_core/src/cart/cart_repository.dart';
 import 'package:elcorazon_core/src/catalog/catalog_repository.dart';
 import 'package:elcorazon_core/src/catalog/category.dart';
 import 'package:elcorazon_core/src/catalog/managed_catalog_repository.dart';
+import 'package:elcorazon_core/src/catalog/managed_category.dart';
 import 'package:elcorazon_core/src/catalog/menu_item.dart';
 import 'package:elcorazon_core/src/catalog/option_template.dart';
 import 'package:elcorazon_core/src/catalog/review.dart';
