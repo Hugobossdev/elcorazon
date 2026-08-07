@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/utils/price_formatter.dart';
-import 'package:elcora_dely/services/address_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/performance_service.dart';
 import 'package:elcora_dely/models/order.dart';
@@ -115,18 +114,6 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       // Ensure AppService is fully initialized
       if (!appService.isInitialized) {
         await appService.initialize();
-      }
-
-      // Initialiser les services optionnels (ne pas bloquer si échec)
-      if (!mounted) return;
-
-      try {
-        await Provider.of<AddressService>(
-          context,
-          listen: false,
-        ).initialize().timeout(const Duration(seconds: 5));
-      } catch (e) {
-        Journal.trace('⚠️ AddressService initialization failed: $e');
       }
 
       // Aucune initialisation de paiement : l'encaissement passe par le

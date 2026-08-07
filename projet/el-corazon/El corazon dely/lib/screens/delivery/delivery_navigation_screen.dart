@@ -8,7 +8,6 @@ import 'package:elcora_dely/models/order.dart';
 import 'package:elcora_dely/screens/delivery/delivery_home_screen.dart';
 import 'package:elcora_dely/screens/delivery/delivery_orders_screen.dart';
 import 'package:elcora_dely/screens/delivery/analytics_screen.dart';
-import 'package:elcora_dely/screens/delivery/address_management_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
@@ -142,12 +141,6 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
             icon: Icons.account_balance_wallet,
             title: 'Mes gains',
             onTap: () => _navigateToPage(3),
-          ),
-          const Divider(),
-          _buildDrawerItem(
-            icon: Icons.location_on,
-            title: 'Gestion des adresses',
-            onTap: () => _navigateToAddressManagement(),
           ),
           _buildDrawerItem(
             icon: Icons.payment,
@@ -321,15 +314,6 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
     );
   }
 
-  void _navigateToAddressManagement() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const AddressManagementScreen(),
-      ),
-    );
-  }
-
   void _navigateToPayments() {
     final appService = Provider.of<AppService>(context, listen: false);
     final assignedDeliveries = appService.assignedDeliveries;
@@ -475,21 +459,6 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildQuickActionButton(
-                    icon: Icons.location_on,
-                    title: 'Adresses',
-                    onTap: () {
-                      Navigator.pop(context);
-                      _navigateToAddressManagement();
-                    },
-                  ),
-                ),
-              ],
             ),
             const SizedBox(height: 12),
             Row(

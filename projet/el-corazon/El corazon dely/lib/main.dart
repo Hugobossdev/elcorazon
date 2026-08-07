@@ -10,7 +10,6 @@ import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/location_service.dart';
 import 'package:elcora_dely/services/notification_service.dart';
 import 'package:elcora_dely/services/realtime_tracking_service.dart';
-import 'package:elcora_dely/services/address_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/performance_service.dart';
 import 'package:elcora_dely/services/chat_service.dart';
@@ -123,7 +122,6 @@ class DeliverApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => NotificationService()),
         ChangeNotifierProvider(create: (_) => RealtimeTrackingService()),
-        ChangeNotifierProvider(create: (_) => AddressService()),
         ChangeNotifierProvider(create: (_) => ErrorHandlerService()),
         ChangeNotifierProvider(create: (_) => PerformanceService()),
         ChangeNotifierProvider(create: (_) => ChatService()),
