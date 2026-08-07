@@ -15,16 +15,21 @@ de la dette laissée derrière cette migration.
 
 Mesuré aujourd'hui, pas déduit.
 
-| Composant | Fichiers | Code | Tests | `flutter analyze` |
-|---|---:|---:|---:|---:|
-| `backend/` | 314 | 29 676 l. | **1276 passés** | ruff + mypy strict, verts |
-| `packages/elcorazon_core` | 77 | 8 008 l. | **161 passés** | **0** |
-| `El Corazon admin` | 76 | 35 462 l. | 42 passés | 1 info |
-| `El Corazon fastfood` | 135 | 46 916 l. | 62 passés | 9 infos |
-| `El corazon dely` | 48 | 17 195 l. | 9 passés | 46 infos |
+Mise à jour au 7 août 2026, après les lots 2 et 5.
 
-Zéro erreur, zéro avertissement partout. `flutter build web` aboutit sur les
-trois applications. `tools/code_mort.py` sort à 0 et bloque la CI.
+| Composant | Fichiers | Code | Tests | `flutter analyze` | Couverture |
+|---|---:|---:|---:|---:|---:|
+| `backend/` | 314 | 29 676 l. | **1276 passés** | ruff + mypy strict, verts | — |
+| `packages/elcorazon_core` | 81 | 8 428 l. | **185 passés** | **0** | 58,87 % |
+| `El Corazon admin` | 76 | 35 362 l. | **50 passés** | **0** | 0,99 % |
+| `El Corazon fastfood` | 135 | 46 660 l. | **69 passés** | **0** | 3,51 % |
+| `El corazon dely` | 48 | 16 973 l. | **16 passés** | **0** | 1,31 % |
+
+Zéro diagnostic partout, et plus seulement zéro erreur : le lot 5 a aligné les
+règles des quatre paquets et retiré `--no-fatal-infos` de la CI. `flutter build
+web` aboutit sur les trois applications. Trois garde-fous bloquent la CI :
+`tools/code_mort.py` (fichier injoignable), `flutter analyze` (le moindre écart),
+`tools/couverture.py` (baisse de couverture).
 
 ### Ce que les lots 0 et 1 ont donné
 
@@ -38,6 +43,9 @@ de 385 à 259 fichiers, sans qu'un seul test change de couleur.
 | 1.2 — services zombies | `847958c` | −16 services construits pour personne |
 | 1.3 — résidus + CI | `945a25d` | −12 SQL Supabase, −16 dépendances, garde-fou bloquant |
 | 2.1 — affichage des montants | `f803e4f` | Une règle d'affichage dans le socle, 17 tests |
+| 2.2 — applications branchées | — | 3 formateurs → 3 délégations, 22 tests, 2 régressions évitées |
+| 2.3 — itinéraires + présentation | — | `DirectionsRepository` au socle (20 tests), `dely` aligné sur `admin` |
+| 5 — outillage durci | — | 1 368 diagnostics → 0, 663 traces muettes en production, plancher de couverture |
 
 ---
 
@@ -118,25 +126,32 @@ dont 5 dépassent 1 500 :
 400 `setState` au total. Aucun écran n'appelle le réseau directement — la
 frontière écran ↔ données tient, c'est ce qui rend la découpe faisable.
 
-### 3.3 Le déséquilibre des tests, aggravé en proportion
+### 3.3 Le déséquilibre des tests reste le sujet
+
+Le lot 5 l'a **chiffré** au lieu de l'estimer, et le constat est plus dur que ne
+le laissait croire le compte de tests :
 
 ```
-backend            29 676 l.  ←→  1276 tests
-elcorazon_core      8 008 l.  ←→   161 tests
-les 3 applications 99 573 l.  ←→   113 tests
+backend             29 676 l.  ←→  1276 tests
+elcorazon_core       8 428 l.  ←→   185 tests   58,87 % couvert
+les 3 applications  99 000 l.  ←→   135 tests    1,89 % couvert
 ```
 
-`dely` a **9 tests pour 17 195 lignes**. C'est le filet qui manque pour le lot 4.
+837 lignes couvertes sur 38 250 dans les trois applications. `admin` est à
+**0,99 %** — 143 lignes sur 14 487. C'est le filet qui manque pour les lots 3
+et 4, et c'est désormais mesuré à chaque exécution de la CI plutôt que deviné.
 
-### 3.4 L'outillage est inégal
+### 3.4 L'outillage était inégal — traité au lot 5
 
-`dely` n'active **aucune** règle de lint (`linter: rules:` vide), `admin` en
-active 7, `fastfood` 53. D'où la répartition des 56 diagnostics : 46 sur `dely`,
-9 sur `fastfood`, 1 sur `admin`. Ce n'est pas que `dely` soit moins soigné,
-c'est qu'on ne lui demande rien.
+`dely` n'activait **aucune** règle de lint, `admin` 7, `fastfood` 53, et le socle
+déclarait `flutter_lints` sans jamais l'inclure. Les quatre partagent maintenant
+le même jeu (`analysis_options.yaml` à la racine) et sont à zéro diagnostic, la
+CI n'en tolérant plus aucun.
 
-681 `debugPrint` subsistent (contre 1 009 avant le lot 1). Contrairement à
-`print`, `debugPrint` **s'exécute en production**.
+Les 663 `debugPrint` restants sont passés par `Journal.trace`, qui ne fait rien
+hors du mode debug. Le point n'était pas cosmétique : contrairement à `print`,
+`debugPrint` **s'exécute en production**, et l'audit y a trouvé des adresses de
+livraison complètes et des coordonnées GPS de clients.
 
 ---
 
@@ -150,19 +165,45 @@ prix différents pour la même commande — « 12.500 CFA » côté client, « 1
 côté back-office — et la version client n'avait aucune garde (`format(-500)`
 rendait « -.500 CFA »).
 
-**2.2 — brancher les applications dessus.** Les trois `price_formatter.dart`
-deviennent des délégations d'une ligne, ce qui laisse les 138 points d'appel
-intacts. Ils disparaîtront d'eux-mêmes au lot 3, quand les écrans manipuleront
-des `Money`. ⚠️ **Changement visible** : le client et le livreur passeront de
-« 12.500 CFA » à « 12 500 CFA ». C'est la correction, mais elle se voit.
+**2.2 fait** : les trois `price_formatter.dart` sont des délégations d'une
+ligne, ce qui a laissé les 131 points d'appel intacts (138 annoncés, 131
+mesurés). Ils disparaîtront d'eux-mêmes au lot 3, quand les écrans manipuleront
+des `Money`. ⚠️ **Changement visible** : le client et le livreur sont passés de
+« 12.500 CFA » à « 12 500 CFA ». C'est la correction, mais elle se voit, et
+**elle reste à annoncer**.
 
-**2.3 — les six autres paires.** `promo_code_service` + `promo_code` (98 % et
-96 %, fast/dely) et `directions_service` (86 %) sont du domaine : ils vont dans
-le socle, avec leurs tests. `loading_widget` et `custom_text_field` (96 % et
-93 %, admin/dely) sont de la présentation : le socle **ne doit pas** les
-prendre — `04-migration-flutter.md` §2.2 réserve la présentation aux
-applications. Les laisser divergents est le bon choix ; ce qu'on peut faire,
-c'est aligner `dely` sur `admin` par copie et s'arrêter là.
+Deux points d'appel ont dû suivre, faute de quoi le lot aurait régressé : le
+nettoyage de l'export CSV du back-office ne voyait pas l'espace insécable
+(`replaceAll(' ')` → `RegExp(r'\s')`), et la ligne « Remise » du panier client
+préfixait un second signe sur un montant déjà négatif — « --.500 CFA » avant,
+« -500 CFA » après.
+
+**2.3 fait, avec une correction de cadrage.** `directions_service` (86 %) est
+passé au socle avec ses tests, sous la forme d'un `DirectionsRepository` : les
+deux copies divergeaient sur le transport, et celle de `dely` construisait ses
+URL par concaténation **sans encoder ses points de passage**. Le socle n'a pas
+pris `google_maps_flutter` pour autant — un `GeoPoint` de deux nombres suffit,
+les écrans convertissent à la frontière.
+
+`loading_widget` et `custom_text_field` (96 % et 93 %, admin/dely) sont de la
+présentation : le socle **ne doit pas** les prendre — `04-migration-flutter.md`
+§2.2 réserve la présentation aux applications. `dely` a été aligné sur `admin`
+par copie, et on s'est arrêté là. C'était sans risque : `LoadingOverlay` et
+`SearchTextField`, les seules classes dont le comportement différait, ne sont
+pas utilisées dans `dely`, et son `ThemeData` ne câble que `lightTheme` — où
+`primaryColor` **est** `colorScheme.primary`.
+
+`promo_code_service` + `promo_code` (98 % et 96 %, fast/dely) **ne vont pas au
+socle** : la ligne était fausse, pour la même raison qu'en §2.2. Le socle porte
+déjà l'entité (`Promotion`, miroir de `ManagedPromotionSerializer`, en `Money`,
+plus `PromotionRepository`) ; et ce que porte le local n'est pas un modèle de
+domaine mais un magasin `SharedPreferences` de codes promo, sous un singleton
+`ChangeNotifier` qui calcule la remise côté client et laisse le client *créer*
+des codes — c'est-à-dire exactement la pile héritée décrite en §3.1. L'y verser
+l'installerait dans le socle. Il n'y a d'ailleurs **aucune route publique de
+promotion** : la remise arrive par le devis de la commande. Ces deux fichiers
+relèvent donc du lot 3, comme tout modèle local que le socle double (§2.2), et
+leur fin n'est pas un déplacement mais une suppression.
 
 *Ne pas faire* : unifier `custom_button` (160/320/221 l.) ni
 `gamification_service` (642 lignes d'écart). Ils ont divergé pour des raisons
@@ -203,21 +244,78 @@ Le critère n'est pas un nombre de lignes : **le comportement métier de l'écra
 est-il atteignable par un test sans monter l'arbre de widgets ?** Tant que la
 réponse est non, la découpe n'est pas finie.
 
-### Lot 5 — Durcir l'outillage (1 jour) — *à faire maintenant, pas à la fin*
+### Lot 5 — Durcir l'outillage — **fait**, mais pas en un jour
 
-Remonté avant le lot 3 dans cette révision : il coûte une journée et rend
-mesurable tout ce qui suit.
+Le lot était estimé à une journée sur l'hypothèse qu'il restait 56 diagnostics.
+C'est la troisième erreur de cadrage du même genre que celles reconnues au §2 :
+le chiffre mesurait l'outillage en place, pas ce que son alignement révèle.
 
-1. Donner à `dely` le jeu de règles de `fastfood`, et à `admin` aussi. Traiter
-   les diagnostics que ça révèle.
-2. Retirer `--no-fatal-infos` de la CI Flutter. La justification écrite dans le
-   workflow — « les trois applications traînent des info de style sur des écrans
-   que la migration n'a pas encore touchés » — **est périmée** : il en reste 56,
-   dont 46 dus au seul fait que `dely` n'active aucune règle.
-3. Les 681 `debugPrint` : un journaliseur qui se tait en production, et vérifier
-   au passage qu'aucun ne rend un jeton ou une adresse.
-4. Un plancher de couverture sur les applications, bas au départ, relevé à
-   chaque domaine migré au lot 3.
+**5.1 — un jeu de règles pour les quatre paquets.** Les trois
+`analysis_options.yaml` triplaient 53 règles ; elles vivent désormais dans
+`analysis_options.yaml` à la racine, que les quatre incluent. Le socle en reçoit
+un aussi : il déclarait `flutter_lints` **sans jamais l'inclure**, faute
+d'`analysis_options.yaml` — son « zéro diagnostic » mesurait surtout ce qu'on ne
+lui demandait pas.
+
+L'alignement a révélé **1 368 diagnostics** (socle 161, admin 796, dely 402,
+fastfood 9), pas 56. 894 traités par `dart fix`, **474 à la main**. Tous à zéro.
+
+Ce que le traitement manuel a mis au jour, au-delà du style :
+
+- **`dart fix` produit du code invalide.** Quatre `const AxisTitles(\n ,)` dans
+  le tableau de bord admin, après retrait d'arguments redondants. D'où la règle :
+  **bâtir** après chaque passe automatique, pas seulement analyser.
+- **30 `BuildContext` traversant un `await`**, dont plusieurs déjà mal gardés
+  *avant* ce lot. La règle que l'analyseur applique : `State.context` se garde
+  avec `mounted`, tout autre `BuildContext` avec `context.mounted`. Le code
+  d'origine faisait l'inverse par endroits.
+- **4 `close_sinks`** vérifiés un par un : tous faux positifs (fermeture au
+  travers d'un champ ou d'une map), documentés par un `// ignore:` justifié.
+- **`RadioListTile.groupValue`/`onChanged` dépréciés** : migration réelle vers
+  `RadioGroup` dans les deux dialogues de réglages de `dely`.
+- **177 appels dynamiques typés**, dont 100 dans les deux `geocoding_service`
+  (36 % de similarité : divergence, pas duplication — on ne les fusionne pas).
+
+**5.2 — `--no-fatal-infos` retiré** de `flutter-ci.yml`. Le jeu de règles partagé
+a été ajouté aux filtres de chemin du workflow : sans cela, le modifier
+n'aurait plus déclenché la CI.
+
+**5.3 — journaliseur.** `Journal.trace` vit dans le socle et **ne fait rien hors
+du mode debug**. Les 663 `debugPrint` des trois applications y sont passés.
+
+L'audit demandé a trouvé, non pas des jetons — le seul jeton tracé l'était déjà
+sous la forme « obtenu »/« indisponible » — mais **des adresses de livraison
+complètes et des coordonnées GPS de clients**, dans les trois applications :
+`GeocodingService: Adresse géocodée - $address -> $latLng`, son symétrique
+inverse, `✅ Coordonnées client obtenues: $_customerLocation` chez le livreur, et
+trois vidages de la réponse Google brute chez le client. `debugPrint` écrit dans
+le journal système de l'appareil ; sur Android, une application outillée le lit.
+Le passage au journal ferme la fuite par construction.
+
+**5.4 — plancher de couverture**, tenu par `tools/couverture.py`.
+
+Le ratio brut de `flutter test --coverage` ne veut rien dire : il n'instrumente
+que les fichiers qu'un test finit par charger. Mesuré sur `dely` — **3 fichiers
+sur 48**, et 29,96 % annoncés pour **1,31 %** réels. Pire pour un cliquet :
+ajouter un fichier sans test ne fait pas baisser un chiffre où le fichier
+n'apparaît pas. L'outil rétablit le dénominateur (un fichier de test généré
+importe tout `lib/`), refuse toute baisse, et refuse aussi un fichier généré
+périmé.
+
+| | couvertes / instrumentables | réel | plancher |
+|---|---:|---:|---:|
+| `elcorazon_core` | 1 480 / 2 514 | 58,87 % | 55,0 % |
+| `fastfood` | 611 / 17 413 | 3,51 % | 3,0 % |
+| `dely` | 83 / 6 350 | 1,31 % | 1,0 % |
+| `admin` | 143 / 14 487 | 0,99 % | 0,9 % |
+
+Les planchers **constatent l'existant**, ils ne fixent pas de cible : ils se
+relèvent à chaque domaine migré au lot 3. C'est le §3.3 chiffré autrement, et
+c'est le filet qui manque au lot 3.
+
+*Reste ouvert* : rien n'interdit à `debugPrint` de revenir — `avoid_print` ne
+couvre que `print`. Un contrôle de CI le fermerait ; il n'a pas été ajouté, le
+document ne le demandait pas.
 
 ### Lot 6 — Documentation (2 jours, en dernier)
 
@@ -264,15 +362,18 @@ mesurable tout ce qui suit.
 ## 7. Séquence
 
 ```
-Lot 2   ▓▓                                      2 j    déduplication finie      (2.1 fait)
-Lot 5   ▓                                       1 j    outillage durci
+Lot 2   ▓▓                                      fait    déduplication finie
+Lot 5   ▓▓                                      fait    outillage durci
 Lot 3     ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓        3-4 sem  pile héritée démontée
 Lot 4          ▓▓▓▓▓▓▓▓▓▓▓▓▓▓                   2 sem   écrans découpés (parallèle)
 Lot 6                                    ▓▓     2 j     documentation
 ```
 
-**Environ 5 semaines**, contre 7 à la révision 1 — le lot 1 a coûté moins cher
-que prévu et rendu le lot 2 presque sans objet.
+**Les lots 2 et 5 sont faits.** Le lot 5 a coûté davantage qu'une journée —
+l'alignement des règles a révélé 1 368 diagnostics là où 56 étaient annoncés —
+mais il a rendu mesurable tout ce qui suit : quatre paquets à zéro diagnostic,
+une CI qui refuse le moindre écart, aucune trace en production, et un plancher
+de couverture qui ne peut que monter.
 
-Les lots 2 et 5 sont sans risque fonctionnel et peuvent partir immédiatement. Le
-lot 3 est le seul qui demande un arbitrage de calendrier.
+Reste **environ 5 semaines**, dominées par le lot 3. C'est le seul qui demande
+un arbitrage de calendrier.
