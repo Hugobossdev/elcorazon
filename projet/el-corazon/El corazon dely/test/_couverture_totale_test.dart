@@ -37,7 +37,6 @@ import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/chat_service.dart';
 import 'package:elcora_dely/services/directions_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
-import 'package:elcora_dely/services/gamification_service.dart';
 import 'package:elcora_dely/services/geocoding_service.dart';
 import 'package:elcora_dely/services/location_service.dart';
 import 'package:elcora_dely/services/notification_service.dart';

@@ -10,7 +10,6 @@ import 'package:elcora_dely/models/order.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/services/location_service.dart';
 import 'package:elcora_dely/services/notification_service.dart';
-import 'package:elcora_dely/services/gamification_service.dart';
 import 'package:elcora_dely/services/realtime_tracking_service.dart';
 
 class AppService extends ChangeNotifier {
@@ -63,7 +62,6 @@ class AppService extends ChangeNotifier {
   // Services intégrés
   final LocationService _locationService = LocationService();
   final NotificationService _notificationService = NotificationService();
-  final GamificationService _gamificationService = GamificationService();
 
   /// Courses du livreur (Phase 6), indexées par identifiant de **commande** :
   /// c'est ainsi que les écrans les désignent, alors que toutes les actions
@@ -90,7 +88,6 @@ class AppService extends ChangeNotifier {
   // Services getters
   LocationService get locationService => _locationService;
   NotificationService get notificationService => _notificationService;
-  GamificationService get gamificationService => _gamificationService;
   RealtimeTrackingService get trackingService => RealtimeTrackingService();
   bool get isAdmin => _currentUser?.role == UserRole.admin;
   bool get isDeliveryStaff => _currentUser?.role == UserRole.delivery;
