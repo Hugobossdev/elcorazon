@@ -236,6 +236,64 @@ qui tient l'application debout tant qu'un domaine hérité subsiste.
 *Critère de fin d'un domaine* : plus aucun `import '…/models/<domaine>.dart'`,
 plus d'adaptateur, et un test qui passe sur la logique déplacée.
 
+#### 3.x — `admin`, domaine « commandes » : mesuré, préparé, pas exécuté
+
+C'est le dernier domaine hérité d'`admin`, et de loin le plus gros :
+**26 fichiers, environ 330 références** à `Order`, `OrderItem`, `OrderStatus`,
+`PaymentMethod`. Il ne se découpe pas en tranches livrables, parce que la
+charnière est le **type de retour d'`OrderManagementService`** : le jour où il
+rend `eccore.Order`, les 25 autres fichiers cèdent d'un coup.
+
+Ce qui est fait, et se tient seul :
+
+- le socle lit `statusEvents` (voir le commit dédié) ;
+- `StatutCommande` porte le vocabulaire des huit statuts, avec 10 cas. Il suit
+  le précédent de `dely` (`libelles_course.dart`) : le socle garde la chaîne
+  brute, l'application pose le libellé par-dessus ;
+- `DjangoOrderMapper` perd ses **deux** tables de statuts recopiées à la main
+  et délègue à `StatutCommande` — 122 → 104 lignes, mêmes 14 tests.
+
+Ce que la mesure a établi, et qui rend la suite sûre :
+
+| Champ du modèle local | État réel |
+|---|---|
+| `promoCode`, `paymentTransactionId`, `specialInstructions` | 0 usage hors du modèle |
+| `userId` | 1 usage, toujours vide (le contrat de supervision ne rend pas le client) |
+| `statusUpdates` | 2 usages, **jamais renseigné** par le mapper |
+| `deliveryPersonId` | 4 usages, **jamais renseigné** par le mapper |
+
+Tout le reste existe dans `eccore.Order`, qui porte en plus `reference`,
+`deliveredAt`, `cancelledAt`, `cancellationReason` et `allowedTransitions` —
+que la traduction locale jetait.
+
+**Trois conséquences de `deliveryPersonId` toujours nul, aujourd'hui, en
+production :**
+
+- `driver_detailed_stats_screen.dart` filtre les commandes d'un livreur sur
+  `o.deliveryPersonId == driver.id` : l'écran est **toujours vide** ;
+- `active_deliveries_screen.dart` ne montre jamais quel livreur a la commande ;
+- le bouton d'assignation dit toujours « Assigner livreur », jamais
+  « Réassigner », et la ligne « Livreur : Assigné » de la fiche ne paraît
+  jamais.
+
+Le sérialiseur back-office des commandes n'expose pas le livreur, et
+`AssignmentViewSet` est réservé au livreur lui-même. **Le back-office n'a donc
+aujourd'hui aucun moyen d'apprendre qui porte une commande.** C'est un manque
+côté serveur, hors du périmètre de ce plan.
+
+*Hypothèse retenue pour la migration à venir* : ces quatre points d'accroche
+disparaissent avec le modèle local, puisqu'ils ne peuvent rien afficher. Rien
+de visible ne change. Ce qu'ils marquaient — l'intention — est consigné ici.
+
+**Deux autres écarts relevés, non corrigés :**
+
+- le serveur rend une `reference` lisible (`CMD-0001`, séquentielle) ; la
+  traduction locale la jette, et **32 endroits** fabriquent un identifiant en
+  découpant l'UUID (`id.substring(0, 8).toUpperCase()`). La migration rendra
+  la vraie référence disponible ; l'afficher changera ce que lit l'opérateur ;
+- les libellés de moyens de paiement sont en anglais dans un back-office
+  français : « Credit Card », « Cash on Delivery », « FastFoodGo Wallet ».
+
 ### Lot 4 — Découper les écrans (2 semaines, parallélisable au lot 3)
 
 Les 5 écrans de plus de 1 500 lignes, dans l'ordre du tableau §3.2. Pour
@@ -291,11 +349,17 @@ attendent un arbitrage, aucun n'est corrigé** :
   étape montre l'heure de commande augmentée d'un délai fixe — +5 min
   « confirmée », +10 « en préparation », +25 « prête », +30 « en livraison »,
   +45 « livrée ». Rien de mesuré n'y entre : une commande encore en attente
-  affiche la même heure de « livrée » qu'une commande livrée. Le serveur ne
-  renvoie pas d'horodatage par étape (`Order` porte `placedAt`, `updatedAt`,
-  `estimatedDeliveryAt`, rien de plus). Trois sorties : n'afficher que l'étape
-  sans heure, retirer l'historique, ou obtenir les horodatages du serveur — ce
-  dernier point touche au back-end, donc hors de ce plan.
+  affiche la même heure de « livrée » qu'une commande livrée.
+
+  **Rectification, apportée au lot 3.** J'ai d'abord écrit ici que le serveur
+  ne renvoyait pas d'horodatage par étape. C'était faux, et l'erreur venait de
+  n'avoir regardé que l'entité du socle. Le serveur tient `OrderStatusEvent` —
+  un journal des transitions écrit par la machine à états dans la même
+  transaction que le changement de statut — et le rend sur la forme détail
+  (`OrderDetailSerializer`). C'est le **socle** qui ne le lisait pas, alors que
+  son propre commentaire de classe l'annonçait. Il le lit désormais. La sortie
+  ne demande donc pas de toucher au back-end : elle demande que l'écran aille
+  chercher la forme détail au dépliage d'une commande.
 - **Une commande annulée paraît avoir été mise en livraison.** L'étape franchie
   se décide par `status.index >= n`, et `cancelled` est déclaré après
   `delivered` dans l'énumération. Le rang de déclaration n'est pas le cycle de

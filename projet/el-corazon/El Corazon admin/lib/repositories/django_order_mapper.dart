@@ -1,6 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 import 'package:admin/models/order.dart';
+import 'package:admin/presentation/statut_commande.dart';
 
 /// Traduit une commande du contrat Django vers le modèle local du back-office.
 ///
@@ -53,58 +54,39 @@ abstract final class DjangoOrderMapper {
     );
   }
 
+  /// Les huit statuts que le serveur connaît, et leur contrepartie locale.
+  ///
+  /// La table des valeurs serveur vit dans `StatutCommande` ; ici ne reste que
+  /// le pont vers l'énumération locale, le temps que celle-ci disparaisse. Il
+  /// y avait auparavant **deux** tables recopiées à la main dans ce fichier —
+  /// une par sens de traduction — plus une troisième dans `OrderStatus.dbValue`.
+  static const _pont = <StatutCommande, OrderStatus>{
+    StatutCommande.enAttente: OrderStatus.pending,
+    StatutCommande.confirmee: OrderStatus.confirmed,
+    StatutCommande.enPreparation: OrderStatus.preparing,
+    StatutCommande.prete: OrderStatus.ready,
+    StatutCommande.recuperee: OrderStatus.pickedUp,
+    StatutCommande.enRoute: OrderStatus.onTheWay,
+    StatutCommande.livree: OrderStatus.delivered,
+    StatutCommande.annulee: OrderStatus.cancelled,
+  };
+
   /// Statut serveur → énumération locale.
   ///
-  /// `failed` n'existe pas côté serveur : une commande qui n'aboutit pas est
-  /// **annulée**, avec un motif. La distinction locale n'avait pas de
-  /// contrepartie et se traduisait par un statut que rien ne produisait.
-  static OrderStatus _toLocalStatus(String status) {
-    switch (status) {
-      case 'confirmed':
-        return OrderStatus.confirmed;
-      case 'preparing':
-        return OrderStatus.preparing;
-      case 'ready':
-        return OrderStatus.ready;
-      case 'picked_up':
-        return OrderStatus.pickedUp;
-      case 'on_the_way':
-        return OrderStatus.onTheWay;
-      case 'delivered':
-        return OrderStatus.delivered;
-      case 'cancelled':
-        return OrderStatus.cancelled;
-      default:
-        return OrderStatus.pending;
-    }
-  }
+  /// Une valeur inconnue retombe sur « en attente », comme `StatutCommande`.
+  static OrderStatus _toLocalStatus(String status) =>
+      _pont[StatutCommande.depuisServeur(status)]!;
 
   /// Énumération locale → valeur attendue par `POST .../status/`.
+  ///
+  /// `refunded` et `failed` n'existent pas comme statuts de commande côté
+  /// serveur : le remboursement est un mouvement de paiement, et ce qui
+  /// n'aboutit pas est **annulé**, avec un motif.
   static String toRemoteStatus(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.confirmed:
-        return 'confirmed';
-      case OrderStatus.preparing:
-        return 'preparing';
-      case OrderStatus.ready:
-        return 'ready';
-      case OrderStatus.pickedUp:
-        return 'picked_up';
-      case OrderStatus.onTheWay:
-        return 'on_the_way';
-      case OrderStatus.delivered:
-        return 'delivered';
-      case OrderStatus.cancelled:
-        return 'cancelled';
-      case OrderStatus.pending:
-        return 'pending';
-      // `refunded` et `failed` n'existent pas comme statuts de commande côté
-      // serveur : le remboursement est un mouvement de paiement, et ce qui
-      // n'aboutit pas est **annulé**, avec un motif.
-      case OrderStatus.refunded:
-      case OrderStatus.failed:
-        return 'cancelled';
+    for (final entree in _pont.entries) {
+      if (entree.value == status) return entree.key.versServeur;
     }
+    return StatutCommande.annulee.versServeur;
   }
 
   static PaymentMethod _toLocalPaymentMethod(String method) {

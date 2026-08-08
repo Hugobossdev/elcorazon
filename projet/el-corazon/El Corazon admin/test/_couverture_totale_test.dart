@@ -26,6 +26,7 @@ import 'package:admin/presentation/evolution_commandes.dart';
 import 'package:admin/presentation/filtres_commandes.dart';
 import 'package:admin/presentation/onglets/statistiques_commandes.dart';
 import 'package:admin/presentation/regimes_article.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/presentation/tri_commandes.dart';
 import 'package:admin/repositories/django_order_mapper.dart';
