@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+
+import 'package:elcora_fast/presentation/trajet_livreur.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -425,8 +427,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     final distance =
         _geocodingService!.calculateDistance(driverPos, _deliveryLatLng!);
 
-    // Alerte si le livreur est à moins de 500 mètres
-    if (distance < 0.5 && !_proximityAlertShown) {
+    if (livreurToutProche(distance) && !_proximityAlertShown) {
       _proximityAlertShown = true;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -454,56 +455,24 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
   /// Calcule les statistiques de livraison (vitesse moyenne, distance parcourue)
   void _calculateDeliveryStats() {
-    if (_locationHistory.length < 2 || _geocodingService == null) return;
+    final geocodage = _geocodingService;
+    if (geocodage == null) return;
 
-    double totalDistance = 0.0;
-    final List<double> speeds = [];
+    final mesure = statistiquesDuTrajet(
+      _locationHistory,
+      distanceEntre: geocodage.calculateDistance,
+    );
 
-    for (int i = 0; i < _locationHistory.length - 1; i++) {
-      final current = _locationHistory[i];
-      final next = _locationHistory[i + 1];
+    if (!mounted) return;
 
-      final currentPos = LatLng(
-        current['latitude'] as double,
-        current['longitude'] as double,
-      );
-      final nextPos = LatLng(
-        next['latitude'] as double,
-        next['longitude'] as double,
-      );
-
-      final distance =
-          _geocodingService!.calculateDistance(currentPos, nextPos);
-      totalDistance += distance;
-
-      final timeDiff = (current['timestamp'] as DateTime)
-          .difference(next['timestamp'] as DateTime)
-          .inSeconds;
-      if (timeDiff > 0) {
-        final speed = (distance / (timeDiff / 3600)); // km/h
-        if (speed > 0 && speed < 100) {
-          // Filtrer les valeurs aberrantes
-          speeds.add(speed);
-        }
+    setState(() {
+      _totalDistance = mesure.distanceParcourue;
+      // On ne remplace la vitesse affichée que par une vitesse mesurée :
+      // faute de relevé plausible, la dernière connue vaut mieux qu'un zéro.
+      if (mesure.vitesseMoyenne != null) {
+        _averageSpeed = mesure.vitesseMoyenne!;
       }
-
-      // Utiliser la vitesse GPS si disponible
-      if (current['speed'] != null) {
-        final speedKmh = (current['speed'] as double) * 3.6; // m/s to km/h
-        if (speedKmh > 0 && speedKmh < 100) {
-          speeds.add(speedKmh);
-        }
-      }
-    }
-
-    if (mounted) {
-      setState(() {
-        _totalDistance = totalDistance;
-        if (speeds.isNotEmpty) {
-          _averageSpeed = speeds.reduce((a, b) => a + b) / speeds.length;
-        }
-      });
-    }
+    });
   }
 
   Future<void> _startTracking() async {
@@ -734,7 +703,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         // Fallback: calculer la distance et estimer
         final distanceKm =
             _geocodingService!.calculateDistance(driverCoords, deliveryCoords);
-        final estimatedMinutes = (distanceKm * 2).round(); // ~2 min/km en ville
+        final estimatedMinutes = minutesEstimeesPourKm(distanceKm);
 
         if (mounted) {
           setState(() {

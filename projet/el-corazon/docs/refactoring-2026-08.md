@@ -118,10 +118,12 @@ dont 5 dépassaient 1 500 :
 | Fichier | Lignes | Après lot 4 |
 |---|---:|---:|
 | `admin/…/advanced_order_management_screen.dart` | 3 070 | **1 224** |
-| `fastfood/…/cake_order_screen.dart` | 2 886 | — |
+| `fastfood/…/cake_order_screen.dart` | 2 886 | 2 442 * |
 | `admin/…/order_management_screen.dart` | 2 531 | **1 324** |
-| `admin/…/gamification_management_screen.dart` | 1 744 | — |
-| `fastfood/…/delivery_tracking_screen.dart` | 1 589 | — |
+| `admin/…/gamification_management_screen.dart` | 1 744 | **163** |
+| `fastfood/…/delivery_tracking_screen.dart` | 1 589 | 1 561 * |
+
+\* écrans encore longs, mais dont la logique est sortie — voir §4.4 et §4.5.
 
 400 `setState` au total. Aucun écran n'appelle le réseau directement — la
 frontière écran ↔ données tient, c'est ce qui rend la découpe faisable.
@@ -306,6 +308,72 @@ Un quatrième point a été corrigé, parce qu'il ne demandait pas d'arbitrage :
 ligne « Client: » d'une commande dépliée affichait `order.id`, la référence de
 la commande sous une étiquette qui annonce une personne. Elle affiche le
 destinataire, et retombe sur la référence quand le nom manque.
+
+**4.3 — `gamification_management_screen.dart` : fait.** 1 744 → 163 lignes.
+Le cas est différent des deux précédents : les quatre onglets et les quatre
+formulaires étaient **déjà** des classes nommées. C'était le fichier qui était
+trop long, pas les widgets. Il est coupé en quatre — succès, défis, badges,
+récompenses — chacun avec son onglet et son formulaire, sous
+`lib/screens/admin/gamification/`.
+
+La découpe a fait tomber une règle qui tirait deux fois sur l'horloge : un défi
+**sans date de fin** prenait `DateTime.now()` comme date de fin, puis la
+comparait à un second `DateTime.now()` pris quelques microsecondes plus tard.
+Le premier étant antérieur au second, le défi s'affichait expiré — par course,
+pas par décision. Il n'expire plus, et sa carte n'affiche plus « Fin: » suivi
+de la date du jour. Six cas couvrent `defiExpire` et `dateDeFinDefi`.
+
+Reste que le vrai passif de cet écran n'est pas le lot 4 mais le lot 3 : le
+domaine gamification n'a **aucun modèle**. Tout y circule en
+`Map<String, dynamic>` — `challenge['end_date']`, `achievement['id']` — et il
+n'y a donc presque rien à tester au-delà de la validation des formulaires.
+
+**4.4 — `delivery_tracking_screen.dart` : le calcul est sorti, le fichier
+reste long.** 1 589 → 1 561 lignes seulement, et c'est volontaire : ce qui
+comptait ici n'était pas le nombre de lignes mais le fait que le seul vrai
+calcul de l'écran — distance parcourue et vitesse moyenne du livreur — était
+enfermé dans une méthode qui écrivait directement dans l'état du widget.
+`statistiquesDuTrajet` le porte maintenant, avec 12 cas.
+
+Trois règles étaient dedans, aucune n'était dite :
+
+- l'historique des positions va **du plus récent au plus ancien**
+  (`insert(0, …)`), et c'est ce qui rend positif l'écart de temps entre deux
+  relevés. J'ai d'abord cru à un bug ; vérification faite, le calcul est juste,
+  il était seulement invérifiable ;
+- deux sources de vitesse coexistent — celle déduite du trajet et celle que le
+  GPS rapporte — et les deux comptent ;
+- les vitesses hors de `]0, 100[` km/h sont rejetées comme aberrantes.
+
+Aucun changement de comportement : `vitesseMoyenne == null` recouvre exactement
+l'ancien `speeds.isEmpty`, et l'écran garde comme avant la dernière vitesse
+connue plutôt que d'afficher un zéro qu'il n'a pas mesuré. Le seul écart
+théorique tient à moins de deux relevés, où la distance vaut désormais zéro au
+lieu de rester inchangée — cas hors d'atteinte, l'historique ne faisant que
+croître.
+
+Deux chiffres écrits au milieu du code en sont sortis aussi : le seuil
+d'alerte de proximité (500 m) et l'estimation de repli (2 min/km, soit
+30 km/h, quand le service d'itinéraire ne répond pas).
+
+**4.5 — `cake_order_screen.dart` : entamé, pas fini.** 2 886 → 2 442 lignes.
+La seule règle métier que l'écran portait en propre est sortie et couverte par
+11 cas : la pré-sélection d'options quand un client part d'un gâteau du
+catalogue pour composer le sien. Le reste du métier — prix des options,
+contraintes de catégorie — vit déjà dans `CustomizationService` et y est testé.
+Le récapitulatif (407 lignes) est devenu `RecapitulatifGateau`.
+
+Ce que la règle sortie a rendu visible : la correspondance est une **inclusion
+littérale**, donc « Fraisier » ne suggère pas « Fraise » — le nom de pâtisserie
+le plus courant en français passe à côté de son propre parfum. Corriger
+demanderait une racinisation, donc une décision ; le cas est épinglé par un
+test qui dit ce qui se passe aujourd'hui.
+
+Restent deux blocs de présentation à nommer, `_buildCategorySection` (285 l.,
+qui entraîne avec lui les sélecteurs de couleur et de texture et les deux
+gestionnaires de sélection) et `_buildDeliverySelectors` (274 l.). Ils ne
+portent pas de règle testable ; c'est de la lisibilité, pas de la dette
+fonctionnelle.
 
 ### Lot 5 — Durcir l'outillage — **fait**, mais pas en un jour
 
