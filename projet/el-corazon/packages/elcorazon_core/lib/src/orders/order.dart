@@ -1,5 +1,41 @@
 import 'package:elcorazon_core/src/models/money.dart';
 
+/// Option retenue sur une ligne de commande — copie figée du choix du client.
+///
+/// Miroir du JSON écrit par `OrderService` :
+/// `{"group": "Cuisson", "option": "À point", "delta": 0, "currency": "XOF"}`.
+///
+/// C'est ce que le client a demandé : « sans oignon », « bien cuit », « taille
+/// L ». Une cuisine qui ne le voit pas prépare autre chose que ce qui a été
+/// commandé — le socle ne le lisait pas, et le back-office ne pouvait donc rien
+/// en montrer.
+class ChosenOption {
+  const ChosenOption({
+    required this.groupName,
+    required this.optionName,
+    required this.priceDelta,
+  });
+
+  factory ChosenOption.fromJson(Map<String, dynamic> json) {
+    return ChosenOption(
+      groupName: json['group'] as String? ?? '',
+      optionName: json['option'] as String? ?? '',
+      priceDelta: Money(
+        amountMinor: (json['delta'] as num?)?.toInt() ?? 0,
+        currency: json['currency'] as String? ?? 'XOF',
+      ),
+    );
+  }
+
+  /// Le groupe d'options — « Cuisson », « Taille », « Suppléments ».
+  final String groupName;
+
+  final String optionName;
+
+  /// Ce que l'option ajoute au prix unitaire. Souvent nul.
+  final Money priceDelta;
+}
+
 /// Ligne de commande figée — miroir de `OrderLineSerializer`
 /// (`backend/apps/orders/serializers.py`). Copie gelée au moment de la
 /// commande : contrairement au panier, elle ne se recalcule jamais depuis le
@@ -14,6 +50,7 @@ class OrderLine {
     required this.quantity,
     required this.lineTotal,
     required this.notes,
+    this.options = const [],
   });
 
   factory OrderLine.fromJson(Map<String, dynamic> json) {
@@ -26,6 +63,9 @@ class OrderLine {
       quantity: json['quantity'] as int,
       lineTotal: Money.fromJson(json['line_total'] as Map<String, dynamic>),
       notes: json['notes'] as String? ?? '',
+      options: (json['options'] as List<dynamic>? ?? const [])
+          .map((o) => ChosenOption.fromJson(o as Map<String, dynamic>))
+          .toList(),
     );
   }
 
@@ -37,6 +77,9 @@ class OrderLine {
   final int quantity;
   final Money lineTotal;
   final String notes;
+
+  /// Ce que le client a choisi sur cette ligne, figé au moment de la commande.
+  final List<ChosenOption> options;
 }
 
 /// Transition de statut — miroir de `OrderStatusEventSerializer`
