@@ -119,7 +119,7 @@ dont 5 dépassaient 1 500 :
 |---|---:|---:|
 | `admin/…/advanced_order_management_screen.dart` | 3 070 | **1 224** |
 | `fastfood/…/cake_order_screen.dart` | 2 886 | — |
-| `admin/…/order_management_screen.dart` | 2 531 | — |
+| `admin/…/order_management_screen.dart` | 2 531 | **1 324** |
 | `admin/…/gamification_management_screen.dart` | 1 744 | — |
 | `fastfood/…/delivery_tracking_screen.dart` | 1 589 | — |
 
@@ -266,6 +266,46 @@ Ce que la découpe a mis au jour — et qui n'aurait pas été trouvé autrement
   dans `order_management_screen.dart`. Les unifier changerait ce que voient les
   utilisateurs sur deux écrans. Le présent document n'en dit rien : à décider
   avant de le faire.
+
+**4.2 — `order_management_screen.dart` : fait.** 2 528 → 1 324 lignes, 23 cas
+ajoutés. Les trois filtres (recherche, zone, fenêtre de temps), l'historique
+d'une commande et l'âge affiché sont sortis dans `lib/presentation/` ; les
+trois panneaux d'une commande dépliée, la fiche et la barre de filtres sont
+devenus des widgets nommés. `ancienneteCommande`, écrite deux fois à
+l'identique dans les deux écrans, n'existe plus qu'une fois.
+
+Ce que la découpe a mis au jour ici est plus lourd qu'au 4.1 — **trois points
+attendent un arbitrage, aucun n'est corrigé** :
+
+- **Le filtre par zone cherche des quartiers de Dakar.** Yoff, Pikine,
+  Guédiawaye, Almadies, Mermoz, Rufisque, Parcelles Assainies, Médina… Le
+  restaurant est à Lomé. Aucune adresse togolaise ne contient ces mots : « Zone
+  2 - Nord » et « Zone 3 - Sud » ne rendent jamais rien, et « Zone 1 - Centre »
+  rend tout, par mot générique ou par repli. Deux des trois choix du filtre
+  sont morts, le troisième ne filtre pas. Le back-office possède pourtant un
+  `DeliveryZoneService` qui tient les vraies zones du serveur. Rebrancher le
+  filtre dessus est une décision de produit.
+- **L'« Historique de la commande » affiche des heures inventées.** Chaque
+  étape montre l'heure de commande augmentée d'un délai fixe — +5 min
+  « confirmée », +10 « en préparation », +25 « prête », +30 « en livraison »,
+  +45 « livrée ». Rien de mesuré n'y entre : une commande encore en attente
+  affiche la même heure de « livrée » qu'une commande livrée. Le serveur ne
+  renvoie pas d'horodatage par étape (`Order` porte `placedAt`, `updatedAt`,
+  `estimatedDeliveryAt`, rien de plus). Trois sorties : n'afficher que l'étape
+  sans heure, retirer l'historique, ou obtenir les horodatages du serveur — ce
+  dernier point touche au back-end, donc hors de ce plan.
+- **Une commande annulée paraît avoir été mise en livraison.** L'étape franchie
+  se décide par `status.index >= n`, et `cancelled` est déclaré après
+  `delivered` dans l'énumération. Le rang de déclaration n'est pas le cycle de
+  vie.
+
+Les trois sont épinglés par des tests qui décrivent l'état actuel, pour que la
+correction se voie le jour où elle est décidée.
+
+Un quatrième point a été corrigé, parce qu'il ne demandait pas d'arbitrage : la
+ligne « Client: » d'une commande dépliée affichait `order.id`, la référence de
+la commande sous une étiquette qui annonce une personne. Elle affiche le
+destinataire, et retombe sur la référence quand le nom manque.
 
 ### Lot 5 — Durcir l'outillage — **fait**, mais pas en un jour
 
