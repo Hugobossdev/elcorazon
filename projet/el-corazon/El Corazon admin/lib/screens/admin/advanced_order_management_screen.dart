@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/models/order.dart';
 import 'package:admin/presentation/anciennete_commande.dart';
+import 'package:admin/presentation/couleur_statut.dart';
 import 'package:admin/presentation/dialogues/assignation_livreur.dart';
 import 'package:admin/presentation/dialogues/changement_statut.dart';
 import 'package:admin/presentation/dialogues/details_commande.dart';
+import 'package:admin/presentation/onglets/statistiques_commandes.dart';
 import 'package:admin/presentation/tri_commandes.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/loading_widget.dart';
@@ -289,7 +290,7 @@ class _AdvancedOrderManagementScreenState
                             OrderStatus.onTheWay, 'Aucune commande en livraison',),);
                   case 6:
                     return SizedBox.expand(
-                        child: _buildStatisticsTab(context, orderService),);
+                        child: OngletStatistiques(orderService: orderService),);
                   default:
                     return SizedBox.expand(
                         child: _buildOverviewTab(context, orderService),);
@@ -384,35 +385,6 @@ class _AdvancedOrderManagementScreenState
           },
         );
       },
-    );
-  }
-
-  Widget _buildStatisticsTab(
-      BuildContext context, OrderManagementService orderService,) {
-    final stats = orderService.getOrderStats();
-    final performanceStats = orderService.getPerformanceStats();
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Statistiques détaillées
-          _buildDetailedStats(context, stats),
-          const SizedBox(height: 20),
-
-          // Performance
-          _buildPerformanceCards(context, performanceStats),
-          const SizedBox(height: 20),
-
-          // Répartition par statut
-          _buildStatusDistribution(context, stats),
-          const SizedBox(height: 20),
-
-          // Évolution des commandes
-          _buildOrderEvolution(context, orderService),
-        ],
-      ),
     );
   }
 
@@ -702,445 +674,6 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
-  Widget _buildDetailedStats(BuildContext context, Map<String, dynamic> stats) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Statistiques détaillées',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            _buildStatRow(
-                context, 'Commandes totales', '${stats['total_orders'] ?? 0}',),
-            _buildStatRow(
-                context, 'En attente', '${stats['pending_orders'] ?? 0}',),
-            _buildStatRow(
-                context, 'Confirmées', '${stats['confirmed_orders'] ?? 0}',),
-            _buildStatRow(
-                context, 'En préparation', '${stats['preparing_orders'] ?? 0}',),
-            _buildStatRow(context, 'Prêtes', '${stats['ready_orders'] ?? 0}'),
-            _buildStatRow(
-                context, 'Livrées', '${stats['delivered_orders'] ?? 0}',),
-            _buildStatRow(
-                context, 'Annulées', '${stats['cancelled_orders'] ?? 0}',),
-            const Divider(),
-            _buildStatRow(
-                context,
-                'Revenus totaux',
-                PriceFormatter.format(
-                    (stats['total_revenue'] as num?)?.toDouble() ?? 0.0,),),
-            _buildStatRow(
-                context,
-                'Panier moyen',
-                PriceFormatter.format(
-                    (stats['average_order_value'] as num?)?.toDouble() ?? 0.0,),),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatRow(BuildContext context, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label),
-          Text(
-            value,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPerformanceCards(
-      BuildContext context, Map<String, dynamic> performanceStats,) {
-    final scheme = Theme.of(context).colorScheme;
-    final sem = AdminColorTokens.semantic(scheme);
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 3,
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
-      childAspectRatio: 1.5,
-      children: [
-        _buildPerformanceCard(
-          context,
-          'Temps moyen',
-          '${(performanceStats['average_delivery_time'] as num?)?.toDouble().toInt() ?? 0} min',
-          Icons.timer,
-          sem.info,
-        ),
-        _buildPerformanceCard(
-          context,
-          'Livraison à temps',
-          '${((performanceStats['on_time_delivery_rate'] as num?)?.toDouble() ?? 0.0) * 100}%',
-          Icons.schedule,
-          sem.success,
-        ),
-        _buildPerformanceCard(
-          context,
-          'Satisfaction',
-          '${(performanceStats['customer_satisfaction'] as num?)?.toDouble() ?? 0.0}/5',
-          Icons.star,
-          sem.warning,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPerformanceCard(BuildContext context, String title, String value,
-      IconData icon, Color color,) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 20),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusDistribution(
-      BuildContext context, Map<String, dynamic> stats,) {
-    final total = stats['total_orders'] as int? ?? 0;
-    if (total == 0) return const SizedBox.shrink();
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Répartition par statut',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            _buildStatusBar(
-              context,
-              'En attente',
-              stats['pending_orders'] as int? ?? 0,
-              total,
-              _getStatusColor(OrderStatus.pending, context),
-            ),
-            _buildStatusBar(
-              context,
-              'Confirmées',
-              stats['confirmed_orders'] as int? ?? 0,
-              total,
-              _getStatusColor(OrderStatus.confirmed, context),
-            ),
-            _buildStatusBar(
-              context,
-              'En préparation',
-              stats['preparing_orders'] as int? ?? 0,
-              total,
-              _getStatusColor(OrderStatus.preparing, context),
-            ),
-            _buildStatusBar(
-              context,
-              'Prêtes',
-              stats['ready_orders'] as int? ?? 0,
-              total,
-              _getStatusColor(OrderStatus.ready, context),
-            ),
-            _buildStatusBar(
-              context,
-              'Livrées',
-              stats['delivered_orders'] as int? ?? 0,
-              total,
-              _getStatusColor(OrderStatus.delivered, context),
-            ),
-            _buildStatusBar(
-              context,
-              'Annulées',
-              stats['cancelled_orders'] as int? ?? 0,
-              total,
-              _getStatusColor(OrderStatus.cancelled, context),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusBar(
-      BuildContext context, String label, int count, int total, Color color,) {
-    final percentage = total > 0 ? count / total : 0.0;
-    final scheme = Theme.of(context).colorScheme;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 2,
-            child: Text(label),
-          ),
-          Expanded(
-            flex: 3,
-            child: LinearProgressIndicator(
-              value: percentage,
-              backgroundColor: scheme.surfaceContainerHighest,
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text('$count (${(percentage * 100).toInt()}%)'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOrderEvolution(
-      BuildContext context, OrderManagementService orderService,) {
-    final orders = orderService.allOrders;
-
-    // Calculer les commandes par jour (7 derniers jours)
-    final now = DateTime.now();
-    final Map<String, int> dailyOrders = {};
-
-    for (int i = 6; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
-      final dateKey =
-          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-      dailyOrders[dateKey] = 0;
-    }
-
-    for (final order in orders) {
-      final orderDate = order.orderTime;
-      final dateKey =
-          '${orderDate.year}-${orderDate.month.toString().padLeft(2, '0')}-${orderDate.day.toString().padLeft(2, '0')}';
-      if (dailyOrders.containsKey(dateKey)) {
-        dailyOrders[dateKey] = (dailyOrders[dateKey] ?? 0) + 1;
-      }
-    }
-
-    final sortedKeys = dailyOrders.keys.toList()..sort();
-    final maxValue = dailyOrders.values.isEmpty
-        ? 1.0
-        : dailyOrders.values.reduce((a, b) => a > b ? a : b).toDouble();
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Évolution des commandes (7 derniers jours)',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 250,
-              child: sortedKeys.isEmpty
-                  ? const Center(
-                      child: Text('Aucune donnée disponible'),
-                    )
-                  : BarChart(
-                      BarChartData(
-                        alignment: BarChartAlignment.spaceAround,
-                        maxY: maxValue +
-                            (maxValue * 0.2), // Ajouter 20% d'espace en haut
-                        barTouchData: BarTouchData(
-                          enabled: true,
-                          touchTooltipData: BarTouchTooltipData(
-                            getTooltipColor: (group) =>
-                                Theme.of(context).colorScheme.inverseSurface,
-                            tooltipPadding: const EdgeInsets.all(8),
-                            tooltipMargin: 8,
-                            getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                              final date = sortedKeys[group.x.toInt()];
-                              final count = dailyOrders[date] ?? 0;
-                              return BarTooltipItem(
-                                '$count commande${count > 1 ? 's' : ''}\n$date',
-                                TextStyle(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onInverseSurface,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        titlesData: FlTitlesData(
-                          bottomTitles: AxisTitles(
-                            sideTitles: SideTitles(
-                              showTitles: true,
-                              getTitlesWidget: (value, meta) {
-                                if (value.toInt() >= 0 &&
-                                    value.toInt() < sortedKeys.length) {
-                                  final dateStr = sortedKeys[value.toInt()];
-                                  final dateParts = dateStr.split('-');
-                                  return Padding(
-                                    padding: const EdgeInsets.only(top: 8.0),
-                                    child: Text(
-                                      '${dateParts[2]}/${dateParts[1]}',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onSurfaceVariant,
-                                      ),
-                                    ),
-                                  );
-                                }
-                                return const SizedBox.shrink();
-                              },
-                              reservedSize: 40,
-                            ),
-                          ),
-                          leftTitles: AxisTitles(
-                            sideTitles: SideTitles(
-                              showTitles: true,
-                              reservedSize: 40,
-                              getTitlesWidget: (value, meta) {
-                                if (value == meta.min || value == meta.max) {
-                                  return const SizedBox.shrink();
-                                }
-                                return Text(
-                                  value.toInt().toString(),
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                          topTitles: const AxisTitles(
-                            
-                          ),
-                          rightTitles: const AxisTitles(
-                            
-                          ),
-                        ),
-                        gridData: FlGridData(
-                          drawVerticalLine: false,
-                          horizontalInterval: maxValue > 0 ? (maxValue / 5) : 1,
-                          getDrawingHorizontalLine: (value) {
-                            return FlLine(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outline
-                                  .withValues(alpha: 0.20),
-                              strokeWidth: 1,
-                            );
-                          },
-                        ),
-                        borderData: FlBorderData(
-                          show: true,
-                          border: Border(
-                            bottom: BorderSide(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outline
-                                  .withValues(alpha: 0.25),
-                            ),
-                            left: BorderSide(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outline
-                                  .withValues(alpha: 0.25),
-                            ),
-                          ),
-                        ),
-                        barGroups: sortedKeys.asMap().entries.map((entry) {
-                          final index = entry.key;
-                          final date = entry.value;
-                          final count = dailyOrders[date] ?? 0;
-
-                          return BarChartGroupData(
-                            x: index,
-                            barRods: [
-                              BarChartRodData(
-                                toY: count.toDouble(),
-                                color: Theme.of(context).colorScheme.primary,
-                                width: 20,
-                                borderRadius: const BorderRadius.vertical(
-                                  top: Radius.circular(4),
-                                ),
-                              ),
-                            ],
-                          );
-                        }).toList(),
-                      ),
-                    ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  size: 16,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Total: ${orders.length} commandes sur 7 jours',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// Recherche et tri s'appliquent **ici**, seul point par lequel passent les
   /// cinq onglets de statut : les y poser une fois vaut mieux que cinq
   /// applications qui finiraient par diverger.
@@ -1192,14 +725,14 @@ class _AdvancedOrderManagementScreenState
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _getStatusColor(order.status, context)
+                    color: couleurDeStatut(order.status, Theme.of(context).colorScheme)
                         .withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     order.status.displayName,
                     style: TextStyle(
-                      color: _getStatusColor(order.status, context),
+                      color: couleurDeStatut(order.status, Theme.of(context).colorScheme),
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
                     ),
@@ -1455,7 +988,7 @@ class _AdvancedOrderManagementScreenState
     return ListTile(
       leading: CircleAvatar(
         backgroundColor:
-            _getStatusColor(order.status, context).withValues(alpha: 0.1),
+            couleurDeStatut(order.status, Theme.of(context).colorScheme).withValues(alpha: 0.1),
         child: Text(
           order.status.emoji,
           style: const TextStyle(fontSize: 16),
@@ -1492,32 +1025,6 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
-  Color _getStatusColor(OrderStatus status, BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final sem = AdminColorTokens.semantic(scheme);
-    switch (status) {
-      case OrderStatus.pending:
-        return sem.warning;
-      case OrderStatus.confirmed:
-        return sem.info;
-      case OrderStatus.preparing:
-        return scheme.tertiary;
-      case OrderStatus.ready:
-        return sem.success;
-      case OrderStatus.pickedUp:
-        return scheme.secondary;
-      case OrderStatus.onTheWay:
-        return scheme.primary;
-      case OrderStatus.delivered:
-        return sem.success;
-      case OrderStatus.cancelled:
-        return sem.danger;
-      case OrderStatus.refunded:
-        return scheme.onSurfaceVariant;
-      case OrderStatus.failed:
-        return sem.danger;
-    }
-  }
 
 
   // Méthode _showSearchDialog supprimée car la recherche est maintenant intégrée directement dans l'interface

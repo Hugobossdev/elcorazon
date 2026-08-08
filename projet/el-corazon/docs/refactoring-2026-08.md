@@ -113,15 +113,15 @@ Les deux piles sont raccordées par **12 adaptateurs** (`django_*_repository.dar
 ### 3.2 Les écrans démesurés
 
 Inchangé — le lot 1 ne les touchait pas. **32 fichiers dépassent 700 lignes**,
-dont 5 dépassent 1 500 :
+dont 5 dépassaient 1 500 :
 
-| Fichier | Lignes |
-|---|---:|
-| `admin/…/advanced_order_management_screen.dart` | 3 070 |
-| `fastfood/…/cake_order_screen.dart` | 2 886 |
-| `admin/…/order_management_screen.dart` | 2 531 |
-| `admin/…/gamification_management_screen.dart` | 1 744 |
-| `fastfood/…/delivery_tracking_screen.dart` | 1 589 |
+| Fichier | Lignes | Après lot 4 |
+|---|---:|---:|
+| `admin/…/advanced_order_management_screen.dart` | 3 070 | **1 224** |
+| `fastfood/…/cake_order_screen.dart` | 2 886 | — |
+| `admin/…/order_management_screen.dart` | 2 531 | — |
+| `admin/…/gamification_management_screen.dart` | 1 744 | — |
+| `fastfood/…/delivery_tracking_screen.dart` | 1 589 | — |
 
 400 `setState` au total. Aucun écran n'appelle le réseau directement — la
 frontière écran ↔ données tient, c'est ce qui rend la découpe faisable.
@@ -243,6 +243,29 @@ provider, écrire le test sur cette logique.
 Le critère n'est pas un nombre de lignes : **le comportement métier de l'écran
 est-il atteignable par un test sans monter l'arbre de widgets ?** Tant que la
 réponse est non, la découpe n'est pas finie.
+
+**4.1 — `advanced_order_management_screen.dart` : fait.** 3 067 → 1 224 lignes.
+Trois règles sont devenues atteignables et sont couvertes par 31 cas : la
+recherche et le tri de la liste, l'âge affiché d'une commande, le comptage par
+jour du graphe. Les cinq onglets de statut, cinq copies de 47 lignes, n'en font
+plus qu'une. Trois dialogues et l'onglet des statistiques sont devenus des vues
+nommées sous `lib/presentation/`.
+
+Ce que la découpe a mis au jour — et qui n'aurait pas été trouvé autrement :
+
+- La légende du graphe annonçait « Total: N commandes sur 7 jours » avec N le
+  nombre de commandes **toutes dates confondues**. Sortir le comptage l'a rendu
+  visible ; il compte désormais la fenêtre qu'il nomme.
+- Deux dialogues d'assignation de livreur coexistent et **ne font pas la même
+  chose** : celui de la gestion avancée marque la commande « récupérée » après
+  assignation, celui d'`active_deliveries_screen.dart` non. Fusionner
+  trancherait une question de métier — laissé tel quel, à arbitrer.
+- **Trois** correspondances statut → couleur coexistent dans le back-office :
+  jetons du thème ici, palette statique `ModernTheme` dans le tableau de bord,
+  `Colors.orange`/`Colors.blue` écrits en dur — donc aveugles au thème sombre —
+  dans `order_management_screen.dart`. Les unifier changerait ce que voient les
+  utilisateurs sur deux écrans. Le présent document n'en dit rien : à décider
+  avant de le faire.
 
 ### Lot 5 — Durcir l'outillage — **fait**, mais pas en un jour
 
