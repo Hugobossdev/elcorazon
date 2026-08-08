@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/chat_service.dart';
-import 'package:elcora_fast/models/chat_message.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/screens/client/call_screen.dart';
 import 'package:intl/intl.dart';
@@ -126,7 +126,7 @@ class _ChatScreenState extends State<ChatScreen> {
           : Column(
                   children: [
                     Expanded(
-                      child: StreamBuilder<List<ChatMessage>>(
+                      child: StreamBuilder<List<eccore.ChatMessage>>(
                         stream: _chatService.getMessageStream(widget.orderId),
                         builder: (context, snapshot) {
                           if (snapshot.hasError) {
@@ -160,7 +160,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             itemCount: messages.length,
                             itemBuilder: (context, index) {
                               final message = messages[index];
-                              final isMe = message.senderId == _myRole;
+                              final isMe = message.sender == _myRole;
                               return _buildMessageBubble(message, isMe);
                             },
                           );
@@ -205,7 +205,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildMessageBubble(ChatMessage message, bool isMe) {
+  Widget _buildMessageBubble(eccore.ChatMessage message, bool isMe) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
@@ -233,7 +233,7 @@ class _ChatScreenState extends State<ChatScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              message.content,
+              message.text,
               style: TextStyle(
                 color: isMe
                     ? Colors.white
@@ -242,7 +242,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              DateFormat('HH:mm').format(message.createdAt),
+              DateFormat('HH:mm').format(message.sentAt),
               style: TextStyle(
                 fontSize: 10,
                 color: isMe

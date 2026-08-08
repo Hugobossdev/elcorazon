@@ -73,6 +73,7 @@ export 'src/profile/address.dart';
 export 'src/promotions/promotion.dart';
 export 'src/promotions/promotion_repository.dart';
 export 'src/profile/address_repository.dart';
+export 'src/realtime/chat_message.dart';
 export 'src/realtime/realtime_channel.dart';
 export 'src/realtime/realtime_event.dart';
 export 'src/search/search_repository.dart';

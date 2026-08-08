@@ -77,6 +77,7 @@ import 'package:elcorazon_core/src/profile/address.dart';
 import 'package:elcorazon_core/src/profile/address_repository.dart';
 import 'package:elcorazon_core/src/promotions/promotion.dart';
 import 'package:elcorazon_core/src/promotions/promotion_repository.dart';
+import 'package:elcorazon_core/src/realtime/chat_message.dart';
 import 'package:elcorazon_core/src/realtime/realtime_channel.dart';
 import 'package:elcorazon_core/src/realtime/realtime_event.dart';
 import 'package:elcorazon_core/src/search/search_repository.dart';

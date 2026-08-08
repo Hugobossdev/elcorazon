@@ -12,7 +12,6 @@ import 'package:elcora_fast/firebase_options.dart';
 import 'package:elcora_fast/main.dart';
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/models/cart_item.dart';
-import 'package:elcora_fast/models/chat_message.dart';
 import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
 import 'package:elcora_fast/models/group_payment.dart';
 import 'package:elcora_fast/models/menu_category.dart';

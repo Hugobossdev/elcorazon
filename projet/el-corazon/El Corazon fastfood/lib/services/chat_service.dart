@@ -4,7 +4,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import 'package:elcora_fast/models/chat_message.dart';
 
 /// Conversation client ↔ livreur sur `ws/orders/{id}/chat/` (Phase 6).
 ///
@@ -22,8 +21,8 @@ class ChatService extends ChangeNotifier {
   factory ChatService() => _instance;
   ChatService._internal();
 
-  final Map<String, StreamController<List<ChatMessage>>> _messageControllers = {};
-  final Map<String, List<ChatMessage>> _messages = {};
+  final Map<String, StreamController<List<eccore.ChatMessage>>> _messageControllers = {};
+  final Map<String, List<eccore.ChatMessage>> _messages = {};
   final Map<String, eccore.RealtimeChannel> _channels = {};
   final Map<String, StreamSubscription<eccore.RealtimeEvent>> _subscriptions = {};
 
@@ -48,7 +47,7 @@ class ChatService extends ChangeNotifier {
 
   /// Flux de la conversation d'une commande. La liste part vide : le serveur
   /// n'a pas d'historique à servir.
-  Stream<List<ChatMessage>> getMessageStream(String orderId) {
+  Stream<List<eccore.ChatMessage>> getMessageStream(String orderId) {
     // `close_sinks` ne sait pas suivre un contrôleur rangé dans une `Map` puis
     // fermé par une autre méthode : il exige la fermeture dans la fonction qui
     // l'ouvre, ce qui est impossible ici — le flux doit survivre à l'appel pour
@@ -60,7 +59,7 @@ class ChatService extends ChangeNotifier {
     if (existing != null) return existing.stream;
 
     // ignore: close_sinks
-    final controller = StreamController<List<ChatMessage>>.broadcast();
+    final controller = StreamController<List<eccore.ChatMessage>>.broadcast();
     _messageControllers[orderId] = controller;
     _messages[orderId] = [];
 
@@ -73,18 +72,9 @@ class ChatService extends ChangeNotifier {
     _subscriptions[orderId] = channel.connect().listen((event) {
       if (event.type != 'chat.message') return;
 
-      final payload = event.payload;
-      final message = ChatMessage(
-        roomId: orderId,
-        // Le serveur ne nomme que le rôle de l'émetteur, jamais son
-        // identifiant : l'écran s'en sert pour placer la bulle à gauche ou à
-        // droite, ce qui est tout ce dont il a besoin.
-        senderId: payload['sender'] as String? ?? 'unknown',
-        content: payload['text'] as String? ?? '',
-        createdAt: payload['sent_at'] == null
-            ? DateTime.now()
-            : DateTime.parse(payload['sent_at'] as String),
-      );
+      // Le socle lit la charge utile : c'est un contrat de serveur, pas une
+      // forme propre à cette application.
+      final message = eccore.ChatMessage.fromPayload(event.payload);
 
       _messages[orderId]!.add(message);
       if (!controller.isClosed) {
