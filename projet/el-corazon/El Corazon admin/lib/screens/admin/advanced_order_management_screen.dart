@@ -6,37 +6,16 @@ import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/models/order.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:admin/presentation/statut_livreur.dart';
+import 'package:admin/presentation/anciennete_commande.dart';
+import 'package:admin/presentation/dialogues/assignation_livreur.dart';
+import 'package:admin/presentation/dialogues/changement_statut.dart';
+import 'package:admin/presentation/dialogues/details_commande.dart';
+import 'package:admin/presentation/tri_commandes.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/ui/ui.dart';
 
-enum OrderSortOption {
-  dateAsc,
-  dateDesc,
-  totalAsc,
-  totalDesc,
-  status,
-}
-
-extension OrderSortOptionExtension on OrderSortOption {
-  String get displayName {
-    switch (this) {
-      case OrderSortOption.dateAsc:
-        return 'Date (Ancien)';
-      case OrderSortOption.dateDesc:
-        return 'Date (Récent)';
-      case OrderSortOption.totalAsc:
-        return 'Total (Croissant)';
-      case OrderSortOption.totalDesc:
-        return 'Total (Décroissant)';
-      case OrderSortOption.status:
-        return 'Statut';
-    }
-  }
-}
 
 class AdvancedOrderManagementScreen extends StatefulWidget {
   const AdvancedOrderManagementScreen({super.key});
@@ -58,7 +37,7 @@ class _AdvancedOrderManagementScreenState
   /// l'autre. Les porter dans le service les rendrait globaux, et un filtre
   /// posé ici resterait actif sur un écran qui ne le montre pas.
   String _searchQuery = '';
-  OrderSortOption _sortOption = OrderSortOption.dateDesc;
+  TriCommandes _sortOption = TriCommandes.dateDecroissante;
 
   @override
   void initState() {
@@ -290,19 +269,24 @@ class _AdvancedOrderManagementScreenState
                         child: _buildOverviewTab(context, orderService),);
                   case 1:
                     return SizedBox.expand(
-                        child: _buildPendingOrdersTab(context, orderService),);
+                        child: _buildOrdersTab(context, orderService,
+                            OrderStatus.pending, 'Aucune commande en attente',),);
                   case 2:
                     return SizedBox.expand(
-                        child: _buildConfirmedOrdersTab(context, orderService),);
+                        child: _buildOrdersTab(context, orderService,
+                            OrderStatus.confirmed, 'Aucune commande confirmée',),);
                   case 3:
                     return SizedBox.expand(
-                        child: _buildPreparingOrdersTab(context, orderService),);
+                        child: _buildOrdersTab(context, orderService,
+                            OrderStatus.preparing, 'Aucune commande en préparation',),);
                   case 4:
                     return SizedBox.expand(
-                        child: _buildReadyOrdersTab(context, orderService),);
+                        child: _buildOrdersTab(context, orderService,
+                            OrderStatus.ready, 'Aucune commande prête',),);
                   case 5:
                     return SizedBox.expand(
-                        child: _buildDeliveryOrdersTab(context, orderService),);
+                        child: _buildOrdersTab(context, orderService,
+                            OrderStatus.onTheWay, 'Aucune commande en livraison',),);
                   case 6:
                     return SizedBox.expand(
                         child: _buildStatisticsTab(context, orderService),);
@@ -350,15 +334,21 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
-  Widget _buildPendingOrdersTab(
-      BuildContext context, OrderManagementService orderService,) {
-    // Charger directement depuis la base de données pour utiliser les valeurs dbValue
+  /// L'onglet d'un statut : les cinq se ressemblaient à la ligne près.
+  ///
+  /// Chacun rechargeait depuis la base plutôt que de filtrer la liste déjà en
+  /// mémoire ; cette lecture et le message affiché quand il n'y a rien sont
+  /// leur seule différence.
+  Widget _buildOrdersTab(
+    BuildContext context,
+    OrderManagementService orderService,
+    OrderStatus statut,
+    String messageVide,
+  ) {
     return Consumer<OrderManagementService>(
       builder: (context, service, child) {
-        final future = service.loadOrdersByStatusFromDB(OrderStatus.pending);
-
         return FutureBuilder<List<Order>>(
-          future: future,
+          future: service.loadOrdersByStatusFromDB(statut),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
@@ -386,202 +376,11 @@ class _AdvancedOrderManagementScreenState
               );
             }
 
-            final pendingOrders = snapshot.data ?? [];
+            final commandes = snapshot.data ?? [];
 
-            return pendingOrders.isEmpty
-                ? _buildEmptyState(context, 'Aucune commande en attente')
-                : _buildOrdersList(context, pendingOrders, orderService);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildConfirmedOrdersTab(
-      BuildContext context, OrderManagementService orderService,) {
-    // Charger directement depuis la base de données pour utiliser les valeurs dbValue
-    return Consumer<OrderManagementService>(
-      builder: (context, service, child) {
-        final future = service.loadOrdersByStatusFromDB(OrderStatus.confirmed);
-
-        return FutureBuilder<List<Order>>(
-          future: future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red,),
-                    const SizedBox(height: 16),
-                    Text('Erreur: ${snapshot.error}'),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () {
-                        service.refresh();
-                        setState(() {});
-                      },
-                      child: const Text('Réessayer'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            final confirmedOrders = snapshot.data ?? [];
-
-            return confirmedOrders.isEmpty
-                ? _buildEmptyState(context, 'Aucune commande confirmée')
-                : _buildOrdersList(context, confirmedOrders, orderService);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildPreparingOrdersTab(
-      BuildContext context, OrderManagementService orderService,) {
-    // Charger directement depuis la base de données pour utiliser les valeurs dbValue
-    return Consumer<OrderManagementService>(
-      builder: (context, service, child) {
-        final future = service.loadOrdersByStatusFromDB(OrderStatus.preparing);
-
-        return FutureBuilder<List<Order>>(
-          future: future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red,),
-                    const SizedBox(height: 16),
-                    Text('Erreur: ${snapshot.error}'),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () {
-                        service.refresh();
-                        setState(() {});
-                      },
-                      child: const Text('Réessayer'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            final preparingOrders = snapshot.data ?? [];
-
-            return preparingOrders.isEmpty
-                ? _buildEmptyState(context, 'Aucune commande en préparation')
-                : _buildOrdersList(context, preparingOrders, orderService);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildReadyOrdersTab(
-      BuildContext context, OrderManagementService orderService,) {
-    // Charger directement depuis la base de données pour utiliser les valeurs dbValue
-    return Consumer<OrderManagementService>(
-      builder: (context, service, child) {
-        final future = service.loadOrdersByStatusFromDB(OrderStatus.ready);
-
-        return FutureBuilder<List<Order>>(
-          future: future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red,),
-                    const SizedBox(height: 16),
-                    Text('Erreur: ${snapshot.error}'),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () {
-                        service.refresh();
-                        setState(() {});
-                      },
-                      child: const Text('Réessayer'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            final readyOrders = snapshot.data ?? [];
-
-            return readyOrders.isEmpty
-                ? _buildEmptyState(context, 'Aucune commande prête')
-                : _buildOrdersList(context, readyOrders, orderService);
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildDeliveryOrdersTab(
-      BuildContext context, OrderManagementService orderService,) {
-    // Utiliser Consumer pour écouter les changements du service
-    // Charger directement depuis la base de données pour utiliser les valeurs dbValue (snake_case)
-    return Consumer<OrderManagementService>(
-      builder: (context, service, child) {
-        // Créer un nouveau Future à chaque rebuild pour forcer le rechargement
-        final future = service.loadOrdersByStatusFromDB(OrderStatus.onTheWay);
-
-        return FutureBuilder<List<Order>>(
-          future: future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline,
-                        size: 48, color: Colors.red,),
-                    const SizedBox(height: 16),
-                    Text('Erreur: ${snapshot.error}'),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () {
-                        // Forcer le rechargement
-                        service.refresh();
-                        setState(() {});
-                      },
-                      child: const Text('Réessayer'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            final deliveryOrders = snapshot.data ?? [];
-
-            return deliveryOrders.isEmpty
-                ? _buildEmptyState(context, 'Aucune commande en livraison')
-                : _buildOrdersList(context, deliveryOrders, orderService);
+            return commandes.isEmpty
+                ? _buildEmptyState(context, messageVide)
+                : _buildOrdersList(context, commandes, orderService);
           },
         );
       },
@@ -1350,39 +1149,14 @@ class _AdvancedOrderManagementScreenState
   /// (`service.searchOrders(value);`, valeur de retour ignorée) et le tri sur
   /// une liste déroulante branchée sur rien : les deux contrôles étaient
   /// visibles et sans effet.
-  List<Order> _appliquerRechercheEtTri(List<Order> orders) {
-    final terme = _searchQuery.trim().toLowerCase();
-
-    final retenues = terme.isEmpty
-        ? List<Order>.of(orders)
-        : orders
-            .where(
-              (order) =>
-                  order.id.toLowerCase().contains(terme) ||
-                  order.recipientName.toLowerCase().contains(terme) ||
-                  order.deliveryAddress.toLowerCase().contains(terme),
-            )
-            .toList();
-
-    switch (_sortOption) {
-      case OrderSortOption.dateAsc:
-        retenues.sort((a, b) => a.orderTime.compareTo(b.orderTime));
-      case OrderSortOption.dateDesc:
-        retenues.sort((a, b) => b.orderTime.compareTo(a.orderTime));
-      case OrderSortOption.totalAsc:
-        retenues.sort((a, b) => a.total.compareTo(b.total));
-      case OrderSortOption.totalDesc:
-        retenues.sort((a, b) => b.total.compareTo(a.total));
-      case OrderSortOption.status:
-        retenues.sort((a, b) => a.status.index.compareTo(b.status.index));
-    }
-
-    return retenues;
-  }
 
   Widget _buildOrdersList(BuildContext context, List<Order> orders,
       OrderManagementService orderService,) {
-    final affichees = _appliquerRechercheEtTri(orders);
+    final affichees = commandesAffichees(
+      orders,
+      recherche: _searchQuery,
+      tri: _sortOption,
+    );
 
     if (affichees.isEmpty) {
       return _buildEmptyState(
@@ -1450,7 +1224,7 @@ class _AdvancedOrderManagementScreenState
             ),
             const SizedBox(height: 4),
             Text(
-              '${order.items.length} article${order.items.length > 1 ? 's' : ''} • ${_formatTime(order.orderTime)}',
+              '${order.items.length} article${order.items.length > 1 ? 's' : ''} • ${ancienneteCommande(order.orderTime)}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -1609,7 +1383,7 @@ class _AdvancedOrderManagementScreenState
                 Expanded(
                   child: CustomButton(
                     text: 'Voir détails',
-                    onPressed: () => _showOrderDetails(order),
+                    onPressed: () => afficherDetailsCommande(context, order),
                     variant: ButtonVariant.outlined,
                     height: 36,
                   ),
@@ -1654,11 +1428,13 @@ class _AdvancedOrderManagementScreenState
                           text: order.deliveryPersonId != null
                               ? 'Réassigner'
                               : 'Assigner livreur',
-                          onPressed: () => _showAssignDriverDialog(
-                            context,
-                            order,
-                            orderService,
-                            driverService,
+                          onPressed: () => unawaited(
+                            afficherAssignationLivreur(
+                              context: context,
+                              order: order,
+                              orderService: orderService,
+                              driverService: driverService,
+                            ),
                           ),
                           color: Theme.of(context).colorScheme.primary,
                           height: 36,
@@ -1688,8 +1464,8 @@ class _AdvancedOrderManagementScreenState
       title: Text('Commande #${order.id.substring(0, 8).toUpperCase()}'),
       subtitle: Text(
           '${order.status.displayName} • ${PriceFormatter.format(order.total)}',),
-      trailing: Text(_formatTime(order.orderTime)),
-      onTap: () => _showOrderDetails(order),
+      trailing: Text(ancienneteCommande(order.orderTime)),
+      onTap: () => afficherDetailsCommande(context, order),
     );
   }
 
@@ -1743,18 +1519,6 @@ class _AdvancedOrderManagementScreenState
     }
   }
 
-  String _formatTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-
-    if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}min';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h';
-    } else {
-      return '${dateTime.day}/${dateTime.month}';
-    }
-  }
 
   // Méthode _showSearchDialog supprimée car la recherche est maintenant intégrée directement dans l'interface
 
@@ -1821,16 +1585,16 @@ class _AdvancedOrderManagementScreenState
                           // l'onglet courant, ne pouvait que le contredire —
                           // choisir « Prêtes » depuis l'onglet « En attente »
                           // vidait la liste sans expliquer pourquoi.
-                          DropdownButtonFormField<OrderSortOption>(
+                          DropdownButtonFormField<TriCommandes>(
                             decoration: const InputDecoration(
                               labelText: 'Trier par',
                               border: OutlineInputBorder(),
                             ),
                             initialValue: _sortOption,
-                            items: OrderSortOption.values.map((option) {
-                              return DropdownMenuItem<OrderSortOption>(
+                            items: TriCommandes.values.map((option) {
+                              return DropdownMenuItem<TriCommandes>(
                                 value: option,
-                                child: Text(option.displayName),
+                                child: Text(option.libelle),
                               );
                             }).toList(),
                             onChanged: (option) {
@@ -1874,7 +1638,7 @@ class _AdvancedOrderManagementScreenState
                           _searchController.clear();
                           setState(() {
                             _searchQuery = '';
-                            _sortOption = OrderSortOption.dateDesc;
+                            _sortOption = TriCommandes.dateDecroissante;
                           });
                           Navigator.of(context).pop();
                         },
@@ -1910,1158 +1674,44 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
-  void _showOrderDetails(Order order) {
-    final screenSize = MediaQuery.of(context).size;
-    final dialogWidth = (screenSize.width * 0.9).clamp(500.0, 900.0);
-    final dialogHeight = (screenSize.height * 0.85).clamp(500.0, 900.0);
-
-    DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => Dialog(
-        child: SizedBox(
-          width: dialogWidth,
-          height: dialogHeight,
-          child: Column(
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Commande #${order.id.substring(0, 8).toUpperCase()}',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                    ),
-                    Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 48,
-                        minHeight: 48,
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              // Contenu scrollable
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Informations générales
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest
-                              .withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.info_outline,
-                                    size: 16,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Informations',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color:
-                                        Theme.of(context).colorScheme.onSurface,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            _buildDetailRow('Statut', order.status.displayName),
-                            const SizedBox(height: 4),
-                            _buildDetailRow(
-                                'Total', PriceFormatter.format(order.total),),
-                            const SizedBox(height: 4),
-                            _buildDetailRow('Articles',
-                                '${order.items.length} article${order.items.length > 1 ? 's' : ''}',),
-                            const SizedBox(height: 4),
-                            _buildDetailRow('Méthode de paiement',
-                                order.paymentMethod.toString().split('.').last,),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Articles de la commande
-                      if (order.items.isNotEmpty) ...[
-                        Text(
-                          'Articles commandés:',
-                          style:
-                              Theme.of(context).textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .outline
-                                  .withValues(alpha: 0.25),
-                            ),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Column(
-                            children: order.items.map((item) {
-                              return Padding(
-                                padding: const EdgeInsets.all(8),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // Image ou icône
-                                    Container(
-                                      width: 40,
-                                      height: 40,
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .surfaceContainerHighest,
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: item.menuItemImage.isNotEmpty
-                                          ? ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                              child: Image.network(
-                                                item.menuItemImage,
-                                                fit: BoxFit.cover,
-                                                errorBuilder: (context, error,
-                                                        stackTrace,) =>
-                                                    Icon(
-                                                  Icons.fastfood,
-                                                  size: 20,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                              ),
-                                            )
-                                          : Icon(
-                                              Icons.fastfood,
-                                              size: 20,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    // Détails de l'article
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            item.menuItemName.isNotEmpty
-                                                ? item.menuItemName
-                                                : item.name.isNotEmpty
-                                                    ? item.name
-                                                    : 'Article',
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            '${item.quantity}x ${PriceFormatter.format(item.unitPrice)} = ${PriceFormatter.format(item.totalPrice)}',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                          ),
-                                          if (item.categoryId.isNotEmpty) ...[
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              'Catégorie: ${item.categoryId}',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .onSurfaceVariant
-                                                    .withValues(alpha: 0.85),
-                                                fontStyle: FontStyle.italic,
-                                              ),
-                                            ),
-                                          ],
-                                          if (item
-                                              .getFormattedCustomizations()
-                                              .isNotEmpty) ...[
-                                            const SizedBox(height: 4),
-                                            ...item
-                                                .getFormattedCustomizations()
-                                                .map((customization) => Padding(
-                                                      padding:
-                                                          const EdgeInsets.only(
-                                                              bottom: 2,),
-                                                      child: Text(
-                                                        '• $customization',
-                                                        style: TextStyle(
-                                                          fontSize: 11,
-                                                          color:
-                                                              Theme.of(context)
-                                                                  .colorScheme
-                                                                  .primary,
-                                                          fontStyle:
-                                                              FontStyle.italic,
-                                                        ),
-                                                      ),
-                                                    ),),
-                                          ],
-                                          if (item.notes != null &&
-                                              item.notes!.isNotEmpty) ...[
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              'Note: ${item.notes}',
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .onTertiaryContainer,
-                                                fontStyle: FontStyle.italic,
-                                              ),
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    ),
-                                    // Prix total
-                                    Text(
-                                      PriceFormatter.format(item.totalPrice),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                      ] else ...[
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color:
-                                Theme.of(context).colorScheme.tertiaryContainer,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.warning,
-                                  size: 16,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onTertiaryContainer,),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Aucun article trouvé dans cette commande',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onTertiaryContainer,
-                                    fontStyle: FontStyle.italic,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 16),
-
-                      // Adresse de livraison
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.location_on,
-                                    size: 16,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onPrimaryContainer,),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Adresse de livraison',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onPrimaryContainer,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              order.deliveryAddress,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-
-                      // Date
-                      Text(
-                        'Date: ${_formatTime(order.orderTime)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Divider(height: 1),
-              // Footer
-              Container(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Fermer'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Afficher un dialog pour assigner un livreur à une commande
-  Future<void> _showAssignDriverDialog(
-    BuildContext context,
-    Order order,
-    OrderManagementService orderService,
-    DriverManagementService driverService,
-  ) async {
-    // Récupérer les livreurs disponibles (déjà chargés au démarrage)
-    final availableDrivers = driverService.getAvailableDrivers();
-
-    // Si aucun livreur disponible, montrer un message
-    if (availableDrivers.isEmpty) {
-      final screenSize = MediaQuery.of(context).size;
-      final dialogWidth = (screenSize.width * 0.9).clamp(400.0, 500.0);
-      const dialogHeight = 250.0;
-
-      unawaited(DialogHelper.showSafeDialog(
-        context: context,
-        builder: (context) => Dialog(
-          child: SizedBox(
-            width: dialogWidth,
-            height: dialogHeight,
-            child: Column(
-              children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.warning,
-                        color: Theme.of(context).colorScheme.tertiary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Aucun livreur disponible',
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                      ),
-                      Container(
-                        constraints: const BoxConstraints(
-                          minWidth: 48,
-                          minHeight: 48,
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                // Contenu
-                const Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Text(
-                      'Il n\'y a actuellement aucun livreur disponible pour cette livraison.\n\n'
-                      'Vous pouvez attendre qu\'un livreur devienne disponible ou assigner un livreur manuellement depuis la liste des livreurs.',
-                      style: TextStyle(fontSize: 14),
-                    ),
-                  ),
-                ),
-                const Divider(height: 1),
-                // Footer
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Fermer'),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),);
-      return;
-    }
-
-    // Livreur sélectionné
-    eccore.CourierProfile? selectedDriver;
-
-    final screenSize = MediaQuery.of(context).size;
-    final dialogWidth = (screenSize.width * 0.9).clamp(500.0, 800.0);
-    final dialogHeight = (screenSize.height * 0.7).clamp(500.0, 800.0);
-
-    await DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => Dialog(
-          child: SizedBox(
-            width: dialogWidth,
-            height: dialogHeight,
-            child: Column(
-              children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.local_shipping,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Assigner un livreur',
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                      ),
-                      Container(
-                        constraints: const BoxConstraints(
-                          minWidth: 48,
-                          minHeight: 48,
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                // Contenu scrollable
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Informations de la commande
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color:
-                                Theme.of(context).colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Commande #${order.id.substring(0, 8).toUpperCase()}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Total: ${PriceFormatter.format(order.total)}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Adresse: ${order.deliveryAddress}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Liste des livreurs disponibles
-                        Text(
-                          'Livreurs disponibles (${availableDrivers.length}):',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 300,
-                          child: ListView.builder(
-                            itemCount: availableDrivers.length,
-                            itemBuilder: (context, index) {
-                              final driver = availableDrivers[index];
-                              final isSelected =
-                                  selectedDriver?.id == driver.id;
-
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                color: isSelected
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .primaryContainer
-                                        .withValues(alpha: 0.35)
-                                    : null,
-                                elevation: isSelected ? 4 : 1,
-                                child: Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () {
-                                      setState(() {
-                                        selectedDriver = driver;
-                                      });
-                                    },
-                                    child: Container(
-                                      width: double.infinity,
-                                      padding: const EdgeInsets.all(12),
-                                      constraints: const BoxConstraints(
-                                        minHeight: 60,
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          // Statut du livreur
-                                          Container(
-                                            width: 12,
-                                            height: 12,
-                                            decoration: BoxDecoration(
-                                              color: driver.statut.couleur,
-                                              shape: BoxShape.circle,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          // Informations du livreur
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Row(
-                                                  children: [
-                                                    Expanded(
-                                                      child: Text(
-                                                        driver.fullName,
-                                                        style: TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                          fontSize: 14,
-                                                          color: isSelected
-                                                              ? Theme.of(
-                                                                      context,)
-                                                                  .colorScheme
-                                                                  .onPrimaryContainer
-                                                              : null,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    if (isSelected)
-                                                      Icon(
-                                                        Icons.check_circle,
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .primary,
-                                                        size: 20,
-                                                      ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Row(
-                                                  children: [
-                                                    Icon(
-                                                      Icons.star,
-                                                      size: 14,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .tertiary,
-                                                    ),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      driver.ratingAverage
-                                                          .toStringAsFixed(1),
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .onSurfaceVariant,
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 12),
-                                                    Icon(
-                                                      Icons.delivery_dining,
-                                                      size: 14,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant,
-                                                    ),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      '${driver.deliveriesCompleted} livraisons',
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: Theme.of(context)
-                                                            .colorScheme
-                                                            .onSurfaceVariant,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                ...[
-                                                const SizedBox(height: 4),
-                                                Text(
-                                                  'Véhicule: ${driver.vehicleType}',
-                                                  style: TextStyle(
-                                                    fontSize: 11,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .onSurfaceVariant
-                                                        .withValues(
-                                                            alpha: 0.85,),
-                                                    fontStyle:
-                                                        FontStyle.italic,
-                                                  ),
-                                                ),
-                                              ],
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const Divider(height: 1),
-                // Footer
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Container(
-                        constraints: const BoxConstraints(
-                          minHeight: 48,
-                        ),
-                        child: TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Text('Annuler'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(
-                        constraints: const BoxConstraints(
-                          minHeight: 48,
-                        ),
-                        child: ElevatedButton.icon(
-                          onPressed: selectedDriver == null
-                              ? null
-                              : () async {
-                                  // Fermer le dialog
-                                  Navigator.of(context).pop();
-
-                                  // Assigner le livreur
-                                  // Vérifier que le driver a un userId avant d'assigner
-                                  if (selectedDriver!.id.isEmpty) {
-                                    if (context.mounted) {
-                                      final scheme =
-                                          Theme.of(context).colorScheme;
-                                      final sem = AdminColorTokens.semantic(
-                                        scheme,
-                                      );
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          backgroundColor:
-                                              scheme.inverseSurface,
-                                          duration: const Duration(seconds: 5),
-                                          content: Row(
-                                            children: [
-                                              Icon(
-                                                Icons.warning,
-                                                color: sem.warning,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  'Ce livreur n\'a pas d\'utilisateur correspondant dans la table users. Veuillez créer un utilisateur avec role=\'delivery\' pour ce livreur.',
-                                                  style: TextStyle(
-                                                    color:
-                                                        scheme.onInverseSurface,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                    return;
-                                  }
-
-                                  // Utiliser userId (obligatoire)
-                                  final success =
-                                      await orderService.assignDriver(
-                                    order.id,
-                                    selectedDriver!.id,
-                                  );
-
-                                  if (success) {
-                                    // Marquer la commande comme récupérée (pickedUp) après assignation
-                                    await orderService
-                                        .markOrderPickedUp(order.id);
-
-                                    // Rafraîchir les commandes
-                                    await orderService.refresh();
-
-                                    // Afficher un message de succès
-                                    if (context.mounted) {
-                                      final scheme =
-                                          Theme.of(context).colorScheme;
-                                      final sem = AdminColorTokens.semantic(
-                                        scheme,
-                                      );
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          backgroundColor:
-                                              scheme.inverseSurface,
-                                          duration: const Duration(seconds: 3),
-                                          content: Row(
-                                            children: [
-                                              Icon(
-                                                Icons.check_circle,
-                                                color: sem.success,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  'Livreur ${selectedDriver!.fullName} assigné avec succès',
-                                                  style: TextStyle(
-                                                    color:
-                                                        scheme.onInverseSurface,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  } else {
-                                    // Afficher un message d'erreur
-                                    if (context.mounted) {
-                                      final scheme =
-                                          Theme.of(context).colorScheme;
-                                      final sem = AdminColorTokens.semantic(
-                                        scheme,
-                                      );
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          backgroundColor:
-                                              scheme.inverseSurface,
-                                          duration: const Duration(seconds: 3),
-                                          content: Row(
-                                            children: [
-                                              Icon(
-                                                Icons.error,
-                                                color: sem.danger,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  'Erreur lors de l\'assignation du livreur',
-                                                  style: TextStyle(
-                                                    color:
-                                                        scheme.onInverseSurface,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  }
-                                },
-                          icon: const Icon(Icons.local_shipping),
-                          label: const Text('Assigner'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor:
-                                Theme.of(context).colorScheme.primary,
-                            foregroundColor:
-                                Theme.of(context).colorScheme.onPrimary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Afficher un dialog de confirmation avant de changer le statut
-  Future<void> _showStatusChangeConfirmation({
-    required BuildContext context,
-    required Order order,
-    required OrderStatus currentStatus,
-    required OrderStatus newStatus,
-    required OrderManagementService orderService,
-    String? confirmationMessage,
-  }) async {
-    final screenSize = MediaQuery.of(context).size;
-    final dialogWidth = (screenSize.width * 0.9).clamp(400.0, 600.0);
-    const dialogHeight = 400.0;
-    // Capturer les valeurs nécessaires avant le gap async
-    final inverseSurfaceColor = Theme.of(context).colorScheme.inverseSurface;
-
-    final confirmed = await DialogHelper.showSafeDialog<bool>(
-      context: context,
-      builder: (context) => Dialog(
-        child: SizedBox(
-          width: dialogWidth,
-          height: dialogHeight,
-          child: Column(
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.warning_amber_rounded,
-                      color: Theme.of(context).colorScheme.tertiary,
-                      size: 28,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Confirmer le changement',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                    ),
-                    Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 48,
-                        minHeight: 48,
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(context).pop(false),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              // Contenu scrollable
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        confirmationMessage ??
-                            'Êtes-vous sûr de vouloir changer le statut de cette commande ?',
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest
-                              .withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Commande #${order.id.substring(0, 8).toUpperCase()}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Icon(Icons.arrow_forward,
-                                    size: 16,
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Statut actuel: ${currentStatus.displayName}',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Icon(
-                                  Icons.check_circle,
-                                  size: 16,
-                                  color: AdminColorTokens.semantic(
-                                    Theme.of(context).colorScheme,
-                                  ).success,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    'Nouveau statut: ${newStatus.displayName}',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.bold,
-                                      color: AdminColorTokens.semantic(
-                                        Theme.of(context).colorScheme,
-                                      ).success,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Divider(height: 1),
-              // Footer
-              Container(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(false),
-                      child: const Text('Annuler'),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton(
-                      onPressed: () => Navigator.of(context).pop(true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor:
-                            Theme.of(context).colorScheme.onPrimary,
-                      ),
-                      child: const Text('Confirmer'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (confirmed == true) {
-      final success = await orderService.updateOrderStatus(order.id, newStatus);
-      // IMPORTANT: sur Web, certains rebuilds peuvent être "perdus" si l'écran
-      // n'écoute pas la bonne instance ou si un cache UI est impliqué.
-      // Forcer un refresh garantit que la commande apparaît dans le bon onglet.
-      if (success) {
-        await orderService.refresh();
-      }
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              success
-                  ? '✅ Statut changé: ${newStatus.displayName}'
-                  : '❌ Erreur lors du changement de statut',
-            ),
-            backgroundColor: inverseSurfaceColor,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    }
-  }
-
   void _confirmOrder(Order order, OrderManagementService orderService) {
-    _showStatusChangeConfirmation(
-      context: context,
-      order: order,
-      currentStatus: order.status,
-      newStatus: OrderStatus.confirmed,
-      orderService: orderService,
-      confirmationMessage:
-          'Voulez-vous confirmer cette commande ?\n\nCette action valide la commande et commence le processus de préparation.',
+    unawaited(
+      confirmerChangementStatut(
+        context: context,
+        order: order,
+        nouveauStatut: OrderStatus.confirmed,
+        orderService: orderService,
+        message:
+            'Voulez-vous confirmer cette commande ?\n\nCette action valide la commande et commence le processus de préparation.',
+      ),
     );
   }
 
   void _prepareOrder(Order order, OrderManagementService orderService) {
-    _showStatusChangeConfirmation(
-      context: context,
-      order: order,
-      currentStatus: order.status,
-      newStatus: OrderStatus.preparing,
-      orderService: orderService,
-      confirmationMessage:
-          'Voulez-vous commencer la préparation de cette commande ?\n\nCette action indique que la cuisine commence à préparer les articles.',
+    unawaited(
+      confirmerChangementStatut(
+        context: context,
+        order: order,
+        nouveauStatut: OrderStatus.preparing,
+        orderService: orderService,
+        message:
+            'Voulez-vous commencer la préparation de cette commande ?\n\nCette action indique que la cuisine commence à préparer les articles.',
+      ),
     );
   }
 
   void _readyOrder(Order order, OrderManagementService orderService) {
-    _showStatusChangeConfirmation(
-      context: context,
-      order: order,
-      currentStatus: order.status,
-      newStatus: OrderStatus.ready,
-      orderService: orderService,
-      confirmationMessage:
-          'Voulez-vous marquer cette commande comme prête ?\n\nCette action indique que la commande est prête pour la livraison.',
+    unawaited(
+      confirmerChangementStatut(
+        context: context,
+        order: order,
+        nouveauStatut: OrderStatus.ready,
+        orderService: orderService,
+        message:
+            'Voulez-vous marquer cette commande comme prête ?\n\nCette action indique que la commande est prête pour la livraison.',
+      ),
     );
   }
 
   /// Widget helper pour afficher une ligne de détail
-  Widget _buildDetailRow(String label, String value) {
-    final scheme = Theme.of(context).colorScheme;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 120,
-          child: Text(
-            '$label:',
-            style: TextStyle(
-              fontSize: 12,
-              color: scheme.onSurfaceVariant,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: TextStyle(
-              fontSize: 12,
-              color: scheme.onSurface,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 }
