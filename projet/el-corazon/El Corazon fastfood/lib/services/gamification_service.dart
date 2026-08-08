@@ -1,10 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:elcora_fast/models/loyalty_reward.dart';
-import 'package:elcora_fast/models/loyalty_transaction.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/main.dart' show apiClient;
+import 'package:elcora_fast/presentation/fidelite.dart';
 import 'package:elcora_fast/repositories/django_gamification_repository.dart';
-import 'package:elcora_fast/repositories/django_loyalty_repository.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
@@ -18,7 +18,8 @@ class GamificationService extends ChangeNotifier {
 
   GamificationService._internal();
 
-  final DjangoLoyaltyRepository _loyaltyRepository = DjangoLoyaltyRepository();
+  final eccore.LoyaltyRepository _loyaltyRepository =
+      eccore.LoyaltyRepository(apiClient: apiClient);
   final DjangoGamificationRepository _gamificationRepository = DjangoGamificationRepository();
 
   int _currentPoints = 0;
@@ -30,9 +31,9 @@ class GamificationService extends ChangeNotifier {
   String? _currentUserId;
   List<Map<String, dynamic>> _achievements = [];
   List<Map<String, dynamic>> _challenges = [];
-  List<LoyaltyReward> _rewards = [];
+  List<eccore.Reward> _rewards = [];
   List<Map<String, dynamic>> _badges = [];
-  List<LoyaltyTransaction> _transactions = [];
+  List<eccore.PointsEntry> _transactions = [];
   final Set<String> _pendingRewardIds = <String>{};
 
   bool _isInitialized = false;
@@ -45,12 +46,16 @@ class GamificationService extends ChangeNotifier {
   double get levelProgress => _levelProgress;
   List<Map<String, dynamic>> get achievements => _achievements;
   List<Map<String, dynamic>> get challenges => _challenges;
-  List<LoyaltyReward> get rewards => List.unmodifiable(_rewards);
-  List<LoyaltyReward> get availableRewards => _rewards
-      .where((reward) => reward.isActive && _currentPoints >= reward.cost)
+  List<eccore.Reward> get rewards => List.unmodifiable(_rewards);
+  /// Les récompenses que le solde permet d'échanger.
+  ///
+  /// Plus de garde sur l'activité : le serveur filtre `is_active=True` côté
+  /// requête et n'expose pas le champ. Toute récompense reçue est active.
+  List<eccore.Reward> get availableRewards => _rewards
+      .where((reward) => reward.estAccessibleAvec(_currentPoints))
       .toList(growable: false);
   List<Map<String, dynamic>> get badges => _badges;
-  List<LoyaltyTransaction> get transactions => List.unmodifiable(_transactions);
+  List<eccore.PointsEntry> get transactions => List.unmodifiable(_transactions);
   bool get isInitialized => _isInitialized;
   bool isRewardBeingProcessed(String rewardId) =>
       _pendingRewardIds.contains(rewardId);
@@ -154,7 +159,7 @@ class GamificationService extends ChangeNotifier {
   /// qu'à la livraison d'une commande, jamais par ce client.
   Future<void> _refreshLoyaltyBalance() async {
     try {
-      _currentPoints = await _loyaltyRepository.getAccountBalance();
+      _currentPoints = (await _loyaltyRepository.getAccount()).balance;
       _currentLevel = _calculateLevel(_currentPoints);
       _levelProgress = _calculateLevelProgress(_currentPoints);
     } catch (e) {
@@ -261,7 +266,7 @@ class GamificationService extends ChangeNotifier {
 
   Future<void> _loadTransactions() async {
     try {
-      _transactions = await _loyaltyRepository.getTransactions();
+      _transactions = await _loyaltyRepository.getEntries();
     } catch (e) {
       Journal.trace('Error loading loyalty transactions: $e');
       _transactions = [];
@@ -299,19 +304,29 @@ class GamificationService extends ChangeNotifier {
   // Échanger des points contre une récompense — délègue entièrement au
   // serveur (C1) : ni le solde ni le coût ne sont recalculés ici, seul
   // Django sait ce qu'il en est après coup.
-  Future<bool> redeemReward(LoyaltyReward reward) async {
+  Future<bool> redeemReward(eccore.Reward reward) async {
     if (_pendingRewardIds.contains(reward.id)) {
       return false;
     }
 
-    if (_currentPoints < reward.cost) {
+    if (_currentPoints < reward.pointsCost) {
       return false;
     }
 
     _pendingRewardIds.add(reward.id);
     notifyListeners();
 
-    final success = await _loyaltyRepository.redeem(reward.id);
+    // Un solde insuffisant (409) ou une récompense retirée (404) sortent en
+      // exception : l'appelant n'a besoin que de savoir que l'échange n'a pas
+      // eu lieu.
+    var success = true;
+    try {
+      await _loyaltyRepository.redeem(reward.id);
+    } on eccore.ApiException catch (e) {
+      Journal.trace('Échange refusé — ${e.code}');
+      success = false;
+    }
+
     if (!success) {
       _pendingRewardIds.remove(reward.id);
       notifyListeners();

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:elcora_fast/models/loyalty_reward.dart';
-import 'package:elcora_fast/models/loyalty_transaction.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/fidelite.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
@@ -253,7 +253,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
       BuildContext context, GamificationService gamificationService,) {
     final theme = Theme.of(context);
     final rewards = [...gamificationService.rewards]
-      ..sort((a, b) => a.cost.compareTo(b.cost));
+      ..sort((a, b) => a.pointsCost.compareTo(b.pointsCost));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,8 +269,8 @@ class _RewardsScreenState extends State<RewardsScreen> {
           _buildEmptyRewards(context)
         else
           ...rewards.map((reward) {
-            final canRedeem = reward.isActive &&
-                gamificationService.currentPoints >= reward.cost;
+            final canRedeem =
+                reward.estAccessibleAvec(gamificationService.currentPoints);
             final isProcessing =
                 gamificationService.isRewardBeingProcessed(reward.id);
 
@@ -293,14 +293,14 @@ class _RewardsScreenState extends State<RewardsScreen> {
 
   Widget _buildRewardCard(
     BuildContext context, {
-    required LoyaltyReward reward,
+    required eccore.Reward reward,
     required bool canRedeem,
     required bool isProcessing,
     required VoidCallback? onRedeem,
   }) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final icon = _iconForReward(reward.type);
+    final icon = _iconForReward(reward.genre);
     final accentColor = canRedeem
         ? colorScheme.primary
         : colorScheme.onSurface.withValues(alpha: 0.3);
@@ -325,7 +325,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        reward.title,
+                        reward.name,
                         style:
                             theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                       ),
@@ -351,20 +351,13 @@ class _RewardsScreenState extends State<RewardsScreen> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  '${reward.cost} points',
+                  '${reward.pointsCost} points',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: colorScheme.secondary,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const Spacer(),
-                if (!reward.isActive)
-                  Text(
-                    'Bientôt disponible',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurface.withValues(alpha: 0.6),
-                    ),
-                  ),
               ],
             ),
             const SizedBox(height: 12),
@@ -416,29 +409,23 @@ class _RewardsScreenState extends State<RewardsScreen> {
     );
   }
 
-  IconData _iconForReward(LoyaltyRewardType type) {
+  IconData _iconForReward(GenreRecompense type) {
     switch (type) {
-      case LoyaltyRewardType.freeItem:
-        return Icons.restaurant;
-      case LoyaltyRewardType.freeDelivery:
+      case GenreRecompense.livraisonOfferte:
         return Icons.delivery_dining;
-      case LoyaltyRewardType.cashback:
-        return Icons.savings;
-      case LoyaltyRewardType.exclusiveOffer:
-        return Icons.workspace_premium;
-      case LoyaltyRewardType.discount:
+      case GenreRecompense.remise:
         return Icons.percent;
     }
   }
 
   Future<void> _confirmRedeem(
-      BuildContext context, LoyaltyReward reward,) async {
+      BuildContext context, eccore.Reward reward,) async {
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: const Text('Échanger la récompense'),
             content: Text(
-                'Voulez-vous échanger ${reward.cost} points pour "${reward.title}" ?',),
+                'Voulez-vous échanger ${reward.pointsCost} points pour "${reward.name}" ?',),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -465,7 +452,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
       SnackBar(
         content: Text(
           success
-              ? 'Récompense "${reward.title}" échangée avec succès !'
+              ? 'Récompense "${reward.name}" échangée avec succès !'
               : 'Impossible d\'échanger la récompense pour le moment.',
         ),
         backgroundColor: success ? Colors.green : Colors.red,
@@ -568,20 +555,20 @@ class _RewardsScreenState extends State<RewardsScreen> {
   }
 
   Widget _buildTransactionTile(
-      BuildContext context, LoyaltyTransaction transaction,) {
+      BuildContext context, eccore.PointsEntry transaction,) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final icon = _iconForTransaction(transaction.type);
-    final color = _colorForTransaction(transaction.type, colorScheme);
+    final icon = _iconForTransaction(transaction.genre);
+    final color = _colorForTransaction(transaction.genre, colorScheme);
 
     final dateLabel =
         MaterialLocalizations.of(context).formatShortDate(transaction.createdAt);
     final timeLabel =
         TimeOfDay.fromDateTime(transaction.createdAt).format(context);
 
-    final pointsLabel = transaction.points >= 0
-        ? '+${transaction.points}'
-        : '${transaction.points}';
+    final pointsLabel = transaction.delta >= 0
+        ? '+${transaction.delta}'
+        : '${transaction.delta}';
 
     return Card(
       elevation: 1,
@@ -598,7 +585,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
         trailing: Text(
           pointsLabel,
           style: theme.textTheme.titleMedium?.copyWith(
-            color: transaction.points >= 0 ? Colors.green : Colors.red,
+            color: transaction.delta >= 0 ? Colors.green : Colors.red,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -640,33 +627,29 @@ class _RewardsScreenState extends State<RewardsScreen> {
     );
   }
 
-  IconData _iconForTransaction(LoyaltyTransactionType type) {
+  IconData _iconForTransaction(GenreMouvementPoints type) {
     switch (type) {
-      case LoyaltyTransactionType.earn:
+      case GenreMouvementPoints.gagnes:
         return Icons.trending_up;
-      case LoyaltyTransactionType.redeem:
+      case GenreMouvementPoints.depenses:
         return Icons.redeem;
-      case LoyaltyTransactionType.bonus:
-        return Icons.bolt;
-      case LoyaltyTransactionType.expiration:
+      case GenreMouvementPoints.expires:
         return Icons.timer_off;
-      case LoyaltyTransactionType.adjustment:
+      case GenreMouvementPoints.ajustes:
         return Icons.tune;
     }
   }
 
   Color _colorForTransaction(
-      LoyaltyTransactionType type, ColorScheme colorScheme,) {
+      GenreMouvementPoints type, ColorScheme colorScheme,) {
     switch (type) {
-      case LoyaltyTransactionType.earn:
+      case GenreMouvementPoints.gagnes:
         return Colors.green;
-      case LoyaltyTransactionType.redeem:
+      case GenreMouvementPoints.depenses:
         return colorScheme.primary;
-      case LoyaltyTransactionType.bonus:
-        return Colors.orange;
-      case LoyaltyTransactionType.expiration:
+      case GenreMouvementPoints.expires:
         return Colors.grey;
-      case LoyaltyTransactionType.adjustment:
+      case GenreMouvementPoints.ajustes:
         return colorScheme.secondary;
     }
   }
