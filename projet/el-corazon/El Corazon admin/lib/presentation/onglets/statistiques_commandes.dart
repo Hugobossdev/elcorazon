@@ -1,7 +1,8 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/couleur_statut.dart';
 import 'package:admin/presentation/evolution_commandes.dart';
 import 'package:admin/services/order_management_service.dart';
@@ -213,13 +214,13 @@ class _RepartitionParStatut extends StatelessWidget {
 
   final Map<String, dynamic> stats;
 
-  static const _lignes = <(String, String, OrderStatus)>[
-    ('En attente', 'pending_orders', OrderStatus.pending),
-    ('Confirmées', 'confirmed_orders', OrderStatus.confirmed),
-    ('En préparation', 'preparing_orders', OrderStatus.preparing),
-    ('Prêtes', 'ready_orders', OrderStatus.ready),
-    ('Livrées', 'delivered_orders', OrderStatus.delivered),
-    ('Annulées', 'cancelled_orders', OrderStatus.cancelled),
+  static const _lignes = <(String, String, StatutCommande)>[
+    ('En attente', 'pending_orders', StatutCommande.enAttente),
+    ('Confirmées', 'confirmed_orders', StatutCommande.confirmee),
+    ('En préparation', 'preparing_orders', StatutCommande.enPreparation),
+    ('Prêtes', 'ready_orders', StatutCommande.prete),
+    ('Livrées', 'delivered_orders', StatutCommande.livree),
+    ('Annulées', 'cancelled_orders', StatutCommande.annulee),
   ];
 
   @override
@@ -299,7 +300,7 @@ class _BarreDeStatut extends StatelessWidget {
 class _EvolutionDesCommandes extends StatelessWidget {
   const _EvolutionDesCommandes({required this.commandes});
 
-  final List<Order> commandes;
+  final List<eccore.Order> commandes;
 
   @override
   Widget build(BuildContext context) {

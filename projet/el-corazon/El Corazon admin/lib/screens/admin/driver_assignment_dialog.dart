@@ -4,12 +4,12 @@ import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/statut_livreur.dart';
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/commande.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/utils/price_formatter.dart';
 
 class DriverAssignmentDialog extends StatefulWidget {
-  final Order order;
+  final eccore.Order order;
 
   const DriverAssignmentDialog({required this.order, super.key});
 
@@ -175,7 +175,7 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      widget.order.deliveryAddress,
+                                      widget.order.adresseComplete,
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.grey[700],
@@ -194,7 +194,7 @@ class _DriverAssignmentDialogState extends State<DriverAssignmentDialog> {
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
-                                    'Total: ${PriceFormatter.format(widget.order.total)}',
+                                    'Total: ${PriceFormatter.format(widget.order.totalAffiche)}',
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.bold,

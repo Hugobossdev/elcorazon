@@ -6,7 +6,8 @@ import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/geocoding_service.dart' as geocoding;
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/statut_livreur.dart';
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -234,13 +235,13 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                 final activeOrders = _showOrders
                     ? orderService.allOrders
                         .where((order) =>
-                            order.status == OrderStatus.confirmed ||
-                            order.status == OrderStatus.preparing ||
-                            order.status == OrderStatus.ready ||
-                            order.status == OrderStatus.pickedUp ||
-                            order.status == OrderStatus.onTheWay,)
+                            order.statut == StatutCommande.confirmee ||
+                            order.statut == StatutCommande.enPreparation ||
+                            order.statut == StatutCommande.prete ||
+                            order.statut == StatutCommande.recuperee ||
+                            order.statut == StatutCommande.enRoute,)
                         .toList()
-                    : <Order>[];
+                    : <eccore.Order>[];
 
                 return _buildMapView(filteredDrivers, activeOrders);
               },
@@ -389,7 +390,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  Widget _buildMapView(List<eccore.CourierProfile> drivers, List<Order> orders) {
+  Widget _buildMapView(List<eccore.CourierProfile> drivers, List<eccore.Order> orders) {
     final Set<Marker> markers = {};
     final Set<Polyline> polylines = {};
 
@@ -420,14 +421,14 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
 
       for (final order in orders) {
         // Si la commande a un livreur assigné et qu'il est en livraison
-        if (order.deliveryPersonId != null) {
+        if (order.livreurAffecte != null) {
           // La même recherche était écrite trois fois, imbriquée, avant de
           // retomber sur un livreur fictif nommé « Livreur inconnu » dont la
           // position était nulle : le marqueur n'était donc jamais posé. Une
           // recherche qui admet l'absence dit la même chose, en clair.
           eccore.CourierProfile? driver;
           for (final dossier in drivers) {
-            if (dossier.id == order.deliveryPersonId) {
+            if (dossier.id == order.livreurAffecte) {
               driver = dossier;
               break;
             }
@@ -487,7 +488,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   }
 
   Future<void> _geocodeAndAddOrderMarker(
-    Order order,
+    eccore.Order order,
     eccore.CourierProfile driver,
     Set<Marker> markers,
     Set<Polyline> polylines,
@@ -495,7 +496,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   ) async {
     try {
       final deliveryLocation = await geocodingService.geocodeAddress(
-        order.deliveryAddress,
+        order.adresseComplete,
       );
 
       if (deliveryLocation != null) {
@@ -513,7 +514,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
             ),
             infoWindow: InfoWindow(
               title: 'Commande #${order.id.substring(0, 8)}',
-              snippet: order.deliveryAddress,
+              snippet: order.adresseComplete,
               onTap: () => _showOrderInfo(order),
             ),
           ),
@@ -589,7 +590,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  void _showOrderInfo(Order order) {
+  void _showOrderInfo(eccore.Order order) {
     DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -598,12 +599,12 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildInfoRow('Statut', order.status.displayName),
+            _buildInfoRow('Statut', order.statut.libelle),
             _buildInfoRow('Client ID', order.id.substring(0, 8)),
-            _buildInfoRow('Adresse', order.deliveryAddress),
-            _buildInfoRow('Montant', '${order.total} CFA'),
+            _buildInfoRow('Adresse', order.adresseComplete),
+            _buildInfoRow('Montant', '${order.totalAffiche} CFA'),
             _buildInfoRow('Date',
-                '${order.orderTime.day}/${order.orderTime.month}/${order.orderTime.year}',),
+                '${order.passeeLe.day}/${order.passeeLe.month}/${order.passeeLe.year}',),
           ],
         ),
         actions: [

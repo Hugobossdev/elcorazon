@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/apparence_statut.dart';
 import 'package:admin/presentation/cartes/commande_deployee.dart';
 import 'package:admin/widgets/order_timeline_widget.dart';
@@ -15,7 +16,7 @@ import 'package:admin/utils/price_formatter.dart';
 ///
 /// 324 lignes tenaient dans une méthode de l'écran. La fiche ne lit rien de
 /// son état : elle affiche une commande et se ferme.
-void afficherFicheCommande(BuildContext context, Order order) {
+void afficherFicheCommande(BuildContext context, eccore.Order order) {
   DialogHelper.showSafeDialog(
     context: context,
     builder: (context) => AlertDialog(
@@ -39,13 +40,13 @@ void afficherFicheCommande(BuildContext context, Order order) {
                         Row(
                           children: [
                             Icon(
-                              iconeDeStatut(order.status),
-                              color: couleurDeStatutFixe(order.status),
+                              iconeDeStatut(order.statut),
+                              color: couleurDeStatutFixe(order.statut),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'Statut: ${order.status.displayName}',
+                                'Statut: ${order.statut.libelle}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
@@ -58,33 +59,33 @@ void afficherFicheCommande(BuildContext context, Order order) {
                         const Divider(height: 24),
                         LigneDeDetail(
                           'Total',
-                          PriceFormatter.format(order.total),
+                          PriceFormatter.format(order.totalAffiche),
                           Icons.monetization_on,
                         ),
                         LigneDeDetail(
                           'Sous-total',
-                          PriceFormatter.format(order.subtotal),
+                          PriceFormatter.format(order.sousTotalAffiche),
                           Icons.receipt,
                         ),
                         LigneDeDetail(
                           'Frais de livraison',
-                          PriceFormatter.format(order.deliveryFee),
+                          PriceFormatter.format(order.fraisLivraisonAffiches),
                           Icons.local_shipping,
                         ),
-                        if (order.discount > 0)
+                        if (order.remiseAffichee > 0)
                           LigneDeDetail(
                             'Réduction',
-                            '-${PriceFormatter.format(order.discount)}',
+                            '-${PriceFormatter.format(order.remiseAffichee)}',
                             Icons.discount,
                           ),
                         LigneDeDetail(
                           'Articles',
-                          '${order.items.length}',
+                          '${order.lines.length}',
                           Icons.restaurant,
                         ),
                         LigneDeDetail(
                           'Paiement',
-                          order.paymentMethod.displayName,
+                          order.moyenPaiement.libelle,
                           Icons.payment,
                         ),
                       ],
@@ -110,9 +111,9 @@ void afficherFicheCommande(BuildContext context, Order order) {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        ...order.items.map((item) {
+                        ...order.lines.map((item) {
                           final customizations =
-                              item.getFormattedCustomizations();
+                              item.personnalisations;
                           return Card(
                             margin: const EdgeInsets.only(bottom: 8),
                             child: ExpansionTile(
@@ -140,7 +141,7 @@ void afficherFicheCommande(BuildContext context, Order order) {
                                 ),
                               ),
                               title: Text(
-                                item.name,
+                                item.itemName,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -149,11 +150,10 @@ void afficherFicheCommande(BuildContext context, Order order) {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '${PriceFormatter.format(item.unitPrice)} × ${item.quantity} = ${PriceFormatter.format(item.totalPrice)}',
+                                    '${PriceFormatter.format(item.prixUnitaireAffiche)} × ${item.quantity} = ${PriceFormatter.format(item.prixTotalAffiche)}',
                                   ),
                                   if (customizations.isNotEmpty ||
-                                      (item.notes != null &&
-                                          item.notes!.isNotEmpty))
+                                      (item.note != null))
                                     const SizedBox(height: 4),
                                   if (customizations.isNotEmpty)
                                     Text(
@@ -167,7 +167,7 @@ void afficherFicheCommande(BuildContext context, Order order) {
                                 ],
                               ),
                               trailing: Text(
-                                PriceFormatter.format(item.totalPrice),
+                                PriceFormatter.format(item.prixTotalAffiche),
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
@@ -240,8 +240,7 @@ void afficherFicheCommande(BuildContext context, Order order) {
                                     ),
                                   ),
                                 ],
-                                if (item.notes != null &&
-                                    item.notes!.isNotEmpty) ...[
+                                if (item.note != null) ...[
                                   Padding(
                                     padding: const EdgeInsets.symmetric(
                                         horizontal: 16, vertical: 8,),
@@ -267,7 +266,7 @@ void afficherFicheCommande(BuildContext context, Order order) {
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
-                                              item.notes!,
+                                              item.notes,
                                               style: TextStyle(
                                                 fontSize: 13,
                                                 color: Colors.grey[800],
@@ -306,20 +305,14 @@ void afficherFicheCommande(BuildContext context, Order order) {
                         const SizedBox(height: 12),
                         LigneDeDetail(
                           'Adresse',
-                          order.deliveryAddress,
+                          order.adresseComplete,
                           Icons.location_on,
                         ),
-                        if (order.deliveryNotes != null)
+                        if (order.consignes != null)
                           LigneDeDetail(
                             'Notes',
-                            order.deliveryNotes!,
+                            order.consignes!,
                             Icons.note,
-                          ),
-                        if (order.deliveryPersonId != null)
-                          const LigneDeDetail(
-                            'Livreur',
-                            'Assigné',
-                            Icons.delivery_dining,
                           ),
                       ],
                     ),

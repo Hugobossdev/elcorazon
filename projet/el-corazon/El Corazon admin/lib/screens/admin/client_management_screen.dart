@@ -4,7 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:admin/services/client_management_service.dart';
 import 'package:admin/services/app_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/widgets/custom_text_field.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/utils/price_formatter.dart';
@@ -80,7 +81,6 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     // Vérifier si le client est suspendu (is_active = false dans la DB)
     return !client.isActive;
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -200,8 +200,8 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                   .toList();
                               final totalSpent = orders
                                   .where(
-                                      (o) => o.status == OrderStatus.delivered,)
-                                  .fold(0.0, (sum, o) => sum + o.total);
+                                      (o) => o.statut == StatutCommande.livree,)
+                                  .fold(0.0, (sum, o) => sum + o.totalAffiche);
 
                               return Card(
                                 margin: const EdgeInsets.only(bottom: 12),
@@ -465,17 +465,17 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                         constraints: const BoxConstraints(minHeight: 56),
                         child: ListTile(
                           leading: Icon(
-                            _getOrderStatusIcon(order.status),
-                            color: _getOrderStatusColor(context, order.status),
+                            _getOrderStatusIcon(order.statut),
+                            color: _getOrderStatusColor(context, order.statut),
                           ),
                           title: Text(
                             'Commande #${order.id.substring(0, 8).toUpperCase()}',
                           ),
                           subtitle: Text(
-                            '${PriceFormatter.format(order.total)} - ${order.status.displayName}',
+                            '${PriceFormatter.format(order.totalAffiche)} - ${order.statut.libelle}',
                           ),
                           trailing: Text(
-                            '${order.orderTime.day}/${order.orderTime.month}/${order.orderTime.year}',
+                            '${order.passeeLe.day}/${order.passeeLe.month}/${order.passeeLe.year}',
                             style: TextStyle(
                               fontSize: 12,
                               color: Theme.of(context)
@@ -502,28 +502,24 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     ),);
   }
 
-  IconData _getOrderStatusIcon(OrderStatus status) {
+  IconData _getOrderStatusIcon(StatutCommande status) {
     switch (status) {
-      case OrderStatus.delivered:
+      case StatutCommande.livree:
         return Icons.check_circle;
-      case OrderStatus.cancelled:
+      case StatutCommande.annulee:
         return Icons.cancel;
-      case OrderStatus.refunded:
-        return Icons.payment;
       default:
         return Icons.pending;
     }
   }
 
-  Color _getOrderStatusColor(BuildContext context, OrderStatus status) {
+  Color _getOrderStatusColor(BuildContext context, StatutCommande status) {
     final sem = AdminColorTokens.semantic(Theme.of(context).colorScheme);
     switch (status) {
-      case OrderStatus.delivered:
+      case StatutCommande.livree:
         return sem.success;
-      case OrderStatus.cancelled:
+      case StatutCommande.annulee:
         return sem.danger;
-      case OrderStatus.refunded:
-        return sem.warning;
       default:
         return Theme.of(context).colorScheme.primary;
     }

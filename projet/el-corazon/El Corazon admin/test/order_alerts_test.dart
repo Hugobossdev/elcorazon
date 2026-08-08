@@ -1,4 +1,7 @@
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/statut_commande.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'aide_commande.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -17,26 +20,21 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   final maintenant = DateTime(2026, 8, 6, 12);
 
-  Order commande({
+  eccore.Order commande({
     required String id,
-    required OrderStatus statut,
+    required StatutCommande statut,
     Duration passeeIlYA = const Duration(minutes: 5),
     Duration? livraisonPrevueDans,
   }) {
-    final passee = maintenant.subtract(passeeIlYA);
-    return Order(
+    return commandeDeTest(
       id: id,
-      userId: 'client-1',
-      items: const [],
-      subtotal: 5000,
-      total: 5600,
-      status: statut,
-      deliveryAddress: 'Tokoin, Lomé',
-      paymentMethod: PaymentMethod.cash,
-      orderTime: passee,
-      createdAt: passee,
-      estimatedDeliveryTime:
-          livraisonPrevueDans == null ? null : maintenant.add(livraisonPrevueDans),
+      statut: statut.versServeur,
+      adresse: 'Tokoin, Lomé',
+      passeeLe: maintenant.subtract(passeeIlYA),
+      livraisonPrevueLe: livraisonPrevueDans == null
+          ? null
+          : maintenant.add(livraisonPrevueDans),
+      totalCfa: 5600,
     );
   }
 
@@ -46,7 +44,7 @@ void main() {
         [
           commande(
             id: 'oubliee',
-            statut: OrderStatus.pending,
+            statut: StatutCommande.enAttente,
             passeeIlYA: const Duration(minutes: 45),
           ),
         ],
@@ -61,7 +59,7 @@ void main() {
         [
           commande(
             id: 'fraiche',
-            statut: OrderStatus.pending,
+            statut: StatutCommande.enAttente,
             passeeIlYA: const Duration(minutes: 3),
           ),
         ],
@@ -79,7 +77,7 @@ void main() {
         [
           commande(
             id: 'en-cuisine',
-            statut: OrderStatus.preparing,
+            statut: StatutCommande.enPreparation,
             passeeIlYA: const Duration(hours: 1),
           ),
         ],
@@ -94,7 +92,7 @@ void main() {
         [
           commande(
             id: 'annulee',
-            statut: OrderStatus.cancelled,
+            statut: StatutCommande.annulee,
             passeeIlYA: const Duration(days: 3),
           ),
         ],
@@ -109,12 +107,12 @@ void main() {
         [
           commande(
             id: 'recente',
-            statut: OrderStatus.pending,
+            statut: StatutCommande.enAttente,
             passeeIlYA: const Duration(minutes: 25),
           ),
           commande(
             id: 'ancienne',
-            statut: OrderStatus.confirmed,
+            statut: StatutCommande.confirmee,
             passeeIlYA: const Duration(hours: 2),
           ),
         ],
@@ -131,7 +129,7 @@ void main() {
         [
           commande(
             id: 'en-retard',
-            statut: OrderStatus.onTheWay,
+            statut: StatutCommande.enRoute,
             livraisonPrevueDans: const Duration(minutes: -15),
           ),
         ],
@@ -146,7 +144,7 @@ void main() {
         [
           commande(
             id: 'dans-les-temps',
-            statut: OrderStatus.onTheWay,
+            statut: StatutCommande.enRoute,
             livraisonPrevueDans: const Duration(minutes: 10),
           ),
         ],
@@ -160,7 +158,7 @@ void main() {
       // Traiter l'absence de promesse comme une promesse rompue ferait sonner
       // l'alerte en permanence, jusqu'à ce que plus personne ne la regarde.
       final retard = OrderManagementService.overdueAmong(
-        [commande(id: 'sans-promesse', statut: OrderStatus.preparing)],
+        [commande(id: 'sans-promesse', statut: StatutCommande.enPreparation)],
         now: maintenant,
       );
 
@@ -175,7 +173,7 @@ void main() {
         [
           commande(
             id: 'livree',
-            statut: OrderStatus.delivered,
+            statut: StatutCommande.livree,
             livraisonPrevueDans: const Duration(hours: -5),
           ),
         ],
@@ -190,12 +188,12 @@ void main() {
         [
           commande(
             id: 'peu',
-            statut: OrderStatus.onTheWay,
+            statut: StatutCommande.enRoute,
             livraisonPrevueDans: const Duration(minutes: -5),
           ),
           commande(
             id: 'beaucoup',
-            statut: OrderStatus.ready,
+            statut: StatutCommande.prete,
             livraisonPrevueDans: const Duration(hours: -2),
           ),
         ],

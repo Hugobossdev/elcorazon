@@ -1,8 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:admin/models/order.dart';
-import 'package:admin/repositories/django_order_mapper.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Dossiers clients — `/administration/customers/` (Phase 6).
@@ -92,10 +90,10 @@ class ClientManagementService extends ChangeNotifier {
 
   /// Commandes d'un client, dans le périmètre d'établissements du compte
   /// connecté — c'est le serveur qui l'applique.
-  Future<List<Order>> getClientOrders(String clientId) async {
+  Future<List<eccore.Order>> getClientOrders(String clientId) async {
     try {
       final commandes = await _orders.list(customerId: clientId);
-      return commandes.map(DjangoOrderMapper.toLocal).toList();
+      return commandes;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('Clients : historique indisponible — ${e.code}');

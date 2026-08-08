@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/anciennete_commande.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/utils/price_formatter.dart';
@@ -14,7 +15,7 @@ import 'package:admin/utils/price_formatter.dart';
 /// `advanced_order_management_screen.dart`. Le dialogue ne lit rien de l'état
 /// de l'écran : il affiche une commande et se ferme. C'est donc une vue à
 /// part, et elle se nomme.
-void afficherDetailsCommande(BuildContext context, Order order) {
+void afficherDetailsCommande(BuildContext context, eccore.Order order) {
   DialogHelper.showSafeDialog(
     context: context,
     builder: (context) => _DetailsCommande(order: order),
@@ -24,7 +25,7 @@ void afficherDetailsCommande(BuildContext context, Order order) {
 class _DetailsCommande extends StatelessWidget {
   const _DetailsCommande({required this.order});
 
-  final Order order;
+  final eccore.Order order;
 
   @override
   Widget build(BuildContext context) {
@@ -72,15 +73,15 @@ class _DetailsCommande extends StatelessWidget {
                   children: [
                     _Informations(order: order),
                     const SizedBox(height: 16),
-                    if (order.items.isNotEmpty)
-                      _ArticlesCommandes(items: order.items)
+                    if (order.lines.isNotEmpty)
+                      _ArticlesCommandes(items: order.lines)
                     else
                       const _AucunArticle(),
                     const SizedBox(height: 16),
-                    _AdresseLivraison(adresse: order.deliveryAddress),
+                    _AdresseLivraison(adresse: order.adresseComplete),
                     const SizedBox(height: 8),
                     Text(
-                      'Date: ${ancienneteCommande(order.orderTime)}',
+                      'Date: ${ancienneteCommande(order.passeeLe)}',
                       style: TextStyle(
                         fontSize: 12,
                         color: scheme.onSurfaceVariant,
@@ -153,12 +154,12 @@ class LigneDeDetail extends StatelessWidget {
 class _Informations extends StatelessWidget {
   const _Informations({required this.order});
 
-  final Order order;
+  final eccore.Order order;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final nombre = order.items.length;
+    final nombre = order.lines.length;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -187,11 +188,11 @@ class _Informations extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          LigneDeDetail(label: 'Statut', valeur: order.status.displayName),
+          LigneDeDetail(label: 'Statut', valeur: order.statut.libelle),
           const SizedBox(height: 4),
           LigneDeDetail(
             label: 'Total',
-            valeur: PriceFormatter.format(order.total),
+            valeur: PriceFormatter.format(order.totalAffiche),
           ),
           const SizedBox(height: 4),
           LigneDeDetail(
@@ -201,7 +202,7 @@ class _Informations extends StatelessWidget {
           const SizedBox(height: 4),
           LigneDeDetail(
             label: 'Méthode de paiement',
-            valeur: order.paymentMethod.toString().split('.').last,
+            valeur: order.moyenPaiement.libelle,
           ),
         ],
       ),
@@ -212,7 +213,7 @@ class _Informations extends StatelessWidget {
 class _ArticlesCommandes extends StatelessWidget {
   const _ArticlesCommandes({required this.items});
 
-  final List<OrderItem> items;
+  final List<eccore.OrderLine> items;
 
   @override
   Widget build(BuildContext context) {
@@ -248,26 +249,26 @@ class _ArticlesCommandes extends StatelessWidget {
 class _LigneArticle extends StatelessWidget {
   const _LigneArticle({required this.item});
 
-  final OrderItem item;
+  final eccore.OrderLine item;
 
   /// Le nom d'un article a deux sources et peut n'en avoir aucune.
   String get _nom {
-    if (item.menuItemName.isNotEmpty) return item.menuItemName;
-    if (item.name.isNotEmpty) return item.name;
+    if (item.itemName.isNotEmpty) return item.itemName;
+    if (item.itemName.isNotEmpty) return item.itemName;
     return 'Article';
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final personnalisations = item.getFormattedCustomizations();
+    final personnalisations = item.personnalisations;
 
     return Padding(
       padding: const EdgeInsets.all(8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _VignetteArticle(image: item.menuItemImage),
+          _VignetteArticle(image: item.itemImage ?? ''),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -282,24 +283,13 @@ class _LigneArticle extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${item.quantity}x ${PriceFormatter.format(item.unitPrice)} '
-                  '= ${PriceFormatter.format(item.totalPrice)}',
+                  '${item.quantity}x ${PriceFormatter.format(item.prixUnitaireAffiche)} '
+                  '= ${PriceFormatter.format(item.prixTotalAffiche)}',
                   style: TextStyle(
                     fontSize: 12,
                     color: scheme.onSurfaceVariant,
                   ),
                 ),
-                if (item.categoryId.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    'Catégorie: ${item.categoryId}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: scheme.onSurfaceVariant.withValues(alpha: 0.85),
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
-                ],
                 if (personnalisations.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   for (final choix in personnalisations)
@@ -315,10 +305,10 @@ class _LigneArticle extends StatelessWidget {
                       ),
                     ),
                 ],
-                if (item.notes != null && item.notes!.isNotEmpty) ...[
+                if (item.note != null) ...[
                   const SizedBox(height: 2),
                   Text(
-                    'Note: ${item.notes}',
+                    'Note: ${item.note}',
                     style: TextStyle(
                       fontSize: 10,
                       color: scheme.onTertiaryContainer,
@@ -330,7 +320,7 @@ class _LigneArticle extends StatelessWidget {
             ),
           ),
           Text(
-            PriceFormatter.format(item.totalPrice),
+            PriceFormatter.format(item.prixTotalAffiche),
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 13,

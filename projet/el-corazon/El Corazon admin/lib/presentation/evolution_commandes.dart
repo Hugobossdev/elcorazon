@@ -1,4 +1,5 @@
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
 
 /// Le nombre de commandes par jour sur une fenêtre glissante.
 ///
@@ -14,7 +15,7 @@ import 'package:admin/models/order.dart';
 /// l'ordre alphabétique soit l'ordre chronologique — c'est ce dont le graphe
 /// se sert pour ranger ses barres.
 Map<String, int> commandesParJour(
-  List<Order> commandes, {
+  List<eccore.Order> commandes, {
   int jours = 7,
   DateTime? maintenant,
 }) {
@@ -26,7 +27,7 @@ Map<String, int> commandesParJour(
   }
 
   for (final commande in commandes) {
-    final jour = _cle(commande.orderTime);
+    final jour = _cle(commande.passeeLe);
     // Une commande hors fenêtre n'ouvre pas de colonne : le graphe en montre
     // sept, pas une de plus.
     if (parJour.containsKey(jour)) {

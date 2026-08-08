@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
@@ -29,7 +29,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 /// n'appartient pas au refactoring.
 Future<void> afficherAssignationLivreur({
   required BuildContext context,
-  required Order order,
+  required eccore.Order order,
   required OrderManagementService orderService,
   required DriverManagementService driverService,
 }) async {
@@ -151,7 +151,7 @@ class _ChoixDuLivreur extends StatefulWidget {
     required this.orderService,
   });
 
-  final Order order;
+  final eccore.Order order;
   final List<eccore.CourierProfile> livreurs;
   final OrderManagementService orderService;
 
@@ -312,7 +312,7 @@ void _bandeau(
 class _RappelCommande extends StatelessWidget {
   const _RappelCommande({required this.order});
 
-  final Order order;
+  final eccore.Order order;
 
   @override
   Widget build(BuildContext context) {
@@ -336,10 +336,10 @@ class _RappelCommande extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
           ),
           const SizedBox(height: 4),
-          Text('Total: ${PriceFormatter.format(order.total)}', style: secondaire),
+          Text('Total: ${PriceFormatter.format(order.totalAffiche)}', style: secondaire),
           const SizedBox(height: 4),
           Text(
-            'Adresse: ${order.deliveryAddress}',
+            'Adresse: ${order.adresseComplete}',
             style: secondaire,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,

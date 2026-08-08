@@ -1,8 +1,8 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:admin/models/order.dart';
-import 'package:admin/repositories/django_order_mapper.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Contexte partagé des écrans d'administration (Phase 6).
@@ -39,7 +39,7 @@ class AppService extends ChangeNotifier {
   bool _isInitialized = false;
   List<eccore.ManagedMenuItem> _menuItems = [];
   List<eccore.ManagedCategory> _categories = [];
-  List<Order> _allOrders = [];
+  List<eccore.Order> _allOrders = [];
   String? _error;
 
   bool get isInitialized => _isInitialized;
@@ -47,16 +47,16 @@ class AppService extends ChangeNotifier {
 
   List<eccore.ManagedMenuItem> get menuItems => _menuItems;
   List<eccore.ManagedCategory> get categoriesList => _categories;
-  List<Order> get allOrders => _allOrders;
+  List<eccore.Order> get allOrders => _allOrders;
 
-  List<Order> get pendingOrders =>
-      _allOrders.where((order) => order.status == OrderStatus.pending).toList();
+  List<eccore.Order> get pendingOrders =>
+      _allOrders.where((order) => order.statut == StatutCommande.enAttente).toList();
 
-  List<Order> get activeOrders => _allOrders
+  List<eccore.Order> get activeOrders => _allOrders
       .where(
         (order) =>
-            order.status != OrderStatus.delivered &&
-            order.status != OrderStatus.cancelled,
+            order.statut != StatutCommande.livree &&
+            order.statut != StatutCommande.annulee,
       )
       .toList();
 
@@ -82,7 +82,7 @@ class AppService extends ChangeNotifier {
 
     try {
       final commandes = await _orders.list();
-      _allOrders = commandes.map(DjangoOrderMapper.toLocal).toList();
+      _allOrders = commandes;
 
       final articles = await _catalog.menuItems(restaurantSlug: _restaurantSlug);
       _menuItems = articles;
@@ -104,6 +104,5 @@ class AppService extends ChangeNotifier {
   }
 
   // --------------------------------------------------------- traduction
-
 
 }

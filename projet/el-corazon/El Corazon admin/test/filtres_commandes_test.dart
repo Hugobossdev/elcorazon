@@ -1,4 +1,7 @@
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/statut_commande.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'aide_commande.dart';
 import 'package:admin/presentation/filtres_commandes.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -9,34 +12,30 @@ import 'package:flutter_test/flutter_test.dart';
 /// qu'il fait n'a pas de sens (voir le groupe sur les zones). Ils sont écrits
 /// avant toute correction, pour que la correction — si elle est décidée — se
 /// voie.
-Order _commande({
+
+/// Une commande de test, dans le vocabulaire de ces cas-ci.
+eccore.Order _commande({
   String id = 'commande-1',
   String destinataire = 'Awa',
   String adresse = 'Rue du Commerce',
+  double total = 4500,
+  StatutCommande statut = StatutCommande.enPreparation,
   DateTime? passeeLe,
-}) {
-  final quand = passeeLe ?? DateTime(2026, 8, 8, 12);
-
-  return Order(
-    id: id,
-    userId: '',
-    items: const [],
-    subtotal: 4500,
-    total: 4500,
-    status: OrderStatus.preparing,
-    deliveryAddress: adresse,
-    recipientName: destinataire,
-    paymentMethod: PaymentMethod.cash,
-    orderTime: quand,
-    createdAt: quand,
-  );
-}
+}) =>
+    commandeDeTest(
+      id: id,
+      destinataire: destinataire,
+      adresse: adresse,
+      totalCfa: total.round(),
+      statut: statut.versServeur,
+      passeeLe: passeeLe,
+    );
 
 void main() {
   final maintenant = DateTime(2026, 8, 8, 14, 30);
 
-  List<Order> filtre(
-    List<Order> commandes, {
+  List<eccore.Order> filtre(
+    List<eccore.Order> commandes, {
     String recherche = '',
     ZoneCommandes zone = ZoneCommandes.toutes,
     FenetreCommandes fenetre = FenetreCommandes.toutes,

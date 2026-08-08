@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/ui/ui.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -13,11 +15,11 @@ import 'package:admin/utils/dialog_helper.dart';
 /// Le dialogue et l'appel au service tenaient dans une même méthode de
 /// `advanced_order_management_screen.dart`, longue de 195 lignes. Le statut
 /// courant y était passé en paramètre alors que les trois appels y mettaient
-/// tous `order.status` : il est lu sur la commande.
+/// tous `order.statut` : il est lu sur la commande.
 Future<void> confirmerChangementStatut({
   required BuildContext context,
-  required Order order,
-  required OrderStatus nouveauStatut,
+  required eccore.Order order,
+  required StatutCommande nouveauStatut,
   required OrderManagementService orderService,
   String? message,
 }) async {
@@ -48,7 +50,7 @@ Future<void> confirmerChangementStatut({
       SnackBar(
         content: Text(
           applique
-              ? '✅ Statut changé: ${nouveauStatut.displayName}'
+              ? '✅ Statut changé: ${nouveauStatut.libelle}'
               : '❌ Erreur lors du changement de statut',
         ),
         backgroundColor: fondDuBandeau,
@@ -65,8 +67,8 @@ class _ConfirmationChangementStatut extends StatelessWidget {
     required this.message,
   });
 
-  final Order order;
-  final OrderStatus nouveauStatut;
+  final eccore.Order order;
+  final StatutCommande nouveauStatut;
   final String? message;
 
   @override
@@ -171,8 +173,8 @@ class _RecapitulatifDuPassage extends StatelessWidget {
     required this.nouveauStatut,
   });
 
-  final Order order;
-  final OrderStatus nouveauStatut;
+  final eccore.Order order;
+  final StatutCommande nouveauStatut;
 
   @override
   Widget build(BuildContext context) {
@@ -203,7 +205,7 @@ class _RecapitulatifDuPassage extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Statut actuel: ${order.status.displayName}',
+                  'Statut actuel: ${order.statut.libelle}',
                   style: TextStyle(
                     fontSize: 13,
                     color: scheme.onSurfaceVariant,
@@ -219,7 +221,7 @@ class _RecapitulatifDuPassage extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Nouveau statut: ${nouveauStatut.displayName}',
+                  'Nouveau statut: ${nouveauStatut.libelle}',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,

@@ -1,30 +1,26 @@
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/statut_commande.dart';
 
 /// L'icône d'un statut de commande.
-IconData iconeDeStatut(OrderStatus status) {
+IconData iconeDeStatut(StatutCommande status) {
   switch (status) {
-    case OrderStatus.pending:
+    case StatutCommande.enAttente:
       return Icons.pending;
-    case OrderStatus.confirmed:
+    case StatutCommande.confirmee:
       return Icons.check_circle_outline;
-    case OrderStatus.preparing:
+    case StatutCommande.enPreparation:
       return Icons.restaurant;
-    case OrderStatus.ready:
+    case StatutCommande.prete:
       return Icons.check_circle_outline;
-    case OrderStatus.pickedUp:
+    case StatutCommande.recuperee:
       return Icons.shopping_bag;
-    case OrderStatus.onTheWay:
+    case StatutCommande.enRoute:
       return Icons.directions_bike;
-    case OrderStatus.delivered:
+    case StatutCommande.livree:
       return Icons.check_circle;
-    case OrderStatus.cancelled:
+    case StatutCommande.annulee:
       return Icons.cancel;
-    case OrderStatus.refunded:
-      return Icons.payment;
-    case OrderStatus.failed:
-      return Icons.error;
   }
 }
 
@@ -39,28 +35,24 @@ IconData iconeDeStatut(OrderStatus status) {
 /// `ModernTheme`) — et les trois rendent des couleurs différentes. Les unifier
 /// changerait ce que voient les utilisateurs : c'est une décision de
 /// conception que le plan de refactoring ne porte pas.
-Color couleurDeStatutFixe(OrderStatus status) {
+Color couleurDeStatutFixe(StatutCommande status) {
   switch (status) {
-    case OrderStatus.pending:
+    case StatutCommande.enAttente:
       return Colors.orange;
-    case OrderStatus.confirmed:
+    case StatutCommande.confirmee:
       return Colors.blue;
-    case OrderStatus.preparing:
+    case StatutCommande.enPreparation:
       return Colors.purple;
-    case OrderStatus.ready:
+    case StatutCommande.prete:
       return Colors.green;
-    case OrderStatus.pickedUp:
+    case StatutCommande.recuperee:
       return Colors.teal;
-    case OrderStatus.onTheWay:
+    case StatutCommande.enRoute:
       return Colors.indigo;
-    case OrderStatus.delivered:
+    case StatutCommande.livree:
       return Colors.green;
-    case OrderStatus.cancelled:
+    case StatutCommande.annulee:
       return Colors.red;
-    case OrderStatus.refunded:
-      return Colors.grey;
-    case OrderStatus.failed:
-      return Colors.brown;
   }
 }
 

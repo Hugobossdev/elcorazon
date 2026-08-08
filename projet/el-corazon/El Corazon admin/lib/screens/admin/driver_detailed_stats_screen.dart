@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:admin/models/order.dart'; // Import OrderStatus
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart'; // Import StatutCommande
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart'; // Import Service
 import 'package:admin/widgets/custom_bar_chart.dart';
@@ -64,8 +65,8 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                 // Calculer les données réelles pour le graphique
                 final driverOrders = orderService.allOrders
                     .where((o) =>
-                        o.deliveryPersonId == widget.driver!.id ||
-                        o.deliveryPersonId == widget.driver!.id,)
+                        o.livreurAffecte == widget.driver!.id ||
+                        o.livreurAffecte == widget.driver!.id,)
                     .toList();
 
                 final weeklyData = List<double>.filled(7, 0);
@@ -90,9 +91,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                     return o.createdAt.year == date.year &&
                         o.createdAt.month == date.month &&
                         o.createdAt.day == date.day &&
-                        o.status ==
-                            OrderStatus
-                                .delivered; // Compter seulement les livrées
+                        o.statut == StatutCommande.livree;
                   }).length;
                   weeklyData[6 - i] = count.toDouble();
                 }

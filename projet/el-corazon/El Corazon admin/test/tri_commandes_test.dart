@@ -1,4 +1,8 @@
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'aide_commande.dart';
 import 'package:admin/presentation/tri_commandes.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -8,28 +12,24 @@ import 'package:flutter_test/flutter_test.dart';
 /// milieu de 3 067 lignes de widgets et n'étaient atteignables qu'en montant
 /// l'arbre. C'est ce critère, et non un nombre de lignes, qui dit si un écran
 /// est découpé.
-Order _commande({
+
+/// Une commande de test, dans le vocabulaire de ces cas-ci.
+eccore.Order _commande({
   String id = 'commande-1',
   String destinataire = 'Awa',
   String adresse = 'Rue du Commerce',
   double total = 4500,
-  OrderStatus statut = OrderStatus.preparing,
+  StatutCommande statut = StatutCommande.enPreparation,
   DateTime? passeeLe,
-}) {
-  return Order(
-    id: id,
-    userId: '',
-    items: const [],
-    subtotal: total,
-    total: total,
-    status: statut,
-    deliveryAddress: adresse,
-    recipientName: destinataire,
-    paymentMethod: PaymentMethod.cash,
-    orderTime: passeeLe ?? DateTime(2026, 8, 8, 12),
-    createdAt: passeeLe ?? DateTime(2026, 8, 8, 12),
-  );
-}
+}) =>
+    commandeDeTest(
+      id: id,
+      destinataire: destinataire,
+      adresse: adresse,
+      totalCfa: total.round(),
+      statut: statut.versServeur,
+      passeeLe: passeeLe,
+    );
 
 void main() {
   group('Recherche', () {
@@ -55,7 +55,7 @@ void main() {
 
     test('par adresse', () {
       final trouvees = commandesAffichees(commandes, recherche: 'mono');
-      expect(trouvees.single.deliveryAddress, 'Boulevard du Mono');
+      expect(trouvees.single.adresseComplete, 'Boulevard du Mono');
     });
 
     test('la casse et les espaces de bordure sont ignorés', () {
@@ -106,9 +106,9 @@ void main() {
     test('par statut, dans l’ordre du cycle de vie', () {
       final parStatut = commandesAffichees(
         [
-          _commande(id: 'livree', statut: OrderStatus.delivered),
-          _commande(id: 'attente', statut: OrderStatus.pending),
-          _commande(id: 'prete', statut: OrderStatus.ready),
+          _commande(id: 'livree', statut: StatutCommande.livree),
+          _commande(id: 'attente', statut: StatutCommande.enAttente),
+          _commande(id: 'prete', statut: StatutCommande.prete),
         ],
         tri: TriCommandes.statut,
       );

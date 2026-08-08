@@ -4,7 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/widgets/custom_bar_chart.dart';
 import 'package:admin/utils/price_formatter.dart';
 
@@ -130,12 +131,12 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
     _endDate = now;
   }
 
-  List<Order> _getDriverOrders(List<Order> allOrders) {
+  List<eccore.Order> _getDriverOrders(List<eccore.Order> allOrders) {
     final driverUserId = widget.driver.id;
 
     return allOrders.where((order) {
-      if (order.deliveryPersonId != driverUserId &&
-          order.deliveryPersonId != widget.driver.id) {
+      if (order.livreurAffecte != driverUserId &&
+          order.livreurAffecte != widget.driver.id) {
         return false;
       }
       final orderDate = order.createdAt;
@@ -144,11 +145,11 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
     }).toList();
   }
 
-  Map<String, dynamic> _calculateStats(List<Order> orders) {
+  Map<String, dynamic> _calculateStats(List<eccore.Order> orders) {
     final completedOrders =
-        orders.where((o) => o.status == OrderStatus.delivered).toList();
+        orders.where((o) => o.statut == StatutCommande.livree).toList();
     final totalRevenue =
-        completedOrders.fold(0.0, (sum, order) => sum + order.total);
+        completedOrders.fold(0.0, (sum, order) => sum + order.totalAffiche);
 
     return {
       'total_orders': orders.length,
@@ -163,7 +164,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
     };
   }
 
-  Widget _buildStatsTab(Map<String, dynamic> stats, List<Order> orders) {
+  Widget _buildStatsTab(Map<String, dynamic> stats, List<eccore.Order> orders) {
     // Calculer les commandes par jour pour les 7 derniers jours
     final dailyCounts = List<double>.filled(7, 0);
     final days = <String>[];
@@ -262,7 +263,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
     );
   }
 
-  Widget _buildHistoryTab(List<Order> orders) {
+  Widget _buildHistoryTab(List<eccore.Order> orders) {
     if (orders.isEmpty) {
       return const Center(child: Text('Aucune commande sur cette période'));
     }
@@ -302,15 +303,15 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  PriceFormatter.format(order.total),
+                  PriceFormatter.format(order.totalAffiche),
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 16,),
                 ),
                 Text(
-                  order.status.displayName,
+                  order.statut.libelle,
                   style: TextStyle(
                     fontSize: 12,
-                    color: order.status == OrderStatus.delivered
+                    color: order.statut == StatutCommande.livree
                         ? Colors.green
                         : Colors.orange,
                   ),
@@ -323,7 +324,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
     );
   }
 
-  Widget _buildPerformanceTab(Map<String, dynamic> stats, List<Order> orders) {
+  Widget _buildPerformanceTab(Map<String, dynamic> stats, List<eccore.Order> orders) {
     // Calculer la performance mensuelle (par semaine)
     // Pour simplifier, on va juste montrer les 4 dernières semaines
     final weeklyData = List<double>.filled(4, 0);

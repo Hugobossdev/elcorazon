@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/driver_management_service.dart';
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/anciennete_commande.dart';
 import 'package:admin/presentation/couleur_statut.dart';
 import 'package:admin/presentation/dialogues/assignation_livreur.dart';
@@ -16,7 +18,6 @@ import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/ui/ui.dart';
-
 
 class AdvancedOrderManagementScreen extends StatefulWidget {
   const AdvancedOrderManagementScreen({super.key});
@@ -271,23 +272,23 @@ class _AdvancedOrderManagementScreenState
                   case 1:
                     return SizedBox.expand(
                         child: _buildOrdersTab(context, orderService,
-                            OrderStatus.pending, 'Aucune commande en attente',),);
+                            StatutCommande.enAttente, 'Aucune commande en attente',),);
                   case 2:
                     return SizedBox.expand(
                         child: _buildOrdersTab(context, orderService,
-                            OrderStatus.confirmed, 'Aucune commande confirmée',),);
+                            StatutCommande.confirmee, 'Aucune commande confirmée',),);
                   case 3:
                     return SizedBox.expand(
                         child: _buildOrdersTab(context, orderService,
-                            OrderStatus.preparing, 'Aucune commande en préparation',),);
+                            StatutCommande.enPreparation, 'Aucune commande en préparation',),);
                   case 4:
                     return SizedBox.expand(
                         child: _buildOrdersTab(context, orderService,
-                            OrderStatus.ready, 'Aucune commande prête',),);
+                            StatutCommande.prete, 'Aucune commande prête',),);
                   case 5:
                     return SizedBox.expand(
                         child: _buildOrdersTab(context, orderService,
-                            OrderStatus.onTheWay, 'Aucune commande en livraison',),);
+                            StatutCommande.enRoute, 'Aucune commande en livraison',),);
                   case 6:
                     return SizedBox.expand(
                         child: OngletStatistiques(orderService: orderService),);
@@ -343,12 +344,12 @@ class _AdvancedOrderManagementScreenState
   Widget _buildOrdersTab(
     BuildContext context,
     OrderManagementService orderService,
-    OrderStatus statut,
+    StatutCommande statut,
     String messageVide,
   ) {
     return Consumer<OrderManagementService>(
       builder: (context, service, child) {
-        return FutureBuilder<List<Order>>(
+        return FutureBuilder<List<eccore.Order>>(
           future: service.loadOrdersByStatusFromDB(statut),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
@@ -487,8 +488,8 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
-  Widget _buildAlertsSection(BuildContext context, List<Order> urgentOrders,
-      List<Order> overdueOrders,) {
+  Widget _buildAlertsSection(BuildContext context, List<eccore.Order> urgentOrders,
+      List<eccore.Order> overdueOrders,) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     return Card(
@@ -538,7 +539,7 @@ class _AdvancedOrderManagementScreenState
       builder: (context, service, child) {
         final future = service.loadRecentOrdersFromDB();
 
-        return FutureBuilder<List<Order>>(
+        return FutureBuilder<List<eccore.Order>>(
           future: future,
           builder: (context, snapshot) {
             return Card(
@@ -683,7 +684,7 @@ class _AdvancedOrderManagementScreenState
   /// une liste déroulante branchée sur rien : les deux contrôles étaient
   /// visibles et sans effet.
 
-  Widget _buildOrdersList(BuildContext context, List<Order> orders,
+  Widget _buildOrdersList(BuildContext context, List<eccore.Order> orders,
       OrderManagementService orderService,) {
     final affichees = commandesAffichees(
       orders,
@@ -709,7 +710,7 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildOrderCard(
-      BuildContext context, Order order, OrderManagementService orderService,) {
+      BuildContext context, eccore.Order order, OrderManagementService orderService,) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 4,
@@ -725,14 +726,14 @@ class _AdvancedOrderManagementScreenState
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: couleurDeStatut(order.status, Theme.of(context).colorScheme)
+                    color: couleurDeStatut(order.statut, Theme.of(context).colorScheme)
                         .withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    order.status.displayName,
+                    order.statut.libelle,
                     style: TextStyle(
-                      color: couleurDeStatut(order.status, Theme.of(context).colorScheme),
+                      color: couleurDeStatut(order.statut, Theme.of(context).colorScheme),
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
                     ),
@@ -740,7 +741,7 @@ class _AdvancedOrderManagementScreenState
                 ),
                 const Spacer(),
                 Text(
-                  PriceFormatter.format(order.total),
+                  PriceFormatter.format(order.totalAffiche),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: Theme.of(context).colorScheme.primary,
@@ -757,14 +758,14 @@ class _AdvancedOrderManagementScreenState
             ),
             const SizedBox(height: 4),
             Text(
-              '${order.items.length} article${order.items.length > 1 ? 's' : ''} • ${ancienneteCommande(order.orderTime)}',
+              '${order.lines.length} article${order.lines.length > 1 ? 's' : ''} • ${ancienneteCommande(order.passeeLe)}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
             ),
             const SizedBox(height: 8),
             // Afficher les articles de la commande
-            if (order.items.isNotEmpty) ...[
+            if (order.lines.isNotEmpty) ...[
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -785,7 +786,7 @@ class _AdvancedOrderManagementScreenState
                           ),
                     ),
                     const SizedBox(height: 4),
-                    ...order.items.take(3).map((item) => Padding(
+                    ...order.lines.take(3).map((item) => Padding(
                           padding: const EdgeInsets.only(bottom: 4),
                           child: Row(
                             children: [
@@ -803,10 +804,10 @@ class _AdvancedOrderManagementScreenState
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      item.menuItemName.isNotEmpty
-                                          ? item.menuItemName
-                                          : item.name.isNotEmpty
-                                              ? item.name
+                                      item.itemName.isNotEmpty
+                                          ? item.itemName
+                                          : item.itemName.isNotEmpty
+                                              ? item.itemName
                                               : 'Article',
                                       style: TextStyle(
                                         fontSize: 12,
@@ -818,15 +819,15 @@ class _AdvancedOrderManagementScreenState
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                     if (item
-                                        .getFormattedCustomizations()
+                                        .personnalisations
                                         .isNotEmpty)
                                       Text(
                                         item
-                                                .getFormattedCustomizations()
+                                                .personnalisations
                                                 .take(2)
                                                 .join(', ') +
                                             (item
-                                                        .getFormattedCustomizations()
+                                                        .personnalisations
                                                         .length >
                                                     2
                                                 ? '...'
@@ -845,7 +846,7 @@ class _AdvancedOrderManagementScreenState
                                 ),
                               ),
                               Text(
-                                PriceFormatter.format(item.totalPrice),
+                                PriceFormatter.format(item.prixTotalAffiche),
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
@@ -856,11 +857,11 @@ class _AdvancedOrderManagementScreenState
                             ],
                           ),
                         ),),
-                    if (order.items.length > 3)
+                    if (order.lines.length > 3)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          '+ ${order.items.length - 3} autre${order.items.length - 3 > 1 ? 's' : ''}',
+                          '+ ${order.lines.length - 3} autre${order.lines.length - 3 > 1 ? 's' : ''}',
                           style: TextStyle(
                             fontSize: 11,
                             fontStyle: FontStyle.italic,
@@ -905,7 +906,7 @@ class _AdvancedOrderManagementScreenState
               const SizedBox(height: 8),
             ],
             Text(
-              order.deliveryAddress,
+              order.adresseComplete,
               style: Theme.of(context).textTheme.bodySmall,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -922,7 +923,7 @@ class _AdvancedOrderManagementScreenState
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (order.status == OrderStatus.pending)
+                if (order.statut == StatutCommande.enAttente)
                   Expanded(
                     child: CustomButton(
                       text: 'Confirmer',
@@ -933,7 +934,7 @@ class _AdvancedOrderManagementScreenState
                       height: 36,
                     ),
                   ),
-                if (order.status == OrderStatus.confirmed)
+                if (order.statut == StatutCommande.confirmee)
                   Expanded(
                     child: CustomButton(
                       text: 'Préparer',
@@ -942,7 +943,7 @@ class _AdvancedOrderManagementScreenState
                       height: 36,
                     ),
                   ),
-                if (order.status == OrderStatus.preparing)
+                if (order.statut == StatutCommande.enPreparation)
                   Expanded(
                     child: CustomButton(
                       text: 'Prêt',
@@ -953,12 +954,12 @@ class _AdvancedOrderManagementScreenState
                       height: 36,
                     ),
                   ),
-                if (order.status == OrderStatus.ready)
+                if (order.statut == StatutCommande.prete)
                   Expanded(
                     child: Consumer<DriverManagementService>(
                       builder: (context, driverService, child) {
                         return CustomButton(
-                          text: order.deliveryPersonId != null
+                          text: order.livreurAffecte != null
                               ? 'Réassigner'
                               : 'Assigner livreur',
                           onPressed: () => unawaited(
@@ -984,20 +985,20 @@ class _AdvancedOrderManagementScreenState
   }
 
   Widget _buildOrderListItem(
-      BuildContext context, Order order, OrderManagementService orderService,) {
+      BuildContext context, eccore.Order order, OrderManagementService orderService,) {
     return ListTile(
       leading: CircleAvatar(
         backgroundColor:
-            couleurDeStatut(order.status, Theme.of(context).colorScheme).withValues(alpha: 0.1),
+            couleurDeStatut(order.statut, Theme.of(context).colorScheme).withValues(alpha: 0.1),
         child: Text(
-          order.status.emoji,
+          order.statut.pastille,
           style: const TextStyle(fontSize: 16),
         ),
       ),
       title: Text('Commande #${order.id.substring(0, 8).toUpperCase()}'),
       subtitle: Text(
-          '${order.status.displayName} • ${PriceFormatter.format(order.total)}',),
-      trailing: Text(ancienneteCommande(order.orderTime)),
+          '${order.statut.libelle} • ${PriceFormatter.format(order.totalAffiche)}',),
+      trailing: Text(ancienneteCommande(order.passeeLe)),
       onTap: () => afficherDetailsCommande(context, order),
     );
   }
@@ -1024,7 +1025,6 @@ class _AdvancedOrderManagementScreenState
       ),
     );
   }
-
 
 
   // Méthode _showSearchDialog supprimée car la recherche est maintenant intégrée directement dans l'interface
@@ -1181,12 +1181,12 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
-  void _confirmOrder(Order order, OrderManagementService orderService) {
+  void _confirmOrder(eccore.Order order, OrderManagementService orderService) {
     unawaited(
       confirmerChangementStatut(
         context: context,
         order: order,
-        nouveauStatut: OrderStatus.confirmed,
+        nouveauStatut: StatutCommande.confirmee,
         orderService: orderService,
         message:
             'Voulez-vous confirmer cette commande ?\n\nCette action valide la commande et commence le processus de préparation.',
@@ -1194,12 +1194,12 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
-  void _prepareOrder(Order order, OrderManagementService orderService) {
+  void _prepareOrder(eccore.Order order, OrderManagementService orderService) {
     unawaited(
       confirmerChangementStatut(
         context: context,
         order: order,
-        nouveauStatut: OrderStatus.preparing,
+        nouveauStatut: StatutCommande.enPreparation,
         orderService: orderService,
         message:
             'Voulez-vous commencer la préparation de cette commande ?\n\nCette action indique que la cuisine commence à préparer les articles.',
@@ -1207,12 +1207,12 @@ class _AdvancedOrderManagementScreenState
     );
   }
 
-  void _readyOrder(Order order, OrderManagementService orderService) {
+  void _readyOrder(eccore.Order order, OrderManagementService orderService) {
     unawaited(
       confirmerChangementStatut(
         context: context,
         order: order,
-        nouveauStatut: OrderStatus.ready,
+        nouveauStatut: StatutCommande.prete,
         orderService: orderService,
         message:
             'Voulez-vous marquer cette commande comme prête ?\n\nCette action indique que la commande est prête pour la livraison.',

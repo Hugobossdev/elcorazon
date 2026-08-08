@@ -236,63 +236,71 @@ qui tient l'application debout tant qu'un domaine hérité subsiste.
 *Critère de fin d'un domaine* : plus aucun `import '…/models/<domaine>.dart'`,
 plus d'adaptateur, et un test qui passe sur la logique déplacée.
 
-#### 3.x — `admin`, domaine « commandes » : mesuré, préparé, pas exécuté
+#### 3.6 — `admin`, domaine « commandes » : **fait**
 
-C'est le dernier domaine hérité d'`admin`, et de loin le plus gros :
-**26 fichiers, environ 330 références** à `Order`, `OrderItem`, `OrderStatus`,
-`PaymentMethod`. Il ne se découpe pas en tranches livrables, parce que la
-charnière est le **type de retour d'`OrderManagementService`** : le jour où il
-rend `eccore.Order`, les 25 autres fichiers cèdent d'un coup.
+Le dernier domaine hérité d'`admin`, et le plus gros : 26 fichiers, environ
+330 références. Il ne se découpait pas — la charnière était le type de retour
+d'`OrderManagementService`, et le jour où il rend `eccore.Order`, tout le reste
+suit d'un coup. C'est ce qui a été fait.
 
-Ce qui est fait, et se tient seul :
+`models/order.dart` (851 l.) et `django_order_mapper.dart` (104 l.) sont
+supprimés. À leur place, quatre fichiers de présentation qui ne traduisent
+rien mais nomment : `StatutCommande` (8 statuts), `MoyenPaiement` (4 moyens),
+et deux extensions — `CommandeAffichee`, `LigneAffichee` — qui portent les
+valeurs dérivées que l'adaptateur figeait dans une copie.
 
-- le socle lit `statusEvents` (voir le commit dédié) ;
-- `StatutCommande` porte le vocabulaire des huit statuts, avec 10 cas. Il suit
-  le précédent de `dely` (`libelles_course.dart`) : le socle garde la chaîne
-  brute, l'application pose le libellé par-dessus ;
-- `DjangoOrderMapper` perd ses **deux** tables de statuts recopiées à la main
-  et délègue à `StatutCommande` — 122 → 104 lignes, mêmes 14 tests.
+**Ce que la traduction perdait en route, et qui arrive maintenant à l'écran :**
 
-Ce que la mesure a établi, et qui rend la suite sûre :
+- les **options choisies** par le client sur chaque article. Le back-office
+  affichait un bloc « Personnalisations » alimenté par un champ que rien ne
+  remplissait : il ne s'affichait jamais. Un client qui commande « sans
+  oignon » l'écrivait dans le vide, et la cuisine préparait autre chose ;
+- l'**historique réel** des transitions. Deux écrans fabriquaient chacun le
+  leur — `order_management_screen.dart` avec +5/+10/+25/+30/+45 minutes,
+  `order_timeline_widget.dart` avec +5/+15/+20/+25/+30. Les deux lisent
+  désormais `statusEvents`. Une étape dont on ignore l'heure n'en affiche
+  pas ;
+- `reference`, `deliveredAt`, `cancelledAt`, `cancellationReason`,
+  `allowedTransitions`.
 
-| Champ du modèle local | État réel |
+**Trois corrections de comportement**, toutes documentées par des tests :
+
+1. une commande **annulée** ne coche plus les étapes du service. Le rang se
+   lisait sur `status.index`, et `cancelled` était déclaré après `delivered` ;
+2. la chronologie n'invente plus d'heures ;
+3. le bloc des personnalisations s'affiche enfin.
+
+**Ce qui a été retiré après vérification qu'il ne servait à rien :**
+
+| Retiré | Pourquoi |
 |---|---|
-| `promoCode`, `paymentTransactionId`, `specialInstructions` | 0 usage hors du modèle |
-| `userId` | 1 usage, toujours vide (le contrat de supervision ne rend pas le client) |
-| `statusUpdates` | 2 usages, **jamais renseigné** par le mapper |
-| `deliveryPersonId` | 4 usages, **jamais renseigné** par le mapper |
+| `refunded`, `failed` | statuts que le serveur ne connaît pas ; le mapper les renvoyait tous deux en `cancelled` |
+| `debitCard` | moyen de paiement sans contrepartie serveur |
+| `markOrderFailed()` | visait `failed` ; aucun appelant |
+| `getTopCustomers()` | groupait sur `userId`, que le contrat de supervision ne rend pas : tous les clients tombaient dans la même clé vide ; aucun appelant |
+| `promoCode`, `paymentTransactionId`, `specialInstructions`, `statusUpdates` | 0 usage, ou jamais renseignés |
+| le garde-fou `total.isNaN \|\| total.isInfinite` | `Money` ne peut être ni l'un ni l'autre |
 
-Tout le reste existe dans `eccore.Order`, qui porte en plus `reference`,
-`deliveredAt`, `cancelledAt`, `cancellationReason` et `allowedTransitions` —
-que la traduction locale jetait.
+**Le manque qui reste, et qui appartient au serveur.** `deliveryPersonId`
+n'était jamais renseigné. Il devient `CommandeAffichee.livreurAffecte`, qui
+rend `null` — **écrit une fois, documenté une fois**, plutôt que dispersé en
+quatre `null` silencieux. Les conséquences restent entières :
 
-**Trois conséquences de `deliveryPersonId` toujours nul, aujourd'hui, en
-production :**
+- `driver_detailed_stats_screen.dart` est toujours vide ;
+- `driver_map_screen.dart` ne pose jamais de marqueur de livraison ;
+- le bouton d'assignation ne propose jamais de réassigner.
 
-- `driver_detailed_stats_screen.dart` filtre les commandes d'un livreur sur
-  `o.deliveryPersonId == driver.id` : l'écran est **toujours vide** ;
-- `active_deliveries_screen.dart` ne montre jamais quel livreur a la commande ;
-- le bouton d'assignation dit toujours « Assigner livreur », jamais
-  « Réassigner », et la ligne « Livreur : Assigné » de la fiche ne paraît
-  jamais.
+Le sérialiseur de supervision n'expose pas le livreur, et `AssignmentViewSet`
+est réservée au livreur lui-même. Le jour où le serveur l'expose, il y a **un**
+endroit à changer.
 
-Le sérialiseur back-office des commandes n'expose pas le livreur, et
-`AssignmentViewSet` est réservé au livreur lui-même. **Le back-office n'a donc
-aujourd'hui aucun moyen d'apprendre qui porte une commande.** C'est un manque
-côté serveur, hors du périmètre de ce plan.
+**Deux écarts relevés, non corrigés :** le serveur rend une `reference` lisible
+(`CMD-0001`) désormais disponible, pendant que 32 endroits fabriquent encore un
+identifiant en découpant l'UUID ; et les libellés de paiement restent en
+anglais dans un back-office français.
 
-*Hypothèse retenue pour la migration à venir* : ces quatre points d'accroche
-disparaissent avec le modèle local, puisqu'ils ne peuvent rien afficher. Rien
-de visible ne change. Ce qu'ils marquaient — l'intention — est consigné ici.
-
-**Deux autres écarts relevés, non corrigés :**
-
-- le serveur rend une `reference` lisible (`CMD-0001`, séquentielle) ; la
-  traduction locale la jette, et **32 endroits** fabriquent un identifiant en
-  découpant l'UUID (`id.substring(0, 8).toUpperCase()`). La migration rendra
-  la vraie référence disponible ; l'afficher changera ce que lit l'opérateur ;
-- les libellés de moyens de paiement sont en anglais dans un back-office
-  français : « Credit Card », « Cash on Delivery », « FastFoodGo Wallet ».
+*Critère de fin atteint* : plus aucun `import '…/models/order.dart'`, plus
+d'adaptateur, et 51 cas sur la logique déplacée.
 
 ### Lot 4 — Découper les écrans (2 semaines, parallélisable au lot 3)
 

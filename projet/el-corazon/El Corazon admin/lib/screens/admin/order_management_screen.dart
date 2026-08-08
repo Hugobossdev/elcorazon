@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:admin/services/app_service.dart';
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/anciennete_commande.dart';
 import 'package:admin/presentation/apparence_statut.dart';
 import 'package:admin/presentation/barre_de_filtres.dart';
@@ -223,7 +225,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                 return _buildOrdersList(
                                   filteredOrders
                                       .where(
-                                        (o) => o.status == OrderStatus.pending,
+                                        (o) => o.statut == StatutCommande.enAttente,
                                       )
                                       .toList(),
                                   appService,
@@ -233,7 +235,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                   filteredOrders
                                       .where(
                                         (o) =>
-                                            o.status == OrderStatus.preparing,
+                                            o.statut == StatutCommande.enPreparation,
                                       )
                                       .toList(),
                                   appService,
@@ -242,7 +244,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                 return _buildOrdersList(
                                   filteredOrders
                                       .where(
-                                        (o) => o.status == OrderStatus.onTheWay,
+                                        (o) => o.statut == StatutCommande.enRoute,
                                       )
                                       .toList(),
                                   appService,
@@ -252,7 +254,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                                   filteredOrders
                                       .where(
                                         (o) =>
-                                            o.status == OrderStatus.delivered,
+                                            o.statut == StatutCommande.livree,
                                       )
                                       .toList(),
                                   appService,
@@ -274,8 +276,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     );
   }
 
-
-  Widget _buildOrdersList(List<Order> orders, AppService appService) {
+  Widget _buildOrdersList(List<eccore.Order> orders, AppService appService) {
     if (orders.isEmpty) {
       final scheme = Theme.of(context).colorScheme;
       return Center(
@@ -324,7 +325,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
       itemBuilder: (context, index) {
         final order = orders[index];
         final scheme = Theme.of(context).colorScheme;
-        final statusColor = couleurDeStatutFixe(order.status);
+        final statusColor = couleurDeStatutFixe(order.statut);
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -378,7 +379,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                 ),
                 child: Center(
                   child: Text(
-                    order.status.emoji,
+                    order.statut.pastille,
                     style: const TextStyle(fontSize: 28),
                   ),
                 ),
@@ -410,7 +411,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                         border: Border.all(color: statusColor, width: 1.5),
                       ),
                       child: Text(
-                        order.status.displayName,
+                        order.statut.libelle,
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -443,7 +444,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              PriceFormatter.format(order.total),
+                              PriceFormatter.format(order.totalAffiche),
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 18,
@@ -465,7 +466,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              '${order.items.length} ${order.items.length > 1 ? 'articles' : 'article'}',
+                              '${order.lines.length} ${order.lines.length > 1 ? 'articles' : 'article'}',
                               style: TextStyle(
                                 color: scheme.onSurface.withValues(alpha: 0.9),
                                 fontWeight: FontWeight.w600,
@@ -486,7 +487,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              ancienneteCommande(order.orderTime),
+                              ancienneteCommande(order.passeeLe),
                               style: TextStyle(
                                 color: scheme.onSurface.withValues(alpha: 0.9),
                                 fontWeight: FontWeight.w600,
@@ -502,21 +503,21 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
               ),
               trailing: _buildOrderActions(order, appService),
               children: [
-                // Order details
+                // eccore.Order details
                 SizedBox(
                   width: double.infinity,
                   child: DetailsCommande(order: order),
                 ),
                 const SizedBox(height: 16),
 
-                // Order items
+                // eccore.Order items
                 SizedBox(
                   width: double.infinity,
                   child: ArticlesCommande(order: order),
                 ),
                 const SizedBox(height: 16),
 
-                // Order timeline
+                // eccore.Order timeline
                 SizedBox(
                   width: double.infinity,
                   child: ChronologieCommande(order: order),
@@ -536,7 +537,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     );
   }
 
-  Widget _buildOrderActions(Order order, AppService appService) {
+  Widget _buildOrderActions(eccore.Order order, AppService appService) {
     return SizedBox(
       width: 40,
       height: 40,
@@ -545,8 +546,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         itemBuilder: (context) {
           final actions = <PopupMenuEntry>[];
 
-          switch (order.status) {
-            case OrderStatus.pending:
+          switch (order.statut) {
+            case StatutCommande.enAttente:
               actions.addAll([
                 const PopupMenuItem(
                   value: 'confirm',
@@ -566,7 +567,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                 ),
               ]);
               break;
-            case OrderStatus.confirmed:
+            case StatutCommande.confirmee:
               actions.add(
                 const PopupMenuItem(
                   value: 'prepare',
@@ -578,7 +579,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                 ),
               );
               break;
-            case OrderStatus.preparing:
+            case StatutCommande.enPreparation:
               actions.add(
                 const PopupMenuItem(
                   value: 'ready',
@@ -590,7 +591,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                 ),
               );
               break;
-            case OrderStatus.ready:
+            case StatutCommande.prete:
               actions.add(
                 const PopupMenuItem(
                   value: 'assign',
@@ -602,7 +603,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                 ),
               );
               break;
-            case OrderStatus.onTheWay:
+            case StatutCommande.enRoute:
               actions.add(
                 const PopupMenuItem(
                   value: 'delivered',
@@ -671,7 +672,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     );
   }
 
-  Widget _buildOrderActionButtons(Order order, AppService appService) {
+  Widget _buildOrderActionButtons(eccore.Order order, AppService appService) {
     return Row(
       children: [
         Expanded(
@@ -702,10 +703,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
 
 
 
-
-
-  // Order action methods
-  Future<void> _acceptOrder(Order order) async {
+  // eccore.Order action methods
+  Future<void> _acceptOrder(eccore.Order order) async {
     final orderService = context.read<OrderManagementService>();
     final success = await orderService.acceptOrder(order.id);
 
@@ -723,7 +722,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     }
   }
 
-  Future<void> _rejectOrder(Order order) async {
+  Future<void> _rejectOrder(eccore.Order order) async {
     final reasonController = TextEditingController();
     final confirmed = await DialogHelper.showSafeDialog<bool>(
       context: context,
@@ -788,7 +787,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     }
   }
 
-  Future<void> _prepareOrder(Order order, AppService appService) async {
+  Future<void> _prepareOrder(eccore.Order order, AppService appService) async {
     final confirmed = await DialogHelper.showSafeDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -830,7 +829,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     }
   }
 
-  Future<void> _readyOrder(Order order, AppService appService) async {
+  Future<void> _readyOrder(eccore.Order order, AppService appService) async {
     final confirmed = await DialogHelper.showSafeDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -872,14 +871,14 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     }
   }
 
-  void _assignDriver(Order order, AppService appService) {
+  void _assignDriver(eccore.Order order, AppService appService) {
     DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => DriverAssignmentDialog(order: order),
     );
   }
 
-  Future<void> _deliverOrder(Order order, AppService appService) async {
+  Future<void> _deliverOrder(eccore.Order order, AppService appService) async {
     final confirmed = await DialogHelper.showSafeDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -921,7 +920,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     }
   }
 
-  Future<void> _refundOrder(Order order, AppService appService) async {
+  Future<void> _refundOrder(eccore.Order order, AppService appService) async {
     final refundType = await DialogHelper.showSafeDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -935,7 +934,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Montant total: ${PriceFormatter.format(order.total)}',
+              'Montant total: ${PriceFormatter.format(order.totalAffiche)}',
               style: const TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 16),
@@ -944,7 +943,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
             ListTile(
               leading: const Icon(Icons.refresh, color: Colors.orange),
               title: const Text('Remboursement total'),
-              subtitle: Text(PriceFormatter.format(order.total)),
+              subtitle: Text(PriceFormatter.format(order.totalAffiche)),
               onTap: () => Navigator.of(dialogContext).pop('total'),
             ),
             ListTile(
@@ -972,10 +971,10 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     // Vérifier que le widget est toujours monté avant d'utiliser context
     if (!mounted || !context.mounted) return;
 
-    double refundAmount = order.total;
+    double refundAmount = order.totalAffiche;
     if (refundType == 'partial') {
       final amountController = TextEditingController(
-        text: order.total.toStringAsFixed(2),
+        text: order.totalAffiche.toStringAsFixed(2),
       );
       final confirmed = await DialogHelper.showSafeDialog<bool>(
         context: context,
@@ -999,7 +998,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
             ElevatedButton(
               onPressed: () {
                 final amount = double.tryParse(amountController.text);
-                if (amount != null && amount > 0 && amount <= order.total) {
+                if (amount != null && amount > 0 && amount <= order.totalAffiche) {
                   Navigator.of(dialogContext).pop(true);
                 }
               },
@@ -1010,7 +1009,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
       );
 
       if (confirmed != true) return;
-      refundAmount = double.tryParse(amountController.text) ?? order.total;
+      refundAmount = double.tryParse(amountController.text) ?? order.totalAffiche;
     }
 
     if (!mounted || !context.mounted) return;
@@ -1068,11 +1067,10 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
   }
 
 
-
-  Future<void> _showOnMap(Order order) async {
+  Future<void> _showOnMap(eccore.Order order) async {
     try {
       // Encoder l'adresse pour l'URL Google Maps
-      final encodedAddress = Uri.encodeComponent(order.deliveryAddress);
+      final encodedAddress = Uri.encodeComponent(order.adresseComplete);
       final googleMapsUrl =
           'https://www.google.com/maps/search/?api=1&query=$encodedAddress';
 
@@ -1098,7 +1096,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
     }
   }
 
-  Future<void> _contactCustomer(Order order) async {
+  Future<void> _contactCustomer(eccore.Order order) async {
     try {
       // Le destinataire est porté par la commande : c'est lui qu'on appelle,
       // et pas forcément le titulaire du compte — on commande pour un collègue,
@@ -1272,15 +1270,15 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         csvBuffer.writeln(
           [
             order.id,
-            order.orderTime.toIso8601String(),
+            order.passeeLe.toIso8601String(),
             clientName,
-            order.deliveryAddress,
-            order.status.displayName,
+            order.adresseComplete,
+            order.statut.libelle,
             // `\s` et non l'espace ordinaire : le socle sépare les milliers par
             // une espace insécable étroite (U+202F), qu'un `replaceAll(' ')`
             // laisserait filer jusque dans la cellule du tableur.
-            PriceFormatter.format(order.total).replaceAll(RegExp(r'\s'), ''),
-            order.items.length,
+            PriceFormatter.format(order.totalAffiche).replaceAll(RegExp(r'\s'), ''),
+            order.lines.length,
           ].map(_csvChamp).join(','),
         );
       }

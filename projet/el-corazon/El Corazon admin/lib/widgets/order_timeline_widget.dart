@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/chronologie_commande.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:intl/intl.dart';
 
 class OrderTimelineWidget extends StatelessWidget {
-  final Order order;
+  final eccore.Order order;
 
   const OrderTimelineWidget({
     required this.order, super.key,
@@ -43,7 +46,7 @@ class OrderTimelineWidget extends StatelessWidget {
                 event: event,
                 isLast: isLast,
                 isActive: index == 0 ||
-                    (index == 1 && order.status == event['status']),
+                    (index == 1 && order.statut == event['status']),
               );
             }),
           ],
@@ -52,95 +55,42 @@ class OrderTimelineWidget extends StatelessWidget {
     );
   }
 
+  /// Les transitions réellement enregistrées, la plus récente d'abord.
+  ///
+  /// Ce widget fabriquait son historique : il ajoutait 5, 15, 20, 25 puis 30
+  /// minutes à l'heure de commande, sur la foi du statut courant. La branche
+  /// « vraies données » qu'il portait lisait `statusUpdates`, que rien ne
+  /// remplissait — elle ne s'exécutait donc jamais.
+  ///
+  /// Il lit désormais `chronologieDe`, qui s'appuie sur le journal du serveur.
+  /// Une étape dont on ignore l'heure n'apparaît pas : mieux vaut un historique
+  /// court qu'un historique inventé.
   List<Map<String, dynamic>> _buildTimelineEvents() {
-    final events = <Map<String, dynamic>>[];
+    final events = [
+      for (final etape in chronologieDe(order))
+        if (etape.franchie && etape.quand != null)
+          {
+            'status': etape.statut,
+            'timestamp': etape.quand!,
+            'note': etape.libelle,
+          },
+    ];
 
-    // Événements par statut
-    if (order.statusUpdates.isNotEmpty) {
-      for (final update in order.statusUpdates) {
-        events.add({
-          'status': update.status,
-          'timestamp': update.timestamp,
-          'note': update.message ?? update.status.displayName,
-        });
-      }
-    } else {
-      // Timeline par défaut basée sur le statut actuel
+    final annulation = annulationDe(order);
+    if (annulation != null && annulation.quand != null) {
       events.add({
-        'status': OrderStatus.pending,
-        'timestamp': order.createdAt,
-        'note': 'Commande créée',
+        'status': StatutCommande.annulee,
+        'timestamp': annulation.quand!,
+        'note': annulation.motif.isEmpty
+            ? StatutCommande.annulee.libelle
+            : annulation.motif,
       });
-
-      if (order.status.index > OrderStatus.pending.index) {
-        events.add({
-          'status': OrderStatus.confirmed,
-          'timestamp': order.orderTime,
-          'note': 'Commande confirmée',
-        });
-      }
-
-      if (order.status.index > OrderStatus.confirmed.index) {
-        events.add({
-          'status': OrderStatus.preparing,
-          'timestamp': order.orderTime.add(const Duration(minutes: 5)),
-          'note': 'En préparation',
-        });
-      }
-
-      if (order.status.index > OrderStatus.preparing.index) {
-        events.add({
-          'status': OrderStatus.ready,
-          'timestamp': order.orderTime.add(const Duration(minutes: 15)),
-          'note': 'Prête pour la livraison',
-        });
-      }
-
-      if (order.deliveryPersonId != null) {
-        events.add({
-          'status': OrderStatus.pickedUp,
-          'timestamp': order.orderTime.add(const Duration(minutes: 20)),
-          'note': 'Livreur assigné et récupéré',
-        });
-      }
-
-      if (order.status == OrderStatus.onTheWay ||
-          order.status == OrderStatus.delivered) {
-        events.add({
-          'status': OrderStatus.onTheWay,
-          'timestamp': order.orderTime.add(const Duration(minutes: 25)),
-          'note': 'En route vers le client',
-        });
-      }
-
-      if (order.status == OrderStatus.delivered) {
-        events.add({
-          'status': OrderStatus.delivered,
-          'timestamp': order.orderTime.add(const Duration(minutes: 30)),
-          'note': 'Livrée avec succès',
-        });
-      }
-
-      if (order.status == OrderStatus.cancelled) {
-        events.add({
-          'status': OrderStatus.cancelled,
-          'timestamp': order.orderTime.add(const Duration(minutes: 10)),
-          'note': 'Commande annulée',
-        });
-      }
-
-      if (order.status == OrderStatus.refunded) {
-        events.add({
-          'status': OrderStatus.refunded,
-          'timestamp': order.orderTime.add(const Duration(hours: 1)),
-          'note': 'Remboursement effectué',
-        });
-      }
     }
 
-    // Trier par timestamp (plus récent en premier)
-    events.sort((a, b) => (b['timestamp'] as DateTime)
-        .compareTo(a['timestamp'] as DateTime),);
+    events.sort(
+      (a, b) => (b['timestamp'] as DateTime)
+          .compareTo(a['timestamp'] as DateTime),
+    );
 
     return events;
   }
@@ -151,7 +101,7 @@ class OrderTimelineWidget extends StatelessWidget {
     required bool isLast,
     required bool isActive,
   }) {
-    final status = event['status'] as OrderStatus;
+    final status = event['status'] as StatutCommande;
     final timestamp = event['timestamp'] as DateTime;
     final note = event['note'] as String?;
 
@@ -203,7 +153,7 @@ class OrderTimelineWidget extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  note ?? status.displayName,
+                  note ?? status.libelle,
                   style: TextStyle(
                     fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
                     fontSize: 14,
@@ -220,9 +170,7 @@ class OrderTimelineWidget extends StatelessWidget {
                     color: Colors.grey[600],
                   ),
                 ),
-                if (isActive && status != OrderStatus.delivered &&
-                    status != OrderStatus.cancelled &&
-                    status != OrderStatus.refunded)
+                if (isActive && status.estEnCours)
                   Container(
                     margin: const EdgeInsets.only(top: 4),
                     padding:
@@ -251,30 +199,25 @@ class OrderTimelineWidget extends StatelessWidget {
     );
   }
 
-  IconData _getStatusIcon(OrderStatus status) {
+  IconData _getStatusIcon(StatutCommande status) {
     switch (status) {
-      case OrderStatus.pending:
+      case StatutCommande.enAttente:
         return Icons.pending;
-      case OrderStatus.confirmed:
+      case StatutCommande.confirmee:
         return Icons.check_circle_outline;
-      case OrderStatus.preparing:
+      case StatutCommande.enPreparation:
         return Icons.restaurant;
-      case OrderStatus.ready:
+      case StatutCommande.prete:
         return Icons.check_circle_outline;
-      case OrderStatus.pickedUp:
+      case StatutCommande.recuperee:
         return Icons.shopping_bag;
-      case OrderStatus.onTheWay:
+      case StatutCommande.enRoute:
         return Icons.directions_bike;
-      case OrderStatus.delivered:
+      case StatutCommande.livree:
         return Icons.check_circle;
-      case OrderStatus.cancelled:
+      case StatutCommande.annulee:
         return Icons.cancel;
-      case OrderStatus.refunded:
-        return Icons.payment;
-      case OrderStatus.failed:
-        return Icons.error;
     }
   }
 }
-
 

@@ -1,27 +1,23 @@
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/statut_commande.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'aide_commande.dart';
 import 'package:admin/presentation/evolution_commandes.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Le comptage derrière le graphe « Évolution des commandes (7 derniers
 /// jours) » du back-office.
-Order _commande(DateTime passeeLe) => Order(
+/// Une commande passée à une date donnée — le seul paramètre qui compte ici.
+eccore.Order _commande(DateTime passeeLe) => commandeDeTest(
       id: 'commande-${passeeLe.microsecondsSinceEpoch}',
-      userId: '',
-      items: const [],
-      subtotal: 1000,
-      total: 1000,
-      status: OrderStatus.delivered,
-      deliveryAddress: 'Rue du Commerce',
-      recipientName: 'Awa',
-      paymentMethod: PaymentMethod.cash,
-      orderTime: passeeLe,
-      createdAt: passeeLe,
+      statut: StatutCommande.livree.versServeur,
+      passeeLe: passeeLe,
     );
 
 void main() {
   final maintenant = DateTime(2026, 8, 8, 14, 30);
 
-  Map<String, int> compte(List<Order> commandes) =>
+  Map<String, int> compte(List<eccore.Order> commandes) =>
       commandesParJour(commandes, maintenant: maintenant);
 
   group('La fenêtre', () {

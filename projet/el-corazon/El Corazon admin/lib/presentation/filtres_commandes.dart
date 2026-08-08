@@ -1,4 +1,5 @@
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
 
 /// La fenêtre de temps sur laquelle porte la liste des commandes.
 enum FenetreCommandes {
@@ -90,8 +91,8 @@ ZoneCommandes zoneDeLAdresse(String adresse) {
 /// rien ne pouvait les interroger. [maintenant] est là pour cela.
 ///
 /// La liste d'entrée n'est jamais modifiée : elle appartient au service.
-List<Order> commandesFiltrees(
-  List<Order> commandes, {
+List<eccore.Order> commandesFiltrees(
+  List<eccore.Order> commandes, {
   String recherche = '',
   ZoneCommandes zone = ZoneCommandes.toutes,
   FenetreCommandes fenetre = FenetreCommandes.aujourdHui,
@@ -104,22 +105,22 @@ List<Order> commandesFiltrees(
     if (terme.isNotEmpty && !_correspond(commande, terme)) return false;
 
     if (zone != ZoneCommandes.toutes &&
-        zoneDeLAdresse(commande.deliveryAddress) != zone) {
+        zoneDeLAdresse(commande.adresseComplete) != zone) {
       return false;
     }
 
-    return _dansLaFenetre(commande.orderTime, fenetre, reference);
+    return _dansLaFenetre(commande.passeeLe, fenetre, reference);
   }).toList();
 
-  retenues.sort((a, b) => b.orderTime.compareTo(a.orderTime));
+  retenues.sort((a, b) => b.passeeLe.compareTo(a.passeeLe));
 
   return retenues;
 }
 
 /// La recherche porte sur la référence, l'adresse et le nom du destinataire.
-bool _correspond(Order commande, String terme) {
+bool _correspond(eccore.Order commande, String terme) {
   if (commande.id.toLowerCase().contains(terme)) return true;
-  if (commande.deliveryAddress.toLowerCase().contains(terme)) return true;
+  if (commande.adresseComplete.toLowerCase().contains(terme)) return true;
 
   return commande.recipientName.isNotEmpty &&
       commande.recipientName.toLowerCase().contains(terme);

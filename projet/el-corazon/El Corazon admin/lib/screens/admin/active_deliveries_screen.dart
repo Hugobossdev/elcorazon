@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/driver_management_service.dart';
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/screens/admin/driver_map_screen.dart';
 import 'package:admin/ui/ui.dart';
@@ -16,7 +17,7 @@ class ActiveDeliveriesScreen extends StatefulWidget {
 
 class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
   // Filtre par défaut : afficher toutes les livraisons actives
-  OrderStatus? _statusFilter;
+  StatutCommande? _statusFilter;
 
   @override
   void initState() {
@@ -47,18 +48,18 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
 
           // Filtrer les commandes actives (prêtes, assignées, en cours)
           final activeOrders = orderService.allOrders.where((order) {
-            final isActive = order.status == OrderStatus.ready ||
-                order.status == OrderStatus.pickedUp ||
-                order.status == OrderStatus.onTheWay;
+            final isActive = order.statut == StatutCommande.prete ||
+                order.statut == StatutCommande.recuperee ||
+                order.statut == StatutCommande.enRoute;
 
             if (_statusFilter != null) {
-              return isActive && order.status == _statusFilter;
+              return isActive && order.statut == _statusFilter;
             }
             return isActive;
           }).toList();
 
           // Trier par date (plus récent en premier)
-          activeOrders.sort((a, b) => b.orderTime.compareTo(a.orderTime));
+          activeOrders.sort((a, b) => b.passeeLe.compareTo(a.passeeLe));
 
           return Column(
             children: [
@@ -78,7 +79,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                             final order = activeOrders[index];
                             final driver = _livreurDe(
                               driverService,
-                              order.deliveryPersonId,
+                              order.livreurAffecte,
                             );
 
                             return _buildDeliveryCard(context, order, driver);
@@ -131,22 +132,22 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                   ),
                   FilterChip(
                     label: const Text('Prêtes'),
-                    selected: _statusFilter == OrderStatus.ready,
+                    selected: _statusFilter == StatutCommande.prete,
                     backgroundColor: sem.success.withValues(alpha: 0.10),
                     selectedColor: sem.success.withValues(alpha: 0.20),
                     onSelected: (selected) {
                       setState(() =>
-                          _statusFilter = selected ? OrderStatus.ready : null,);
+                          _statusFilter = selected ? StatutCommande.prete : null,);
                     },
                   ),
                   FilterChip(
                     label: const Text('En route'),
-                    selected: _statusFilter == OrderStatus.onTheWay,
+                    selected: _statusFilter == StatutCommande.enRoute,
                     backgroundColor: sem.info.withValues(alpha: 0.10),
                     selectedColor: sem.info.withValues(alpha: 0.20),
                     onSelected: (selected) {
                       setState(() => _statusFilter =
-                          selected ? OrderStatus.onTheWay : null,);
+                          selected ? StatutCommande.enRoute : null,);
                     },
                   ),
                 ],
@@ -158,10 +159,10 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
     );
   }
 
-  Widget _buildDeliveryCard(BuildContext context, Order order, eccore.CourierProfile? driver) {
+  Widget _buildDeliveryCard(BuildContext context, eccore.Order order, eccore.CourierProfile? driver) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final statusColor = _getStatusColor(context, order.status);
+    final statusColor = _getStatusColor(context, order.statut);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -188,13 +189,13 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        _getStatusIcon(order.status),
+                        _getStatusIcon(order.statut),
                         size: 14,
                         color: statusColor,
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        order.status.displayName,
+                        order.statut.libelle,
                         style: TextStyle(
                           color: statusColor,
                           fontWeight: FontWeight.bold,
@@ -224,7 +225,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    order.deliveryAddress,
+                    order.adresseComplete,
                     style: const TextStyle(fontSize: 14),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
@@ -240,15 +241,15 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                 Icon(Icons.access_time, size: 18, color: scheme.onSurfaceVariant),
                 const SizedBox(width: 8),
                 Text(
-                  'Commandé à ${_formatTime(order.orderTime)}',
+                  'Commandé à ${_formatTime(order.passeeLe)}',
                   style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
                 ),
-                if (order.estimatedDeliveryTime != null) ...[
+                if (order.estimatedDeliveryAt != null) ...[
                   const SizedBox(width: 16),
                   Icon(Icons.timer, size: 18, color: scheme.primary),
                   const SizedBox(width: 4),
                   Text(
-                    'Estimé: ${_formatTime(order.estimatedDeliveryTime!)}',
+                    'Estimé: ${_formatTime(order.estimatedDeliveryAt!)}',
                     style: TextStyle(color: scheme.primary, fontSize: 13),
                   ),
                 ],
@@ -319,7 +320,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                   ),
 
                 // Bouton d'action principal
-                if (order.status == OrderStatus.ready)
+                if (order.statut == StatutCommande.prete)
                   ElevatedButton.icon(
                     onPressed: () => _showAssignDriverDialog(context, order),
                     icon: const Icon(Icons.person_add, size: 16),
@@ -370,32 +371,32 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
     );
   }
 
-  Color _getStatusColor(BuildContext context, OrderStatus status) {
+  Color _getStatusColor(BuildContext context, StatutCommande status) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     switch (status) {
-      case OrderStatus.ready:
+      case StatutCommande.prete:
         return sem.warning;
-      case OrderStatus.pickedUp:
+      case StatutCommande.recuperee:
         return sem.info;
-      case OrderStatus.onTheWay:
+      case StatutCommande.enRoute:
         return scheme.primary;
-      case OrderStatus.delivered:
+      case StatutCommande.livree:
         return sem.success;
       default:
         return scheme.onSurfaceVariant;
     }
   }
 
-  IconData _getStatusIcon(OrderStatus status) {
+  IconData _getStatusIcon(StatutCommande status) {
     switch (status) {
-      case OrderStatus.ready:
+      case StatutCommande.prete:
         return Icons.inventory_2;
-      case OrderStatus.pickedUp:
+      case StatutCommande.recuperee:
         return Icons.directions_run;
-      case OrderStatus.onTheWay:
+      case StatutCommande.enRoute:
         return Icons.local_shipping;
-      case OrderStatus.delivered:
+      case StatutCommande.livree:
         return Icons.check_circle;
       default:
         return Icons.help_outline;
@@ -407,7 +408,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
   }
 
   Future<void> _showAssignDriverDialog(
-      BuildContext context, Order order,) async {
+      BuildContext context, eccore.Order order,) async {
     final driverService = context.read<DriverManagementService>();
     final orderService = context.read<OrderManagementService>();
     final availableDrivers = driverService.getAvailableDrivers();

@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
-import 'package:admin/repositories/django_order_mapper.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Supervision des commandes — `/api/v1/orders/manage/` (Phase 6).
@@ -16,10 +16,10 @@ import 'package:admin/services/admin_auth_service.dart';
 class OrderManagementService extends ChangeNotifier {
   eccore.ManagedOrderRepository get _orders =>
       eccore.ManagedOrderRepository(apiClient: AdminAuthService().apiClient);
-  List<Order> _allOrders = [];
+  List<eccore.Order> _allOrders = [];
   bool _isLoading = false;
 
-  List<Order> get allOrders => _allOrders;
+  List<eccore.Order> get allOrders => _allOrders;
   bool get isLoading => _isLoading;
 
   OrderManagementService() {
@@ -43,7 +43,7 @@ class OrderManagementService extends ChangeNotifier {
     _setLoading(true);
     try {
       final remote = await _orders.list();
-      _allOrders = remote.map(DjangoOrderMapper.toLocal).toList();
+      _allOrders = remote;
       eccore.Journal.trace('OrderManagementService: ${_allOrders.length} commande(s)');
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('OrderManagementService: chargement impossible — ${e.code}');
@@ -62,17 +62,17 @@ class OrderManagementService extends ChangeNotifier {
   ///
   /// L'annulation ne passe pas par ici : voir [cancelOrder], qui exige une
   /// permission distincte et un motif.
-  Future<bool> updateOrderStatus(String orderId, OrderStatus newStatus) async {
-    if (newStatus == OrderStatus.cancelled) {
+  Future<bool> updateOrderStatus(String orderId, StatutCommande newStatus) async {
+    if (newStatus == StatutCommande.annulee) {
       return cancelOrder(orderId, 'Annulée depuis la supervision');
     }
 
     try {
       final updated = await _orders.updateStatus(
         orderId: orderId,
-        status: DjangoOrderMapper.toRemoteStatus(newStatus),
+        status: newStatus.versServeur,
       );
-      _replaceLocally(DjangoOrderMapper.toLocal(updated));
+      _replaceLocally(updated);
       return true;
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('OrderManagementService: transition refusée — ${e.code}');
@@ -80,7 +80,7 @@ class OrderManagementService extends ChangeNotifier {
     }
   }
 
-  void _replaceLocally(Order order) {
+  void _replaceLocally(eccore.Order order) {
     final index = _allOrders.indexWhere((existing) => existing.id == order.id);
     if (index != -1) {
       _allOrders[index] = order;
@@ -92,47 +92,43 @@ class OrderManagementService extends ChangeNotifier {
 
   /// Confirmer une commande
   Future<bool> confirmOrder(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.confirmed);
+    return await updateOrderStatus(orderId, StatutCommande.confirmee);
   }
 
   /// Commencer la préparation d'une commande
   Future<bool> startPreparingOrder(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.preparing);
+    return await updateOrderStatus(orderId, StatutCommande.enPreparation);
   }
 
   /// Marquer une commande comme prête
   Future<bool> markOrderReady(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.ready);
+    return await updateOrderStatus(orderId, StatutCommande.prete);
   }
 
   /// Marquer une commande comme récupérée
   Future<bool> markOrderPickedUp(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.pickedUp);
+    return await updateOrderStatus(orderId, StatutCommande.recuperee);
   }
 
   /// Marquer une commande comme en route
   Future<bool> markOrderOnTheWay(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.onTheWay);
+    return await updateOrderStatus(orderId, StatutCommande.enRoute);
   }
 
   /// Marquer une commande comme livrée
   Future<bool> markOrderDelivered(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.delivered);
+    return await updateOrderStatus(orderId, StatutCommande.livree);
   }
 
   /// Annuler une commande
   Future<bool> cancelOrderStatus(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.cancelled);
+    return await updateOrderStatus(orderId, StatutCommande.annulee);
   }
 
-  /// Marquer une commande comme échouée
-  Future<bool> markOrderFailed(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.failed);
-  }
 
   /// Accepter une commande
   Future<bool> acceptOrder(String orderId) async {
-    return await updateOrderStatus(orderId, OrderStatus.confirmed);
+    return await updateOrderStatus(orderId, StatutCommande.confirmee);
   }
 
   /// Refuser une commande
@@ -169,7 +165,7 @@ class OrderManagementService extends ChangeNotifier {
   Future<bool> cancelOrder(String orderId, String reason) async {
     try {
       final updated = await _orders.cancel(orderId: orderId, reason: reason);
-      _replaceLocally(DjangoOrderMapper.toLocal(updated));
+      _replaceLocally(updated);
       return true;
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('OrderManagementService: annulation refusée — ${e.code}');
@@ -200,37 +196,37 @@ class OrderManagementService extends ChangeNotifier {
   }
 
   /// Filtrer les commandes par date
-  List<Order> filterByDateRange(DateTime startDate, DateTime endDate) {
+  List<eccore.Order> filterByDateRange(DateTime startDate, DateTime endDate) {
     return _allOrders.where((order) {
-      return order.orderTime
+      return order.passeeLe
               .isAfter(startDate.subtract(const Duration(days: 1))) &&
-          order.orderTime.isBefore(endDate.add(const Duration(days: 1)));
+          order.passeeLe.isBefore(endDate.add(const Duration(days: 1)));
     }).toList();
   }
 
   /// Obtenir les commandes en attente
-  List<Order> getPendingOrders() {
+  List<eccore.Order> getPendingOrders() {
     return _allOrders
-        .where((order) => order.status == OrderStatus.pending)
+        .where((order) => order.statut == StatutCommande.enAttente)
         .toList();
   }
 
   /// Obtenir les commandes par statut (filtre en mémoire)
-  List<Order> getOrdersByStatus(OrderStatus status) {
-    return _allOrders.where((order) => order.status == status).toList();
+  List<eccore.Order> getOrdersByStatus(StatutCommande status) {
+    return _allOrders.where((order) => order.statut == status).toList();
   }
 
   /// Statuts d'une commande encore en cours — celle sur laquelle la
   /// supervision peut encore agir. Les terminales (livrée, annulée,
   /// remboursée, échouée) ne peuvent être ni urgentes ni en retard : leur
   /// sort est joué.
-  static const Set<OrderStatus> _enCours = {
-    OrderStatus.pending,
-    OrderStatus.confirmed,
-    OrderStatus.preparing,
-    OrderStatus.ready,
-    OrderStatus.pickedUp,
-    OrderStatus.onTheWay,
+  static const Set<StatutCommande> _enCours = {
+    StatutCommande.enAttente,
+    StatutCommande.confirmee,
+    StatutCommande.enPreparation,
+    StatutCommande.prete,
+    StatutCommande.recuperee,
+    StatutCommande.enRoute,
   };
 
   /// Au-delà de ce délai sans être confirmée ni préparée, une commande est
@@ -243,10 +239,10 @@ class OrderManagementService extends ChangeNotifier {
   /// L'écran affichait un bandeau d'alerte alimenté par une liste vide écrite
   /// en dur : la section ne s'affichait jamais, et une commande oubliée en
   /// cuisine ne se voyait qu'en parcourant les onglets.
-  List<Order> get urgentOrders => urgentAmong(_allOrders);
+  List<eccore.Order> get urgentOrders => urgentAmong(_allOrders);
 
   /// Commandes en cours dont l'heure de livraison annoncée est dépassée.
-  List<Order> get overdueOrders => overdueAmong(_allOrders);
+  List<eccore.Order> get overdueOrders => overdueAmong(_allOrders);
 
   /// Sélection pure, exposée à part des accesseurs d'instance.
   ///
@@ -254,18 +250,18 @@ class OrderManagementService extends ChangeNotifier {
   /// règles **temporelles**, et une règle temporelle qui lit l'horloge en son
   /// sein ne se vérifie qu'en attendant. L'écran omet l'argument ; les tests le
   /// fournissent.
-  static List<Order> urgentAmong(List<Order> orders, {DateTime? now}) {
+  static List<eccore.Order> urgentAmong(List<eccore.Order> orders, {DateTime? now}) {
     final maintenant = now ?? DateTime.now();
     return orders
         .where(
           (order) =>
-              (order.status == OrderStatus.pending ||
-                  order.status == OrderStatus.confirmed) &&
-              maintenant.difference(order.orderTime) > _delaiUrgence,
+              (order.statut == StatutCommande.enAttente ||
+                  order.statut == StatutCommande.confirmee) &&
+              maintenant.difference(order.passeeLe) > _delaiUrgence,
         )
         .toList()
       // La plus ancienne d'abord : c'est celle qui attend le plus.
-      ..sort((a, b) => a.orderTime.compareTo(b.orderTime));
+      ..sort((a, b) => a.passeeLe.compareTo(b.passeeLe));
   }
 
   /// Commandes en cours dont l'heure de livraison annoncée est dépassée.
@@ -275,26 +271,25 @@ class OrderManagementService extends ChangeNotifier {
   /// une constante du back-office. Une commande sans heure annoncée n'est pas
   /// en retard — elle est seulement sans promesse, ce qui n'est pas la même
   /// chose et ne doit pas déclencher d'alerte.
-  static List<Order> overdueAmong(List<Order> orders, {DateTime? now}) {
+  static List<eccore.Order> overdueAmong(List<eccore.Order> orders, {DateTime? now}) {
     final maintenant = now ?? DateTime.now();
     return orders
         .where(
           (order) =>
-              _enCours.contains(order.status) &&
-              order.estimatedDeliveryTime != null &&
-              maintenant.isAfter(order.estimatedDeliveryTime!),
+              _enCours.contains(order.statut) &&
+              order.estimatedDeliveryAt != null &&
+              maintenant.isAfter(order.estimatedDeliveryAt!),
         )
         .toList()
       ..sort(
-        (a, b) => a.estimatedDeliveryTime!.compareTo(b.estimatedDeliveryTime!),
+        (a, b) => a.estimatedDeliveryAt!.compareTo(b.estimatedDeliveryAt!),
       );
   }
 
   /// Commandes d'un statut donné, filtrées **par le serveur**.
-  Future<List<Order>> loadOrdersByStatusFromDB(OrderStatus status) async {
+  Future<List<eccore.Order>> loadOrdersByStatusFromDB(StatutCommande status) async {
     try {
-      final remote = await _orders.list(status: DjangoOrderMapper.toRemoteStatus(status));
-      return remote.map(DjangoOrderMapper.toLocal).toList();
+      return _orders.list(status: status.versServeur);
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('OrderManagementService: filtre par statut impossible — ${e.code}');
       return [];
@@ -302,10 +297,10 @@ class OrderManagementService extends ChangeNotifier {
   }
 
   /// Les [limit] commandes les plus récentes.
-  Future<List<Order>> loadRecentOrdersFromDB({int limit = 5}) async {
+  Future<List<eccore.Order>> loadRecentOrdersFromDB({int limit = 5}) async {
     try {
       final remote = await _orders.list();
-      return remote.take(limit).map(DjangoOrderMapper.toLocal).toList();
+      return remote.take(limit).toList();
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('OrderManagementService: commandes récentes indisponibles — ${e.code}');
       return [];
@@ -313,36 +308,36 @@ class OrderManagementService extends ChangeNotifier {
   }
 
   /// Obtenir les commandes d'aujourd'hui
-  List<Order> getTodayOrders() {
+  List<eccore.Order> getTodayOrders() {
     final today = DateTime.now();
     return _allOrders
         .where((order) =>
-            order.orderTime.year == today.year &&
-            order.orderTime.month == today.month &&
-            order.orderTime.day == today.day,)
+            order.passeeLe.year == today.year &&
+            order.passeeLe.month == today.month &&
+            order.passeeLe.day == today.day,)
         .toList();
   }
 
   /// Obtenir les commandes de cette semaine
-  List<Order> getThisWeekOrders() {
+  List<eccore.Order> getThisWeekOrders() {
     final now = DateTime.now();
     final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
     final endOfWeek = startOfWeek.add(const Duration(days: 6));
 
     return _allOrders
         .where((order) =>
-            order.orderTime.isAfter(startOfWeek) &&
-            order.orderTime.isBefore(endOfWeek),)
+            order.passeeLe.isAfter(startOfWeek) &&
+            order.passeeLe.isBefore(endOfWeek),)
         .toList();
   }
 
   /// Obtenir les commandes de ce mois
-  List<Order> getThisMonthOrders() {
+  List<eccore.Order> getThisMonthOrders() {
     final now = DateTime.now();
     return _allOrders
         .where((order) =>
-            order.orderTime.year == now.year &&
-            order.orderTime.month == now.month,)
+            order.passeeLe.year == now.year &&
+            order.passeeLe.month == now.month,)
         .toList();
   }
 
@@ -356,35 +351,25 @@ class OrderManagementService extends ChangeNotifier {
   Map<String, dynamic> getOrderStats() {
     final totalOrders = _allOrders.length;
     final pendingOrders =
-        _allOrders.where((o) => o.status == OrderStatus.pending).length;
+        _allOrders.where((o) => o.statut == StatutCommande.enAttente).length;
     final confirmedOrders =
-        _allOrders.where((o) => o.status == OrderStatus.confirmed).length;
+        _allOrders.where((o) => o.statut == StatutCommande.confirmee).length;
     final preparingOrders =
-        _allOrders.where((o) => o.status == OrderStatus.preparing).length;
+        _allOrders.where((o) => o.statut == StatutCommande.enPreparation).length;
     final readyOrders =
-        _allOrders.where((o) => o.status == OrderStatus.ready).length;
+        _allOrders.where((o) => o.statut == StatutCommande.prete).length;
     final pickedUpOrders =
-        _allOrders.where((o) => o.status == OrderStatus.pickedUp).length;
+        _allOrders.where((o) => o.statut == StatutCommande.recuperee).length;
     final onTheWayOrders =
-        _allOrders.where((o) => o.status == OrderStatus.onTheWay).length;
+        _allOrders.where((o) => o.statut == StatutCommande.enRoute).length;
     final deliveredOrders =
-        _allOrders.where((o) => o.status == OrderStatus.delivered).length;
+        _allOrders.where((o) => o.statut == StatutCommande.livree).length;
     final cancelledOrders =
-        _allOrders.where((o) => o.status == OrderStatus.cancelled).length;
-    final refundedOrders =
-        _allOrders.where((o) => o.status == OrderStatus.refunded).length;
-    final failedOrders =
-        _allOrders.where((o) => o.status == OrderStatus.failed).length;
+        _allOrders.where((o) => o.statut == StatutCommande.annulee).length;
 
     final totalRevenue = _allOrders
-        .where((o) => o.status == OrderStatus.delivered)
-        .fold(
-            0.0,
-            (sum, order) =>
-                sum +
-                (order.total.isNaN || order.total.isInfinite
-                    ? 0.0
-                    : order.total),);
+        .where((o) => o.statut == StatutCommande.livree)
+        .fold(0.0, (sum, order) => sum + order.totalAffiche);
 
     final averageOrderValue =
         deliveredOrders > 0 ? totalRevenue / deliveredOrders : 0.0;
@@ -399,8 +384,6 @@ class OrderManagementService extends ChangeNotifier {
       'on_the_way_orders': onTheWayOrders,
       'delivered_orders': deliveredOrders,
       'cancelled_orders': cancelledOrders,
-      'refunded_orders': refundedOrders,
-      'failed_orders': failedOrders,
       'total_revenue':
           totalRevenue.isNaN || totalRevenue.isInfinite ? 0.0 : totalRevenue,
       'average_order_value':
@@ -417,18 +400,19 @@ class OrderManagementService extends ChangeNotifier {
   }
 
   /// Obtenir les commandes nécessitant une attention
-  List<Order> getOrdersNeedingAttention() {
+  List<eccore.Order> getOrdersNeedingAttention() {
     final now = DateTime.now();
     return _allOrders.where((order) {
       // Commandes en attente depuis plus de 30 minutes
-      if (order.status == OrderStatus.pending) {
-        final timeDiff = now.difference(order.orderTime);
+      if (order.statut == StatutCommande.enAttente) {
+        final timeDiff = now.difference(order.passeeLe);
         if (timeDiff.inMinutes > 30) return true;
       }
 
-      // Commandes annulées avec remboursement nécessaire
-      if (order.status == OrderStatus.cancelled &&
-          order.paymentMethod != PaymentMethod.cash) {
+      // Une annulation ne réclame l'attention que si de l'argent est déjà
+      // passé : les espèces n'ont jamais quitté le client.
+      if (order.statut == StatutCommande.annulee &&
+          order.moyenPaiement.estPrepaye) {
         return true;
       }
 
@@ -437,23 +421,23 @@ class OrderManagementService extends ChangeNotifier {
   }
 
   /// Obtenir les commandes programmées
-  List<Order> getScheduledOrders() {
+  List<eccore.Order> getScheduledOrders() {
     final now = DateTime.now();
     return _allOrders.where((order) {
-      return order.estimatedDeliveryTime != null &&
-          order.estimatedDeliveryTime!.isAfter(now);
+      return order.estimatedDeliveryAt != null &&
+          order.estimatedDeliveryAt!.isAfter(now);
     }).toList();
   }
 
   /// Obtenir les commandes en retard
-  List<Order> getDelayedOrders() {
+  List<eccore.Order> getDelayedOrders() {
     final now = DateTime.now();
     return _allOrders.where((order) {
-      if (order.estimatedDeliveryTime == null) return false;
-      if (order.status == OrderStatus.delivered) return false;
-      if (order.status == OrderStatus.cancelled) return false;
+      if (order.estimatedDeliveryAt == null) return false;
+      if (order.statut == StatutCommande.livree) return false;
+      if (order.statut == StatutCommande.annulee) return false;
 
-      return now.isAfter(order.estimatedDeliveryTime!);
+      return now.isAfter(order.estimatedDeliveryAt!);
     }).toList();
   }
 
@@ -463,9 +447,9 @@ class OrderManagementService extends ChangeNotifier {
       final cutoffDate = DateTime.now().subtract(Duration(days: daysOld));
 
       final oldOrders = _allOrders.where((order) {
-        return order.orderTime.isBefore(cutoffDate) &&
-            (order.status == OrderStatus.delivered ||
-                order.status == OrderStatus.cancelled);
+        return order.passeeLe.isBefore(cutoffDate) &&
+            (order.statut == StatutCommande.livree ||
+                order.statut == StatutCommande.annulee);
       }).toList();
 
       eccore.Journal.trace('Archiving ${oldOrders.length} old orders');
@@ -488,15 +472,15 @@ class OrderManagementService extends ChangeNotifier {
     final dayOrders = filterByDateRange(dayStart, dayEnd);
 
     final deliveredOrders =
-        dayOrders.where((o) => o.status == OrderStatus.delivered);
+        dayOrders.where((o) => o.statut == StatutCommande.livree);
     final revenue =
-        deliveredOrders.fold(0.0, (sum, order) => sum + order.total);
+        deliveredOrders.fold(0.0, (sum, order) => sum + order.totalAffiche);
     final avgOrderValue =
         deliveredOrders.isNotEmpty ? revenue / deliveredOrders.length : 0.0;
 
     final statusBreakdown = <String, int>{};
     for (final order in dayOrders) {
-      final statusName = order.status.displayName;
+      final statusName = order.statut.libelle;
       statusBreakdown[statusName] = (statusBreakdown[statusName] ?? 0) + 1;
     }
 
@@ -557,7 +541,7 @@ class OrderManagementService extends ChangeNotifier {
     final hourCounts = <int, int>{};
 
     for (final order in _allOrders) {
-      final hour = order.orderTime.hour;
+      final hour = order.passeeLe.hour;
       hourCounts[hour] = (hourCounts[hour] ?? 0) + 1;
     }
 
@@ -578,42 +562,14 @@ class OrderManagementService extends ChangeNotifier {
     };
   }
 
-  /// Obtenir les meilleurs clients
-  List<Map<String, dynamic>> getTopCustomers({int limit = 10}) {
-    final customerOrders = <String, List<Order>>{};
-
-    for (final order in _allOrders) {
-      if (order.status == OrderStatus.delivered) {
-        customerOrders.putIfAbsent(order.userId, () => []).add(order);
-      }
-    }
-
-    final customerStats = customerOrders.entries.map((entry) {
-      final orders = entry.value;
-      final totalSpent = orders.fold(0.0, (sum, order) => sum + order.total);
-
-      return {
-        'user_id': entry.key,
-        'order_count': orders.length,
-        'total_spent': totalSpent,
-        'average_order_value': totalSpent / orders.length,
-        'last_order_date': orders.last.orderTime.toIso8601String(),
-      };
-    }).toList();
-
-    customerStats.sort((a, b) =>
-        (b['total_spent'] as double).compareTo(a['total_spent'] as double),);
-
-    return customerStats.take(limit).toList();
-  }
 
   /// Obtenir les produits les plus commandés
   Map<String, dynamic> getMostOrderedItems({int limit = 10}) {
     final itemCounts = <String, int>{};
 
     for (final order in _allOrders) {
-      for (final item in order.items) {
-        itemCounts[item.name] = (itemCounts[item.name] ?? 0) + item.quantity;
+      for (final item in order.lines) {
+        itemCounts[item.itemName] = (itemCounts[item.itemName] ?? 0) + item.quantity;
       }
     }
 
@@ -635,8 +591,8 @@ class OrderManagementService extends ChangeNotifier {
   Map<String, dynamic> getDeliveryStats() {
     final deliveredOrders = _allOrders
         .where((o) =>
-            o.status == OrderStatus.delivered &&
-            o.estimatedDeliveryTime != null,)
+            o.statut == StatutCommande.livree &&
+            o.estimatedDeliveryAt != null,)
         .toList();
 
     if (deliveredOrders.isEmpty) {
@@ -654,8 +610,8 @@ class OrderManagementService extends ChangeNotifier {
     int onTimeCount = 0;
 
     for (final order in deliveredOrders) {
-      final deliveryTime = order.estimatedDeliveryTime!
-          .difference(order.orderTime)
+      final deliveryTime = order.estimatedDeliveryAt!
+          .difference(order.passeeLe)
           .inMinutes
           .toDouble();
       totalDeliveryTime += deliveryTime;

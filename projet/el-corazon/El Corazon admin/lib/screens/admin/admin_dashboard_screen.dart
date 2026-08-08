@@ -5,7 +5,8 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:admin/services/app_service.dart';
 import 'package:admin/services/analytics_service.dart';
 import 'package:admin/services/driver_management_service.dart';
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/core/utils/admin_helpers.dart';
 import 'package:admin/widgets/modern/enhanced_stat_card.dart';
@@ -112,7 +113,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   Widget _buildOverviewTab(
     BuildContext context,
     eccore.User? user,
-    List<Order> orders,
+    List<eccore.Order> orders,
     List<eccore.ManagedMenuItem> menuItems,
     DriverManagementService driverService,
   ) {
@@ -126,10 +127,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final weekStart =
         DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
     final weekOrders =
-        orders.where((o) => o.orderTime.isAfter(weekStart)).toList();
+        orders.where((o) => o.passeeLe.isAfter(weekStart)).toList();
     final weekRevenue = weekOrders
-        .where((order) => order.status == OrderStatus.delivered)
-        .fold(0.0, (sum, order) => sum + order.total);
+        .where((order) => order.statut == StatutCommande.livree)
+        .fold(0.0, (sum, order) => sum + order.totalAffiche);
 
     return RefreshIndicator(
       onRefresh: () async {
@@ -529,7 +530,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     );
   }
 
-  Widget _buildRecentOrders(BuildContext context, List<Order> recentOrders) {
+  Widget _buildRecentOrders(BuildContext context, List<eccore.Order> recentOrders) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -579,24 +580,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     contentPadding: EdgeInsets.zero,
                     leading: CircleAvatar(
                       backgroundColor:
-                          _getStatusColor(order.status).withValues(alpha: 0.1),
-                      child: Text(order.status.emoji),
+                          _getStatusColor(order.statut).withValues(alpha: 0.1),
+                      child: Text(order.statut.pastille),
                     ),
                     title:
                         Text('CMD #${order.id.substring(0, 8).toUpperCase()}'),
                     subtitle: Text(
-                        '${AdminHelpers.formatRelativeTime(order.orderTime)} • ${order.items.length} articles',),
+                        '${AdminHelpers.formatRelativeTime(order.passeeLe)} • ${order.lines.length} articles',),
                     trailing: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(formatPrice(order.total),
+                        Text(formatPrice(order.totalAffiche),
                             style:
                                 const TextStyle(fontWeight: FontWeight.bold),),
-                        Text(order.status.displayName,
+                        Text(order.statut.libelle,
                             style: TextStyle(
                                 fontSize: 12,
-                                color: _getStatusColor(order.status),),),
+                                color: _getStatusColor(order.statut),),),
                       ],
                     ),
                   );
@@ -994,52 +995,48 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   // --- Helpers ---
 
-  double _calculateTodayRevenue(List<Order> orders) {
+  double _calculateTodayRevenue(List<eccore.Order> orders) {
     final now = DateTime.now();
     return orders
         .where((o) =>
-            o.orderTime.day == now.day &&
-            o.orderTime.month == now.month &&
-            o.orderTime.year == now.year &&
-            o.status == OrderStatus.delivered,)
-        .fold(0.0, (sum, o) => sum + o.total);
+            o.passeeLe.day == now.day &&
+            o.passeeLe.month == now.month &&
+            o.passeeLe.year == now.year &&
+            o.statut == StatutCommande.livree,)
+        .fold(0.0, (sum, o) => sum + o.totalAffiche);
   }
 
-  double _calculateAverageOrderValue(int totalOrders, List<Order> orders) {
+  double _calculateAverageOrderValue(int totalOrders, List<eccore.Order> orders) {
     if (orders.isEmpty) return 0.0;
     final deliveredOrders =
-        orders.where((o) => o.status == OrderStatus.delivered).toList();
+        orders.where((o) => o.statut == StatutCommande.livree).toList();
     if (deliveredOrders.isEmpty) return 0.0;
 
-    final totalRevenue = deliveredOrders.fold(0.0, (sum, o) => sum + o.total);
+    final totalRevenue = deliveredOrders.fold(0.0, (sum, o) => sum + o.totalAffiche);
     return totalRevenue / deliveredOrders.length;
   }
 
-  Color _getStatusColor(OrderStatus status) {
+  Color _getStatusColor(StatutCommande status) {
     // Mapping sémantique basé sur le ColorScheme (compatible light/dark)
     // Note: méthode non-contextuelle, on retourne une "intention" via palette statique.
     // Les widgets qui l'appellent appliquent généralement .withOpacity(...) etc.
     // Ici on conserve un mapping stable (à refactorer si besoin vers un helper contextuel).
     switch (status) {
-      case OrderStatus.pending:
+      case StatutCommande.enAttente:
         return ModernTheme.warning;
-      case OrderStatus.confirmed:
+      case StatutCommande.confirmee:
         return ModernTheme.info;
-      case OrderStatus.preparing:
+      case StatutCommande.enPreparation:
         return ModernTheme.primaryLight;
-      case OrderStatus.ready:
+      case StatutCommande.prete:
         return ModernTheme.success;
-      case OrderStatus.pickedUp:
+      case StatutCommande.recuperee:
         return ModernTheme.secondary;
-      case OrderStatus.onTheWay:
+      case StatutCommande.enRoute:
         return ModernTheme.primaryDark;
-      case OrderStatus.delivered:
+      case StatutCommande.livree:
         return ModernTheme.success;
-      case OrderStatus.cancelled:
-        return ModernTheme.error;
-      case OrderStatus.refunded:
-        return ModernTheme.textSecondary;
-      case OrderStatus.failed:
+      case StatutCommande.annulee:
         return ModernTheme.error;
     }
   }

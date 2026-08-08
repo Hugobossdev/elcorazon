@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:admin/presentation/commande.dart';
 import 'package:admin/services/app_service.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/utils/price_formatter.dart';
@@ -207,8 +208,8 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
         'id': 'order_${order.id}',
         'title': '📦 Nouvelle commande',
         'message':
-            'Commande #${order.id.substring(0, 8).toUpperCase()} - ${PriceFormatter.format(order.total)}',
-        'time': order.orderTime,
+            'Commande #${order.id.substring(0, 8).toUpperCase()} - ${PriceFormatter.format(order.totalAffiche)}',
+        'time': order.passeeLe,
         'type': 'order',
         'icon': Icons.shopping_cart,
         'color': 'info',

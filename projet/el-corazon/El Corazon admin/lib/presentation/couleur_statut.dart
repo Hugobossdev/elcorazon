@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/ui/ui.dart';
 
 /// La couleur qui signale un statut de commande.
@@ -20,29 +20,25 @@ import 'package:admin/ui/ui.dart';
 /// écrits en dur, aveugles au thème sombre. Les unifier changerait ce que
 /// voient les utilisateurs sur ces deux écrans : c'est une décision de
 /// conception, pas de refactoring, et le plan n'en dit rien.
-Color couleurDeStatut(OrderStatus statut, ColorScheme scheme) {
+Color couleurDeStatut(StatutCommande statut, ColorScheme scheme) {
   final sem = AdminColorTokens.semantic(scheme);
 
   switch (statut) {
-    case OrderStatus.pending:
+    case StatutCommande.enAttente:
       return sem.warning;
-    case OrderStatus.confirmed:
+    case StatutCommande.confirmee:
       return sem.info;
-    case OrderStatus.preparing:
+    case StatutCommande.enPreparation:
       return scheme.tertiary;
-    case OrderStatus.ready:
+    case StatutCommande.prete:
       return sem.success;
-    case OrderStatus.pickedUp:
+    case StatutCommande.recuperee:
       return scheme.secondary;
-    case OrderStatus.onTheWay:
+    case StatutCommande.enRoute:
       return scheme.primary;
-    case OrderStatus.delivered:
+    case StatutCommande.livree:
       return sem.success;
-    case OrderStatus.cancelled:
-      return sem.danger;
-    case OrderStatus.refunded:
-      return scheme.onSurfaceVariant;
-    case OrderStatus.failed:
+    case StatutCommande.annulee:
       return sem.danger;
   }
 }

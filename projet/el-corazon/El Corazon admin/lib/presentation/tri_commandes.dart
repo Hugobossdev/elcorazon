@@ -1,4 +1,5 @@
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
 
 /// Recherche et tri de la liste des commandes.
 ///
@@ -35,35 +36,35 @@ enum TriCommandes {
 ///
 /// La liste d'entrée n'est jamais modifiée : elle appartient au service, et un
 /// tri en place réordonnerait ce que les autres écrans lisent.
-List<Order> commandesAffichees(
-  List<Order> commandes, {
+List<eccore.Order> commandesAffichees(
+  List<eccore.Order> commandes, {
   String recherche = '',
   TriCommandes tri = TriCommandes.dateDecroissante,
 }) {
   final terme = recherche.trim().toLowerCase();
 
   final retenues = terme.isEmpty
-      ? List<Order>.of(commandes)
+      ? List<eccore.Order>.of(commandes)
       : commandes
           .where(
             (commande) =>
                 commande.id.toLowerCase().contains(terme) ||
                 commande.recipientName.toLowerCase().contains(terme) ||
-                commande.deliveryAddress.toLowerCase().contains(terme),
+                commande.adresseComplete.toLowerCase().contains(terme),
           )
           .toList();
 
   switch (tri) {
     case TriCommandes.dateCroissante:
-      retenues.sort((a, b) => a.orderTime.compareTo(b.orderTime));
+      retenues.sort((a, b) => a.passeeLe.compareTo(b.passeeLe));
     case TriCommandes.dateDecroissante:
-      retenues.sort((a, b) => b.orderTime.compareTo(a.orderTime));
+      retenues.sort((a, b) => b.passeeLe.compareTo(a.passeeLe));
     case TriCommandes.totalCroissant:
-      retenues.sort((a, b) => a.total.compareTo(b.total));
+      retenues.sort((a, b) => a.totalAffiche.compareTo(b.totalAffiche));
     case TriCommandes.totalDecroissant:
-      retenues.sort((a, b) => b.total.compareTo(a.total));
+      retenues.sort((a, b) => b.totalAffiche.compareTo(a.totalAffiche));
     case TriCommandes.statut:
-      retenues.sort((a, b) => a.status.index.compareTo(b.status.index));
+      retenues.sort((a, b) => a.statut.index.compareTo(b.statut.index));
   }
 
   return retenues;

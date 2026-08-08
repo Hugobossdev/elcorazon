@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:admin/models/order.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/anciennete_commande.dart';
 import 'package:admin/presentation/chronologie_commande.dart';
 import 'package:admin/utils/price_formatter.dart';
@@ -69,7 +70,7 @@ class _Panneau extends StatelessWidget {
 class DetailsCommande extends StatelessWidget {
   const DetailsCommande({required this.order, super.key});
 
-  final Order order;
+  final eccore.Order order;
 
   /// Le destinataire, ou la référence à défaut.
   ///
@@ -96,13 +97,13 @@ class DetailsCommande extends StatelessWidget {
                   const SizedBox(height: 12),
                   LigneDeDetail(
                     'Adresse:',
-                    order.deliveryAddress,
+                    order.adresseComplete,
                     Icons.location_on,
                   ),
                   const SizedBox(height: 12),
                   LigneDeDetail(
                     'Paiement:',
-                    order.paymentMethod.displayName,
+                    order.moyenPaiement.libelle,
                     Icons.payment,
                   ),
                 ],
@@ -116,19 +117,19 @@ class DetailsCommande extends StatelessWidget {
                 children: [
                   LigneDeDetail(
                     'Sous-total:',
-                    PriceFormatter.format(order.subtotal),
+                    PriceFormatter.format(order.sousTotalAffiche),
                     Icons.receipt,
                   ),
                   const SizedBox(height: 12),
                   LigneDeDetail(
                     'Livraison:',
-                    PriceFormatter.format(order.deliveryFee),
+                    PriceFormatter.format(order.fraisLivraisonAffiches),
                     Icons.local_shipping,
                   ),
                   const SizedBox(height: 12),
                   LigneDeDetail(
                     'Total:',
-                    PriceFormatter.format(order.total),
+                    PriceFormatter.format(order.totalAffiche),
                     Icons.monetization_on,
                     enGras: true,
                   ),
@@ -198,14 +199,14 @@ class LigneDeDetail extends StatelessWidget {
 class ArticlesCommande extends StatelessWidget {
   const ArticlesCommande({required this.order, super.key});
 
-  final Order order;
+  final eccore.Order order;
 
   @override
   Widget build(BuildContext context) {
     return _Panneau(
       titre: 'Articles commandés',
       enfants: [
-        for (final item in order.items) _CarteArticle(item: item),
+        for (final item in order.lines) _CarteArticle(item: item),
       ],
     );
   }
@@ -214,11 +215,11 @@ class ArticlesCommande extends StatelessWidget {
 class _CarteArticle extends StatelessWidget {
   const _CarteArticle({required this.item});
 
-  final OrderItem item;
+  final eccore.OrderLine item;
 
   @override
   Widget build(BuildContext context) {
-    final personnalisations = item.getFormattedCustomizations();
+    final personnalisations = item.personnalisations;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -259,7 +260,7 @@ class _CarteArticle extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      item.name,
+                      item.itemName,
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
                         fontSize: 16,
@@ -270,7 +271,7 @@ class _CarteArticle extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${PriceFormatter.format(item.unitPrice)} × '
+                      '${PriceFormatter.format(item.prixUnitaireAffiche)} × '
                       '${item.quantity}',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.6),
@@ -284,7 +285,7 @@ class _CarteArticle extends StatelessWidget {
               const SizedBox(width: 12),
               Flexible(
                 child: Text(
-                  PriceFormatter.format(item.totalPrice),
+                  PriceFormatter.format(item.prixTotalAffiche),
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 18,
@@ -300,9 +301,9 @@ class _CarteArticle extends StatelessWidget {
             const SizedBox(height: 12),
             _Personnalisations(choix: personnalisations),
           ],
-          if (item.notes != null && item.notes!.isNotEmpty) ...[
+          if (item.note != null) ...[
             const SizedBox(height: 8),
-            _NoteArticle(note: item.notes!),
+            _NoteArticle(note: item.note!),
           ],
         ],
       ),
@@ -420,7 +421,7 @@ class _NoteArticle extends StatelessWidget {
 class ChronologieCommande extends StatelessWidget {
   const ChronologieCommande({required this.order, super.key});
 
-  final Order order;
+  final eccore.Order order;
 
   @override
   Widget build(BuildContext context) {
@@ -491,7 +492,9 @@ class _LigneChronologie extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                ancienneteCommande(etape.quand),
+                etape.quand == null
+                    ? '—'
+                    : ancienneteCommande(etape.quand!),
                 style: TextStyle(
                   color: franchie ? _Palette.franchi : _Palette.eteint,
                   fontSize: 13,
