@@ -39,6 +39,48 @@ class OrderLine {
   final String notes;
 }
 
+/// Transition de statut — miroir de `OrderStatusEventSerializer`
+/// (`backend/apps/orders/serializers.py`).
+///
+/// La machine à états l'écrit dans la même transaction que le changement de
+/// statut : l'historique d'une commande est un sous-produit du service, pas
+/// une écriture séparée qu'on peut oublier. C'est la **seule** source
+/// d'horodatage par étape ; une application qui affiche un historique sans
+/// lire ceci l'invente.
+///
+/// Renseigné sur la forme détail (`GET /orders/{id}/`) uniquement.
+class OrderStatusEvent {
+  const OrderStatusEvent({
+    required this.id,
+    required this.fromStatus,
+    required this.toStatus,
+    required this.reason,
+    required this.createdAt,
+  });
+
+  factory OrderStatusEvent.fromJson(Map<String, dynamic> json) {
+    return OrderStatusEvent(
+      id: json['id'] as String,
+      fromStatus: json['from_status'] as String,
+      toStatus: json['to_status'] as String,
+      reason: json['reason'] as String? ?? '',
+      createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+
+  final String id;
+
+  /// Vide sur la toute première transition, la commande n'ayant pas d'avant.
+  final String fromStatus;
+
+  final String toStatus;
+
+  /// Motif saisi par le personnel, ou vide si la transition vient du système.
+  final String reason;
+
+  final DateTime createdAt;
+}
+
 /// Commande — miroir de `OrderSerializer`/`OrderDetailSerializer`
 /// (`backend/apps/orders/serializers.py`). `lines`/`statusEvents` ne sont
 /// renseignés que sur la forme détail (`GET /orders/{id}/`) — vides sur la
@@ -71,6 +113,7 @@ class Order {
     this.cancellationReason = '',
     this.deliveryInstructions = '',
     this.lines = const [],
+    this.statusEvents = const [],
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -103,6 +146,9 @@ class Order {
       deliveryInstructions: json['delivery_instructions'] as String? ?? '',
       lines: (json['lines'] as List<dynamic>? ?? const [])
           .map((line) => OrderLine.fromJson(line as Map<String, dynamic>))
+          .toList(),
+      statusEvents: (json['status_events'] as List<dynamic>? ?? const [])
+          .map((e) => OrderStatusEvent.fromJson(e as Map<String, dynamic>))
           .toList(),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
@@ -137,6 +183,10 @@ class Order {
   final String cancellationReason;
   final String deliveryInstructions;
   final List<OrderLine> lines;
+
+  /// Les transitions qu'a connues la commande, dans l'ordre où le serveur les
+  /// rend. Vide sur la forme liste.
+  final List<OrderStatusEvent> statusEvents;
   final DateTime createdAt;
   final DateTime updatedAt;
 
