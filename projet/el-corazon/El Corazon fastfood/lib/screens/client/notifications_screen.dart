@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
-import 'package:elcora_fast/models/notification_model.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/genre_notification.dart';
 import 'package:elcora_fast/theme.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
-import 'dart:convert';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran des notifications
 class NotificationsScreen extends StatefulWidget {
@@ -20,7 +19,7 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
-  NotificationType? _selectedFilter;
+  GenreNotification? _selectedFilter;
   bool _showUnreadOnly = false;
 
   @override
@@ -162,7 +161,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             height: 40,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              itemCount: NotificationType.values.length + 1,
+              itemCount: GenreNotification.values.length + 1,
               itemBuilder: (context, index) {
                 if (index == 0) {
                   return _buildFilterChip(
@@ -172,10 +171,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                     _selectedFilter == null,
                   );
                 }
-                final type = NotificationType.values[index - 1];
+                final type = GenreNotification.values[index - 1];
                 return _buildFilterChip(
                   type,
-                  _getTypeLabel(type),
+                  type.libelle,
                   _getTypeIcon(type),
                   _selectedFilter == type,
                 );
@@ -188,7 +187,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Widget _buildFilterChip(
-    NotificationType? type,
+    GenreNotification? type,
     String label,
     IconData icon,
     bool isSelected,
@@ -243,35 +242,16 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           return const Center(child: CircularProgressIndicator());
         }
 
-        // Convertir PushNotification en NotificationModel
-        final pushNotifications = unreadOnly
+        // L'écran lisait ces notifications au travers de deux traductions
+        // successives, dont la seconde remplaçait l'identifiant du serveur par
+        // un `hashCode` avant de le ranger à côté sous un autre nom.
+        var notifications = unreadOnly
             ? notificationService.getUnreadNotifications()
             : notificationService.notifications;
 
-        final filteredPushNotifications = pushNotifications.where((pn) {
-          // Ignorer les notifications sans ID valide (UUID)
-          return _isValidUuid(pn.id);
-        }).toList();
-
-        List<NotificationModel> notifications =
-            filteredPushNotifications.map((pn) {
-          return NotificationModel(
-            id: pn.id.hashCode,
-            title: pn.title,
-            body: pn.body,
-            type: _mapNotificationType(pn.type.name),
-            priority: NotificationPriority.normal,
-            payload: pn.data.toString(),
-            createdAt: pn.timestamp,
-            isRead: pn.isRead,
-            backendId: pn.id,
-          );
-        }).toList();
-
-        // Appliquer les filtres
         if (_selectedFilter != null) {
           notifications =
-              notifications.where((n) => n.type == _selectedFilter).toList();
+              notifications.where((n) => n.genre == _selectedFilter).toList();
         }
 
         if (_showUnreadOnly && !unreadOnly) {
@@ -310,7 +290,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Widget _buildNotificationCard(
-    NotificationModel notification,
+    eccore.AppNotification notification,
     NotificationDatabaseService service,
   ) {
     return Padding(
@@ -322,12 +302,12 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: _getTypeColor(notification.type).withValues(alpha: 0.1),
+              color: _getTypeColor(notification.genre).withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
-              _getTypeIcon(notification.type),
-              color: _getTypeColor(notification.type),
+              _getTypeIcon(notification.genre),
+              color: _getTypeColor(notification.genre),
               size: 24,
             ),
           ),
@@ -412,10 +392,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           ),
           onTap: () {
             if (!notification.isRead) {
-              final backendId = notification.backendId;
-              if (backendId != null && _isValidUuid(backendId)) {
-                service.markAsRead(backendId);
-              }
+              service.markAsRead(notification.id);
             }
             _navigateBasedOnNotification(notification);
           },
@@ -459,23 +436,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     );
   }
 
-  NotificationType _mapNotificationType(String type) {
-    switch (type.toLowerCase()) {
-      case 'order':
-      case 'orderstatus':
-        return NotificationType.order;
-      case 'promotion':
-        return NotificationType.promotion;
-      case 'system':
-        return NotificationType.system;
-      case 'delivery':
-        return NotificationType.delivery;
-      case 'general':
-        return NotificationType.general;
-      default:
-        return NotificationType.general;
-    }
-  }
 
   void _handleMenuAction(String action) {
     final service =
@@ -496,73 +456,44 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   void _handleNotificationAction(
     String action,
-    NotificationModel notification,
+    eccore.AppNotification notification,
     NotificationDatabaseService service,
   ) {
     switch (action) {
       case 'mark_read':
-        final backendId = notification.backendId;
-        if (backendId != null && _isValidUuid(backendId)) {
-          service.markAsRead(backendId);
-        }
+        service.markAsRead(notification.id);
         break;
     }
   }
 
-  String _getTypeLabel(NotificationType type) {
-    switch (type) {
-      case NotificationType.general:
-        return 'Général';
-      case NotificationType.order:
-        return 'Commande';
-      case NotificationType.delivery:
-        return 'Livraison';
-      case NotificationType.promotion:
-        return 'Promotion';
-      case NotificationType.reminder:
-        return 'Rappel';
-      case NotificationType.reward:
-        return 'Récompense';
-      case NotificationType.system:
-        return 'Système';
-    }
-  }
 
-  IconData _getTypeIcon(NotificationType type) {
+  IconData _getTypeIcon(GenreNotification type) {
     switch (type) {
-      case NotificationType.general:
-        return Icons.notifications;
-      case NotificationType.order:
+      case GenreNotification.commande:
         return Icons.shopping_bag;
-      case NotificationType.delivery:
+      case GenreNotification.livraison:
         return Icons.delivery_dining;
-      case NotificationType.promotion:
+      case GenreNotification.paiement:
+        return Icons.payment;
+      case GenreNotification.compte:
+        return Icons.person;
+      case GenreNotification.promotion:
         return Icons.local_offer;
-      case NotificationType.reminder:
-        return Icons.alarm;
-      case NotificationType.reward:
-        return Icons.stars;
-      case NotificationType.system:
-        return Icons.settings;
     }
   }
 
-  Color _getTypeColor(NotificationType type) {
+  Color _getTypeColor(GenreNotification type) {
     switch (type) {
-      case NotificationType.general:
-        return Colors.blue;
-      case NotificationType.order:
+      case GenreNotification.commande:
         return Colors.green;
-      case NotificationType.delivery:
+      case GenreNotification.livraison:
         return Colors.orange;
-      case NotificationType.promotion:
-        return Colors.purple;
-      case NotificationType.reminder:
-        return Colors.amber;
-      case NotificationType.reward:
-        return Colors.pink;
-      case NotificationType.system:
+      case GenreNotification.paiement:
+        return Colors.blue;
+      case GenreNotification.compte:
         return Colors.grey;
+      case GenreNotification.promotion:
+        return Colors.purple;
     }
   }
 
@@ -581,97 +512,29 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     }
   }
 
-  bool _isValidUuid(String value) {
-    final uuidRegex = RegExp(
-      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
-    );
-    return value.isNotEmpty && uuidRegex.hasMatch(value);
-  }
+  /// Ouvre l'écran que la notification désigne.
+  ///
+  /// Deux choses empechaient cette navigation d'aboutir, et aucune ne se
+  /// voyait : la charge utile arrivait ici sous forme de `Map.toString()`, que
+  /// `jsonDecode` refusait à chaque fois ; et la clé cherchée était `orderId`
+  /// la ou le serveur ecrit `order`. Elle lit maintenant `data` directement.
+  void _navigateBasedOnNotification(eccore.AppNotification notification) {
+    final commande = notification.commandeVisee;
 
-  /// Navigue vers la page appropriée selon le type et le payload de la notification
-  void _navigateBasedOnNotification(NotificationModel notification) {
-    try {
-      // Parser le payload si disponible
-      Map<String, dynamic>? payloadData;
-      if (notification.payload != null && notification.payload!.isNotEmpty) {
-        try {
-          payloadData = jsonDecode(notification.payload!);
-        } catch (e) {
-          // Si le payload n'est pas du JSON, essayer de l'interpréter comme une Map
-          Journal.trace('Notification payload parsing error: $e');
-        }
-      }
-
-      // Navigation basée sur le type de notification
-      switch (notification.type) {
-        case NotificationType.order:
-          // Naviguer vers les détails de la commande si orderId est disponible
-          final orderId = payloadData?['orderId'] as String?;
-          if (orderId != null && orderId.isNotEmpty) {
-            Navigator.of(context).pushNamed(
-              AppRouter.deliveryTracking,
-              arguments: {'orderId': orderId},
-            );
-          } else {
-            // Sinon, naviguer vers la liste des commandes
-            Navigator.of(context).pushNamed(AppRouter.orders);
-          }
-          break;
-
-        case NotificationType.delivery:
-          // Naviguer vers le suivi de livraison
-          final orderId = payloadData?['orderId'] as String?;
-          if (orderId != null && orderId.isNotEmpty) {
-            Navigator.of(context).pushNamed(
-              AppRouter.deliveryTracking,
-              arguments: {'orderId': orderId},
-            );
-          } else {
-            Navigator.of(context).pushNamed(AppRouter.orders);
-          }
-          break;
-
-        case NotificationType.promotion:
-          // Naviguer vers les codes promo ou le menu
-          final promoCode = payloadData?['promoCode'] as String?;
-          if (promoCode != null && promoCode.isNotEmpty) {
-            Navigator.of(context).pushNamed(
-              AppRouter.promoCodes,
-              arguments: {
-                'orderAmount': 0.0,
-                'onPromoCodeApplied': (_, __) {},
-              },
-            );
-          } else {
-            Navigator.of(context).pushNamed(AppRouter.menu);
-          }
-          break;
-
-        case NotificationType.reward:
-          // Naviguer vers les récompenses
-          Navigator.of(context).pushNamed(AppRouter.rewards);
-          break;
-
-        case NotificationType.reminder:
-          // Naviguer vers les commandes si orderId est disponible
-          final orderId = payloadData?['orderId'] as String?;
-          if (orderId != null && orderId.isNotEmpty) {
-            Navigator.of(context).pushNamed(
-              AppRouter.deliveryTracking,
-              arguments: {'orderId': orderId},
-            );
-          } else {
-            Navigator.of(context).pushNamed(AppRouter.orders);
-          }
-          break;
-
-        case NotificationType.general:
-        case NotificationType.system:
-          // Pour les notifications générales, ne rien faire ou rester sur la page
-          break;
-      }
-    } catch (e) {
-      Journal.trace('Error navigating from notification: $e');
+    switch (notification.genre) {
+      case GenreNotification.commande:
+      case GenreNotification.livraison:
+        Navigator.of(context).pushNamed(
+          commande == null ? AppRouter.orders : AppRouter.deliveryTracking,
+          arguments: commande == null ? null : {'orderId': commande},
+        );
+      case GenreNotification.promotion:
+        Navigator.of(context).pushNamed(AppRouter.menu);
+      case GenreNotification.paiement:
+      case GenreNotification.compte:
+        // Rien à ouvrir : ces notifications se lisent, elles ne menent pas
+        // ailleurs.
+        break;
     }
   }
 }

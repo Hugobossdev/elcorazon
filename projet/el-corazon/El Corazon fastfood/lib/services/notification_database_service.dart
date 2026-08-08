@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:elcora_fast/repositories/django_notification_repository.dart';
-import 'package:elcora_fast/services/push_notification_service.dart';
+import 'package:elcora_fast/main.dart' show apiClient;
+import 'package:elcora_fast/presentation/genre_notification.dart';
 
 /// Historique des notifications, contre le backend Django (Phase 6).
 ///
@@ -20,15 +20,16 @@ class NotificationDatabaseService extends ChangeNotifier {
   factory NotificationDatabaseService() => _instance;
   NotificationDatabaseService._internal();
 
-  final DjangoNotificationRepository _repository = DjangoNotificationRepository();
+  final eccore.NotificationRepository _repository =
+      eccore.NotificationRepository(apiClient: apiClient);
 
-  List<PushNotification> _notifications = [];
+  List<eccore.AppNotification> _notifications = [];
   int _unreadCount = 0;
   bool _isLoading = false;
 
   final StreamController<int> _unreadCountController = StreamController<int>.broadcast();
 
-  List<PushNotification> get notifications => List.unmodifiable(_notifications);
+  List<eccore.AppNotification> get notifications => List.unmodifiable(_notifications);
   int get unreadCount => _unreadCount;
   bool get isLoading => _isLoading;
   Stream<int> get unreadCountStream => _unreadCountController.stream;
@@ -90,24 +91,24 @@ class NotificationDatabaseService extends ChangeNotifier {
     }
   }
 
-  List<PushNotification> getNotificationsByType(NotificationType type) {
-    return _notifications.where((n) => n.type == type).toList();
+  List<eccore.AppNotification> parGenre(GenreNotification genre) {
+    return _notifications.where((n) => n.genre == genre).toList();
   }
 
-  List<PushNotification> getUnreadNotifications() {
+  List<eccore.AppNotification> getUnreadNotifications() {
     return _notifications.where((n) => !n.isRead).toList();
   }
 
-  List<PushNotification> getNotificationsByPeriod({
+  List<eccore.AppNotification> getNotificationsByPeriod({
     required DateTime start,
     required DateTime end,
   }) {
     return _notifications
-        .where((n) => n.timestamp.isAfter(start) && n.timestamp.isBefore(end))
+        .where((n) => n.createdAt.isAfter(start) && n.createdAt.isBefore(end))
         .toList();
   }
 
-  List<PushNotification> searchNotifications(String query) {
+  List<eccore.AppNotification> searchNotifications(String query) {
     final lowercaseQuery = query.toLowerCase();
     return _notifications.where((n) {
       return n.title.toLowerCase().contains(lowercaseQuery) ||
@@ -122,24 +123,17 @@ class NotificationDatabaseService extends ChangeNotifier {
       'read': _notifications.where((n) => n.isRead).length,
     };
 
-    for (final type in NotificationType.values) {
-      stats[type.name] = _notifications.where((n) => n.type == type).length;
+    for (final genre in GenreNotification.values) {
+      stats[genre.name] = _notifications.where((n) => n.genre == genre).length;
     }
 
     return stats;
   }
 
-  PushNotification _asRead(PushNotification notification) {
-    return PushNotification(
-      id: notification.id,
-      title: notification.title,
-      body: notification.body,
-      data: notification.data,
-      type: notification.type,
-      timestamp: notification.timestamp,
-      isRead: true,
-    );
-  }
+  /// Le socle sait se marquer lu — inutile de recopier tous les champs pour
+  /// n'en changer qu'un, et l'heure de lecture arrive avec.
+  eccore.AppNotification _asRead(eccore.AppNotification notification) =>
+      notification.asRead(DateTime.now());
 
   /// Recompte sur l'état en mémoire — utilisé après un marquage, dont on
   /// connaît l'effet exact, plutôt que de refaire un aller-retour.
