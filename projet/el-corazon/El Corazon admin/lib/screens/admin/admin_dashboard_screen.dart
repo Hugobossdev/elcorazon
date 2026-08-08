@@ -6,7 +6,6 @@ import 'package:admin/services/app_service.dart';
 import 'package:admin/services/analytics_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/models/order.dart';
-import 'package:admin/models/menu_models.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/core/utils/admin_helpers.dart';
 import 'package:admin/widgets/modern/enhanced_stat_card.dart';
@@ -114,7 +113,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     BuildContext context,
     eccore.User? user,
     List<Order> orders,
-    List<MenuItem> menuItems,
+    List<eccore.ManagedMenuItem> menuItems,
     DriverManagementService driverService,
   ) {
     final todayRevenue = _calculateTodayRevenue(orders);

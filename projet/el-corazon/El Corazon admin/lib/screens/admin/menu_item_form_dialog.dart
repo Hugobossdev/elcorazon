@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:admin/models/menu_models.dart';
+import 'package:admin/presentation/regimes_article.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/services/menu_service.dart';
 import 'package:admin/services/category_management_service.dart';
@@ -12,7 +12,7 @@ import 'package:admin/screens/admin/option_groups_editor.dart'; // Import du nou
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class MenuItemFormDialog extends StatefulWidget {
-  final MenuItem? menuItem;
+  final eccore.ManagedMenuItem? menuItem;
   final VoidCallback? onSaved;
 
   const MenuItemFormDialog({
@@ -39,7 +39,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
   bool _isVegetarian = false;
   bool _isVegan = false;
   bool _isUploadingImage = false;
-  List<MenuOptionGroup> _optionGroups = [];
+  List<eccore.OptionGroup> _optionGroups = [];
 
   /// Photo choisie pour un article **qui n'existe pas encore** — envoyée juste
   /// après sa création, faute d'identifiant à qui l'attacher avant.
@@ -188,14 +188,14 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
     final item = widget.menuItem;
     _nameController = TextEditingController(text: item?.name);
     _descriptionController = TextEditingController(text: item?.description);
-    _priceController = TextEditingController(text: item?.basePrice.toString());
-    _imageUrlController = TextEditingController(text: item?.imageUrl);
+    _priceController = TextEditingController(text: item?.price.toMajorUnits().toStringAsFixed(0));
+    _imageUrlController = TextEditingController(text: item?.image);
 
     _selectedCategoryId = item?.categoryId;
     _isAvailable = item?.isAvailable ?? true;
     _isPopular = item?.isPopular ?? false;
-    _isVegetarian = item?.isVegetarian ?? false;
-    _isVegan = item?.isVegan ?? false;
+    _isVegetarian = item?.estVegetarien ?? false;
+    _isVegan = item?.estVegan ?? false;
     _optionGroups = item?.optionGroups ?? [];
   }
 
@@ -501,37 +501,35 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
         if (!isExistingGroup) {
           // Nouveau groupe : créer le groupe et ses options
           // Ne pas inclure l'ID temporaire lors de la création
-          final groupToCreate = MenuOptionGroup(
-            id: '', // Laisser la DB générer l'ID
+          final createdGroup = await menuService.createOptionGroup(
             menuItemId: menuItemId,
             name: newGroup.name,
-            description: newGroup.description,
-            minSelection: newGroup.minSelection,
-            maxSelection: newGroup.maxSelection,
-            isRequired: newGroup.isRequired,
+            minSelect: newGroup.minSelect,
+            maxSelect: newGroup.maxSelect,
             sortOrder: newGroup.sortOrder,
           );
-          final createdGroup = await menuService.createOptionGroup(groupToCreate);
           
           if (createdGroup != null && newGroup.options.isNotEmpty) {
             for (final option in newGroup.options) {
               // Créer toutes les options comme nouvelles (ignorer les IDs temporaires)
-              final optionToCreate = MenuOption(
-                id: '', // Laisser la DB générer l'ID
+              await menuService.createOption(
                 groupId: createdGroup.id,
                 name: option.name,
-                description: option.description,
-                priceModifier: option.priceModifier,
+                priceModifier: option.priceDelta.toMajorUnits(),
                 isAvailable: option.isAvailable,
                 sortOrder: option.sortOrder,
               );
-              await menuService.createOption(optionToCreate);
             }
           }
         } else {
           // Groupe existant : mettre à jour le groupe
-          final groupToUpdate = newGroup.copyWith(menuItemId: menuItemId);
-          await menuService.updateOptionGroup(groupToUpdate);
+          await menuService.updateOptionGroup(
+            groupId: newGroup.id,
+            name: newGroup.name,
+            minSelect: newGroup.minSelect,
+            maxSelect: newGroup.maxSelect,
+            sortOrder: newGroup.sortOrder,
+          );
           
           // Synchroniser les options du groupe
           final existingGroup = existingGroupMap[newGroup.id];
@@ -557,19 +555,22 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
             for (final newOption in newGroup.options) {
               if (!existingOptionMap.containsKey(newOption.id)) {
                 // Nouvelle option : créer (ignorer l'ID temporaire)
-                final optionToCreate = MenuOption(
-                  id: '', // Laisser la DB générer l'ID
+                await menuService.createOption(
                   groupId: newGroup.id,
                   name: newOption.name,
-                  description: newOption.description,
-                  priceModifier: newOption.priceModifier,
+                  priceModifier: newOption.priceDelta.toMajorUnits(),
                   isAvailable: newOption.isAvailable,
                   sortOrder: newOption.sortOrder,
                 );
-                await menuService.createOption(optionToCreate);
               } else {
                 // Option existante : mettre à jour
-                await menuService.updateOption(newOption.copyWith(groupId: newGroup.id));
+                await menuService.updateOption(
+                  optionId: newOption.id,
+                  name: newOption.name,
+                  priceModifier: newOption.priceDelta.toMajorUnits(),
+                  isAvailable: newOption.isAvailable,
+                  sortOrder: newOption.sortOrder,
+                );
               }
             }
           }
@@ -589,26 +590,25 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
     try {
       final menuService = Provider.of<MenuService>(context, listen: false);
 
-      // Créer l'objet MenuItem de base
-      final newItem = MenuItem(
-        id: widget.menuItem?.id ?? '',
-        categoryId: _selectedCategoryId!,
-        name: _nameController.text,
-        description: _descriptionController.text,
-        basePrice: double.parse(_priceController.text),
-        imageUrl: _imageUrlController.text,
-        isAvailable: _isAvailable,
-        isPopular: _isPopular,
-        isVegetarian: _isVegetarian,
-        isVegan: _isVegan,
-        optionGroups: _optionGroups, // Les optionGroups sont sauvegardés séparément dans _saveMenuItem
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
+      // Les régimes partent entiers : la liste est ouverte côté serveur, et
+      // n'y renvoyer que les deux cases de cet écran effacerait les autres.
+      final regimes = Regimes.regimesAvec(
+        widget.menuItem?.dietaryTags ?? const [],
+        vegetarien: _isVegetarian,
+        vegan: _isVegan,
       );
 
       bool success;
       if (widget.menuItem == null) {
-        final createdItem = await menuService.createMenuItem(newItem);
+        final createdItem = await menuService.createMenuItem(
+          categoryId: _selectedCategoryId!,
+          name: _nameController.text,
+          basePrice: double.parse(_priceController.text),
+          dietaryTags: regimes,
+          description: _descriptionController.text,
+          isAvailable: _isAvailable,
+          isPopular: _isPopular,
+        );
         success = createdItem != null;
 
         // La photo choisie avant que l'article existe : c'est maintenant
@@ -622,43 +622,45 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           );
         }
 
-        // Sauvegarder les optionGroups séparément car Supabase ne gère pas les nested writes complexes
+        // Les groupes d'options s'écrivent après l'article : ils lui
+        // appartiennent, et le contrat ne les accepte pas imbriqués.
         if (success && _optionGroups.isNotEmpty) {
           for (final group in _optionGroups) {
-            // Créer le groupe sans l'ID temporaire (laisser la DB générer l'ID)
-            final groupToCreate = MenuOptionGroup(
-              id: '', // Laisser la DB générer l'ID
+            final createdGroup = await menuService.createOptionGroup(
               menuItemId: createdItem.id,
               name: group.name,
-              description: group.description,
-              minSelection: group.minSelection,
-              maxSelection: group.maxSelection,
-              isRequired: group.isRequired,
+              minSelect: group.minSelect,
+              maxSelect: group.maxSelect,
               sortOrder: group.sortOrder,
             );
-            final createdGroup = await menuService.createOptionGroup(groupToCreate);
-            if (createdGroup != null && group.options.isNotEmpty) {
+            if (createdGroup != null) {
               for (final option in group.options) {
-                // Créer l'option sans l'ID temporaire (laisser la DB générer l'ID)
-                final optionToCreate = MenuOption(
-                  id: '', // Laisser la DB générer l'ID
+                await menuService.createOption(
                   groupId: createdGroup.id,
                   name: option.name,
-                  description: option.description,
-                  priceModifier: option.priceModifier,
+                  priceModifier: option.priceDelta.toMajorUnits(),
                   isAvailable: option.isAvailable,
                   sortOrder: option.sortOrder,
                 );
-                await menuService.createOption(optionToCreate);
               }
             }
           }
         }
       } else {
-        success = await menuService.updateMenuItem(newItem);
-        // Synchroniser les optionGroups séparément car Supabase ne gère pas les nested writes complexes
+        final existant = widget.menuItem!;
+        success = await menuService.updateMenuItem(
+          menuItemId: existant.id,
+          categoryId: _selectedCategoryId!,
+          name: _nameController.text,
+          basePrice: double.parse(_priceController.text),
+          dietaryTags: regimes,
+          description: _descriptionController.text,
+          isAvailable: _isAvailable,
+          isPopular: _isPopular,
+          sortOrder: existant.sortOrder,
+        );
         if (success) {
-          await _syncOptionGroups(menuService, newItem.id);
+          await _syncOptionGroups(menuService, existant.id);
         }
       }
 

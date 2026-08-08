@@ -1,7 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:admin/models/menu_models.dart';
 import 'package:admin/models/order.dart';
 import 'package:admin/repositories/django_order_mapper.dart';
 import 'package:admin/services/admin_auth_service.dart';
@@ -38,7 +37,7 @@ class AppService extends ChangeNotifier {
   static const String _restaurantSlug = 'el-corazon-lome';
 
   bool _isInitialized = false;
-  List<MenuItem> _menuItems = [];
+  List<eccore.ManagedMenuItem> _menuItems = [];
   List<eccore.ManagedCategory> _categories = [];
   List<Order> _allOrders = [];
   String? _error;
@@ -46,7 +45,7 @@ class AppService extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   String? get error => _error;
 
-  List<MenuItem> get menuItems => _menuItems;
+  List<eccore.ManagedMenuItem> get menuItems => _menuItems;
   List<eccore.ManagedCategory> get categoriesList => _categories;
   List<Order> get allOrders => _allOrders;
 
@@ -86,7 +85,7 @@ class AppService extends ChangeNotifier {
       _allOrders = commandes.map(DjangoOrderMapper.toLocal).toList();
 
       final articles = await _catalog.menuItems(restaurantSlug: _restaurantSlug);
-      _menuItems = articles.map(_toLocalMenuItem).toList();
+      _menuItems = articles;
 
       final categories = await _catalog.categories(
         restaurantSlug: _restaurantSlug,
@@ -106,22 +105,5 @@ class AppService extends ChangeNotifier {
 
   // --------------------------------------------------------- traduction
 
-  MenuItem _toLocalMenuItem(eccore.ManagedMenuItem remote) {
-    return MenuItem(
-      id: remote.id,
-      categoryId: remote.categoryId,
-      name: remote.name,
-      description: remote.description.isEmpty ? null : remote.description,
-      basePrice: remote.price.toMajorUnits(),
-      imageUrl: remote.image,
-      isPopular: remote.isPopular,
-      isVegetarian: remote.dietaryTags.contains('vegetarian'),
-      isVegan: remote.dietaryTags.contains('vegan'),
-      isAvailable: remote.isAvailable,
-      sortOrder: remote.sortOrder,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
-  }
 
 }

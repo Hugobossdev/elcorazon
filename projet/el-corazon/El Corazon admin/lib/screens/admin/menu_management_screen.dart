@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:admin/models/menu_models.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/services/menu_service.dart';
 import 'package:admin/services/category_management_service.dart';
 import 'package:admin/widgets/modern/modern_button.dart';
@@ -26,7 +26,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
   String _searchQuery = '';
   String? _selectedCategoryId;
   MenuFilter _currentFilter = MenuFilter.all;
-  Future<List<MenuItem>>? _menuItemsFuture;
+  Future<List<eccore.ManagedMenuItem>>? _menuItemsFuture;
 
   @override
   void initState() {
@@ -271,7 +271,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                         () => _loadAllMenuItems(menuService, categoryService),
                       );
 
-                      return FutureBuilder<List<MenuItem>>(
+                      return FutureBuilder<List<eccore.ManagedMenuItem>>(
                         future: _menuItemsFuture,
                         builder: (context, snapshot) {
                           if (snapshot.connectionState ==
@@ -334,7 +334,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
     );
   }
 
-  Future<List<MenuItem>> _loadAllMenuItems(
+  Future<List<eccore.ManagedMenuItem>> _loadAllMenuItems(
     MenuService menuService,
     CategoryManagementService categoryService,
   ) async {
@@ -346,7 +346,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
     return items;
   }
 
-  List<MenuItem> _filterMenuItems(List<MenuItem> items) {
+  List<eccore.ManagedMenuItem> _filterMenuItems(List<eccore.ManagedMenuItem> items) {
     var filtered = items;
 
     // Filtre par statut (Tab)
@@ -376,8 +376,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
           .where(
             (item) =>
                 item.name.toLowerCase().contains(_searchQuery) ||
-                (item.description?.toLowerCase().contains(_searchQuery) ??
-                    false),
+                item.description.toLowerCase().contains(_searchQuery),
           )
           .toList();
     }
@@ -387,7 +386,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
 
   Widget _buildMenuItemCard(
     BuildContext context,
-    MenuItem item,
+    eccore.ManagedMenuItem item,
     MenuService menuService,
     CategoryManagementService categoryService,
   ) {
@@ -416,9 +415,9 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  item.imageUrl != null && item.imageUrl!.isNotEmpty
+                  item.image != null && item.image!.isNotEmpty
                       ? Image.network(
-                          item.imageUrl!,
+                          item.image!,
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => Container(
                             color: scheme.surfaceContainerHighest,
@@ -535,7 +534,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          formatPrice(item.basePrice),
+                          formatPrice(item.price.toMajorUnits()),
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: theme.colorScheme.primary,
                             fontWeight: FontWeight.w800,
@@ -633,7 +632,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
     );
   }
 
-  void _showMenuItemForm(BuildContext context, MenuItem? item) {
+  void _showMenuItemForm(BuildContext context, eccore.ManagedMenuItem? item) {
     DialogHelper.showSafeDialog(
       context: context,
       builder: (context) => MenuItemFormDialog(
@@ -647,17 +646,28 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
 
   Future<void> _toggleAvailability(
     BuildContext context,
-    MenuItem item,
+    eccore.ManagedMenuItem item,
     MenuService menuService,
   ) async {
-    final updatedItem = item.copyWith(isAvailable: !item.isAvailable);
-    await menuService.updateMenuItem(updatedItem);
+    // Tous les champs repartent, régimes compris : le serveur remplace la
+    // ressource, il ne fusionne pas. N'en renvoyer qu'une partie l'effacerait.
+    await menuService.updateMenuItem(
+      menuItemId: item.id,
+      categoryId: item.categoryId,
+      name: item.name,
+      basePrice: item.price.toMajorUnits(),
+      dietaryTags: item.dietaryTags,
+      description: item.description,
+      isAvailable: !item.isAvailable,
+      isPopular: item.isPopular,
+      sortOrder: item.sortOrder,
+    );
     unawaited(_refreshMenu());
   }
 
   Future<void> _deleteMenuItem(
     BuildContext context,
-    MenuItem item,
+    eccore.ManagedMenuItem item,
     MenuService menuService,
   ) async {
     final confirmed = await showDialog<bool>(

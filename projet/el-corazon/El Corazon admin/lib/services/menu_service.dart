@@ -2,7 +2,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
-import 'package:admin/models/menu_models.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Écriture du catalogue — `/api/v1/catalog/manage/*` (Phase 6).
@@ -102,7 +101,10 @@ class MenuService extends ChangeNotifier {
     }
   }
 
-  Future<List<MenuItem>> getMenuItems(String? categoryId, {bool notify = true}) async {
+  Future<List<eccore.ManagedMenuItem>> getMenuItems(
+    String? categoryId, {
+    bool notify = true,
+  }) async {
     if (notify) {
       _isLoading = true;
       _error = null;
@@ -114,7 +116,7 @@ class MenuService extends ChangeNotifier {
         restaurantSlug: _restaurantSlug,
         categoryId: categoryId,
       );
-      return remote.map(_toLocalItem).toList();
+      return remote;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('MenuService: chargement impossible — ${e.code}');
@@ -128,10 +130,9 @@ class MenuService extends ChangeNotifier {
   }
 
   /// Un article avec ses groupes d'options — le détail les porte.
-  Future<MenuItem?> getMenuItem(String id) async {
+  Future<eccore.ManagedMenuItem?> getMenuItem(String id) async {
     try {
-      final remote = await _catalog.getMenuItem(id);
-      return _toLocalItem(remote);
+      return _catalog.getMenuItem(id);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('MenuService: article introuvable — ${e.code}');
@@ -139,21 +140,29 @@ class MenuService extends ChangeNotifier {
     }
   }
 
-  Future<MenuItem?> createMenuItem(MenuItem item) async {
+  Future<eccore.ManagedMenuItem?> createMenuItem({
+    required String categoryId,
+    required String name,
+    required double basePrice,
+    required List<String> dietaryTags,
+    String description = '',
+    bool isAvailable = true,
+    bool isPopular = false,
+    int sortOrder = 0,
+  }) async {
     try {
-      final created = await _catalog.createMenuItem(
+      return await _catalog.createMenuItem(
         restaurantSlug: _restaurantSlug,
-        categoryId: item.categoryId,
-        name: item.name,
-        slug: _slugifier(item.name),
-        price: _versMoney(item.basePrice),
-        description: item.description ?? '',
-        isAvailable: item.isAvailable,
-        isPopular: item.isPopular,
-        dietaryTags: _regimes(item),
-        sortOrder: item.sortOrder,
+        categoryId: categoryId,
+        name: name,
+        slug: _slugifier(name),
+        price: _versMoney(basePrice),
+        description: description,
+        isAvailable: isAvailable,
+        isPopular: isPopular,
+        dietaryTags: dietaryTags,
+        sortOrder: sortOrder,
       );
-      return _toLocalItem(created);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('MenuService: création refusée — ${e.code}');
@@ -161,18 +170,30 @@ class MenuService extends ChangeNotifier {
     }
   }
 
-  Future<bool> updateMenuItem(MenuItem item) async {
+  /// [dietaryTags] part **entière** : la liste est ouverte côté serveur, et n'y
+  /// renvoyer que les deux régimes de l'écran effacerait les autres.
+  Future<bool> updateMenuItem({
+    required String menuItemId,
+    required String categoryId,
+    required String name,
+    required double basePrice,
+    required List<String> dietaryTags,
+    String description = '',
+    bool isAvailable = true,
+    bool isPopular = false,
+    int sortOrder = 0,
+  }) async {
     try {
       await _catalog.updateMenuItem(
-        menuItemId: item.id,
-        name: item.name,
-        description: item.description ?? '',
-        categoryId: item.categoryId,
-        price: _versMoney(item.basePrice),
-        isAvailable: item.isAvailable,
-        isPopular: item.isPopular,
-        dietaryTags: _regimes(item),
-        sortOrder: item.sortOrder,
+        menuItemId: menuItemId,
+        name: name,
+        description: description,
+        categoryId: categoryId,
+        price: _versMoney(basePrice),
+        isAvailable: isAvailable,
+        isPopular: isPopular,
+        dietaryTags: dietaryTags,
+        sortOrder: sortOrder,
       );
       return true;
     } on eccore.ApiException catch (e) {
@@ -197,16 +218,21 @@ class MenuService extends ChangeNotifier {
 
   // ------------------------------------------------------ groupes d'options
 
-  Future<MenuOptionGroup?> createOptionGroup(MenuOptionGroup group) async {
+  Future<eccore.OptionGroup?> createOptionGroup({
+    required String menuItemId,
+    required String name,
+    int minSelect = 0,
+    int maxSelect = 1,
+    int sortOrder = 0,
+  }) async {
     try {
-      final created = await _catalog.createOptionGroup(
-        menuItemId: group.menuItemId,
-        name: group.name,
-        minSelect: group.minSelection,
-        maxSelect: group.maxSelection,
-        sortOrder: group.sortOrder,
+      return await _catalog.createOptionGroup(
+        menuItemId: menuItemId,
+        name: name,
+        minSelect: minSelect,
+        maxSelect: maxSelect,
+        sortOrder: sortOrder,
       );
-      return _toLocalGroup(created, group.menuItemId);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('MenuService: création de groupe refusée — ${e.code}');
@@ -214,14 +240,20 @@ class MenuService extends ChangeNotifier {
     }
   }
 
-  Future<bool> updateOptionGroup(MenuOptionGroup group) async {
+  Future<bool> updateOptionGroup({
+    required String groupId,
+    required String name,
+    int minSelect = 0,
+    int maxSelect = 1,
+    int sortOrder = 0,
+  }) async {
     try {
       await _catalog.updateOptionGroup(
-        groupId: group.id,
-        name: group.name,
-        minSelect: group.minSelection,
-        maxSelect: group.maxSelection,
-        sortOrder: group.sortOrder,
+        groupId: groupId,
+        name: name,
+        minSelect: minSelect,
+        maxSelect: maxSelect,
+        sortOrder: sortOrder,
       );
       return true;
     } on eccore.ApiException catch (e) {
@@ -242,16 +274,21 @@ class MenuService extends ChangeNotifier {
 
   // -------------------------------------------------------------- options
 
-  Future<MenuOption?> createOption(MenuOption option) async {
+  Future<eccore.Option?> createOption({
+    required String groupId,
+    required String name,
+    required double priceModifier,
+    bool isAvailable = true,
+    int sortOrder = 0,
+  }) async {
     try {
-      final created = await _catalog.createOption(
-        groupId: option.groupId,
-        name: option.name,
-        priceDelta: _versMoney(option.priceModifier),
-        isAvailable: option.isAvailable,
-        sortOrder: option.sortOrder,
+      return await _catalog.createOption(
+        groupId: groupId,
+        name: name,
+        priceDelta: _versMoney(priceModifier),
+        isAvailable: isAvailable,
+        sortOrder: sortOrder,
       );
-      return _toLocalOption(created, option.groupId);
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace("MenuService: création d'option refusée — ${e.code}");
@@ -259,14 +296,20 @@ class MenuService extends ChangeNotifier {
     }
   }
 
-  Future<bool> updateOption(MenuOption option) async {
+  Future<bool> updateOption({
+    required String optionId,
+    required String name,
+    required double priceModifier,
+    bool isAvailable = true,
+    int sortOrder = 0,
+  }) async {
     try {
       await _catalog.updateOption(
-        optionId: option.id,
-        name: option.name,
-        priceDelta: _versMoney(option.priceModifier),
-        isAvailable: option.isAvailable,
-        sortOrder: option.sortOrder,
+        optionId: optionId,
+        name: name,
+        priceDelta: _versMoney(priceModifier),
+        isAvailable: isAvailable,
+        sortOrder: sortOrder,
       );
       return true;
     } on eccore.ApiException catch (e) {
@@ -287,58 +330,9 @@ class MenuService extends ChangeNotifier {
 
   // ------------------------------------------------------------- traduction
 
-  MenuItem _toLocalItem(eccore.ManagedMenuItem remote) {
-    return MenuItem(
-      id: remote.id,
-      categoryId: remote.categoryId,
-      name: remote.name,
-      description: remote.description.isEmpty ? null : remote.description,
-      basePrice: remote.price.toMajorUnits(),
-      imageUrl: remote.image,
-      isPopular: remote.isPopular,
-      // Le contrat ne porte pas deux booléens de régime : ils sont dérivés de
-      // `dietary_tags`, une liste ouverte que l'exploitation enrichit sans
-      // migration.
-      isVegetarian: remote.dietaryTags.contains('vegetarian'),
-      isVegan: remote.dietaryTags.contains('vegan'),
-      isAvailable: remote.isAvailable,
-      sortOrder: remote.sortOrder,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-      optionGroups: [
-        for (final groupe in remote.optionGroups) _toLocalGroup(groupe, remote.id),
-      ],
-    );
-  }
 
-  MenuOptionGroup _toLocalGroup(eccore.OptionGroup remote, String menuItemId) {
-    return MenuOptionGroup(
-      id: remote.id,
-      menuItemId: menuItemId,
-      name: remote.name,
-      minSelection: remote.minSelect,
-      maxSelection: remote.maxSelect,
-      isRequired: remote.isRequired,
-      sortOrder: remote.sortOrder,
-      options: [for (final option in remote.options) _toLocalOption(option, remote.id)],
-    );
-  }
 
-  MenuOption _toLocalOption(eccore.Option remote, String groupId) {
-    return MenuOption(
-      id: remote.id,
-      groupId: groupId,
-      name: remote.name,
-      priceModifier: remote.priceDelta.toMajorUnits(),
-      isAvailable: remote.isAvailable,
-      sortOrder: remote.sortOrder,
-    );
-  }
 
-  List<String> _regimes(MenuItem item) => [
-        if (item.isVegetarian) 'vegetarian',
-        if (item.isVegan) 'vegan',
-      ];
 
   /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
   eccore.Money _versMoney(double montant) =>

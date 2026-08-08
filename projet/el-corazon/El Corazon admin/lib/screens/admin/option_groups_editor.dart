@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:admin/models/menu_models.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/widgets/custom_button.dart';
 
 class OptionGroupsEditor extends StatefulWidget {
   final String menuItemId;
-  final List<MenuOptionGroup> initialGroups;
-  final Function(List<MenuOptionGroup>) onChanged;
+  final List<eccore.OptionGroup> initialGroups;
+  final Function(List<eccore.OptionGroup>) onChanged;
 
   const OptionGroupsEditor({
     required this.menuItemId, required this.initialGroups, required this.onChanged, super.key,
@@ -17,7 +17,7 @@ class OptionGroupsEditor extends StatefulWidget {
 }
 
 class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
-  late List<MenuOptionGroup> _groups;
+  late List<eccore.OptionGroup> _groups;
 
   @override
   void initState() {
@@ -75,7 +75,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   subtitle: Text(
-                    '${group.isRequired ? "Obligatoire" : "Facultatif"} • ${group.minSelection}-${group.maxSelection} choix',
+                    '${group.isRequired ? "Obligatoire" : "Facultatif"} • ${group.minSelect}-${group.maxSelect} choix',
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -110,9 +110,9 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  if (option.priceModifier > 0)
+                                  if (option.priceDelta.amountMinor > 0)
                                     Text(
-                                      '+${option.priceModifier.toStringAsFixed(0)} FCFA',
+                                      '+${option.priceDelta.format()}',
                                       style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                           color: Colors.green,),
@@ -207,15 +207,16 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
               onPressed: () {
                 if (nameController.text.isEmpty) return;
                 setState(() {
-                  _groups.add(MenuOptionGroup(
-                    id: DateTime.now()
-                        .millisecondsSinceEpoch
-                        .toString(), // Temp ID
-                    menuItemId: widget.menuItemId,
+                  _groups.add(eccore.OptionGroup(
+                    // Provisoire : le serveur attribue l'identifiant définitif
+                    // à l'enregistrement.
+                    id: DateTime.now().millisecondsSinceEpoch.toString(),
                     name: nameController.text,
-                    minSelection: int.parse(minController.text),
-                    maxSelection: int.parse(maxController.text),
+                    minSelect: int.parse(minController.text),
+                    maxSelect: int.parse(maxController.text),
                     isRequired: isRequired,
+                    sortOrder: _groups.length,
+                    options: const [],
                   ),);
                 });
                 widget.onChanged(_groups);
@@ -233,9 +234,9 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
     final group = _groups[index];
     final nameController = TextEditingController(text: group.name);
     final minController =
-        TextEditingController(text: group.minSelection.toString());
+        TextEditingController(text: group.minSelect.toString());
     final maxController =
-        TextEditingController(text: group.maxSelection.toString());
+        TextEditingController(text: group.maxSelect.toString());
     bool isRequired = group.isRequired;
 
     DialogHelper.showSafeDialog(
@@ -287,8 +288,8 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                 this.setState(() {
                   _groups[index] = group.copyWith(
                     name: nameController.text,
-                    minSelection: int.parse(minController.text),
-                    maxSelection: int.parse(maxController.text),
+                    minSelect: int.parse(minController.text),
+                    maxSelect: int.parse(maxController.text),
                     isRequired: isRequired,
                   );
                 });
@@ -344,12 +345,19 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
               if (nameController.text.isEmpty) return;
               setState(() {
                 final group = _groups[groupIndex];
-                final newOptions = List<MenuOption>.from(group.options)
-                  ..add(MenuOption(
+                final newOptions = List<eccore.Option>.from(group.options)
+                  ..add(eccore.Option(
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
-                    groupId: group.id,
                     name: nameController.text,
-                    priceModifier: double.parse(priceController.text),
+                    // Les francs CFA n'ont pas de décimale : l'unité mineure
+                    // est le franc.
+                    priceDelta: eccore.Money(
+                      amountMinor: double.parse(priceController.text).round(),
+                      currency: 'XOF',
+                    ),
+                    isDefault: false,
+                    isAvailable: true,
+                    sortOrder: group.options.length,
                   ),);
                 _groups[groupIndex] = group.copyWith(options: newOptions);
               });
@@ -368,7 +376,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
     final option = group.options[optionIndex];
     final nameController = TextEditingController(text: option.name);
     final priceController =
-        TextEditingController(text: option.priceModifier.toString());
+        TextEditingController(text: option.priceDelta.toString());
 
     DialogHelper.showSafeDialog(
       context: context,
@@ -397,10 +405,13 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
           FilledButton(
             onPressed: () {
               setState(() {
-                final newOptions = List<MenuOption>.from(group.options);
+                final newOptions = List<eccore.Option>.from(group.options);
                 newOptions[optionIndex] = option.copyWith(
                   name: nameController.text,
-                  priceModifier: double.parse(priceController.text),
+                  priceDelta: eccore.Money(
+                    amountMinor: double.parse(priceController.text).round(),
+                    currency: 'XOF',
+                  ),
                 );
                 _groups[groupIndex] = group.copyWith(options: newOptions);
               });
@@ -417,7 +428,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
   void _deleteOption(int groupIndex, int optionIndex) {
     setState(() {
       final group = _groups[groupIndex];
-      final newOptions = List<MenuOption>.from(group.options)
+      final newOptions = List<eccore.Option>.from(group.options)
         ..removeAt(optionIndex);
       _groups[groupIndex] = group.copyWith(options: newOptions);
     });

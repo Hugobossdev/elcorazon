@@ -1,7 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:admin/models/menu_models.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Option de la bibliothèque réutilisable — miroir local d'`OptionTemplate`.
@@ -111,14 +110,14 @@ class CustomizationManagementService extends ChangeNotifier {
 
   List<CustomizationOptionModel> _options = [];
   List<MenuItemCustomization> _menuItemCustomizations = [];
-  List<MenuItem> _menuItems = [];
+  List<eccore.ManagedMenuItem> _menuItems = [];
   bool _isLoading = false;
   String? _error;
 
   List<CustomizationOptionModel> get options => _options;
   List<MenuItemCustomization> get menuItemCustomizations =>
       _menuItemCustomizations;
-  List<MenuItem> get menuItems => _menuItems;
+  List<eccore.ManagedMenuItem> get menuItems => _menuItems;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
@@ -138,7 +137,7 @@ class CustomizationManagementService extends ChangeNotifier {
       _options = modeles.map(_toLocalOption).toList();
 
       final articles = await _catalog.menuItems(restaurantSlug: _restaurantSlug);
-      _menuItems = articles.map(_toLocalMenuItem).toList();
+      _menuItems = articles;
 
       // Les options réellement posées sur les articles sont celles de leurs
       // groupes : il n'y a plus de table d'association à lire, et la forme
@@ -334,23 +333,6 @@ class CustomizationManagementService extends ChangeNotifier {
     );
   }
 
-  MenuItem _toLocalMenuItem(eccore.ManagedMenuItem remote) {
-    return MenuItem(
-      id: remote.id,
-      categoryId: remote.categoryId,
-      name: remote.name,
-      description: remote.description.isEmpty ? null : remote.description,
-      basePrice: remote.price.toMajorUnits(),
-      imageUrl: remote.image,
-      isPopular: remote.isPopular,
-      isVegetarian: remote.dietaryTags.contains('vegetarian'),
-      isVegan: remote.dietaryTags.contains('vegan'),
-      isAvailable: remote.isAvailable,
-      sortOrder: remote.sortOrder,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
-  }
 
   /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
   eccore.Money _versMoney(double montant) =>

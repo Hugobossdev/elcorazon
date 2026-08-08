@@ -124,6 +124,27 @@ class OptionGroup {
   final bool isRequired;
   final int sortOrder;
   final List<Option> options;
+
+  /// Copie modifiée — l'écran d'exploitation compose un groupe avant de
+  /// l'enregistrer, et le serveur reste seul à décider des identifiants.
+  OptionGroup copyWith({
+    String? name,
+    int? minSelect,
+    int? maxSelect,
+    bool? isRequired,
+    int? sortOrder,
+    List<Option>? options,
+  }) {
+    return OptionGroup(
+      id: id,
+      name: name ?? this.name,
+      minSelect: minSelect ?? this.minSelect,
+      maxSelect: maxSelect ?? this.maxSelect,
+      isRequired: isRequired ?? this.isRequired,
+      sortOrder: sortOrder ?? this.sortOrder,
+      options: options ?? this.options,
+    );
+  }
 }
 
 /// Option d'un groupe — miroir de `OptionSerializer`.
@@ -158,4 +179,22 @@ class Option {
   final bool isDefault;
   final bool isAvailable;
   final int sortOrder;
+
+  /// Copie modifiée — voir [OptionGroup.copyWith].
+  Option copyWith({
+    String? name,
+    Money? priceDelta,
+    bool? isDefault,
+    bool? isAvailable,
+    int? sortOrder,
+  }) {
+    return Option(
+      id: id,
+      name: name ?? this.name,
+      priceDelta: priceDelta ?? this.priceDelta,
+      isDefault: isDefault ?? this.isDefault,
+      isAvailable: isAvailable ?? this.isAvailable,
+      sortOrder: sortOrder ?? this.sortOrder,
+    );
+  }
 }
