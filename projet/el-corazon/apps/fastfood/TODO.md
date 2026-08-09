@@ -114,7 +114,7 @@ Liste des tâches futures et bugs connus pour le projet.
 
 - [ ] Optimiser le bundle size (vérifier les dépendances inutilisées)
 - [ ] Implémenter lazy loading pour les écrans
-- [ ] Optimiser les requêtes Supabase (indexes, queries)
+- [ ] Réduire les allers-retours à l'API (pagination, champs demandés)
 - [ ] Profiling et correction des memory leaks
 
 ### Code Quality

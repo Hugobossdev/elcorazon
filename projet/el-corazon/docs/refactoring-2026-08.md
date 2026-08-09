@@ -569,6 +569,46 @@ d'écrans dont un seul existe. Il vit désormais en
 
 Plus aucun `.md` ne subsiste dans les `lib/` des quatre paquets.
 
+#### 6.2 — La prose des racines d'applications, que le plan ne couvrait pas
+
+Le lot ne visait que `lib/services/`. Le reste de la documentation des
+applications était dans le même état, et deux points relevaient de la sécurité,
+pas du rangement :
+
+- **`apps/fastfood/SETUP.md` demandait de placer les quatre clés marchandes
+  PayDunya dans le `.env` de l'application**, et de créer un compte Supabase.
+  C'est exactement la fuite que le commit `99c09e3` avait fermée dans le README
+  racine — ce fichier-là avait été manqué ;
+- **`apps/fastfood/.env.example`**, le gabarit que les développeurs copient,
+  les redemandait. Vérification faite, `PAYDUNYA_MASTER_KEY`,
+  `PAYDUNYA_PRIVATE_KEY`, `PAYDUNYA_TOKEN`, `SUPABASE_URL` et
+  `SUPABASE_ANON_KEY` ne sont lus **par aucune ligne de code**. Le gabarit ne
+  liste plus que ce que le code lit ;
+- **`apps/fastfood/README.md` conseillait** : « Toutes les clés sensibles
+  doivent être dans `.env` ». L'inverse est vrai. Le `.env` ignoré par Git
+  protège le dépôt, pas le produit : une clé qui y figure part dans le binaire.
+
+Trois documents décrivaient une application qui n'existe plus :
+
+- **`apps/admin/README.md`** — 480 lignes sur `supabase_flutter`,
+  `SupabaseRealtimeService` et `lib/supabase/supabase_config.dart`, tous
+  disparus. Archivé en `docs/README-supabase.md`, remplacé par un README
+  vérifié. Il était par ailleurs **illisible** : 19 octets d'UTF-16 collés en
+  fin de fichier UTF-8 le faisaient passer pour un binaire aux yeux de `grep` ;
+- **`apps/admin/ADMIN_ROLE_FIX.md`** — 217 lignes sur un bug d'une classe
+  `AdminRole` qui n'existe plus. Déplacé en `docs/` ;
+- **`apps/dely/README.md`** — le gabarit Flutter d'origine, jamais rempli.
+  Remplacé.
+
+`NOTIFICATIONS_PUSH_REALTIME.md` et `APPELS_AGORA.md` rejoignent
+`apps/fastfood/docs/` : aucun document ne les référençait, et ils décrivent des
+mécaniques bâties sur Supabase. `ARCHITECTURE.md` reste à la racine — trois
+documents y renvoient — et a été corrigé en place.
+
+Hors archives assumées, plus une seule mention de Supabase ne subsiste dans la
+documentation des applications, sauf le `CHANGELOG.md` de `fastfood`, où elle
+est à sa place : un changelog consigne ce qui a eu lieu.
+
 #### 6.2 — Les trois répertoires sont sous `apps/`
 
 Point 4 fait. Le plan demandait de retirer les espaces sans dire vers quoi ;

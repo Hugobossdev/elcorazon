@@ -15,28 +15,34 @@ Guide pas à pas pour installer et configurer le projet El Corazon Fastfood.
 - **Git**  
   Pour cloner le dépôt
 
-- **Node.js** >= 16.x (optionnel)  
-  Si vous souhaitez lancer le backend localement
+- **Docker** et **Docker Compose**  
+  Pour lancer le backend Django localement (`backend/docker-compose.yml`)
 
-### Comptes et Clés API nécessaires
+### Clés nécessaires à l'application
 
-1. **Supabase** (Base de données et authentification)
-   - Créer un compte sur [supabase.com](https://supabase.com)
-   - Créer un nouveau projet
-   - Récupérer l'URL et la clé anonyme
+L'application ne détient **aucun secret de prestataire**. Elle ne parle qu'au
+backend Django, qui encaisse, signe les jetons d'appel et garde les clés
+marchandes. Une clé placée dans le `.env` d'une application est une clé dans le
+binaire distribué.
 
-2. **Google Maps API** (Cartographie et géolocalisation)
-   - Console Google Cloud: [console.cloud.google.com](https://console.cloud.google.com)
-   - Activer "Maps SDK for Android" et "Maps SDK for iOS"
-   - Créer une clé API
+Deux clés seulement, toutes deux clientes et publiques par nature :
 
-3. **PayDunya** (Paiements Mobile Money)
-   - Créer un compte sur [paydunya.com](https://paydunya.com)
-   - Mode Sandbox pour les tests
+1. **Google Maps** (cartographie et géolocalisation)
+   - Console Google Cloud : [console.cloud.google.com](https://console.cloud.google.com)
+   - Activer « Maps SDK for Android » et « Maps SDK for iOS »
+   - Créer une clé, puis **la restreindre** par empreinte d'application et par
+     API — sans quoi elle est utilisable par n'importe qui
 
-4. **Agora** (Appels audio/vidéo - optionnel)
+2. **Agora** (appels audio/vidéo, facultatif)
    - Compte sur [agora.io](https://www.agora.io)
-   - Créer un projet et récupérer l'App ID
+   - Récupérer l'**App ID** seulement. Le certificat reste côté backend
+     (`AGORA_APP_CERTIFICATE`) : c'est lui qui signe les jetons d'appel
+
+À quoi s'ajoute la configuration cliente **Firebase** pour les notifications
+push, elle aussi publique — elle identifie le projet, elle n'y donne pas accès.
+
+Ce qui se configure **côté backend, jamais ici** : les quatre clés marchandes
+PayDunya, le certificat Agora, et les accès à la base.
 
 ## 🚀 Installation
 
@@ -44,7 +50,7 @@ Guide pas à pas pour installer et configurer le projet El Corazon Fastfood.
 
 ```bash
 git clone <repository-url>
-cd "El Corazon fastfood"
+cd projet/el-corazon/apps/fastfood
 ```
 
 ### 2. Installer les dépendances Flutter
@@ -64,25 +70,27 @@ cp .env.example .env
 Éditer le fichier `.env` avec vos vraies clés :
 
 ```env
-# Supabase
-SUPABASE_URL=https://votre-projet.supabase.co
-SUPABASE_ANON_KEY=votre-cle-anon
+# Backend Django. 10.0.2.2 est l'alias de l'émulateur Android vers l'hôte ;
+# utiliser localhost pour iOS, desktop et web.
+API_BASE_URL=http://10.0.2.2:8000/api/v1
 
-# Backend
-BACKEND_URL=https://backend-qbwe.onrender.com
+ENVIRONMENT=development
 
-# PayDunya (Mode test au départ)
-PAYDUNYA_MASTER_KEY=votre-master-key
-PAYDUNYA_PRIVATE_KEY=votre-private-key
-PAYDUNYA_TOKEN=votre-token
-PAYDUNYA_IS_SANDBOX=true
-
-# Google Maps
 GOOGLE_MAPS_API_KEY=votre-cle-google-maps
 
-# Agora (optionnel)
+# App ID seulement — le certificat vit côté backend.
 AGORA_APP_ID=votre-app-id
+
+# Configuration cliente Firebase, publique par nature.
+FIREBASE_API_KEY=
+FIREBASE_AUTH_DOMAIN=
+FIREBASE_PROJECT_ID=
+FIREBASE_STORAGE_BUCKET=
+FIREBASE_MESSAGING_SENDER_ID=
+FIREBASE_APP_ID=
 ```
+
+`.env.example` fait foi : il ne liste que ce que le code lit.
 
 ### 4. Configuration Android
 
@@ -127,39 +135,21 @@ cd ..
 
 La configuration est déjà en place, vérifiez le fichier.
 
-## 🗄️ Configuration Supabase
+## 🗄️ Lancer le backend
 
-### 1. Créer les tables
+L'application ne crée aucune table et ne parle à aucune base : tout passe par
+l'API Django. Le backend se lance avec Docker, depuis `backend/` :
 
-Exécutez les scripts SQL suivants dans l'éditeur SQL de Supabase :
-
-**Tables principales** :
-- `users` - Utilisateurs (clients, livreurs, admin)
-- `menu_categories` - Catégories du menu
-- `menu_items` - Plats du menu
-- `orders` - Commandes
-- `order_items` - Éléments de commande
-- `addresses` - Adresses de livraison
-- `driver_ratings` - Évaluations des livreurs
-- `dish_ratings` - Évaluations des plats
-
-> **💡 Conseil** : Les schémas SQL peuvent être trouvés dans le backend ou générés depuis le dashboard Supabase.
-
-### 2. Configurer les règles RLS (Row Level Security)
-
-Activer RLS sur toutes les tables sensibles :
-
-```sql
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
--- etc.
+```bash
+cd ../../backend
+docker compose up
 ```
 
-### 3. Configurer l'authentification
+Le schéma est celui des migrations Django (`backend/apps/*/migrations/`), et
+l'authentification est celle du backend — il n'y a ni règles RLS ni fournisseur
+tiers à configurer côté application.
 
-Dans Supabase Dashboard → Authentication :
-- Activer "Email" provider
-- Configurer les redirections
+📖 Détail : [docs/architecture/03-modele-de-donnees.md](../../docs/architecture/03-modele-de-donnees.md)
 
 ## 🔧 Lancer l'application
 
@@ -195,7 +185,7 @@ flutter build ios --release
 
 1. **Lancer l'app** : L'écran de splash doit apparaître
 2. **Créer un compte** : Tester l'inscription
-3. **Voir le menu** : Les plats doivent se charger depuis Supabase
+3. **Voir le menu** : les plats doivent se charger depuis l'API
 4. **Tester une commande** : Ajouter au panier
 5. **Voir la map** : Google Maps doit s'afficher
 
@@ -235,16 +225,20 @@ flutter logs
 - Exécuter `flutter clean`
 - Vérifier que `minSdkVersion` est >= 21 dans `android/app/build.gradle`
 
-### Supabase "Unauthorized"
-- Vérifier que la clé ANON est correcte
-- Vérifier les règles RLS dans Supabase
+### L'API répond « 401 Unauthorized »
+- Vérifier que le backend tourne (`docker compose ps` dans `backend/`)
+- Vérifier `API_BASE_URL` : sur émulateur Android, l'hôte est `10.0.2.2`, pas
+  `localhost`
+- Se reconnecter : le jeton d'accès a une durée de vie courte, et son
+  renouvellement échoue si le jeton de rafraîchissement a expiré
 
 ## 📞 Support
 
 Pour toute question d'installation, consulter :
-- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) - Guide développeur
-- [API_GUIDE.md](API_GUIDE.md) - Documentation des APIs
-- Issues GitHub du projet
+- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — guide développeur
+- [docs/architecture/](../../docs/architecture/) — architecture, modèle de
+  données, plan de migration et ADR
+- l'API elle-même : le backend publie son schéma OpenAPI sur `/api/v1/schema/`
 
 ---
 

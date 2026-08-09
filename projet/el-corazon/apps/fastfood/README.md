@@ -65,29 +65,45 @@ lib/
 ## 🔧 Technologies
 
 - **Framework**: Flutter 3.x
-- **Backend**: Supabase + Node.js (Render.com)
-- **Paiement**: PayDunya
-- **Maps**: Google Maps API
-- **Appels**: Agora RTC
-- **State Management**: Provider
-- **Temps réel**: WebSocket + Supabase Realtime
+- **Backend** : Django REST + PostgreSQL/PostGIS (`backend/`)
+- **Socle partagé** : `packages/elcorazon_core` — entités et dépôts communs aux
+  trois applications
+- **Paiement** : PayDunya, **côté serveur** — l'application demande une adresse
+  de règlement et lit l'état que le webhook signé a écrit
+- **Maps** : Google Maps API
+- **Appels** : Agora RTC, jetons signés par le backend
+- **État** : Provider dans l'application, Riverpod pour la session du socle
+- **Temps réel** : WebSocket Django Channels
 
 ## 📚 Documentation
 
-- [SETUP.md](SETUP.md) - Installation et configuration
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Architecture du projet
-- [API_GUIDE.md](API_GUIDE.md) - Documentation des APIs
-- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) - Guide développeur
-- [TODO.md](TODO.md) - Tâches et bugs connus
-- [CHANGELOG.md](CHANGELOG.md) - Historique des versions
+- [SETUP.md](SETUP.md) — installation et configuration
+- [ARCHITECTURE.md](ARCHITECTURE.md) — architecture du projet
+- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — guide développeur
+- [TODO.md](TODO.md) — tâches et bugs connus
+- [CHANGELOG.md](CHANGELOG.md) — historique des versions
+- [docs/](docs/) — notes techniques datées, dont certaines décrivent du code
+  qui n'existe plus ; l'index dit lesquelles
+- [../../docs/architecture/](../../docs/architecture/) — architecture générale,
+  modèle de données, plan de migration et ADR
+
+L'API se documente elle-même : le backend publie son schéma OpenAPI sur
+`/api/v1/schema/`.
 
 ## 🔐 Sécurité
 
-⚠️ **IMPORTANT** : Ne committez JAMAIS le fichier `.env` avec vos vraies clés API !
+**Aucune clé sensible ne va dans `.env`.** C'est l'inverse de ce que cette
+section disait, et l'inverse est faux : une clé placée dans le `.env` d'une
+application est une clé dans le binaire distribué, lisible par quiconque le
+décompresse. Le `.env` ignoré par Git protège le dépôt, pas le produit.
 
-- Utilisez `.env.example` comme template
-- Toutes les clés sensibles doivent être dans `.env`
-- Le `.env` est ignoré par Git
+- `.env` ne contient que des valeurs **publiques par nature** : l'adresse de
+  l'API, l'App ID Agora, la configuration cliente Firebase, et la clé Google
+  Maps — cette dernière à restreindre par empreinte d'application et par API
+  dans la console Google, faute de quoi elle est utilisable par n'importe qui
+- Les **secrets** restent côté backend : les quatre clés marchandes PayDunya,
+  le certificat Agora qui signe les jetons d'appel, les accès à la base
+- `.env.example` fait foi : il ne liste que ce que le code lit
 
 ## 🤝 Contribution
 

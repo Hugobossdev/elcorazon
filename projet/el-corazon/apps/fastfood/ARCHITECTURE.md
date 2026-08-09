@@ -100,7 +100,7 @@ MultiProvider(
 └──────┬───────┘
        │
        ├─→ AuthService          (Authentification)
-       ├─→ DatabaseService      (CRUD Supabase)
+       ├─→ dépôts du socle      (elcorazon_core → API Django)
        ├─→ CartService          (Gestion panier)
        ├─→ LocationService      (GPS)
        └─→ SocketService        (Temps réel)
@@ -153,21 +153,19 @@ Endpoints WebSocket:
 - Events: driver_location, order_status_changed
 ```
 
-### Supabase
+### Backend Django
 
 ```
-Tables principales:
-- users
-- menu_categories, menu_items
-- orders, order_items
-- addresses
-- driver_ratings, dish_ratings
+L'application ne parle qu'à l'API — jamais à une base.
 
-Features utilisées:
-- Authentication (Email/Password)
-- Realtime (Subscriptions)
-- Storage (Images)
-- RLS (Row Level Security)
+Ce que le serveur établit, et qu'elle ne recalcule pas :
+- prix, remises, frais de livraison
+- statuts de commande (machines à états)
+- éligibilité d'un livreur, points de fidélité
+- remboursements
+
+Entités partagées : packages/elcorazon_core/lib/src/
+Chacune annonce en commentaire le sérialiseur qu'elle reflète.
 ```
 
 ### PayDunya
@@ -200,9 +198,9 @@ SDK: google_maps_flutter
 
 ### Authentification
 
-- JWT tokens via Supabase Auth
-- Refresh tokens automatiques
-- Sessions persistantes
+- Jetons JWT émis par le backend Django
+- Rafraîchissement automatique par l'`ApiClient` du socle
+- Session persistante, portée par `sessionProvider` (Riverpod)
 
 ### Permissions
 
@@ -299,9 +297,9 @@ class SocketService {
 
 - **Singleton** : Services (AppService, DatabaseService)
 - **Provider** : State management
-- **Repository** : Abstraction données (DatabaseService)
+- **Repository** : dépôts du socle, un par domaine
 - **Factory** : Création modèles (Model.fromMap())
-- **Observer** : Temps réel (Supabase subscriptions)
+- **Observer** : temps réel (WebSocket Django Channels)
 
 ## 🚀 Performance
 

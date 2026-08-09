@@ -1,5 +1,12 @@
 # Architecture du back-office
 
+> Voir aussi [ADMIN_ROLE_FIX.md](ADMIN_ROLE_FIX.md), déplacé ici depuis la
+> racine de l'application : 217 lignes décrivant la correction d'un bug de
+> lecture des permissions dans une classe `AdminRole` **qui n'existe plus**.
+> Les permissions viennent aujourd'hui du serveur en `List<String>` (ADR-005),
+> et `AdminAuthService.can()` les interroge. Le document est conservé comme
+> témoignage, il ne décrit plus rien de vivant.
+
 Ce document vivait dans `lib/core/architecture/README.md` — un répertoire de
 sources qui ne contenait que lui. Le lot 6 du refactoring l'en sort.
 

@@ -357,7 +357,7 @@ service.doSomething();
 ## 📝 Documentation du code
 
 ```dart
-/// Récupère les données utilisateur depuis Supabase.
+/// Récupère les données utilisateur depuis l'API.
 ///
 /// Retourne un [User] si trouvé, sinon `null`.
 /// Lance une [DatabaseException] en cas d'erreur réseau.
