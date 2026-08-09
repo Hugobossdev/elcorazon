@@ -4,7 +4,6 @@ import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/app_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
 import 'package:elcora_fast/models/cart_item.dart' as cart_item;
-import 'package:elcora_fast/models/promo_code.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
@@ -331,17 +330,16 @@ class CartScreen extends StatelessWidget {
     BuildContext context,
     CartService cartService,
   ) async {
+    // Sans adresse : seule la remise nous intéresse ici, et elle porte sur le
+    // sous-total. Les frais du devis ne sont pas lus.
     await context.navigateToPromoCodes(
-      cartService.subtotal + cartService.deliveryFee,
-      (PromoCode promoCode, double discount) {
-        cartService.applyPromoDiscount(
-          code: promoCode.code,
-          discount: discount,
-        );
+      null,
+      (String code, double discount) {
+        cartService.applyPromoDiscount(code: code, discount: discount);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Code ${promoCode.code} appliqué: -${discount.toStringAsFixed(0)} FCFA',
+              'Code $code appliqué: -${discount.toStringAsFixed(0)} FCFA',
             ),
             backgroundColor: AppColors.success,
           ),

@@ -1,17 +1,44 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:elcora_fast/services/promo_code_service.dart';
-import 'package:elcora_fast/services/app_service.dart';
-import 'package:elcora_fast/models/promo_code.dart';
+
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'package:elcora_fast/services/delivery_fee_service.dart';
+import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/custom_text_field.dart';
 
+/// Saisie d'un code promotionnel.
+///
+/// Pourquoi cet écran a été refait
+/// -------------------------------
+///
+/// Il interrogeait `PromoCodeService`, qui ne connaissait que le **stockage
+/// local** de l'appareil. Cette liste n'était alimentée que par
+/// `createPromoCode`, que rien n'appelait : elle était donc toujours vide, et
+/// tout code saisi ressortait « Code promo non trouvé ». Aucun client ne
+/// pouvait appliquer une remise.
+///
+/// C'est le serveur qui évalue un code — `POST /orders/preview/` relit le
+/// panier, applique le barème de zone et le code, et rend le devis. La remise
+/// n'est plus calculée ici : une remise calculée côté client est une promesse
+/// que la facture peut démentir.
+///
+/// La barre de recherche et la liste des codes disponibles ont disparu avec le
+/// service : il n'existe **aucun** point d'entrée client pour lister les
+/// promotions — `/promotions/` est réservé au back-office. Les deux ne
+/// pouvaient rien afficher.
 class PromoCodesScreen extends StatefulWidget {
-  final double orderAmount;
-  final Function(PromoCode, double) onPromoCodeApplied;
-
   const PromoCodesScreen({
-    required this.orderAmount, required this.onPromoCodeApplied, super.key,
+    required this.onPromoCodeApplied,
+    this.addressId,
+    super.key,
   });
+
+  /// Rend le code retenu par le serveur et la remise qu'il accorde.
+  final void Function(String code, double remise) onPromoCodeApplied;
+
+  /// L'adresse choisie, s'il y en a une : le devis en dépend, puisque les
+  /// frais de livraison entrent dans le total.
+  final String? addressId;
 
   @override
   State<PromoCodesScreen> createState() => _PromoCodesScreenState();
@@ -19,7 +46,10 @@ class PromoCodesScreen extends StatefulWidget {
 
 class _PromoCodesScreenState extends State<PromoCodesScreen> {
   final _codeController = TextEditingController();
-  String _searchQuery = '';
+  final DeliveryFeeService _devis = DeliveryFeeService();
+
+  bool _enCours = false;
+  String? _erreur;
 
   @override
   void dispose() {
@@ -27,363 +57,119 @@ class _PromoCodesScreenState extends State<PromoCodesScreen> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Codes Promo'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-      ),
-      body: Consumer<PromoCodeService>(
-        builder: (context, promoCodeService, child) {
-          final promoCodes = _searchQuery.isEmpty
-              ? promoCodeService.getActivePromoCodes()
-              : promoCodeService.searchPromoCodes(_searchQuery);
-
-          return Column(
-            children: [
-              // Champ de saisie de code promo
-              Container(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CustomTextField(
-                        controller: _codeController,
-                        label: 'Code promo',
-                        hint: 'Entrez votre code promo',
-                        prefixIcon: Icons.local_offer,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton(
-                      onPressed: _applyPromoCode,
-                      child: const Text('Appliquer'),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Barre de recherche
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TextField(
-                  decoration: InputDecoration(
-                    hintText: 'Rechercher des codes promo...',
-                    prefixIcon: const Icon(Icons.search),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    filled: true,
-                    fillColor: Colors.grey[100],
-                  ),
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
-                  },
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              // Code promo actuel
-              if (promoCodeService.hasActivePromoCode)
-                _buildCurrentPromoCode(promoCodeService.currentPromoCode!),
-
-              // Liste des codes promo disponibles
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: promoCodes.length,
-                  itemBuilder: (context, index) {
-                    final promoCode = promoCodes[index];
-                    return _buildPromoCodeCard(promoCode);
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildCurrentPromoCode(PromoCode promoCode) {
-    final discountAmount = promoCode.calculateDiscount(widget.orderAmount);
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.green.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.green),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.check_circle,
-            color: Colors.green,
-            size: 24,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  promoCode.code,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green,
-                      ),
-                ),
-                Text(
-                  promoCode.description,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                if (discountAmount > 0)
-                  Text(
-                    'Économisez ${discountAmount.toInt()} FCFA',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green,
-                        ),
-                  ),
-              ],
-            ),
-          ),
-          IconButton(
-            onPressed: () {
-              Provider.of<PromoCodeService>(context, listen: false)
-                  .removeCurrentPromoCode();
-            },
-            icon: const Icon(Icons.close),
-            color: Colors.green,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPromoCodeCard(PromoCode promoCode) {
-    final discountAmount = promoCode.calculateDiscount(widget.orderAmount);
-    final isValid =
-        discountAmount > 0 || promoCode.type == PromoCodeType.freeDelivery;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isValid ? Colors.green : Colors.grey[300]!,
-          width: isValid ? 2 : 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ListTile(
-        leading: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: promoCode.type.color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Center(
-            child: Text(
-              promoCode.type.symbol,
-              style: TextStyle(
-                color: promoCode.type.color,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                promoCode.code,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-            if (promoCode.isForNewUsersOnly)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.blue,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text(
-                  'Nouveau',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(promoCode.description),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: promoCode.type.color.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    promoCode.type.displayName,
-                    style: TextStyle(
-                      color: promoCode.type.color,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                if (promoCode.minimumOrderAmount != null) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    'Min: ${promoCode.minimumOrderAmount!.toInt()} FCFA',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey[600],
-                        ),
-                  ),
-                ],
-              ],
-            ),
-            if (isValid && discountAmount > 0)
-              Text(
-                'Économisez ${discountAmount.toInt()} FCFA',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green,
-                    ),
-              ),
-          ],
-        ),
-        trailing: isValid
-            ? ElevatedButton(
-                onPressed: () => _applySpecificPromoCode(promoCode),
-                child: const Text('Appliquer'),
-              )
-            : Text(
-                'Non applicable',
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 12,
-                ),
-              ),
-      ),
-    );
-  }
-
-  Future<void> _applyPromoCode() async {
-    final code = _codeController.text.trim();
+  Future<void> _appliquer() async {
+    final code = _codeController.text.trim().toUpperCase();
     if (code.isEmpty) {
-      _showError('Veuillez entrer un code promo');
+      setState(() => _erreur = 'Entrez un code promo');
       return;
     }
 
-    await _applySpecificPromoCodeByCode(code);
-  }
+    setState(() {
+      _enCours = true;
+      _erreur = null;
+    });
 
-  Future<void> _applySpecificPromoCode(PromoCode promoCode) async {
-    await _applySpecificPromoCodeByCode(promoCode.code);
-  }
-
-  Future<void> _applySpecificPromoCodeByCode(String code) async {
     try {
-      // Récupérer les services depuis Provider
-      final promoCodeService = Provider.of<PromoCodeService>(context, listen: false);
-      final appService = Provider.of<AppService>(context, listen: false);
-      
-      // S'assurer que PromoCodeService est initialisé
-      if (!promoCodeService.isInitialized) {
-        await promoCodeService.initialize();
-      }
-      
-      final currentUser = appService.currentUser;
-      
-      if (currentUser == null) {
-        _showError('Vous devez être connecté pour utiliser un code promo');
-        return;
-      }
-      
-      // Déterminer si l'utilisateur est nouveau (première commande)
-      final isNewUser = appService.orders.isEmpty;
-      
-      final result = await promoCodeService.validateAndApplyPromoCode(
-        code: code,
-        orderAmount: widget.orderAmount,
-        userId: currentUser.id,
-        isNewUser: isNewUser,
+      final quote = await _devis.quoteOrder(
+        addressId: widget.addressId,
+        promoCode: code,
       );
 
-      if (result.isValid && result.promoCode != null) {
-        widget.onPromoCodeApplied(result.promoCode!, result.discountAmount);
-        _showSuccess('Code promo appliqué avec succès !');
-        if (mounted) {
-          Navigator.of(context).pop();
-        }
-      } else {
-        _showError(result.errorMessage ?? 'Code promo non valide');
+      if (!mounted) return;
+
+      // Le serveur rend un code vide quand il l'a refusé. Le distinguer d'une
+      // remise nulle importe : un code périmé doit se voir, pas se taire.
+      if (!quote.hasPromotion) {
+        setState(() {
+          _enCours = false;
+          _erreur = 'Code promo refusé ou expiré';
+        });
+        return;
       }
-    } catch (e) {
-      _showError('Erreur lors de l\'application du code promo');
+
+      widget.onPromoCodeApplied(
+        quote.promotionCode,
+        quote.discount.toMajorUnits(),
+      );
+      Navigator.of(context).pop();
+    } on eccore.ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _enCours = false;
+        _erreur = e.detail;
+      });
     }
   }
 
-  void _showSuccess(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Code promo'),
+        backgroundColor: scheme.primary,
+        foregroundColor: scheme.onPrimary,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            CustomTextField(
+              controller: _codeController,
+              label: 'Code promo',
+              hint: 'Entrez votre code promo',
+              prefixIcon: Icons.local_offer,
+              onChanged: (_) {
+                if (_erreur != null) setState(() => _erreur = null);
+              },
+            ),
+            if (_erreur != null) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.error_outline,
+                    size: 18,
+                    color: AppColors.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _erreur!,
+                      style: const TextStyle(
+                        color: AppColors.error,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _enCours ? null : _appliquer,
+              child: _enCours
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Appliquer'),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'La remise est calculée par nos serveurs au moment de la '
+              'commande : le montant affiché ici est celui qui sera facturé.',
+              style: TextStyle(
+                fontSize: 12,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
     );
-  }
-
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-}
-
-// Extension pour obtenir la couleur du type de code promo
-extension PromoCodeTypeExtension on PromoCodeType {
-  Color get color {
-    switch (this) {
-      case PromoCodeType.percentage:
-        return Colors.blue;
-      case PromoCodeType.fixedAmount:
-        return Colors.green;
-      case PromoCodeType.freeDelivery:
-        return Colors.orange;
-      case PromoCodeType.buyOneGetOne:
-        return Colors.purple;
-    }
   }
 }

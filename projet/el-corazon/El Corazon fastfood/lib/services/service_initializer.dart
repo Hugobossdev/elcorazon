@@ -8,7 +8,6 @@ import 'package:elcora_fast/services/group_cart_service.dart';
 import 'package:elcora_fast/services/voice_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
-import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
@@ -47,8 +46,6 @@ class ServiceInitializer {
       final customizationService =
           Provider.of<CustomizationService>(context, listen: false);
       final groupCartService = Provider.of<GroupCartService>(context, listen: false);
-      final promoCodeService =
-          Provider.of<PromoCodeService>(context, listen: false);
       final offlineSyncService =
           Provider.of<OfflineSyncService>(context, listen: false);
       final pushNotificationService =
@@ -74,7 +71,6 @@ class ServiceInitializer {
       // Services optionnels
       await _initializeOptionalServices(
         groupCartService: groupCartService,
-        promoCodeService: promoCodeService,
         offlineSyncService: offlineSyncService,
         pushNotificationService: pushNotificationService,
         aiRecommendationService: aiRecommendationService,
@@ -139,7 +135,6 @@ class ServiceInitializer {
   /// Initialise les services optionnels
   Future<void> _initializeOptionalServices({
     required GroupCartService groupCartService,
-    required PromoCodeService promoCodeService,
     required OfflineSyncService offlineSyncService,
     required PushNotificationService pushNotificationService,
     required AIRecommendationService aiRecommendationService,
@@ -149,11 +144,6 @@ class ServiceInitializer {
     // Services sociaux et groupes
     await _initializeServiceWithoutContext(
       () => groupCartService.initialize(),
-    );
-
-    // Codes promotionnels
-    await _initializeServiceWithoutContext(
-      () => promoCodeService.initialize(),
     );
 
     // Services de suivi et temps réel (initialisés plus tard avec l'utilisateur)

@@ -5,7 +5,6 @@ import 'package:elcora_fast/widgets/navigation_error_handler.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/models/menu_item.dart';
-import 'package:elcora_fast/models/promo_code.dart';
 import 'package:elcora_fast/models/payment_participant.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
@@ -266,15 +265,15 @@ class NavigationHelper {
   /// Naviguer vers les codes promo
   static Future<void> navigateToPromoCodes(
     BuildContext context,
-    double orderAmount,
-    Function(PromoCode, double) onPromoCodeApplied,
+    String? addressId,
+    void Function(String code, double remise) onPromoCodeApplied,
   ) async {
     try {
       await NavigationService.pushNamedWithArgs(
         context,
         AppRouter.promoCodes,
         arguments: {
-          'orderAmount': orderAmount,
+          'addressId': addressId,
           'onPromoCodeApplied': onPromoCodeApplied,
         },
       );
@@ -504,12 +503,12 @@ extension NavigationHelperExtension on BuildContext {
 
   /// Naviguer vers les codes promo
   Future<void> navigateToPromoCodes(
-    double orderAmount,
-    Function(PromoCode, double) onPromoCodeApplied,
+    String? addressId,
+    void Function(String code, double remise) onPromoCodeApplied,
   ) =>
       NavigationHelper.navigateToPromoCodes(
         this,
-        orderAmount,
+        addressId,
         onPromoCodeApplied,
       );
 

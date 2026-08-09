@@ -29,7 +29,6 @@ import 'package:elcora_fast/screens/client/product_reviews_screen.dart';
 import 'package:elcora_fast/screens/client/support_screen.dart';
 import 'package:elcora_fast/screens/client/advanced_search_screen.dart';
 import 'package:elcora_fast/screens/client/enhanced_orders_screen.dart';
-import 'package:elcora_fast/models/promo_code.dart';
 import 'package:elcora_fast/screens/client/driver_rating_screen.dart';
 import 'package:elcora_fast/screens/client/order_rating_screen.dart';
 import 'package:elcora_fast/models/payment_participant.dart';
@@ -248,10 +247,11 @@ class AppRouter {
       case promoCodes:
         final args = settings.arguments as Map<String, dynamic>?;
         final onPromoCodeApplied =
-            args?['onPromoCodeApplied'] as Function(PromoCode, double)?;
+            args?['onPromoCodeApplied']
+                as void Function(String, double)?;
         return MaterialPageRoute(
           builder: (_) => PromoCodesScreen(
-            orderAmount: args?['orderAmount'] ?? 0.0,
+            addressId: args?['addressId'] as String?,
             onPromoCodeApplied: onPromoCodeApplied ?? (_, __) {},
           ),
           settings: settings,

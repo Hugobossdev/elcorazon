@@ -20,7 +20,6 @@ import 'package:elcora_fast/services/voice_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
-import 'package:elcora_fast/services/promo_code_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
@@ -167,7 +166,6 @@ class ClientApp extends StatelessWidget {
           lazy: true,
         ),
         ChangeNotifierProvider(create: (_) => AddressService(), lazy: true),
-        ChangeNotifierProvider(create: (_) => PromoCodeService(), lazy: true),
         ChangeNotifierProvider(
           create: (_) => AIRecommendationService(),
           lazy: true,
