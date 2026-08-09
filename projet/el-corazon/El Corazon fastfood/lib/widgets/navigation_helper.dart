@@ -3,7 +3,7 @@ import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/widgets/navigation_error_handler.dart';
 import 'package:elcora_fast/models/cart_item.dart';
-import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/payment_participant.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
@@ -412,7 +412,7 @@ class NavigationHelper {
 
 
   /// Retourner à l'accueil
-  static Future<void> goToHome(BuildContext context, User? user) async {
+  static Future<void> goToHome(BuildContext context, eccore.User? user) async {
     try {
       if (user != null) {
         NavigationService.navigateBasedOnRole(context, user);
@@ -554,5 +554,5 @@ extension NavigationHelperExtension on BuildContext {
       NavigationHelper.navigateToEnhancedOrders(this);
 
   /// Retourner à l'accueil
-  Future<void> goToHome(User? user) => NavigationHelper.goToHome(this, user);
+  Future<void> goToHome(eccore.User? user) => NavigationHelper.goToHome(this, user);
 }

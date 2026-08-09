@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/navigation/app_router.dart';
 
 /// Service de navigation centralisé pour gérer la navigation entre les différents rôles
@@ -9,7 +9,7 @@ class NavigationService {
   NavigationService._internal();
 
   /// Naviguer vers l'écran approprié selon le rôle de l'utilisateur
-  static void navigateBasedOnRole(BuildContext context, User user) {
+  static void navigateBasedOnRole(BuildContext context, eccore.User user) {
     _navigateToClientApp(context);
   }
 
@@ -46,7 +46,7 @@ class NavigationService {
   static bool canNavigateToScreen(
     BuildContext context,
     String routeName,
-    User? user,
+    eccore.User? user,
   ) {
     // Logique simple de validation des routes
     if (user == null) return false;
@@ -104,7 +104,7 @@ class NavigationService {
 /// Extension pour faciliter l'utilisation du service de navigation
 extension NavigationServiceExtension on BuildContext {
   /// Naviguer basé sur le rôle
-  void navigateBasedOnRole(User user) {
+  void navigateBasedOnRole(eccore.User user) {
     NavigationService.navigateBasedOnRole(this, user);
   }
 
@@ -124,7 +124,7 @@ extension NavigationServiceExtension on BuildContext {
   }
 
   /// Vérifier si on peut naviguer
-  bool canNavigateTo(String routeName, User? user) {
+  bool canNavigateTo(String routeName, eccore.User? user) {
     return NavigationService.canNavigateToScreen(this, routeName, user);
   }
 }

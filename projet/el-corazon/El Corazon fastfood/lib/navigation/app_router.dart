@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/models/address.dart';
-import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/order.dart';
@@ -336,7 +336,7 @@ class AppRouter {
   }
 
   /// Navigation contextuelle basée sur le rôle utilisateur
-  static void navigateBasedOnRole(BuildContext context, User user) {
+  static void navigateBasedOnRole(BuildContext context, eccore.User user) {
     // Utiliser le service de navigation centralisé
     NavigationService.navigateBasedOnRole(context, user);
   }

@@ -1,11 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// Alias explicite : `eccore.User` (backend Django) et le `User` local
-// (Supabase, ci-dessous) portent le même nom mais pas la même forme — voir
-// `_fromDjangoUser`, qui traduit le premier vers le second.
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/models/order.dart';
@@ -72,7 +68,7 @@ class AppService extends ChangeNotifier {
   late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
   late final StreamSubscription<String> _tokenRefreshSubscription;
 
-  User? _currentUser;
+  eccore.User? _currentUser;
 
   bool _isInitialized = false;
   List<MenuItem> _menuItems = [];
@@ -91,7 +87,7 @@ class AppService extends ChangeNotifier {
   final OfflineSyncService _offlineSyncService = OfflineSyncService();
 
   // Getters
-  User? get currentUser => _currentUser;
+  eccore.User? get currentUser => _currentUser;
   List<MenuItem> get menuItems => _menuItems.isNotEmpty ? _menuItems : [];
   List<Order> get orders => _orders;
   bool get isLoggedIn => _currentUser != null;
@@ -115,7 +111,6 @@ class AppService extends ChangeNotifier {
   GamificationService get gamificationService => _gamificationService;
   RealtimeTrackingService get trackingService => RealtimeTrackingService();
   ErrorHandlerService get errorHandler => _errorHandler;
-  bool get isClient => _currentUser?.role == UserRole.client;
 
   @override
   void dispose() {
@@ -125,7 +120,7 @@ class AppService extends ChangeNotifier {
   }
 
   /// Pont entre la session Riverpod (backend Django, source de vérité de
-  /// l'identité — Phase 6) et le `_currentUser` local que le reste de cette
+  /// l'identité — Phase 6) et le `_currentUser` que le reste de cette
   /// classe lit encore. C'est le seul endroit qui traduit l'un vers l'autre.
   void _onSessionChanged(AsyncValue<eccore.User?> next) {
     // Une session en cours de restauration n'est pas une session fermée : agir
@@ -134,7 +129,7 @@ class AppService extends ChangeNotifier {
     if (next.isLoading) return;
 
     final djangoUser = next.value;
-    _currentUser = djangoUser == null ? null : _fromDjangoUser(djangoUser);
+    _currentUser = djangoUser;
     unawaited(_followSessionInAddressBook(djangoUser?.id));
     unawaited(_followSessionInCart(djangoUser?.id));
     notifyListeners();
@@ -202,17 +197,6 @@ class AppService extends ChangeNotifier {
   /// Les points de fidélité et les badges n'existent pas dans
   /// `UserSerializer` — domaine pas encore migré. Ils gardent leur valeur par
   /// défaut tant que la fidélité n'a pas son tour ; ce n'est pas un oubli.
-  User _fromDjangoUser(eccore.User djangoUser) {
-    return User(
-      id: djangoUser.id,
-      name: djangoUser.fullName,
-      email: djangoUser.email,
-      phone: djangoUser.phone ?? '',
-      role: UserRole.client,
-      profileImage: djangoUser.avatar,
-      createdAt: djangoUser.createdAt,
-    );
-  }
 
   Future<void> initialize() async {
     try {

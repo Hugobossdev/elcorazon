@@ -5,7 +5,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/order.dart';
-import 'package:elcora_fast/models/user.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 
@@ -50,10 +49,10 @@ class RealtimeTrackingService extends ChangeNotifier {
   /// Marque le service prêt à suivre des commandes. Contrairement à
   /// l'ancienne connexion Supabase (globale), l'état de connexion réel est
   /// désormais par commande suivie (`trackOrder`), pas ici.
-  Future<void> initialize({
-    required String userId,
-    required UserRole userRole,
-  }) async {
+  /// Ni identifiant ni rôle : le suivi se fait par commande (`trackOrder`),
+  /// et le serveur cloisonne sur le jeton. Les deux paramètres exigés ici
+  /// n'étaient lus par personne.
+  Future<void> initialize() async {
     _isConnected = true;
     notifyListeners();
   }

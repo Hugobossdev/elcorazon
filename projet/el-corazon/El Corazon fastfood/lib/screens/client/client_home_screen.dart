@@ -238,7 +238,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Bonjour ${appService.currentUser?.name ?? 'Gourmand'} !',
+                        'Bonjour ${appService.currentUser?.fullName ?? 'Gourmand'} !',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.9),
                           fontSize: 16,

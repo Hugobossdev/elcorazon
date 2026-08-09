@@ -50,7 +50,28 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
   StreamSubscription<Order>? _orderUpdatesSubscription;
   StreamSubscription<Map<String, dynamic>>? _deliveryLocationSubscription;
-  late RealtimeTrackingService? _trackingService;
+  RealtimeTrackingService? _trackingService;
+
+  /// Statuts pendant lesquels `ws/orders/{id}/tracking/` accepte une
+  /// connexion — miroir de `TRACKABLE_ORDER_STATUSES`
+  /// (`backend/apps/tracking/consumers.py`).
+  ///
+  /// Une commande qui attend encore sa confirmation n'a rien à diffuser, et le
+  /// serveur refuse la poignée de main. L'écran s'ouvrant juste après le
+  /// paiement, c'est le cas le plus courant : le canal était systématiquement
+  /// tenté sur une commande `pending`, systématiquement refusé (403), et
+  /// l'échec ressortait en erreur non rattrapée dans la console. Jusqu'à la
+  /// confirmation, le rafraîchissement périodique fait le travail.
+  static const Set<OrderStatus> _statutsDiffuses = {
+    OrderStatus.confirmed,
+    OrderStatus.preparing,
+    OrderStatus.ready,
+    OrderStatus.pickedUp,
+    OrderStatus.onTheWay,
+  };
+
+  /// Vrai une fois le canal temps réel effectivement ouvert.
+  bool _suiviTempsReelOuvert = false;
   /// Suivi serveur : livreur affecté et dernière position connue.
   final eccore.TrackingRepository _tracking =
       eccore.TrackingRepository(apiClient: apiClient);
@@ -123,6 +144,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         await _geocodeDeliveryAddress();
         await _loadTracking();
         _initializeStatusTimestamps();
+        // C'est ici que le passage de `pending` à `confirmed` est constaté :
+        // le canal s'ouvre au moment où le serveur accepte de le servir.
+        await _ouvrirSuiviSiDiffuse();
       }
 
       setState(() {
@@ -490,16 +514,16 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       _trackingService = RealtimeTrackingService();
 
       if (!_trackingService!.isConnected) {
-        await _trackingService!.initialize(
-          userId: currentUser.id,
-          userRole: currentUser.role,
-        );
+        await _trackingService!.initialize();
       }
 
       if (!mounted || !context.mounted) return;
 
-      // Suivre cette commande spécifique
-      await _trackingService!.trackOrder(widget.orderId);
+      // Le canal n'est ouvert que si la commande est déjà diffusée ; sinon,
+      // [_loadOrderDetails] s'en chargera dès qu'elle le sera. Les abonnements
+      // ci-dessous, eux, sont posés tout de suite : ils écoutent le service,
+      // pas le canal, et survivent à son ouverture différée.
+      await _ouvrirSuiviSiDiffuse();
 
       // S'abonner aux mises à jour de la commande
       _orderUpdatesSubscription = _trackingService!.orderUpdates.listen(
@@ -527,6 +551,11 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
             if (updatedOrder.status == OrderStatus.delivered) {
               _estimatedTimeUpdateTimer?.cancel();
               _orderRefreshTimer?.cancel();
+              // Le serveur ferme aussi de son côté : une commande livrée n'est
+              // plus diffusée. Le dire ici évite de rouvrir un canal refusé.
+              _suiviTempsReelOuvert = false;
+              unawaited(_trackingService?.untrackOrder(widget.orderId) ??
+                  Future<void>.value(),);
             }
           }
         },
@@ -615,6 +644,26 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     }
   }
 
+  /// Ouvre le canal temps réel, si et seulement si la commande est dans un
+  /// statut que le serveur diffuse.
+  ///
+  /// Rien n'est tenté autrement : la poignée de main serait refusée, et un
+  /// refus ne se corrige pas en le répétant. L'écran vit alors du
+  /// rafraîchissement périodique, qui constatera le passage à `confirmed` et
+  /// rappellera cette méthode.
+  Future<bool> _ouvrirSuiviSiDiffuse() async {
+    if (_suiviTempsReelOuvert) return true;
+
+    final statut = _order?.status;
+    if (statut == null || !_statutsDiffuses.contains(statut)) return false;
+
+    final service = _trackingService ??= RealtimeTrackingService();
+    await service.trackOrder(widget.orderId);
+    _suiviTempsReelOuvert = true;
+    eccore.Journal.trace('✅ Suivi temps réel ouvert pour ${widget.orderId}');
+    return true;
+  }
+
   /// Tente une reconnexion automatique en cas de perte de connexion
   Future<void> _attemptReconnect() async {
     if (_isReconnecting || !mounted) return;
@@ -638,22 +687,28 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
       // Réinitialiser le service
       if (_trackingService != null && !_trackingService!.isConnected) {
-        await _trackingService!.initialize(
-          userId: currentUser.id,
-          userRole: currentUser.role,
-        );
-        await _trackingService!.trackOrder(widget.orderId);
+        await _trackingService!.initialize();
       }
+
+      // Le canal est refait à neuf, et seulement s'il a lieu d'être : sur une
+      // commande que le serveur ne diffuse pas, il n'y a rien à rétablir.
+      _suiviTempsReelOuvert = false;
+      final rouvert = await _ouvrirSuiviSiDiffuse();
 
       if (mounted) {
         setState(() => _isReconnecting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Reconnexion réussie'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
+        // L'annonce ne portait sur rien : elle s'affichait même quand aucune
+        // connexion n'avait été rétablie. Elle ne parle plus que d'un canal
+        // réellement rouvert.
+        if (rouvert) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Reconnexion réussie'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
       }
     } catch (e) {
       eccore.Journal.trace('❌ Erreur lors de la reconnexion: $e');
@@ -788,7 +843,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       MaterialPageRoute(
         builder: (context) => CallScreen(
           orderId: widget.orderId,
-          callerName: currentUser.name,
+          callerName: currentUser.fullName,
           receiverName: _driverProfile?['name'] ?? 'Livreur',
         ),
       ),

@@ -6,7 +6,7 @@ import 'package:elcora_fast/services/service_initialization_helper.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/notification_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
-import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/services/error_handler_service.dart';
 
 /// Widget pour gérer l'initialisation des services
@@ -194,7 +194,7 @@ extension ServiceInitializationExtension on BuildContext {
   }
 
   /// Initialise les services pour un utilisateur
-  Future<void> initializeUserServices(User user) async {
+  Future<void> initializeUserServices(eccore.User user) async {
     final serviceInitializer = ServiceInitializer();
     await serviceInitializer.initializeUserServices(this, user);
   }

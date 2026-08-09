@@ -14,7 +14,7 @@ import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/push_notification_service.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
 import 'package:elcora_fast/services/subscription_service.dart';
-import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Service centralisé pour initialiser tous les services de l'application
@@ -188,10 +188,10 @@ class ServiceInitializer {
   }
 
   /// Initialise les services pour un utilisateur spécifique
-  Future<void> initializeUserServices(BuildContext context, User user) async {
+  Future<void> initializeUserServices(BuildContext context, eccore.User user) async {
     try {
       Journal.trace(
-        '👤 Initialisation des services pour l\'utilisateur: ${user.name}',
+        '👤 Initialisation des services pour l\'utilisateur: ${user.fullName}',
       );
 
       // Capturer les services avant le gap asynchrone
@@ -216,10 +216,7 @@ class ServiceInitializer {
       // Initialiser le service de suivi en temps réel avec l'utilisateur
       // (pas besoin de passer context car le service est déjà capturé)
       await _initializeServiceWithoutContext(
-        () => realtimeTrackingService.initialize(
-          userId: user.id,
-          userRole: user.role,
-        ),
+        () => realtimeTrackingService.initialize(),
       );
 
       Journal.trace('✅ Services utilisateur initialisés');

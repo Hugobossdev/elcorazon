@@ -3,7 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/theme_service.dart';
-import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/profil_utilisateur.dart';
+import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
@@ -52,26 +54,35 @@ class ProfileScreen extends StatelessWidget {
         automaticallyImplyLeading: false,
         centerTitle: true,
       ),
-      body: Consumer<AppService>(
-        builder: (context, appService, child) {
+      body: Consumer2<AppService, GamificationService>(
+        builder: (context, appService, gamification, child) {
           if (!appService.isLoggedIn || appService.currentUser == null) {
             return _buildGuestProfile(context);
           }
 
           final user = appService.currentUser!;
           final ordersCount = appService.orders.length;
+          // `user.loyaltyPoints` valait toujours zéro : le compte ne porte pas
+          // le solde, `GamificationService` le tient depuis le socle.
+          final points = gamification.currentPoints;
+          final badges = gamification.badges;
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildProfileHeader(context, user, ordersCount: ordersCount),
+                _buildProfileHeader(
+                  context,
+                  user,
+                  ordersCount: ordersCount,
+                  points: points,
+                ),
                 const SizedBox(height: 12),
                 _buildQuickActions(context),
                 const SizedBox(height: 24),
-                if (_isClient(user.role)) ...[
-                  _buildLoyaltyCard(context, user),
+                if (user.estClient) ...[
+                  _buildLoyaltyCard(context, points, badges),
                   const SizedBox(height: 24),
                 ],
                 _buildAppearanceSection(context),
@@ -310,11 +321,12 @@ class ProfileScreen extends StatelessWidget {
 
   Widget _buildProfileHeader(
     BuildContext context,
-    User user, {
+    eccore.User user, {
     required int ordersCount,
+    required int points,
   }) {
-    final tier = _getAccountTierLabel(user);
-    final tierColor = _getAccountTierColor(context, user);
+    final tier = palierDeFidelite(points);
+    final tierColor = _couleurDuPalier(context, tier);
 
     return InkWell(
       onTap: () => _showEditProfileDialog(context),
@@ -329,17 +341,17 @@ class ProfileScreen extends StatelessWidget {
             CircleAvatar(
               radius: 40,
               backgroundColor: Theme.of(context).colorScheme.primary,
-              child: user.profileImage != null
+              child: user.avatar != null
                   ? ClipOval(
                       child: Image.network(
-                        user.profileImage!,
+                        user.avatar!,
                         width: 80,
                         height: 80,
                         fit: BoxFit.cover,
                       ),
                     )
                   : Text(
-                      user.name.substring(0, 2).toUpperCase(),
+                      user.fullName.substring(0, 2).toUpperCase(),
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
@@ -353,7 +365,7 @@ class ProfileScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    user.name,
+                    user.fullName,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -370,12 +382,12 @@ class ProfileScreen extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        _getRoleEmoji(user.role),
+                        user.pastilleDuType,
                         style: const TextStyle(fontSize: 16),
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        _getRoleDisplayName(user.role),
+                        user.libelleDuType,
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.primary,
                           fontWeight: FontWeight.bold,
@@ -395,11 +407,11 @@ class ProfileScreen extends StatelessWidget {
                         label: tier,
                         color: tierColor,
                       ),
-                      if (_isClient(user.role))
+                      if (user.estClient)
                         _buildInfoChip(
                           context,
                           icon: Icons.loyalty,
-                          label: '${user.loyaltyPoints} pts',
+                          label: '$points pts',
                           color: Theme.of(context).colorScheme.secondary,
                         ),
                       _buildInfoChip(
@@ -465,18 +477,7 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  String _getAccountTierLabel(User user) {
-    // Simple heuristique: badge "loyal_customer" ou seuil de points.
-    final badges = (user.badges as List?)?.cast<String>() ?? <String>[];
-    if (badges.contains('loyal_customer') || user.loyaltyPoints >= 500) {
-      return 'VIP';
-    }
-    if (user.loyaltyPoints >= 200) return 'Fidèle';
-    return 'Standard';
-  }
-
-  Color _getAccountTierColor(BuildContext context, User user) {
-    final tier = _getAccountTierLabel(user);
+  Color _couleurDuPalier(BuildContext context, String tier) {
     switch (tier) {
       case 'VIP':
         return const Color(0xFFFFB300); // amber
@@ -487,8 +488,12 @@ class ProfileScreen extends StatelessWidget {
     }
   }
 
-  Widget _buildLoyaltyCard(BuildContext context, User user) {
-    final progress = (user.loyaltyPoints % 100) / 100;
+  Widget _buildLoyaltyCard(
+    BuildContext context,
+    int points,
+    List<Map<String, dynamic>> badges,
+  ) {
+    final progress = (points % 100) / 100;
 
     return Card(
       elevation: 4,
@@ -526,7 +531,7 @@ class ProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              '${user.loyaltyPoints} points',
+              '$points points',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSecondary,
                 fontSize: 32,
@@ -543,7 +548,7 @@ class ProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '${(100 - (user.loyaltyPoints % 100)).round()} points jusqu\'à votre prochaine récompense',
+              '${100 - (points % 100)} points jusqu\'à votre prochaine récompense',
               style: TextStyle(
                 color: Theme.of(context)
                     .colorScheme
@@ -552,7 +557,7 @@ class ProfileScreen extends StatelessWidget {
                 fontSize: 14,
               ),
             ),
-            if (user.badges.isNotEmpty) ...[
+            if (badges.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(
                 'Badges obtenus:',
@@ -565,7 +570,7 @@ class ProfileScreen extends StatelessWidget {
               Wrap(
                 spacing: 8,
                 runSpacing: 4,
-                children: user.badges
+                children: badges
                     .map(
                       (badge) => Container(
                         padding: const EdgeInsets.symmetric(
@@ -577,7 +582,7 @@ class ProfileScreen extends StatelessWidget {
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          _getBadgeDisplayName(badge),
+                          badge['title']?.toString() ?? '',
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.onSecondary,
                             fontSize: 12,
@@ -722,32 +727,9 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  String _getBadgeDisplayName(String badge) {
-    switch (badge) {
-      case 'first_order':
-        return '🥇 Première commande';
-      case 'loyal_customer':
-        return '💎 Client fidèle';
-      case 'big_spender':
-        return '💰 Gros dépensier';
-      case 'frequent_visitor':
-        return '🔥 Visiteur fréquent';
-      default:
-        return badge;
-    }
-  }
 
-  String _getRoleEmoji(UserRole role) {
-    return role.emoji;
-  }
 
-  String _getRoleDisplayName(UserRole role) {
-    return role.displayName;
-  }
 
-  bool _isClient(UserRole role) {
-    return role == UserRole.client;
-  }
 
   Widget _buildAppearanceSection(BuildContext context) {
     return Consumer<ThemeService>(
@@ -839,8 +821,8 @@ class _EditProfileDialogState extends State<EditProfileDialog> {
   void initState() {
     super.initState();
     final user = Provider.of<AppService>(context, listen: false).currentUser!;
-    _nameController.text = user.name;
-    _phoneController.text = user.phone;
+    _nameController.text = user.fullName;
+    _phoneController.text = user.phone ?? '';
   }
 
   @override

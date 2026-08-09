@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
-import 'package:elcora_fast/models/user.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Widget pour gérer les erreurs de navigation
 class NavigationErrorHandler extends StatelessWidget {
   final Widget child;
-  final User? currentUser;
+  final eccore.User? currentUser;
 
   const NavigationErrorHandler({
     required this.child, super.key,
@@ -43,7 +43,7 @@ class NavigationErrorHandler extends StatelessWidget {
   static void handleNavigationError(
     BuildContext context,
     String error,
-    User? user,
+    eccore.User? user,
   ) {
     Journal.trace('Navigation Error: $error');
 
@@ -62,7 +62,7 @@ class NavigationErrorHandler extends StatelessWidget {
 /// Mixin pour ajouter la gestion d'erreurs de navigation aux widgets
 mixin NavigationErrorMixin<T extends StatefulWidget> on State<T> {
   /// Gérer une erreur de navigation
-  void handleNavigationError(String error, {User? user}) {
+  void handleNavigationError(String error, {eccore.User? user}) {
     NavigationErrorHandler.handleNavigationError(context, error, user);
   }
 
@@ -70,7 +70,7 @@ mixin NavigationErrorMixin<T extends StatefulWidget> on State<T> {
   Future<void> navigateSafely(
     String routeName, {
     Object? arguments,
-    User? user,
+    eccore.User? user,
   }) async {
     try {
       await Navigator.of(context).pushNamed(routeName, arguments: arguments);
@@ -84,7 +84,7 @@ mixin NavigationErrorMixin<T extends StatefulWidget> on State<T> {
   Future<void> navigateReplacementSafely(
     String routeName, {
     Object? arguments,
-    User? user,
+    eccore.User? user,
   }) async {
     try {
       await Navigator.of(context)

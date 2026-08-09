@@ -198,7 +198,7 @@ class _ChatScreenState extends State<ChatScreen> {
       MaterialPageRoute(
         builder: (context) => CallScreen(
           orderId: widget.orderId,
-          callerName: currentUser.name,
+          callerName: currentUser.fullName,
           receiverName: receiverName,
         ),
       ),
