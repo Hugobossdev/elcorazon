@@ -39,10 +39,9 @@ class CartService extends ChangeNotifier {
   bool _isHydrating = false;
   bool _isSyncing = false;
 
-  /// Future de la dernière synchronisation déclenchée par `_persistChanges`
-  /// (non attendue là-bas) — permet à `ensureSynced` d'attendre celle déjà en
-  /// cours plutôt que d'en réarmer une seconde qui se contenterait de
-  /// ressortir immédiatement (`_isSyncing` déjà vrai).
+  /// Queue des synchronisations : dernière réécriture du panier serveur mise
+  /// en file, chacune enchaînée après la précédente. `ensureSynced` l'attend
+  /// avant de laisser chiffrer ou commander.
   Future<void>? _pendingCartSync;
 
   final eccore.CartRepository _cartRepository = eccore.CartRepository(apiClient: apiClient);
@@ -109,7 +108,9 @@ class CartService extends ChangeNotifier {
     }
   }
 
-  /// Initialise le panier pour un utilisateur connecté (sync Supabase)
+  /// Ouvre le panier du client connecté — appelé par `AppService` dès que la
+  /// session est connue, et seul endroit qui renseigne [_userId], donc seule
+  /// condition qui autorise les écritures vers `/carts/`.
   Future<void> initializeForUser(String userId) async {
     await initialize();
 
@@ -118,8 +119,27 @@ class CartService extends ChangeNotifier {
       return;
     }
 
+    // Les clés de stockage portent l'identité : passer de « invité » au compte
+    // change celle qu'on relit, et la relire seule effaçait sous les yeux du
+    // client ce qu'il avait mis dans son panier avant de se connecter. Le
+    // transfert n'a lieu qu'au départ d'une visite anonyme — d'un compte à
+    // l'autre, le panier du premier ne suit pas le second.
+    final bool depuisVisiteAnonyme = _userId == null;
+    final String cleVisiteur = _cartItemsKey;
+    final List<CartItem> panierVisiteur =
+        depuisVisiteAnonyme ? List<CartItem>.from(_items) : const <CartItem>[];
+
     _userId = userId;
     await _loadCartFromStorage();
+
+    if (panierVisiteur.isNotEmpty) {
+      if (_items.isEmpty) {
+        _items.addAll(panierVisiteur);
+        await _saveCartToStorage();
+      }
+      await _prefs?.remove(cleVisiteur);
+    }
+
     await _loadCartFromDatabase();
     await _syncDatabaseWithLocal(overwriteRemote: _items.isNotEmpty);
   }
@@ -481,9 +501,13 @@ class CartService extends ChangeNotifier {
 
   /// Attend que le panier serveur reflète l'état local — `_persistChanges`
   /// déclenche la synchronisation sans l'attendre (`unawaited`), ce qui
-  /// convient pour un ajout/retrait isolé mais pas avant de créer une
-  /// commande : `OrderService.create_from_cart` (backend) lit le panier
-  /// serveur tel quel au moment de l'appel.
+  /// convient pour un ajout/retrait isolé mais pas avant de chiffrer ou de
+  /// créer une commande : `OrderService.preview` et `create_from_cart`
+  /// (backend) lisent le panier serveur tel quel au moment de l'appel.
+  ///
+  /// Attendre la dernière synchronisation de la file suffit : elle démarre
+  /// après toutes les précédentes, et reproduit l'état du panier au moment où
+  /// elle s'exécute.
   Future<void> ensureSynced() async {
     if (_userId == null) return;
     await (_pendingCartSync ?? _syncCartToDatabase());
@@ -648,12 +672,19 @@ class CartService extends ChangeNotifier {
   /// boucle**. Elle le faisait, après le `clear` : un seul article devenu
   /// invalide vidait le panier distant et emportait tous les suivants. Les
   /// refus sont signalés ; seule une panne de réseau propage, pour que
-  /// [_syncCartToDatabase] bascule sur la file hors ligne.
+  /// [_pousserPanier] bascule sur la file hors ligne.
   Future<void> _replaceRemoteCart() async {
+    // L'état à reproduire est figé avant le premier appel : un ajout d'article
+    // pendant que la synchronisation est en vol modifierait `_items` en cours
+    // d'itération, ce que Dart refuse. L'exception coupait la reprise au
+    // milieu, laissant le panier serveur amputé des lignes suivantes — et
+    // vide, si elle survenait juste après le `clear`.
+    final lignes = List<CartItem>.from(_items);
+
     await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
 
     final refused = <String>[];
-    for (final item in _items) {
+    for (final item in lignes) {
       try {
         await _cartRepository.addLine(
           restaurantSlug: AppConstants.restaurantSlug,
@@ -678,11 +709,26 @@ class CartService extends ChangeNotifier {
     }
   }
 
-  Future<void> _syncCartToDatabase() async {
-    if (_userId == null || _isHydrating) return;
-    if (_isSyncing) return;
-    _isSyncing = true;
+  /// Met une réécriture du panier serveur **à la suite** de celle déjà en vol.
+  ///
+  /// L'appel concurrent était auparavant abandonné (`_isSyncing` déjà vrai) :
+  /// la modification qui l'avait déclenché ne partait jamais, et `ensureSynced`
+  /// se retrouvait à attendre un futur déjà terminé — donc rendait la main
+  /// pendant que le panier serveur était encore à l'état précédent, voire vide,
+  /// [_replaceRemoteCart] commençant par le purger. Mis en file, le dernier
+  /// appel décrit l'état courant, et c'est celui-là que `ensureSynced` attend.
+  Future<void> _syncCartToDatabase() {
+    if (_userId == null || _isHydrating) return Future<void>.value();
 
+    final suivante =
+        (_pendingCartSync ?? Future<void>.value()).then((_) => _pousserPanier());
+    _pendingCartSync = suivante;
+    return suivante;
+  }
+
+  /// Une réécriture, qui ne relance jamais : la file ne doit pas se rompre sur
+  /// l'échec d'un maillon.
+  Future<void> _pousserPanier() async {
     try {
       await _replaceRemoteCart();
     } catch (e) {
@@ -701,8 +747,6 @@ class CartService extends ChangeNotifier {
           'CartService: erreur lors de la synchronisation distante - $e',
         );
       }
-    } finally {
-      _isSyncing = false;
     }
   }
 
@@ -714,11 +758,10 @@ class CartService extends ChangeNotifier {
     if (_prefs != null) {
       unawaited(_saveCartToStorage());
     }
-    if (_userId != null && !_isHydrating) {
-      final sync = _syncCartToDatabase();
-      _pendingCartSync = sync;
-      unawaited(sync);
-    }
+    // La synchronisation n'est pas attendue ici — l'écran ne doit pas attendre
+    // le réseau pour montrer l'article ajouté. `_syncCartToDatabase` la place
+    // dans la file, et `ensureSynced` attend cette file avant de commander.
+    unawaited(_syncCartToDatabase());
   }
 
   /// Réconcilie panier local et panier serveur au premier chargement d'une
@@ -738,8 +781,11 @@ class CartService extends ChangeNotifier {
 
       final bool shouldOverwriteRemote = overwriteRemote || remoteItems.isEmpty;
 
+      // Les réécritures passent toutes par la même file : deux `clear` puis
+      // deux séries d'ajouts entrelacés livreraient un panier serveur en
+      // double, chaque ligne comptée deux fois.
       if (shouldOverwriteRemote) {
-        await _replaceRemoteCart();
+        await _syncCartToDatabase();
       } else if (_items.isEmpty) {
         _items
           ..clear()
@@ -754,7 +800,7 @@ class CartService extends ChangeNotifier {
         notifyListeners();
         await _saveCartToStorage();
 
-        await _replaceRemoteCart();
+        await _syncCartToDatabase();
       }
     } catch (e) {
       eccore.Journal.trace(

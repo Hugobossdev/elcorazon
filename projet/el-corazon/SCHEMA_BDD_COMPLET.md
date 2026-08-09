@@ -1244,12 +1244,20 @@ Catégories les plus populaires
 
 ---
 
-## 📞 Contact et Support
+## 📞 Où regarder aujourd'hui
 
-Pour toute question sur ce schéma :
-- Vérifier la documentation Supabase
-- Consulter les fichiers SQL individuels dans `lib/database/`
-- Référer aux modèles Dart dans `lib/models/`
+Ce schéma n'a plus de contrepartie vivante : les trois renvois qui figuraient
+ici pointaient vers la documentation Supabase, vers `lib/database/` — supprimé
+au lot 1 du refactoring — et vers les modèles Dart de `lib/models/`, retirés
+domaine par domaine au lot 3 au profit des entités du socle.
+
+Le modèle en vigueur se lit à trois endroits :
+
+- **[docs/architecture/03-modele-de-donnees.md](docs/architecture/03-modele-de-donnees.md)** — la vue d'ensemble ;
+- `backend/apps/*/migrations/` — la vérité exécutable, table par table ;
+- `packages/elcorazon_core/lib/src/` — les entités que lisent les trois
+  applications, chacune annonçant en commentaire le sérialiseur qu'elle
+  reflète.
 
 ---
 

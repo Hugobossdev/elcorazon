@@ -533,6 +533,42 @@ document ne le demandait pas.
    workflows CI. C'est l'espace non échappé qui avait produit l'arborescence
    parasite `El/ Corazon/ dely/build/` supprimée au lot 1.
 
+#### 6.1 — Deux points 2 et 3 faits, le point 1 repose sur une prémisse périmée
+
+**Le point 1 n'a pas été exécuté, et il ne devrait pas l'être tel quel.** Il a
+été écrit avant le commit `99c09e3`, « Réaligne la documentation sur
+l'architecture Django », qui a changé la donne :
+
+- `CAHIER_DES_CHARGES.md` ne contient **plus aucune** mention de Supabase et
+  n'ouvre sur aucun avertissement. L'archiver détruirait un travail de
+  réalignement postérieur au plan ;
+- `ETAT_FONCTIONNALITES.md` porte bien un avertissement, mais ses sept mentions
+  de Supabase sont toutes des constats de son **retrait**, datés du 1er août
+  2026. C'est un inventaire tenu, pas un document faux.
+
+Le document qui correspond réellement à la description du point 1 est
+`SCHEMA_BDD_COMPLET.md` : il décrit le schéma Supabase abandonné et le dit dès
+sa troisième ligne. Il se déclare lui-même « conservé comme référence
+historique » — décision explicite qu'il n'appartenait pas à ce lot de renverser.
+Seuls ses renvois morts ont été corrigés : ils pointaient vers la documentation
+Supabase, vers `lib/database/` (supprimé au lot 1) et vers `lib/models/`
+(retiré domaine par domaine au lot 3).
+
+**Le point 3 portait sur huit fichiers, pas sept**, et un neuvième que le plan
+ne citait pas : `El Corazon admin/lib/core/architecture/README.md`, seul
+occupant de son répertoire. Les huit de `fastfood` sont sous
+`El Corazon fastfood/docs/`, avec un index qui distingue les trois qui décrivent
+encore du code existant des cinq qui décrivent du code disparu — dont
+`connectivity_service.dart` et `PaginatedMenuScreen`, qui n'existent plus.
+
+Le neuvième a été **corrigé en le déplaçant**, parce qu'il n'était pas daté mais
+trompeur : il prescrivait `AdminInteractiveWidget`, `AdminSafeCard` et
+`AdminRouter`, trois classes jamais écrites, et dessinait sept sous-répertoires
+d'écrans dont un seul existe. Il vit désormais en
+`El Corazon admin/docs/architecture.md`, vérifié contre le code.
+
+Plus aucun `.md` ne subsiste dans les `lib/` des quatre paquets.
+
 ---
 
 ## 5. Ce que je ne recommande pas
