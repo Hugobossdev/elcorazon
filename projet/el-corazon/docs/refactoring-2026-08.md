@@ -302,6 +302,38 @@ anglais dans un back-office français.
 *Critère de fin atteint* : plus aucun `import '…/models/order.dart'`, plus
 d'adaptateur, et 51 cas sur la logique déplacée.
 
+#### 3.7 — `fastfood`, ce qui reste : mesuré, pas exécuté
+
+Quatre modèles subsistent : `menu_item` (21 consommateurs), `menu_category`
+(8), `address` (14), `cart_item` (9), plus `order` (18) et trois modèles de
+paiement. Le catalogue est **un seul bloc** : `menu_item.dart` importe
+`menu_category.dart`, et les deux passent par `django_menu_repository.dart`.
+
+La correspondance avec le socle est directe — `price` en `Money`, `categoryId`
+en `categorySlug`, `imageUrl` en `image`, `preparationTime` en
+`preparationMinutes`, `rating`/`reviewCount` en `ratingAverage`/`ratingCount`,
+`isVegetarian`/`isVegan` dérivés de `dietaryTags`. Un seul champ local n'a pas
+de contrepartie, `availableQuantity`, et il a **zéro usage**.
+
+Trois constats de la mesure, tous vérifiés :
+
+- **Une catégorie sans emoji disparaît du mode hors-ligne.**
+  `OfflineSyncService` écarte toute catégorie dont `emoji` est vide, au même
+  titre qu'un nom vide. Or `emoji` vaut `''` dès que le serveur n'en a pas
+  configuré — et **toujours** quand la catégorie est reconstruite depuis un
+  article, l'adaptateur écrivant `emoji: ''` en dur à cet endroit. Deux objets
+  `MenuCategory` coexistent donc pour la même catégorie, l'un avec son emoji,
+  l'autre sans ;
+- `displayName` vaut toujours `name`. Le champ n'existe que parce que le modèle
+  local le déclare ; le serveur ne rend pas de `display_name`, et `fromMap`
+  déroule trois replis pour une clé qui n'arrive jamais ;
+- `id` porte le **slug**, pas l'UUID, sur toute la chaîne locale. Cohérent,
+  mais l'identifiant réel est perdu à la traduction.
+
+`address` croise `address_detail_bottom_sheet.dart` et `cart_item` croise
+`cart_service.dart` — deux fichiers en cours d'édition côté humain au moment de
+cette mesure. Ces deux domaines attendent.
+
 ### Lot 4 — Découper les écrans (2 semaines, parallélisable au lot 3)
 
 Les 5 écrans de plus de 1 500 lignes, dans l'ordre du tableau §3.2. Pour
