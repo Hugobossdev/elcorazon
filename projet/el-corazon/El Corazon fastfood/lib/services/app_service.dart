@@ -77,7 +77,6 @@ class AppService extends ChangeNotifier {
   bool _isInitialized = false;
   List<MenuItem> _menuItems = [];
   List<Order> _orders = [];
-  final List<MenuItem> _cartItems = [];
   List<String> _menuCategoryDisplayNames = [];
   List<MenuCategory> _menuCategories = [];
 
@@ -95,7 +94,6 @@ class AppService extends ChangeNotifier {
   User? get currentUser => _currentUser;
   List<MenuItem> get menuItems => _menuItems.isNotEmpty ? _menuItems : [];
   List<Order> get orders => _orders;
-  List<MenuItem> get cartItems => _cartItems;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
   List<String> get menuCategoryDisplayNames => _menuCategoryDisplayNames;
@@ -119,14 +117,6 @@ class AppService extends ChangeNotifier {
   ErrorHandlerService get errorHandler => _errorHandler;
   bool get isClient => _currentUser?.role == UserRole.client;
 
-  double get cartTotal {
-    return _cartItems.fold(0.0, (sum, item) => sum + item.price);
-  }
-
-  int get cartItemCount {
-    return _cartItems.length;
-  }
-
   @override
   void dispose() {
     _sessionSubscription.close();
@@ -146,6 +136,7 @@ class AppService extends ChangeNotifier {
     final djangoUser = next.value;
     _currentUser = djangoUser == null ? null : _fromDjangoUser(djangoUser);
     unawaited(_followSessionInAddressBook(djangoUser?.id));
+    unawaited(_followSessionInCart(djangoUser?.id));
     notifyListeners();
   }
 
@@ -174,6 +165,37 @@ class AppService extends ChangeNotifier {
       // Le carnet est secondaire par rapport à l'identité : son échec ne doit
       // pas empêcher la connexion d'aboutir.
       eccore.Journal.trace('Carnet d\'adresses non synchronisé : $e');
+    }
+  }
+
+  /// Identité dont le panier est actuellement ouvert.
+  ///
+  /// Même oubli que pour le carnet d'adresses, et même conséquence un cran
+  /// plus loin : `CartService.initializeForUser` n'était appelé de nulle part,
+  /// donc `_userId` y restait nul, donc `_persistChanges` s'arrêtait au
+  /// stockage local et `ensureSynced` rendait la main sans rien attendre —
+  /// `/carts/` ne recevait jamais la moindre ligne. Or le devis lit le panier
+  /// **serveur** (`POST /orders/preview/`, invariants C1/C2) : il chiffrait un
+  /// panier vide, et le barème de zone refusait la commande au motif d'un
+  /// minimum que zéro ne pouvait pas atteindre. L'écran, lui, affichait bien
+  /// les articles, et le message accusait le montant du panier.
+  String? _cartUserId;
+
+  Future<void> _followSessionInCart(String? userId) async {
+    if (_cartUserId == userId) return;
+    _cartUserId = userId;
+
+    try {
+      if (userId == null) {
+        await CartService().clearForLogout();
+      } else {
+        await CartService().initializeForUser(userId);
+      }
+    } catch (e) {
+      // Le panier local reste affichable : un échec de synchronisation ne doit
+      // pas empêcher la connexion d'aboutir. La commande, elle, ne partira pas
+      // sur un panier serveur périmé — `ensureSynced` la précède.
+      eccore.Journal.trace('Panier non synchronisé : $e');
     }
   }
 
@@ -321,10 +343,9 @@ class AppService extends ChangeNotifier {
       // continuerait de recevoir ses notifications.
       await _unregisterPushDeviceBestEffort();
       await _container.read(eccore.sessionProvider.notifier).logout();
-      _cartItems.clear();
-      await CartService().clearForLogout();
-      // Le carnet d'adresses n'est pas fermé ici : il suit la session, via
-      // `_followSessionInAddressBook`. Le fermer aussi depuis cet endroit
+      // Ni le panier ni le carnet d'adresses ne sont fermés ici : ils suivent
+      // la session, via `_followSessionInCart` et
+      // `_followSessionInAddressBook`. Les fermer aussi depuis cet endroit
       // donnait deux chemins pour la même chose, dont un seul couvrait
       // l'expiration du jeton — l'autre cas où la session tombe.
       _gamificationService.reset();
@@ -344,30 +365,6 @@ class AppService extends ChangeNotifier {
     } catch (e) {
       eccore.Journal.trace('⚠️ Échec du retrait du jeton FCM: $e');
     }
-  }
-
-  // Cart methods
-  void addToCart(MenuItem menuItem) {
-    _cartItems.add(menuItem);
-    notifyListeners();
-  }
-
-  void removeFromCart(MenuItem menuItem) {
-    _cartItems.remove(menuItem);
-    notifyListeners();
-  }
-
-  void updateCartItemQuantity(MenuItem menuItem, int newQuantity) {
-    if (newQuantity <= 0) {
-      _cartItems.remove(menuItem);
-    }
-    // Pour simplifier, on ne gère pas les quantités différentes pour le moment
-    notifyListeners();
-  }
-
-  void clearCart() {
-    _cartItems.clear();
-    notifyListeners();
   }
 
   Future<String> placeOrderFromCartService(
