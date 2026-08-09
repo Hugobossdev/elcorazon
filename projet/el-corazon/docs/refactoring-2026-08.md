@@ -21,9 +21,9 @@ Mise à jour au 7 août 2026, après les lots 2 et 5.
 |---|---:|---:|---:|---:|---:|
 | `backend/` | 314 | 29 676 l. | **1276 passés** | ruff + mypy strict, verts | — |
 | `packages/elcorazon_core` | 81 | 8 428 l. | **185 passés** | **0** | 58,87 % |
-| `El Corazon admin` | 76 | 35 362 l. | **50 passés** | **0** | 0,99 % |
-| `El Corazon fastfood` | 135 | 46 660 l. | **69 passés** | **0** | 3,51 % |
-| `El corazon dely` | 48 | 16 973 l. | **16 passés** | **0** | 1,31 % |
+| `apps/admin` | 76 | 35 362 l. | **50 passés** | **0** | 0,99 % |
+| `apps/fastfood` | 135 | 46 660 l. | **69 passés** | **0** | 3,51 % |
+| `apps/dely` | 48 | 16 973 l. | **16 passés** | **0** | 1,31 % |
 
 Zéro diagnostic partout, et plus seulement zéro erreur : le lot 5 a aligné les
 règles des quatre paquets et retiré `--no-fatal-infos` de la CI. `flutter build
@@ -528,7 +528,7 @@ document ne le demandait pas.
    qui a été fait du backend Laravel.
 2. `SCHEMA_BDD_COMPLET.md:1251` renvoie vers `lib/database/`, supprimé au lot 1.
 3. Sortir de `lib/services/` les sept `README_*.md` survivants.
-4. Renommer `El corazon dely` → `El Corazon dely`, et retirer les espaces des
+4. Renommer `apps/dely` → `El Corazon dely`, et retirer les espaces des
    trois répertoires. À faire en une opération isolée : cela touche les deux
    workflows CI. C'est l'espace non échappé qui avait produit l'arborescence
    parasite `El/ Corazon/ dely/build/` supprimée au lot 1.
@@ -555,9 +555,9 @@ Supabase, vers `lib/database/` (supprimé au lot 1) et vers `lib/models/`
 (retiré domaine par domaine au lot 3).
 
 **Le point 3 portait sur huit fichiers, pas sept**, et un neuvième que le plan
-ne citait pas : `El Corazon admin/lib/core/architecture/README.md`, seul
+ne citait pas : `apps/admin/lib/core/architecture/README.md`, seul
 occupant de son répertoire. Les huit de `fastfood` sont sous
-`El Corazon fastfood/docs/`, avec un index qui distingue les trois qui décrivent
+`apps/fastfood/docs/`, avec un index qui distingue les trois qui décrivent
 encore du code existant des cinq qui décrivent du code disparu — dont
 `connectivity_service.dart` et `PaginatedMenuScreen`, qui n'existent plus.
 
@@ -565,9 +565,38 @@ Le neuvième a été **corrigé en le déplaçant**, parce qu'il n'était pas da
 trompeur : il prescrivait `AdminInteractiveWidget`, `AdminSafeCard` et
 `AdminRouter`, trois classes jamais écrites, et dessinait sept sous-répertoires
 d'écrans dont un seul existe. Il vit désormais en
-`El Corazon admin/docs/architecture.md`, vérifié contre le code.
+`apps/admin/docs/architecture.md`, vérifié contre le code.
 
 Plus aucun `.md` ne subsiste dans les `lib/` des quatre paquets.
+
+#### 6.2 — Les trois répertoires sont sous `apps/`
+
+Point 4 fait. Le plan demandait de retirer les espaces sans dire vers quoi ;
+la forme retenue regroupe les trois applications, à côté de `backend/`,
+`docs/`, `packages/` et `tools/` :
+
+| Avant | Après |
+|---|---|
+| `El Corazon admin` | `apps/admin` |
+| `El Corazon fastfood` | `apps/fastfood` |
+| `El corazon dely` | `apps/dely` |
+
+Descendre d'un niveau déplace tous les chemins relatifs. Ont suivi : les trois
+`pubspec.yaml` (`path: ../../packages/elcorazon_core`), les trois
+`analysis_options.yaml` (`include: ../../analysis_options.yaml`),
+`tools/code_mort.py`, `tools/couverture.py`, le workflow CI — dont l'appel
+`python ../tools/couverture.py` devenu `../../` — et 33 mentions dans la
+documentation.
+
+Deux choses à savoir pour la suite :
+
+- `git mv` a échoué : sous Windows, le serveur de langage Dart de l'éditeur
+  tient un descripteur sur les répertoires ouverts. Le contenu a été déplacé
+  fichier par fichier ; git détecte les renommages au contenu, l'historique est
+  préservé. Les trois répertoires d'origine restent en place, **vides**, jusqu'à
+  ce que l'éditeur les relâche — git ne les suit pas ;
+- il existe une seconde copie du workflow en `elcorazon/.github/workflows/`,
+  hors du suivi git. Elle n'a pas été touchée.
 
 ---
 

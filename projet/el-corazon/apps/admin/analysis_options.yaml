@@ -3,4 +3,4 @@
 # Le jeu commun aux trois applications vit dans `../analysis_options.yaml` —
 # voir l'en-tête de ce fichier pour la raison. Cette application en activait 7
 # avant le lot 5 ; elle hérite désormais des mêmes que les deux autres.
-include: ../analysis_options.yaml
+include: ../../analysis_options.yaml

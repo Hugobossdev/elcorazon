@@ -31,8 +31,8 @@ Les deux applications portent encore l'identifiant de paquet du gabarit Flutter 
 
 | Application | `applicationId` actuel |
 |---|---|
-| `El Corazon fastfood` | `com.example.elcora_fast` |
-| `El corazon dely` | `com.example.elcora_dely` |
+| `apps/fastfood` | `com.example.elcora_fast` |
+| `apps/dely` | `com.example.elcora_dely` |
 
 **Une application Firebase est créée pour un nom de paquet donné et ce nom ne se
 change pas après coup** : il faut supprimer l'application dans la console et la

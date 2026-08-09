@@ -5,7 +5,7 @@ Pourquoi ce script existe
 -------------------------
 
 `flutter test --coverage` n'instrumente que les fichiers qu'un test finit par
-charger. Mesuré le 2026-08-07 sur `El corazon dely` : `lcov.info` ne contenait
+charger. Mesuré le 2026-08-07 sur `apps/dely` : `lcov.info` ne contenait
 **3 fichiers sur 48**, et le ratio brut annonçait 29,96 % — alors que la
 couverture réelle de `lib/` est de 1,31 %. Le chiffre flatteur n'est pas une
 approximation, c'est un autre indicateur : il mesure la couverture des fichiers
@@ -35,7 +35,7 @@ Usage
 
     flutter test --coverage                       # dans le répertoire visé
     python tools/couverture.py                    # les quatre paquets
-    python tools/couverture.py "El corazon dely"  # un seul
+    python tools/couverture.py apps/dely          # un seul
     python tools/couverture.py --generer          # régénère les fichiers
 
 Code de sortie 1 sous le plancher, ou si un fichier généré est périmé.
@@ -57,12 +57,12 @@ RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: trois applications réunies, et 1 480 lignes couvertes contre 837.
 CIBLES: dict[str, tuple[str, float]] = {
     "packages/elcorazon_core": ("elcorazon_core", 55.0),
-    "El Corazon fastfood": ("elcora_fast", 3.0),
+    "apps/fastfood": ("elcora_fast", 3.0),
     # Relevé de 1,0 à 2,5 au lot 3 : le test de traduction des courses
     # (`django_delivery_repository_test.dart`) a porté la couverture réelle à
     # 2,79 %. C'est le cliquet qui se resserre, comme prévu.
-    "El corazon dely": ("elcora_dely", 2.5),
-    "El Corazon admin": ("admin", 0.9),
+    "apps/dely": ("elcora_dely", 2.5),
+    "apps/admin": ("admin", 0.9),
 }
 
 GENERE = "test/_couverture_totale_test.dart"

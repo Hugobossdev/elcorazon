@@ -9,7 +9,7 @@
 Le backend (`backend/`) porte aujourd'hui l'intégralité du chemin critique et des domaines
 secondaires (18 apps, chemin critique + fidélité, gamification, social, support, analytics,
 abonnements — voir [README](README.md#avancement)). **Il ne reste que la Phase 6.** Les trois
-applications Flutter (`El Corazon fastfood`, `El corazon dely`, `El Corazon admin`) n'ont en
+applications Flutter (`apps/fastfood`, `apps/dely`, `apps/admin`) n'ont en
 revanche subi aucune migration : elles lisent et écrivent encore directement dans Supabase
 (Auth, Postgres, Realtime, Storage), plus un canal Socket.IO résiduel côté `fastfood`.
 
@@ -191,7 +191,7 @@ c'est justement l'occasion actée par ADR-009 de lever les trois travers de l'an
     `/auth/token/refresh/` part même si plusieurs requêtes échouent en même temps ; le refresh token
     est à usage unique côté serveur, rotation + liste noire), mapping `problem+json` → `ApiException`
     typée par `code`.
-  - `auth/token_storage.dart` — adapté de `El Corazon fastfood/lib/services/secure_token_storage_service.dart`
+  - `auth/token_storage.dart` — adapté de `apps/fastfood/lib/services/secure_token_storage_service.dart`
     (construit mais jamais branché côté Supabase — récupéré plutôt que réécrit).
   - `auth/auth_repository.dart` — register/login/refresh/logout/me/changePassword/registerDevice.
   - `auth/session.dart` — `sessionProvider` (Riverpod `AsyncNotifier<User?>`), porte la garde de rôle
@@ -223,7 +223,7 @@ c'est justement l'occasion actée par ADR-009 de lever les trois travers de l'an
       — le reste de l'état de chaque app (panier, catalogue, tracking...) reste sur
       Provider/ChangeNotifier jusqu'à ce que son propre domaine soit migré. Les deux cohabitent via
       `UncontrolledProviderScope` (un `ProviderContainer` créé une fois dans `main()`) plutôt qu'une
-      réécriture complète de la gestion d'état — voir `El corazon dely/lib/main.dart` et
+      réécriture complète de la gestion d'état — voir `apps/dely/lib/main.dart` et
       `AppService._onSessionChanged` (le pont qui recopie `sessionProvider` dans `_currentUser`).
 - [x] Migrer la gestion de session (accès + refresh rotatif, révocation) — fait pour `dely`.
 - [ ] Aligner le modèle de rôles/permissions client sur ADR-005 (le back-office n'est plus la

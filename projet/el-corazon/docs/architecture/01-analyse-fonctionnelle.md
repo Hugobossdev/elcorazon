@@ -97,7 +97,7 @@ l'état d'UI persisté côté serveur, sans valeur métier.
 
 ## 5. Parcours utilisateurs
 
-### 5.1 Client (`El Corazon fastfood` — 33 écrans)
+### 5.1 Client (`apps/fastfood` — 33 écrans)
 
 ```
 Splash → [invité : catalogue en lecture seule]
@@ -124,7 +124,7 @@ Splash → [invité : catalogue en lecture seule]
 **Modes dégradés supportés** : consultation du catalogue en cache (24 h), mise en file d'attente
 d'une commande hors-ligne avec retry à backoff exponentiel.
 
-### 5.2 Livreur (`El corazon dely` — 13 écrans)
+### 5.2 Livreur (`apps/dely` — 13 écrans)
 
 ```
 Splash → Auth livreur ──(nouveau)──→ Inscription + dépôt de pièces
@@ -146,7 +146,7 @@ Splash → Auth livreur ──(nouveau)──→ Inscription + dépôt de pièce
 **Détail critique** : un livreur peut voir des courses disponibles *avant* validation de son
 dossier dans l'UI — le contrôle d'accès est donc entièrement à la charge du serveur (cf. §6.2).
 
-### 5.3 Administrateur (`El Corazon admin` — 30 écrans)
+### 5.3 Administrateur (`apps/admin` — 30 écrans)
 
 ```
 Auth admin (+ rôle granulaire)

@@ -3,4 +3,4 @@
 # Le jeu commun aux trois applications vit dans `../analysis_options.yaml` —
 # c'est celui que cette application portait seule avant le lot 5, et qui a été
 # retenu pour les trois parce qu'il était le plus exigeant.
-include: ../analysis_options.yaml
+include: ../../analysis_options.yaml

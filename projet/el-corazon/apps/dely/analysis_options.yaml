@@ -4,4 +4,4 @@
 # voir l'en-tête de ce fichier pour la raison. Cette application n'activait
 # aucune règle avant le lot 5, ce qui expliquait à soi seul 46 des 56
 # diagnostics du projet.
-include: ../analysis_options.yaml
+include: ../../analysis_options.yaml

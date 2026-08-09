@@ -24,9 +24,7 @@ on:
   push:
     paths:
       - "projet/el-corazon/packages/**"
-      - "projet/el-corazon/El Corazon fastfood/**"
-      - "projet/el-corazon/El corazon dely/**"
-      - "projet/el-corazon/El Corazon admin/**"
+      - "projet/el-corazon/apps/**"
       - "projet/el-corazon/tools/**"
       # Jeu de règles de lint partagé par les trois applications : le
       # modifier change ce que la CI exige, il doit donc la déclencher.
@@ -35,9 +33,7 @@ on:
   pull_request:
     paths:
       - "projet/el-corazon/packages/**"
-      - "projet/el-corazon/El Corazon fastfood/**"
-      - "projet/el-corazon/El corazon dely/**"
-      - "projet/el-corazon/El Corazon admin/**"
+      - "projet/el-corazon/apps/**"
       - "projet/el-corazon/tools/**"
       # Jeu de règles de lint partagé par les trois applications : le
       # modifier change ce que la CI exige, il doit donc la déclencher.
@@ -136,14 +132,14 @@ jobs:
       matrix:
         include:
           - nom: Client (fastfood)
-            chemin: "projet/el-corazon/El Corazon fastfood"
-            nom_repertoire: "El Corazon fastfood"
+            chemin: "projet/el-corazon/apps/fastfood"
+            nom_repertoire: "apps/fastfood"
           - nom: Livreur (dely)
-            chemin: "projet/el-corazon/El corazon dely"
-            nom_repertoire: "El corazon dely"
+            chemin: "projet/el-corazon/apps/dely"
+            nom_repertoire: "apps/dely"
           - nom: Back-office (admin)
-            chemin: "projet/el-corazon/El Corazon admin"
-            nom_repertoire: "El Corazon admin"
+            chemin: "projet/el-corazon/apps/admin"
+            nom_repertoire: "apps/admin"
     defaults:
       run:
         working-directory: ${{ matrix.chemin }}
@@ -198,4 +194,4 @@ jobs:
         # une cible. C'est un cliquet : il se relève à chaque domaine migré au
         # lot 3, et interdit d'ici là qu'on ajoute du code non testé sans que
         # la mesure bouge.
-        run: python ../tools/couverture.py "${{ matrix.nom_repertoire }}"
+        run: python ../../tools/couverture.py "${{ matrix.nom_repertoire }}"

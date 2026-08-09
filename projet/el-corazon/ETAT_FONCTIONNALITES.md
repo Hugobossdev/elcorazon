@@ -613,7 +613,7 @@ applications de l'écosystème El Corazón.
      n'ont plus aucune source de données locale.
 
 2. **Fichiers `.env` des applications**
-   - `El Corazon fastfood/.env`, `El corazon dely/.env`, `El Corazon admin/.env`
+   - `apps/fastfood/.env`, `apps/dely/.env`, `apps/admin/.env`
    - Une seule variable indispensable : `API_BASE_URL`
      (`http://localhost:8000/api/v1` en développement).
    - **Plus aucune clé Supabase, ni clé marchande PayDunya, ni certificat

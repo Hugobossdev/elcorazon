@@ -32,7 +32,7 @@ dependencies:
   
   # Notifications
   flutter_local_notifications: ^19.5.0
-  # Push FCM (Phase 6) — mêmes versions que `El corazon dely`
+  # Push FCM (Phase 6) — mêmes versions que `apps/dely`
   firebase_core: ^4.2.1
   firebase_messaging: ^16.0.4
   
@@ -54,7 +54,7 @@ dependencies:
 
   # Backend Django v2 (Phase 6) — fondations partagées avec dely/admin
   elcorazon_core:
-    path: ../packages/elcorazon_core
+    path: ../../packages/elcorazon_core
   
   # Fonts
   google_fonts: ^6.2.1

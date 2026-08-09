@@ -5,7 +5,7 @@ Pourquoi ce script existe
 -------------------------
 
 `flutter analyze` ne signale rien sur les fichiers injoignables : vérifié le
-2026-08-06 sur `El corazon dely/lib/dialogs/menu_item_dialog.dart`, dont les
+2026-08-06 sur `apps/dely/lib/dialogs/menu_item_dialog.dart`, dont les
 trois imports `../../models|services|widgets/...` désignaient des répertoires
 qui n'existent qu'un niveau plus bas — irrésolvables, donc, et pourtant
 `flutter analyze`, `dart analyze` sur le répertoire et `dart analyze
@@ -40,7 +40,7 @@ Usage
 -----
 
     python tools/code_mort.py                  # les trois applications
-    python tools/code_mort.py "El Corazon admin"
+    python tools/code_mort.py apps/admin
     python tools/code_mort.py --zombies        # signale aussi les zombies
 
 Code de sortie 1 s'il reste un fichier injoignable : c'est ce qui rend la CI
@@ -62,7 +62,7 @@ DIRECTIVE = re.compile(r"""(?:^|\n)\s*(?:import|export|part)\s+['"]([^'"]+)['"]"
 #: Racine du dépôt, déduite de l'emplacement de ce script (`tools/`).
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-APPLICATIONS = ["El Corazon admin", "El Corazon fastfood", "El corazon dely"]
+APPLICATIONS = ["apps/admin", "apps/fastfood", "apps/dely"]
 
 
 def nom_du_paquet(racine_app: str) -> str | None:

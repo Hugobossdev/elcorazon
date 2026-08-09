@@ -12,14 +12,14 @@ les plateformes, et elle est en clair dans le dépôt :
 
 | Fichier | Plateforme |
 | --- | --- |
-| `El Corazon fastfood/android/app/src/main/AndroidManifest.xml` | Android |
-| `El Corazon fastfood/web/index.html` | Web |
-| `El corazon dely/android/app/src/main/AndroidManifest.xml` | Android |
-| `El corazon dely/ios/Runner/AppDelegate.swift` | iOS |
-| `El corazon dely/web/index.html` | Web |
-| `El corazon dely/lib/config/api_config.dart` | toutes |
-| `El Corazon admin/web/index.html` | Web |
-| `El Corazon fastfood/SETUP.md` | documentation |
+| `apps/fastfood/android/app/src/main/AndroidManifest.xml` | Android |
+| `apps/fastfood/web/index.html` | Web |
+| `apps/dely/android/app/src/main/AndroidManifest.xml` | Android |
+| `apps/dely/ios/Runner/AppDelegate.swift` | iOS |
+| `apps/dely/web/index.html` | Web |
+| `apps/dely/lib/config/api_config.dart` | toutes |
+| `apps/admin/web/index.html` | Web |
+| `apps/fastfood/SETUP.md` | documentation |
 
 Une clé Maps côté client **est** publique : elle part dans l'APK, dans l'IPA et
 dans le HTML servi au navigateur. La cacher est impossible et ce n'est pas
@@ -171,11 +171,11 @@ restreintes.
 | Fichier | À renseigner |
 | --- | --- |
 | `<app>/android/app/src/main/AndroidManifest.xml` | clé Android de l'app |
-| `El corazon dely/ios/Runner/AppDelegate.swift` | clé iOS |
+| `apps/dely/ios/Runner/AppDelegate.swift` | clé iOS |
 | `<app>/web/index.html` | clé web |
 | `<app>/.env` → `GOOGLE_MAPS_API_KEY` | clé web ou Android selon la cible construite |
 
-**Exception à corriger** : `El corazon dely/lib/config/api_config.dart:7` porte
+**Exception à corriger** : `apps/dely/lib/config/api_config.dart:7` porte
 la clé **en dur dans le code Dart** au lieu de la lire depuis `.env`, contrairement
 aux deux autres applications. À aligner sur `dotenv.env['GOOGLE_MAPS_API_KEY']`.
 
