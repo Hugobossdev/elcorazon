@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:elcora_fast/models/group_payment.dart';
+import 'package:elcora_fast/presentation/paiement_partage.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/main.dart' show apiClient;
-import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 
@@ -26,7 +24,7 @@ class GroupPaymentStatusScreen extends StatefulWidget {
 class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
   final eccore.PaymentRepository _payments =
       eccore.PaymentRepository(apiClient: apiClient);
-  GroupPaymentSession? _session;
+  eccore.SplitPayment? _session;
   bool _isLoading = true;
   String? _loadError;
   Timer? _refreshTimer;
@@ -49,7 +47,7 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
       final split = await _payments.getSplit(widget.orderId);
       if (mounted) {
         setState(() {
-          _session = GroupPaymentSession.fromRemote(split);
+          _session = split;
           _isLoading = false;
           _loadError = null;
         });
@@ -78,50 +76,8 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
     });
   }
 
-  String _getStatusText(GroupPaymentParticipantStatus status) {
-    switch (status) {
-      case GroupPaymentParticipantStatus.paid:
-        return 'Payé';
-      case GroupPaymentParticipantStatus.processing:
-        return 'En traitement';
-      case GroupPaymentParticipantStatus.failed:
-        return 'Échoué';
-      case GroupPaymentParticipantStatus.cancelled:
-        return 'Annulé';
-      case GroupPaymentParticipantStatus.pending:
-        return 'En attente';
-    }
-  }
 
-  IconData _getStatusIcon(GroupPaymentParticipantStatus status) {
-    switch (status) {
-      case GroupPaymentParticipantStatus.paid:
-        return Icons.check_circle;
-      case GroupPaymentParticipantStatus.processing:
-        return Icons.hourglass_empty;
-      case GroupPaymentParticipantStatus.failed:
-        return Icons.error;
-      case GroupPaymentParticipantStatus.cancelled:
-        return Icons.cancel;
-      case GroupPaymentParticipantStatus.pending:
-        return Icons.pending;
-    }
-  }
 
-  Color _getStatusColor(GroupPaymentParticipantStatus status) {
-    switch (status) {
-      case GroupPaymentParticipantStatus.paid:
-        return AppColors.success;
-      case GroupPaymentParticipantStatus.processing:
-        return AppColors.primary;
-      case GroupPaymentParticipantStatus.failed:
-        return AppColors.error;
-      case GroupPaymentParticipantStatus.cancelled:
-        return Colors.grey;
-      case GroupPaymentParticipantStatus.pending:
-        return Colors.orange;
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -174,11 +130,11 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
 
   Widget _buildContent() {
     final session = _session!;
-    final paidCount = session.participants
-        .where((p) => p.status == GroupPaymentParticipantStatus.paid)
+    final paidCount = session.shares
+        .where((p) => p.isPaid)
         .length;
-    final totalCount = session.participants.length;
-    final remaining = session.totalAmount - session.paidAmount;
+    final totalCount = session.shares.length;
+    final remaining = session.totalAmount.toMajorUnits() - session.paidAmount.toMajorUnits();
 
     return Column(
       children: [
@@ -213,12 +169,12 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
                 children: [
                   _buildSummaryItem(
                     'Total',
-                    PriceFormatter.format(session.totalAmount),
+                    PriceFormatter.format(session.totalAmount.toMajorUnits()),
                     Colors.white,
                   ),
                   _buildSummaryItem(
                     'Payé',
-                    PriceFormatter.format(session.paidAmount),
+                    PriceFormatter.format(session.paidAmount.toMajorUnits()),
                     AppColors.success,
                   ),
                   _buildSummaryItem(
@@ -233,8 +189,9 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
                 children: [
                   Expanded(
                     child: LinearProgressIndicator(
-                      value: session.totalAmount > 0
-                          ? session.paidAmount / session.totalAmount
+                      value: session.totalAmount.amountMinor > 0
+                          ? session.paidAmount.amountMinor /
+                              session.totalAmount.amountMinor
                           : 0,
                       backgroundColor: Colors.white.withValues(alpha: 0.3),
                       valueColor: const AlwaysStoppedAnimation<Color>(
@@ -261,9 +218,9 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: session.participants.length,
+            itemCount: session.shares.length,
             itemBuilder: (context, index) {
-              final participant = session.participants[index];
+              final participant = session.shares[index];
               return _buildParticipantCard(participant);
             },
           ),
@@ -296,12 +253,11 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
     );
   }
 
-  Widget _buildParticipantCard(GroupPaymentParticipant participant) {
-    final statusColor = _getStatusColor(participant.status);
-    final statusIcon = _getStatusIcon(participant.status);
-    final statusText = _getStatusText(participant.status);
-
-    final isCurrentUser = _isCurrentUser(participant.userId);
+  Widget _buildParticipantCard(eccore.SplitShare participant) {
+    final etat = EtatPart.depuisServeur(participant.status);
+    final statusColor = etat.couleur;
+    final statusIcon = etat.icone;
+    final statusText = etat.libelle;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -314,15 +270,13 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: isCurrentUser
-                      ? AppColors.primary
-                      : statusColor.withValues(alpha: 0.2),
+                  backgroundColor: statusColor.withValues(alpha: 0.2),
                   child: Text(
-                    participant.name.isNotEmpty
-                        ? participant.name[0].toUpperCase()
+                    participant.displayName.isNotEmpty
+                        ? participant.displayName[0].toUpperCase()
                         : '?',
                     style: TextStyle(
-                      color: isCurrentUser ? Colors.white : statusColor,
+                      color: statusColor,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -336,44 +290,15 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              participant.name,
+                              participant.displayName,
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
                               ),
                             ),
                           ),
-                          if (isCurrentUser)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Text(
-                                'Vous',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                            ),
                         ],
                       ),
-                      if (participant.email != null &&
-                          participant.email!.isNotEmpty)
-                        Text(
-                          participant.email!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -421,7 +346,7 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      PriceFormatter.format(participant.amount),
+                      PriceFormatter.format(participant.amount.toMajorUnits()),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -430,7 +355,7 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
                     ),
                   ],
                 ),
-                if (participant.status == GroupPaymentParticipantStatus.paid)
+                if (participant.isPaid)
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -443,7 +368,7 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        PriceFormatter.format(participant.paidAmount),
+                        PriceFormatter.format(participant.amount.toMajorUnits()),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -454,7 +379,7 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
                   ),
               ],
             ),
-            if (participant.phone != null && participant.phone!.isNotEmpty) ...[
+            if (participant.phone.isNotEmpty) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -465,57 +390,10 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    participant.phone!,
+                    participant.phone,
                     style: TextStyle(
                       fontSize: 12,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  if (participant.operator != null &&
-                      participant.operator!.isNotEmpty) ...[
-                    const SizedBox(width: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        participant.operator!.toUpperCase(),
-                        style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-            if (participant.transactionId != null &&
-                participant.transactionId!.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(
-                    Icons.receipt,
-                    size: 14,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Transaction: ${participant.transactionId}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontFamily: 'monospace',
-                      ),
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -527,10 +405,4 @@ class _GroupPaymentStatusScreenState extends State<GroupPaymentStatusScreen> {
     );
   }
 
-  bool _isCurrentUser(String? userId) {
-    if (userId == null) return false;
-    final appService = context.read<AppService>();
-    final currentUser = appService.currentUser;
-    return currentUser != null && currentUser.id == userId;
-  }
 }

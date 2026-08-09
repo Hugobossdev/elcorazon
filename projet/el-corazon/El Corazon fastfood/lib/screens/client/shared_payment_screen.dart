@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:elcora_fast/main.dart' show apiClient;
-import 'package:elcora_fast/models/group_payment.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/models/payment_participant.dart';
@@ -51,7 +50,7 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
   final eccore.PaymentRepository _payments =
       eccore.PaymentRepository(apiClient: apiClient);
 
-  GroupPaymentSession? _session;
+  eccore.SplitPayment? _session;
   bool _isLoading = true;
   bool _isProcessing = false;
   String? _loadError;
@@ -95,7 +94,7 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
 
       if (!mounted) return;
       setState(() {
-        _session = GroupPaymentSession.fromRemote(split);
+        _session = split;
         _isLoading = false;
       });
     } on eccore.ApiException catch (e) {
@@ -111,7 +110,7 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
   ///
   /// Ne solde rien : au retour, la part reste « en attente » tant que le webhook
   /// n'a pas confirmé. L'écran se contente de relire l'état.
-  Future<void> _payShare(GroupPaymentParticipant participant) async {
+  Future<void> _payShare(eccore.SplitShare participant) async {
     if (participant.shareToken.isEmpty) {
       _showError("Cette part n'a pas de lien de paiement");
       return;
@@ -131,7 +130,7 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
         await showDialog<void>(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text('Régler la part de ${participant.name}'),
+            title: Text('Régler la part de ${participant.displayName}'),
             content: Text(checkout.instructions),
             actions: [
               TextButton(
@@ -154,13 +153,13 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
   /// Copie le jeton d'une part — c'est ainsi qu'un convive **sans compte** règle
   /// la sienne : le lien lui suffit, et ne donne accès qu'à cette part, ni à la
   /// commande ni aux autres participants.
-  void _copyShareLink(GroupPaymentParticipant participant) {
+  void _copyShareLink(eccore.SplitShare participant) {
     if (participant.shareToken.isEmpty) return;
 
     Clipboard.setData(ClipboardData(text: participant.shareToken));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Lien de paiement de ${participant.name} copié'),
+        content: Text('Lien de paiement de ${participant.displayName} copié'),
         backgroundColor: AppColors.success,
       ),
     );
@@ -228,19 +227,20 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: session.participants.length,
+            itemCount: session.shares.length,
             itemBuilder: (context, index) =>
-                _buildParticipantCard(session.participants[index]),
+                _buildParticipantCard(session.shares[index]),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSummary(GroupPaymentSession session) {
-    final reste = session.totalAmount - session.paidAmount;
-    final reglees = session.participants
-        .where((p) => p.status == GroupPaymentParticipantStatus.paid)
+  Widget _buildSummary(eccore.SplitPayment session) {
+    final reste =
+        session.totalAmount.toMajorUnits() - session.paidAmount.toMajorUnits();
+    final reglees = session.shares
+        .where((p) => p.isPaid)
         .length;
 
     return Container(
@@ -251,7 +251,7 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Total : ${PriceFormatter.format(session.totalAmount)}',
+            'Total : ${PriceFormatter.format(session.totalAmount.toMajorUnits())}',
             style: Theme.of(context)
                 .textTheme
                 .titleMedium
@@ -259,13 +259,13 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Déjà réglé : ${PriceFormatter.format(session.paidAmount)} • '
+            'Déjà réglé : ${PriceFormatter.format(session.paidAmount.toMajorUnits())} • '
             'Reste : ${PriceFormatter.format(reste)}',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 4),
           Text(
-            '$reglees part(s) réglée(s) sur ${session.participants.length}',
+            '$reglees part(s) réglée(s) sur ${session.shares.length}',
             style: Theme.of(context)
                 .textTheme
                 .bodySmall
@@ -276,8 +276,8 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
     );
   }
 
-  Widget _buildParticipantCard(GroupPaymentParticipant participant) {
-    final paid = participant.status == GroupPaymentParticipantStatus.paid;
+  Widget _buildParticipantCard(eccore.SplitShare participant) {
+    final paid = participant.isPaid;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -302,11 +302,11 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        participant.name,
+                        participant.displayName,
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        PriceFormatter.format(participant.amount),
+                        PriceFormatter.format(participant.amount.toMajorUnits()),
                         style: const TextStyle(color: AppColors.textSecondary),
                       ),
                     ],
