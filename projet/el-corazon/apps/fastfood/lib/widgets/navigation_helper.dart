@@ -4,7 +4,6 @@ import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/widgets/navigation_error_handler.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/payment_participant.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
@@ -97,7 +96,7 @@ class NavigationHelper {
   static Future<void> navigateToItemCustomization(
     BuildContext context,
     dynamic item, {
-    Function(MenuItem, int, Map<String, dynamic>)? onAddToCart,
+    Function(eccore.MenuItem, int, Map<String, dynamic>)? onAddToCart,
   }) async {
     try {
       await NavigationService.pushNamedWithArgs(
@@ -290,7 +289,7 @@ class NavigationHelper {
   /// Naviguer vers les avis produit
   static Future<void> navigateToProductReviews(
     BuildContext context,
-    MenuItem menuItem,
+    eccore.MenuItem menuItem,
   ) async {
     try {
       await NavigationService.pushNamedWithArgs(
@@ -460,7 +459,7 @@ extension NavigationHelperExtension on BuildContext {
   /// Naviguer vers la personnalisation d'item
   Future<void> navigateToItemCustomization(
     dynamic item, {
-    Function(MenuItem, int, Map<String, dynamic>)? onAddToCart,
+    Function(eccore.MenuItem, int, Map<String, dynamic>)? onAddToCart,
   }) =>
       NavigationHelper.navigateToItemCustomization(
         this,
@@ -513,7 +512,7 @@ extension NavigationHelperExtension on BuildContext {
       );
 
   /// Naviguer vers les avis produit
-  Future<void> navigateToProductReviews(MenuItem menuItem) =>
+  Future<void> navigateToProductReviews(eccore.MenuItem menuItem) =>
       NavigationHelper.navigateToProductReviews(this, menuItem);
 
   /// Naviguer vers le paiement partagé

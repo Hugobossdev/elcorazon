@@ -2,8 +2,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
-import 'package:elcora_fast/models/menu_item.dart';
-import 'package:elcora_fast/repositories/django_menu_repository.dart';
 
 /// Critères de recherche avancée
 class SearchCriteria {
@@ -120,7 +118,7 @@ class AdvancedSearchService {
   /// filtrés sur la page reçue, si bien qu'un article correspondant mais absent
   /// de cette page ne remontait jamais. Ici, `apps/catalog/filters.py` filtre
   /// le catalogue entier et le repository suit la pagination jusqu'au bout.
-  Future<List<MenuItem>> search(SearchCriteria criteria) async {
+  Future<List<eccore.MenuItem>> search(SearchCriteria criteria) async {
     try {
       final items = await _catalog.getMenuItems(
         restaurantSlug: AppConstants.restaurantSlug,
@@ -146,10 +144,11 @@ class AdvancedSearchService {
         ordering: _orderingFor(criteria.sortBy),
       );
 
-      final results = items
-          .where((item) => item.isAvailable)
-          .map(DjangoMenuRepository.toLocalMenuItem)
-          .toList();
+      // Plus de traduction : le dépôt du socle rend déjà ce que les écrans
+      // lisent. `DjangoMenuRepository.toLocalMenuItem` existait pour que deux
+      // chemins vers le même point d'entrée ne divergent pas ; il n'y a plus
+      // qu'un chemin.
+      final results = items.where((item) => item.isAvailable).toList();
 
       eccore.Journal.trace('✅ Recherche avancée: ${results.length} résultats trouvés');
       return results;
@@ -189,22 +188,22 @@ class AdvancedSearchService {
   }
 
   /// Recherche simple (compatibilité avec l'ancien code)
-  Future<List<MenuItem>> searchSimple(String query) async {
+  Future<List<eccore.MenuItem>> searchSimple(String query) async {
     return search(SearchCriteria(query: query));
   }
 
   /// Recherche par ingrédients
-  Future<List<MenuItem>> searchByIngredients(List<String> ingredients) async {
+  Future<List<eccore.MenuItem>> searchByIngredients(List<String> ingredients) async {
     return search(SearchCriteria(includeIngredients: ingredients));
   }
 
   /// Recherche sans allergènes
-  Future<List<MenuItem>> searchWithoutAllergens(List<String> allergens) async {
+  Future<List<eccore.MenuItem>> searchWithoutAllergens(List<String> allergens) async {
     return search(SearchCriteria(excludeAllergens: allergens));
   }
 
   /// Recherche par prix
-  Future<List<MenuItem>> searchByPrice({
+  Future<List<eccore.MenuItem>> searchByPrice({
     double? minPrice,
     double? maxPrice,
   }) async {
@@ -215,7 +214,7 @@ class AdvancedSearchService {
   }
 
   /// Recherche végétarienne/végane
-  Future<List<MenuItem>> searchByDiet({
+  Future<List<eccore.MenuItem>> searchByDiet({
     bool? vegetarian,
     bool? vegan,
   }) async {
@@ -226,7 +225,7 @@ class AdvancedSearchService {
   }
 
   /// Recherche combinée (tous les critères)
-  Future<List<MenuItem>> searchCombined({
+  Future<List<eccore.MenuItem>> searchCombined({
     String? query,
     List<String>? categoryIds,
     double? minPrice,

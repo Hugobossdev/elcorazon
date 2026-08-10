@@ -302,12 +302,52 @@ anglais dans un back-office français.
 *Critère de fin atteint* : plus aucun `import '…/models/order.dart'`, plus
 d'adaptateur, et 51 cas sur la logique déplacée.
 
+#### 3.8 — `fastfood`, domaine « catalogue » : **fait**
+
+`models/menu_item.dart` et `models/menu_category.dart` sont retirés, et
+`DjangoMenuRepository` ne traduit plus rien — `eccore.CatalogRepository` rend
+déjà ce que les écrans lisent. 21 fichiers touchés.
+
+L'aller-retour JSON manquait au socle : `fromJson` existait seul, alors que le
+cache hors-ligne range les entités en base locale. `MenuItem.toJson`,
+`Category.toJson`, plus celles d'`OptionGroup` et `Option`, comblent le manque
+— 7 cas les épinglent, dont le prix au centime près.
+
+Cinq défauts sont tombés avec la traduction :
+
+- **Le regroupement par catégorie n'aurait plus rien trouvé.** `menu_screen`
+  indexait les catégories par `id` et cherchait avec le `categorySlug` de
+  l'article. L'ancien adaptateur rangeait le slug dans le champ `id` du modèle
+  local, ce qui masquait l'écart ; `eccore.Category.id` est l'UUID. Corrigé en
+  indexant par `slug` — l'identifiant que l'article partage réellement ;
+- **Un article sans catégorie connue tombait dans la première venue.**
+  `app_service` rattachait l'objet catégorie article par article, avec
+  `orElse: () => _menuCategories.first`. La boucle entière disparaît : le
+  contrat rend `category` et `category_name` sur l'article ;
+- **La « recommande » fabriquait des articles que le serveur refuse.** Un
+  article retiré de la carte était recréé avec un identifiant `temp-` et une
+  catégorie `temp-category` ; le panier l'acceptait, `/carts/` non, et la ligne
+  disparaissait à la synchronisation suivante sans que personne ne le dise.
+  L'écran nomme désormais les articles qui ne sont plus à la carte ;
+- **Les cartes du menu affichaient un article qui n'était pas le leur.**
+  `createEnhancedMenuItemCard` recevait une dizaine de scalaires et
+  reconstruisait un `MenuItem` avec `categoryId: 'burgers'` écrit en dur, sans
+  note ni disponibilité ni exclusivité VIP. Elle reçoit l'article entier ;
+- **Le prix « personnalisé » du panier n'a jamais servi.**
+  `enhanced_item_customization_screen` recopiait un total calculé localement
+  sur une copie de l'article. Le serveur ne l'a jamais lu : il chiffre les
+  options depuis leurs identifiants (ADR-007).
+
+Un sixième a été corrigé au passage : **`OfflineSyncService` écartait les
+catégories sans emoji**, au même titre qu'une catégorie sans nom. Une catégorie
+disparaissait donc du mode hors ligne pour un champ décoratif. Le rejet est
+retiré, et l'écran affiche un repli (`CategorieAffichee.pastille`).
+
 #### 3.7 — `fastfood`, ce qui reste : mesuré, pas exécuté
 
-Quatre modèles subsistent : `menu_item` (21 consommateurs), `menu_category`
-(8), `address` (14), `cart_item` (9), plus `order` (18) et trois modèles de
-paiement. Le catalogue est **un seul bloc** : `menu_item.dart` importe
-`menu_category.dart`, et les deux passent par `django_menu_repository.dart`.
+Après la fermeture du catalogue (§3.8), deux modèles subsistent —
+`address` (14 consommateurs) et `cart_item` (9) — plus `order` (18) et trois
+modèles de paiement.
 
 La correspondance avec le socle est directe — `price` en `Money`, `categoryId`
 en `categorySlug`, `imageUrl` en `image`, `preparationTime` en

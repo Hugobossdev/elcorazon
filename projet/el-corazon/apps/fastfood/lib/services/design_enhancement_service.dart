@@ -1,9 +1,9 @@
 import 'dart:ui'; // Pour ImageFilter
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/menu_item_card.dart';
 import 'package:elcora_fast/widgets/cart_item_card.dart';
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/cart_item.dart' as cart_item;
 
 /// Service pour intégrer facilement les améliorations de design
@@ -105,15 +105,15 @@ class DesignEnhancementService {
   }
 
   /// Créer une carte de produit améliorée
+  /// [item] passe **entier**.
+  ///
+  /// Les appelants démontaient l'article en une dizaine de scalaires pour que
+  /// cette fabrique en reconstruise un autre — avec `categoryId: 'burgers'`
+  /// écrit en dur, et sans note, ni disponibilité, ni exclusivité VIP. La
+  /// carte affichait donc un article qui n'était pas celui qu'on lui avait
+  /// donné.
   static Widget createEnhancedMenuItemCard({
-    required String name,
-    required String description,
-    required double price,
-    String? id,
-    String? imageUrl,
-    bool isPopular = false,
-    bool isVegetarian = false,
-    bool isVegan = false,
+    required eccore.MenuItem item,
     VoidCallback? onTap,
     VoidCallback? onAddToCart,
     VoidCallback? onDecrement,
@@ -123,17 +123,7 @@ class DesignEnhancementService {
     int quantity = 0,
   }) {
     final card = MenuItemCard(
-      item: MenuItem(
-        id: id ?? '',
-        name: name,
-        description: description,
-        price: price,
-        categoryId: 'burgers', // Placeholder category ID
-        imageUrl: imageUrl,
-        isPopular: isPopular,
-        isVegetarian: isVegetarian,
-        isVegan: isVegan,
-      ),
+      item: item,
       onTap: onTap ?? () {},
       onAddToCart: onAddToCart ?? () {},
       onDecrement: onDecrement,

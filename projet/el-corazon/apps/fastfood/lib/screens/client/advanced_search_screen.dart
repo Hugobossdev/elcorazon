@@ -1,7 +1,7 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:elcora_fast/models/menu_item.dart';
-import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/services/advanced_search_service.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/theme.dart';
@@ -19,7 +19,7 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   final AdvancedSearchService _searchService = AdvancedSearchService();
 
-  List<MenuItem> _results = [];
+  List<eccore.MenuItem> _results = [];
   bool _isLoading = false;
   bool _showFilters = false;
 
@@ -171,7 +171,7 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
     );
   }
 
-  Widget _buildFiltersSection(List<MenuCategory> categories) {
+  Widget _buildFiltersSection(List<eccore.Category> categories) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -199,7 +199,7 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
               children: categories.map((category) {
                 final isSelected = _selectedCategoryIds.contains(category.id);
                 return FilterChip(
-                  label: Text(category.displayName),
+                  label: Text(category.name),
                   selected: isSelected,
                   onSelected: (selected) {
                     setState(() {
@@ -386,11 +386,11 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           child: ListTile(
-            leading: item.imageUrl != null
+            leading: item.image != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: Image.network(
-                      item.imageUrl!,
+                      item.image!,
                       width: 60,
                       height: 60,
                       fit: BoxFit.cover,
@@ -409,22 +409,22 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    if (item.isVegetarian)
+                    if (item.estVegetarien)
                       const Chip(
                         label: Text('Végétarien'),
                         padding: EdgeInsets.zero,
                         labelPadding: EdgeInsets.symmetric(horizontal: 8),
                       ),
-                    if (item.isVegan)
+                    if (item.estVegan)
                       const Chip(
                         label: Text('Végan'),
                         padding: EdgeInsets.zero,
                         labelPadding: EdgeInsets.symmetric(horizontal: 8),
                       ),
-                    if (item.rating > 0) ...[
+                    if (item.ratingAverage > 0) ...[
                       const SizedBox(width: 8),
                       const Icon(Icons.star, size: 16, color: Colors.amber),
-                      Text(item.rating.toStringAsFixed(1)),
+                      Text(item.ratingAverage.toStringAsFixed(1)),
                     ],
                   ],
                 ),
@@ -435,15 +435,15 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  PriceFormatter.format(item.price),
+                  PriceFormatter.format(item.prixAffiche),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: AppTheme.primaryColor,
                       ),
                 ),
-                if (item.preparationTime > 0)
+                if (item.preparationMinutes > 0)
                   Text(
-                    '${item.preparationTime} min',
+                    '${item.preparationMinutes} min',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
               ],

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/cart_item.dart';
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/screens/splash_screen.dart';
@@ -218,9 +217,9 @@ class AppRouter {
         final args = settings.arguments as Map<String, dynamic>?;
         return MaterialPageRoute(
           builder: (_) => EnhancedItemCustomizationScreen(
-            item: args?['item'] as MenuItem,
+            item: args?['item'] as eccore.MenuItem,
             onAddToCart: args?['onAddToCart'] as Function(
-              MenuItem,
+              eccore.MenuItem,
               int,
               Map<String, dynamic>,
             )?,
@@ -284,7 +283,7 @@ class AppRouter {
         final args = settings.arguments as Map<String, dynamic>?;
         return MaterialPageRoute(
           builder: (_) => ProductReviewsScreen(
-            menuItem: args?['menuItem'] as MenuItem,
+            menuItem: args?['menuItem'] as eccore.MenuItem,
           ),
           settings: settings,
         );

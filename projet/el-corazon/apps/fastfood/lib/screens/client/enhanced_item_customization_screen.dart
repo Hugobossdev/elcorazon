@@ -1,6 +1,7 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
@@ -9,8 +10,8 @@ import 'package:elcora_fast/widgets/navigation_helper.dart';
 
 /// Écran de personnalisation amélioré avec tabs et fonctionnalités modernes
 class EnhancedItemCustomizationScreen extends StatefulWidget {
-  final MenuItem item;
-  final Function(MenuItem item, int quantity, Map<String, dynamic> customizations)? onAddToCart;
+  final eccore.MenuItem item;
+  final Function(eccore.MenuItem item, int quantity, Map<String, dynamic> customizations)? onAddToCart;
 
   const EnhancedItemCustomizationScreen({
     required this.item, 
@@ -167,10 +168,10 @@ class _EnhancedItemCustomizationScreenState
       child: Stack(
         children: [
           // Image de fond
-          if (widget.item.imageUrl != null && widget.item.imageUrl!.isNotEmpty)
+          if (widget.item.image != null && widget.item.image!.isNotEmpty)
             Positioned.fill(
               child: Image.network(
-                widget.item.imageUrl!,
+                widget.item.image!,
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stackTrace) {
                   return Container(
@@ -223,7 +224,7 @@ class _EnhancedItemCustomizationScreenState
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    if (widget.item.calories > 0) ...[
+                    if ((widget.item.calories ?? 0) > 0) ...[
                       const Icon(
                         Icons.local_fire_department,
                         color: Colors.white,
@@ -252,7 +253,7 @@ class _EnhancedItemCustomizationScreenState
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      '${widget.item.preparationTime} min',
+                      '${widget.item.preparationMinutes} min',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.9),
                         fontSize: 12,
@@ -345,7 +346,7 @@ class _EnhancedItemCustomizationScreenState
 
   Widget _buildSizeOption(CustomizationOption option, CustomizationService service) {
     final isSelected = _selectedSizeId == option.id;
-    final basePrice = widget.item.price;
+    final basePrice = widget.item.prixAffiche;
     final sizePrice = basePrice + option.priceModifier;
     final priceDifference = option.priceModifier;
 
@@ -795,7 +796,7 @@ class _EnhancedItemCustomizationScreenState
         final priceModifier = customization?.totalPriceModifier ?? 0.0;
         
         // Calculer le prix de base selon la taille sélectionnée
-        double basePrice = widget.item.price;
+        double basePrice = widget.item.prixAffiche;
         if (_selectedSizeId != null) {
           final optionsByCategory = service.getOptionsByCategory(
             _menuItemId,
@@ -807,7 +808,7 @@ class _EnhancedItemCustomizationScreenState
               (opt) => opt.id == _selectedSizeId,
               orElse: () => sizeOptions.first,
             );
-            basePrice = widget.item.price + selectedSize.priceModifier;
+            basePrice = widget.item.prixAffiche + selectedSize.priceModifier;
           }
         }
         
@@ -1042,8 +1043,10 @@ class _EnhancedItemCustomizationScreenState
 
       final cartService = Provider.of<CartService>(context, listen: false);
       
-      // Créer un MenuItem avec le prix personnalisé
-      final customizedItem = widget.item.copyWith(price: totalPrice / _quantity);
+      // L'article part **tel quel**. Le prix personnalisé était calculé ici
+      // puis recopié sur une copie de l'article ; le serveur ne l'a jamais lu
+      // — il chiffre les options depuis leurs identifiants (ADR-007), et
+      // c'est son total qui fait foi au panier comme à la commande.
       
       // Préparer les customizations pour le panier
       final customizationsMap = <String, dynamic>{
@@ -1060,14 +1063,14 @@ class _EnhancedItemCustomizationScreenState
 
       if (widget.onAddToCart != null) {
         widget.onAddToCart!(
-          customizedItem,
+          widget.item,
           _quantity,
           customizationsMap,
         );
       } else {
         // Ajouter au panier avec la quantité
         cartService.addItem(
-          customizedItem,
+          widget.item,
           quantity: _quantity,
           customizations: customizationsMap,
         );

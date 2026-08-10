@@ -1,6 +1,6 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class FavoritesService extends ChangeNotifier {
@@ -8,10 +8,10 @@ class FavoritesService extends ChangeNotifier {
   factory FavoritesService() => _instance;
   FavoritesService._internal();
 
-  final List<MenuItem> _favorites = [];
+  final List<eccore.MenuItem> _favorites = [];
   bool _isInitialized = false;
 
-  List<MenuItem> get favorites => List.unmodifiable(_favorites);
+  List<eccore.MenuItem> get favorites => List.unmodifiable(_favorites);
   int get count => _favorites.length;
   bool get isEmpty => _favorites.isEmpty;
   bool get isInitialized => _isInitialized;
@@ -57,12 +57,12 @@ class FavoritesService extends ChangeNotifier {
   }
 
   /// Vérifier si un produit est en favori
-  bool isFavorite(MenuItem item) {
+  bool isFavorite(eccore.MenuItem item) {
     return _favorites.any((favorite) => favorite.id == item.id);
   }
 
   /// Ajouter un produit aux favoris
-  Future<bool> addToFavorites(MenuItem item) async {
+  Future<bool> addToFavorites(eccore.MenuItem item) async {
     try {
       if (!isFavorite(item)) {
         _favorites.add(item);
@@ -79,7 +79,7 @@ class FavoritesService extends ChangeNotifier {
   }
 
   /// Retirer un produit des favoris
-  Future<bool> removeFromFavorites(MenuItem item) async {
+  Future<bool> removeFromFavorites(eccore.MenuItem item) async {
     try {
       final initialLength = _favorites.length;
       _favorites.removeWhere((favorite) => favorite.id == item.id);
@@ -99,7 +99,7 @@ class FavoritesService extends ChangeNotifier {
   }
 
   /// Basculer l'état favori d'un produit
-  Future<bool> toggleFavorite(MenuItem item) async {
+  Future<bool> toggleFavorite(eccore.MenuItem item) async {
     if (isFavorite(item)) {
       return await removeFromFavorites(item);
     } else {
@@ -108,7 +108,7 @@ class FavoritesService extends ChangeNotifier {
   }
 
   /// Récupérer tous les favoris
-  List<MenuItem> getFavorites() {
+  List<eccore.MenuItem> getFavorites() {
     return List.unmodifiable(_favorites);
   }
 
@@ -121,7 +121,7 @@ class FavoritesService extends ChangeNotifier {
   }
 
   /// Mettre à jour un produit dans les favoris
-  Future<void> updateFavorite(MenuItem item) async {
+  Future<void> updateFavorite(eccore.MenuItem item) async {
     final index = _favorites.indexWhere((favorite) => favorite.id == item.id);
     if (index != -1) {
       _favorites[index] = item;

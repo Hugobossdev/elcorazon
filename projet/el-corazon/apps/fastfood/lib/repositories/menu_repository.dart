@@ -1,25 +1,24 @@
-import 'package:elcora_fast/models/menu_item.dart';
-import 'package:elcora_fast/models/menu_category.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
-/// Repository abstrait pour les opérations sur les menu items
-/// Permet de séparer la logique métier de l'accès aux données
+/// Accès au catalogue, vu par l'application.
+///
+/// L'abstraction survit à la migration : elle sépare les écrans de la source
+/// des données, et c'est elle qui a permis de remplacer Supabase par Django
+/// sans toucher aux écrans. Ce sont les **types** qui changent — plus de
+/// modèles locaux, les entités du socle directement.
 abstract class MenuRepository {
-  /// Récupère tous les menu items, optionnellement filtrés par catégorie
-  Future<List<MenuItem>> getMenuItems({String? categoryId});
+  /// Les articles, éventuellement d'une seule catégorie (par son slug).
+  Future<List<eccore.MenuItem>> getMenuItems({String? categoryId});
 
-  /// Récupère un menu item par son ID
-  Future<MenuItem?> getMenuItemById(String id);
+  Future<eccore.MenuItem?> getMenuItemById(String id);
 
-  /// Stream des menu items pour la mise à jour en temps réel
-  Stream<List<MenuItem>> watchMenuItems({String? categoryId});
+  /// Le catalogue rafraîchi périodiquement — il n'y a pas de WebSocket
+  /// catalogue.
+  Stream<List<eccore.MenuItem>> watchMenuItems({String? categoryId});
 
-  /// Récupère les catégories de menu
-  Future<List<MenuCategory>> getMenuCategories();
+  Future<List<eccore.Category>> getMenuCategories();
 
-  /// Recherche des menu items
-  Future<List<MenuItem>> searchMenuItems(String query);
+  Future<List<eccore.MenuItem>> searchMenuItems(String query);
 
-  /// Récupère les menu items populaires
-  Future<List<MenuItem>> getPopularMenuItems({int limit = 10});
+  Future<List<eccore.MenuItem>> getPopularMenuItems({int limit = 10});
 }
-

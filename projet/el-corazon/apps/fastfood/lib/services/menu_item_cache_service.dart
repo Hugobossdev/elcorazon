@@ -1,19 +1,18 @@
-import 'package:elcora_fast/models/menu_item.dart';
-import 'package:elcora_fast/models/menu_category.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/repositories/django_menu_repository.dart';
 import 'package:elcora_fast/repositories/menu_repository.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Modèle pour un élément de menu en cache
 class CachedMenuItem {
-  final MenuItem item;
+  final eccore.MenuItem item;
   final DateTime cachedAt;
-  final String? categoryId;
+  final String? categorySlug;
 
   CachedMenuItem({
     required this.item,
     required this.cachedAt,
-    this.categoryId,
+    this.categorySlug,
   });
 
   bool isExpired(Duration expiryDuration) {
@@ -23,7 +22,7 @@ class CachedMenuItem {
 
 /// Modèle pour une catégorie en cache
 class CachedCategory {
-  final MenuCategory category;
+  final eccore.Category category;
   final DateTime cachedAt;
 
   CachedCategory({
@@ -71,7 +70,7 @@ class MenuItemCacheService {
   }
 
   /// Récupère les menu items depuis le cache ou la base de données
-  Future<List<MenuItem>> getMenuItems({
+  Future<List<eccore.MenuItem>> getMenuItems({
     String? categoryId,
     bool forceRefresh = false,
     Duration? customExpiry,
@@ -84,13 +83,13 @@ class MenuItemCacheService {
         !_isCacheExpired(_menuItemsLastUpdate!, expiry)) {
       
       // Filtrer par catégorie si demandé
-      List<MenuItem> items = _menuItemsCache.values
+      List<eccore.MenuItem> items = _menuItemsCache.values
           .where((cached) => !cached.isExpired(expiry))
           .map((cached) => cached.item)
           .toList();
       
       if (categoryId != null) {
-        items = items.where((item) => item.categoryId == categoryId).toList();
+        items = items.where((item) => item.categorySlug == categoryId).toList();
       }
       
       if (items.isNotEmpty) {
@@ -108,7 +107,7 @@ class MenuItemCacheService {
     
     // Filtrer par catégorie si demandé
     if (categoryId != null) {
-      return items.where((item) => item.categoryId == categoryId).toList();
+      return items.where((item) => item.categorySlug == categoryId).toList();
     }
     
     Journal.trace('✅ ${items.length} menu items chargés depuis la base de données');
@@ -116,7 +115,7 @@ class MenuItemCacheService {
   }
 
   /// Récupère un menu item spécifique par ID
-  Future<MenuItem?> getMenuItemById(String id, {bool forceRefresh = false}) async {
+  Future<eccore.MenuItem?> getMenuItemById(String id, {bool forceRefresh = false}) async {
     // Vérifier le cache d'abord
     if (!forceRefresh && _menuItemsCache.containsKey(id)) {
       final cached = _menuItemsCache[id]!;
@@ -135,7 +134,7 @@ class MenuItemCacheService {
       _menuItemsCache[id] = CachedMenuItem(
         item: item,
         cachedAt: DateTime.now(),
-        categoryId: item.categoryId,
+        categorySlug: item.categorySlug,
       );
       
       return item;
@@ -146,7 +145,7 @@ class MenuItemCacheService {
   }
 
   /// Récupère les catégories depuis le cache ou la base de données
-  Future<List<MenuCategory>> getCategories({
+  Future<List<eccore.Category>> getCategories({
     bool forceRefresh = false,
     Duration? customExpiry,
   }) async {
@@ -180,13 +179,13 @@ class MenuItemCacheService {
   }
 
   /// Met à jour le cache des menu items
-  void _updateMenuItemsCache(List<MenuItem> items) {
+  void _updateMenuItemsCache(List<eccore.MenuItem> items) {
     _menuItemsCache.clear();
     for (final item in items) {
       _menuItemsCache[item.id] = CachedMenuItem(
         item: item,
         cachedAt: DateTime.now(),
-        categoryId: item.categoryId,
+        categorySlug: item.categorySlug,
       );
     }
     _menuItemsLastUpdate = DateTime.now();
@@ -194,7 +193,7 @@ class MenuItemCacheService {
   }
 
   /// Met à jour le cache des catégories
-  void _updateCategoriesCache(List<MenuCategory> categories) {
+  void _updateCategoriesCache(List<eccore.Category> categories) {
     _categoriesCache.clear();
     for (final category in categories) {
       _categoriesCache[category.id] = CachedCategory(
@@ -233,11 +232,11 @@ class MenuItemCacheService {
   }
 
   /// Met à jour un menu item dans le cache
-  void updateMenuItemInCache(MenuItem item) {
+  void updateMenuItemInCache(eccore.MenuItem item) {
     _menuItemsCache[item.id] = CachedMenuItem(
       item: item,
       cachedAt: DateTime.now(),
-      categoryId: item.categoryId,
+      categorySlug: item.categorySlug,
     );
     Journal.trace('💾 Menu item ${item.id} mis à jour dans le cache');
   }

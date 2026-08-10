@@ -1,3 +1,4 @@
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/cart_service.dart';
@@ -478,9 +479,9 @@ class CartScreen extends StatelessWidget {
                               height: 100,
                               width: double.infinity,
                               color: Colors.grey[200],
-                              child: item.imageUrl != null
+                              child: item.image != null
                                   ? Image.network(
-                                      item.imageUrl!,
+                                      item.image!,
                                       fit: BoxFit.cover,
                                       errorBuilder: (_, __, ___) => Icon(
                                         Icons.restaurant,
@@ -515,7 +516,7 @@ class CartScreen extends StatelessWidget {
                                         MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(
-                                        PriceFormatter.format(item.price),
+                                        PriceFormatter.format(item.prixAffiche),
                                         style: const TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.bold,

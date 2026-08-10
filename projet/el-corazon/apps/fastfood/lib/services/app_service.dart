@@ -2,8 +2,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_fast/models/menu_item.dart';
-import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/notification_service.dart';
@@ -71,10 +69,10 @@ class AppService extends ChangeNotifier {
   eccore.User? _currentUser;
 
   bool _isInitialized = false;
-  List<MenuItem> _menuItems = [];
+  List<eccore.MenuItem> _menuItems = [];
   List<Order> _orders = [];
   List<String> _menuCategoryDisplayNames = [];
-  List<MenuCategory> _menuCategories = [];
+  List<eccore.Category> _menuCategories = [];
 
   // Service de cache intelligent pour les menu items et catégories
   final MenuItemCacheService _menuItemCache = MenuItemCacheService();
@@ -88,19 +86,19 @@ class AppService extends ChangeNotifier {
 
   // Getters
   eccore.User? get currentUser => _currentUser;
-  List<MenuItem> get menuItems => _menuItems.isNotEmpty ? _menuItems : [];
+  List<eccore.MenuItem> get menuItems => _menuItems.isNotEmpty ? _menuItems : [];
   List<Order> get orders => _orders;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
   List<String> get menuCategoryDisplayNames => _menuCategoryDisplayNames;
-  List<MenuCategory> get menuCategories => _menuCategories;
+  List<eccore.Category> get menuCategories => _menuCategories;
 
   // Obtenir les catégories uniques des items du menu
   List<String> get categories {
     if (_menuItems.isEmpty) return [];
     return _menuItems
-        .where((item) => item.category != null)
-        .map((item) => item.category!.displayName)
+        .where((item) => item.categoryName.isNotEmpty)
+        .map((item) => item.categoryName)
         .toSet()
         .toList();
   }
@@ -441,19 +439,11 @@ class AppService extends ChangeNotifier {
       // Utiliser le nouveau service de cache intelligent
       _menuItems = await _menuItemCache.getMenuItems();
 
-      // Associer les catégories si nécessaire
-      if (_menuCategories.isNotEmpty) {
-        _menuItems = _menuItems.map((item) {
-          if (item.category == null && item.categoryId.isNotEmpty) {
-            final category = _menuCategories.firstWhere(
-              (c) => c.id == item.categoryId,
-              orElse: () => _menuCategories.first,
-            );
-            return item.copyWith(category: category);
-          }
-          return item;
-        }).toList();
-      }
+      // Plus de recollement de catégorie : le contrat rend `category` et
+      // `category_name` sur l'article lui-même. La boucle qui rattachait
+      // l'objet retombait de surcroît sur `_menuCategories.first` quand elle
+      // ne trouvait pas la bonne — un article se voyait rangé dans la
+      // première catégorie venue.
 
       // Mettre en cache dans OfflineSyncService pour le mode hors ligne
       await _offlineSyncService.cacheMenuItems(_menuItems);
@@ -472,11 +462,12 @@ class AppService extends ChangeNotifier {
       // Utiliser le nouveau service de cache intelligent
       _menuCategories = await _menuItemCache.getCategories();
 
-      // Extraire les display names pour la compatibilité
+      // Le catalogue public ne rend que les catégories actives — le filtre
+      // `isActive` du modèle local portait sur un champ que le serveur
+      // n'envoie pas, et qui valait donc toujours `true`.
       _menuCategoryDisplayNames = _menuCategories
-          .where((c) => c.isActive)
-          .map((c) => c.displayName)
-          .where((s) => s.isNotEmpty)
+          .map((c) => c.name)
+          .where((nom) => nom.isNotEmpty)
           .toList();
 
       // fallback si display_name manquant

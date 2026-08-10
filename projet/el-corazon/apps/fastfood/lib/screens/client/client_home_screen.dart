@@ -457,14 +457,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
                         ),
                         child:
                             DesignEnhancementService.createEnhancedMenuItemCard(
-                          id: item.id,
-                          name: item.name,
-                          description: item.description,
-                          price: item.price,
-                          imageUrl: item.imageUrl,
-                          isPopular: item.isPopular,
-                          isVegetarian: item.isVegetarian,
-                          isVegan: item.isVegan,
+                          item: item,
                           animationDelay:
                               Duration(milliseconds: 200 + (index * 100)),
                           onTap: () =>
@@ -501,7 +494,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
           // Obtenir les recommandations basées sur les produits populaires
           final recommendations = aiService
               .getRecommendationsForUser('current_user')
-              .where((item) => item.isPopular && item.rating > 4.0)
+              .where((item) => item.isPopular && item.ratingAverage > 4.0)
               .take(3)
               .toList();
 
@@ -539,14 +532,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
                             ),
                             child: DesignEnhancementService
                                 .createEnhancedMenuItemCard(
-                              id: item.id,
-                              name: item.name,
-                              description: item.description,
-                              price: item.price,
-                              imageUrl: item.imageUrl,
-                              isPopular: item.isPopular,
-                              isVegetarian: item.isVegetarian,
-                              isVegan: item.isVegan,
+                              item: item,
                               animationDelay:
                                   Duration(milliseconds: 400 + (index * 100)),
                               onTap: () =>
@@ -633,14 +619,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
                         ),
                         child:
                             DesignEnhancementService.createEnhancedMenuItemCard(
-                          id: item.id,
-                          name: item.name,
-                          description: item.description,
-                          price: item.price,
-                          imageUrl: item.imageUrl,
-                          isPopular: item.isPopular,
-                          isVegetarian: item.isVegetarian,
-                          isVegan: item.isVegan,
+                          item: item,
                           animationDelay:
                               Duration(milliseconds: 600 + (index * 100)),
                           onTap: () =>

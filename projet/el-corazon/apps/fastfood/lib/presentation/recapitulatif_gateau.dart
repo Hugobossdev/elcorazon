@@ -1,7 +1,8 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
@@ -24,7 +25,7 @@ class RecapitulatifGateau extends StatelessWidget {
     super.key,
   });
 
-  final MenuItem gateau;
+  final eccore.MenuItem gateau;
   final String customizationId;
 
   /// Ce que les options ajoutent au prix de base.
@@ -66,7 +67,7 @@ class RecapitulatifGateau extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Image du gâteau avec gradient overlay
-          if (gateau.imageUrl != null)
+          if (gateau.image != null)
             Stack(
               children: [
                 ClipRRect(
@@ -84,7 +85,7 @@ class RecapitulatifGateau extends StatelessWidget {
                     ).createShader(bounds),
                     blendMode: BlendMode.darken,
                     child: Image.network(
-                      gateau.imageUrl!,
+                      gateau.image!,
                       height: 200,
                       width: double.infinity,
                       fit: BoxFit.cover,
@@ -214,7 +215,7 @@ class RecapitulatifGateau extends StatelessWidget {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            PriceFormatter.format(gateau.price),
+                            PriceFormatter.format(gateau.prixAffiche),
                             style: theme.textTheme.bodyLarge?.copyWith(
                               fontWeight: FontWeight.w600,
                             ),

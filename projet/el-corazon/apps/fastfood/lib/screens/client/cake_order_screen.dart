@@ -1,7 +1,9 @@
+import 'package:elcora_fast/config/app_constants.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/repositories/django_menu_repository.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
@@ -44,8 +46,8 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
   // static const Set<String> _singleChoiceCategories = { ... };
 
   // Data loaded from Supabase
-  List<MenuItem> _readyCakes = [];
-  MenuItem? _customCakeItem;
+  List<eccore.MenuItem> _readyCakes = [];
+  eccore.MenuItem? _customCakeItem;
 
   /// Vrai quand [_customCakeItem] vient réellement du catalogue.
   ///
@@ -106,7 +108,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
           .where(
             (cat) =>
                 cat.name.toLowerCase().contains('dessert') ||
-                cat.displayName.toLowerCase().contains('dessert'),
+                cat.name.toLowerCase().contains('dessert'),
           )
           .firstOrNull;
 
@@ -174,39 +176,19 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
       // Créer un item par défaut si la création en DB a échoué ou si pas de catégorie
       _customCakeIsFromCatalog = false;
-      _customCakeItem = MenuItem(
+      _customCakeItem = _gateauEnApercu(
         id: 'cake-custom-${DateTime.now().millisecondsSinceEpoch}',
-        name: 'Gâteau personnalisé',
-        description:
-            'Composez votre gâteau idéal : forme, taille, saveur et décor.',
-        price: 20000,
-        categoryId: _dessertsCategoryId ?? '',
-        imageUrl:
-            'https://images.unsplash.com/photo-1542281286-9e0a16bb7366?auto=format&fit=crop&w=600&q=80',
-        isPopular: true,
-        preparationTime: 90,
       );
       Journal.trace('⚠️ Custom cake item not found, using default in-memory item');
     } catch (e) {
       Journal.trace('❌ Error loading custom cake item: $e');
       // Fallback vers un item par défaut
       _customCakeIsFromCatalog = false;
-      _customCakeItem = MenuItem(
-        id: 'cake-custom-default',
-        name: 'Gâteau personnalisé',
-        description:
-            'Composez votre gâteau idéal : forme, taille, saveur et décor.',
-        price: 20000,
-        categoryId: _dessertsCategoryId ?? '',
-        imageUrl:
-            'https://images.unsplash.com/photo-1542281286-9e0a16bb7366?auto=format&fit=crop&w=600&q=80',
-        isPopular: true,
-        preparationTime: 90,
-      );
+      _customCakeItem = _gateauEnApercu(id: 'cake-custom-default');
     }
   }
 
-  Future<void> _initializeCustomization({MenuItem? prefillFrom}) async {
+  Future<void> _initializeCustomization({eccore.MenuItem? prefillFrom}) async {
     // 🔒 Empêcher les initialisations multiples en parallèle
     if (_isInitializingCustomization) {
       Journal.trace('⚠️ Initialisation déjà en cours, annulation...');
@@ -273,7 +255,38 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     }
   }
 
-  void _applySmartPrefill(CustomizationService service, MenuItem cake) {
+  /// Le gâteau sur mesure **tel qu'on le montre** quand le catalogue ne le
+  /// publie pas.
+  ///
+  /// Ce n'est pas un article commandable : `_customCakeIsFromCatalog` reste
+  /// faux et l'écran affiche `_buildUnpublishedNotice`. Il n'existe que pour
+  /// que les options aient un support à afficher.
+  eccore.MenuItem _gateauEnApercu({required String id}) {
+    return eccore.MenuItem(
+      id: id,
+      restaurantSlug: AppConstants.restaurantSlug,
+      categorySlug: _dessertsCategoryId ?? '',
+      categoryName: 'Desserts',
+      name: 'Gâteau personnalisé',
+      slug: 'gateau-personnalise',
+      description:
+          'Composez votre gâteau idéal : forme, taille, saveur et décor.',
+      image:
+          'https://images.unsplash.com/photo-1542281286-9e0a16bb7366?auto=format&fit=crop&w=600&q=80',
+      price: const eccore.Money(amountMinor: 2000000, currency: 'XOF'),
+      preparationMinutes: 90,
+      allergens: const [],
+      dietaryTags: const [],
+      isAvailable: false,
+      isPopular: true,
+      vipExclusive: false,
+      ratingAverage: 0,
+      ratingCount: 0,
+      sortOrder: 0,
+    );
+  }
+
+  void _applySmartPrefill(CustomizationService service, eccore.MenuItem cake) {
     final suggerees = optionsSuggereesPar(
       '${cake.name} ${cake.description}',
       service.getOptionsForMenuItem(
@@ -494,7 +507,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     );
   }
 
-  Widget _buildCakeCard(ThemeData theme, MenuItem cake, int index) {
+  Widget _buildCakeCard(ThemeData theme, eccore.MenuItem cake, int index) {
     return Card(
       margin: const EdgeInsets.only(bottom: 20),
       elevation: 0,
@@ -510,7 +523,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (cake.imageUrl != null)
+            if (cake.image != null)
               Stack(
                 children: [
                   ClipRRect(
@@ -520,7 +533,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
                     child: Hero(
                       tag: 'cake-image-${cake.id}',
                       child: Image.network(
-                        cake.imageUrl!,
+                        cake.image!,
                         height: 200,
                         width: double.infinity,
                         fit: BoxFit.cover,
@@ -638,7 +651,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          PriceFormatter.format(cake.price),
+                          PriceFormatter.format(cake.prixAffiche),
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -901,7 +914,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         }
 
         final priceModifier = service.calculatePriceModifier(_customizationId);
-        final finalPrice = _customCakeItem!.price + priceModifier;
+        final finalPrice = _customCakeItem!.prixAffiche + priceModifier;
 
         // Commandable seulement si l'article **et** ses options viennent du
         // catalogue : sans les deux, la ligne déposée au panier serait refusée
@@ -1714,7 +1727,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     );
   }
 
-  Future<void> _handleReadyCakeOrder(MenuItem cake) async {
+  Future<void> _handleReadyCakeOrder(eccore.MenuItem cake) async {
     final deliverySlot = await _pickDeliverySlot(context);
     if (deliverySlot == null || !mounted || !context.mounted) return;
 
@@ -2036,7 +2049,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
   Future<void> _resetCustomization(
     CustomizationService service, {
-    MenuItem? prefillFrom,
+    eccore.MenuItem? prefillFrom,
   }) async {
     // Nettoyer la personnalisation précédente
     service.clearCustomization(_customizationId);

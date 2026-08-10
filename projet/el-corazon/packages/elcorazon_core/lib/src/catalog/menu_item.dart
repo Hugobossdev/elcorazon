@@ -62,6 +62,36 @@ class MenuItem {
     );
   }
 
+  /// L'inverse de [MenuItem.fromJson].
+  ///
+  /// Utile au **cache local** : une application hors ligne doit pouvoir
+  /// ranger un article et le relire à l'identique. Ce n'est pas une forme
+  /// d'envoi — le catalogue est en lecture seule pour les clients ; c'est
+  /// l'aller-retour de `fromJson`, et les tests l'épinglent comme tel.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'restaurant': restaurantSlug,
+        'category': categorySlug,
+        'category_name': categoryName,
+        'name': name,
+        'slug': slug,
+        'description': description,
+        'image': image,
+        'price': price.toJson(),
+        'preparation_minutes': preparationMinutes,
+        'allergens': allergens,
+        'dietary_tags': dietaryTags,
+        'is_available': isAvailable,
+        'is_popular': isPopular,
+        'vip_exclusive': vipExclusive,
+        'rating_average': ratingAverage,
+        'rating_count': ratingCount,
+        'sort_order': sortOrder,
+        'ingredients': ingredients,
+        'calories': calories,
+        'option_groups': [for (final groupe in optionGroups) groupe.toJson()],
+      };
+
   final String id;
   final String restaurantSlug;
   final String categorySlug;
@@ -116,6 +146,17 @@ class OptionGroup {
           .toList(),
     );
   }
+
+  /// L'inverse de [OptionGroup.fromJson].
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'min_select': minSelect,
+        'max_select': maxSelect,
+        'is_required': isRequired,
+        'sort_order': sortOrder,
+        'options': [for (final option in options) option.toJson()],
+      };
 
   final String id;
   final String name;
@@ -172,6 +213,16 @@ class Option {
       sortOrder: json['sort_order'] as int? ?? 0,
     );
   }
+
+  /// L'inverse de [Option.fromJson].
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'price_delta': priceDelta.toJson(),
+        'is_default': isDefault,
+        'is_available': isAvailable,
+        'sort_order': sortOrder,
+      };
 
   final String id;
   final String name;

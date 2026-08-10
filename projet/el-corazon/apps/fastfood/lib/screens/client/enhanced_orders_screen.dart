@@ -5,7 +5,6 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/order_history_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/models/order.dart';
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/widgets/delivery_status_card.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/theme.dart';
@@ -521,53 +520,32 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
       final cartService = Provider.of<CartService>(context, listen: false);
       final appService = Provider.of<AppService>(context, listen: false);
 
-      int addedCount = 0;
+      var addedCount = 0;
+      final indisponibles = <String>[];
 
       // Ajouter chaque item de la commande au panier
       for (final orderItem in order.items) {
-        try {
-          // Chercher le menu item correspondant
-          MenuItem? menuItem;
-          if (orderItem.menuItemId.isNotEmpty) {
-            try {
-              menuItem = appService.menuItems.firstWhere(
-                (item) => item.id == orderItem.menuItemId,
-              );
-            } catch (e) {
-              // Si l'item n'existe plus, créer un item temporaire
-              menuItem = MenuItem(
-                id: orderItem.menuItemId,
-                name: orderItem.name,
-                price: orderItem.unitPrice,
-                description: '',
-                categoryId: 'temp-category',
-                imageUrl: orderItem.menuItemImage,
-              );
-            }
-          } else {
-            // Créer un menu item temporaire si l'ID n'existe pas
-            menuItem = MenuItem(
-              id: 'temp-${DateTime.now().millisecondsSinceEpoch}',
-              name: orderItem.name,
-              price: orderItem.unitPrice,
-              description: '',
-              categoryId: 'temp-category',
-              imageUrl: orderItem.menuItemImage,
-            );
-          }
+        // L'article doit exister **au catalogue d'aujourd'hui**. Un article
+        // retiré de la carte était jusqu'ici recréé de toutes pièces, avec un
+        // identifiant `temp-` et une catégorie `temp-category` : le panier
+        // l'acceptait, mais `/carts/` le refuse — il ne connaît que des
+        // articles du catalogue. La ligne disparaissait à la synchronisation
+        // suivante, sans que personne ne le dise.
+        final menuItem = appService.menuItems
+            .where((item) => item.id == orderItem.menuItemId)
+            .firstOrNull;
 
-          // Ajouter au panier avec la quantité de la commande
-          for (int i = 0; i < orderItem.quantity; i++) {
-            cartService.addItem(
-              menuItem,
-              customizations: orderItem.customizations,
-            );
-            addedCount++;
-          }
-        } catch (e) {
-          Journal.trace(
-              'Erreur lors de l\'ajout de l\'item ${orderItem.name}: $e',);
+        if (menuItem == null) {
+          indisponibles.add(orderItem.name);
+          continue;
         }
+
+        cartService.addItem(
+          menuItem,
+          quantity: orderItem.quantity,
+          customizations: orderItem.customizations,
+        );
+        addedCount += orderItem.quantity;
       }
 
       if (addedCount > 0 && mounted && context.mounted) {

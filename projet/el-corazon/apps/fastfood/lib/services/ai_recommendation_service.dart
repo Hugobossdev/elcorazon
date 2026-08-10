@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/foundation.dart';
 
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/repositories/django_menu_repository.dart';
@@ -15,7 +16,7 @@ class AIRecommendationService extends ChangeNotifier {
   factory AIRecommendationService() => _instance;
   AIRecommendationService._internal();
 
-  final Map<String, List<MenuItem>> _recommendations = {};
+  final Map<String, List<eccore.MenuItem>> _recommendations = {};
   final Map<String, UserPreferences> _userPreferences = {};
   final Map<String, List<Order>> _userOrderHistory = {};
   bool _isInitialized = false;
@@ -23,7 +24,7 @@ class AIRecommendationService extends ChangeNotifier {
   // Facteurs de recommandation
 
   // Getters
-  Map<String, List<MenuItem>> get recommendations =>
+  Map<String, List<eccore.MenuItem>> get recommendations =>
       Map.unmodifiable(_recommendations);
   Map<String, UserPreferences> get userPreferences =>
       Map.unmodifiable(_userPreferences);
@@ -156,7 +157,7 @@ class AIRecommendationService extends ChangeNotifier {
     if (preferences == null) return;
 
     final menuItems = await _getAvailableMenuItems();
-    final recommendations = <MenuItem>[];
+    final recommendations = <eccore.MenuItem>[];
 
     // Les recommandations sont calculées localement.
     //
@@ -192,9 +193,9 @@ class AIRecommendationService extends ChangeNotifier {
   }
 
   /// Recommandations basées sur l'historique des commandes
-  List<MenuItem> _getHistoryBasedRecommendations(
+  List<eccore.MenuItem> _getHistoryBasedRecommendations(
     String userId,
-    List<MenuItem> menuItems,
+    List<eccore.MenuItem> menuItems,
   ) {
     final orders = _userOrderHistory[userId] ?? [];
     final categoryFrequency = <String, int>{};
@@ -208,14 +209,14 @@ class AIRecommendationService extends ChangeNotifier {
     }
 
     // Recommander des items des catégories populaires
-    final recommendations = <MenuItem>[];
+    final recommendations = <eccore.MenuItem>[];
     final sortedCategories = categoryFrequency.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     for (final category in sortedCategories.take(3)) {
       final categoryItems = menuItems
           .where(
-            (item) => item.category?.displayName.toLowerCase() == category.key,
+            (item) => item.categoryName.toLowerCase() == category.key,
           )
           .toList();
       if (categoryItems.isNotEmpty) {
@@ -227,20 +228,20 @@ class AIRecommendationService extends ChangeNotifier {
   }
 
   /// Recommandations basées sur l'heure de la journée
-  List<MenuItem> _getTimeBasedRecommendations(
+  List<eccore.MenuItem> _getTimeBasedRecommendations(
     UserPreferences preferences,
-    List<MenuItem> menuItems,
+    List<eccore.MenuItem> menuItems,
   ) {
     final now = DateTime.now();
     final hour = now.hour;
-    final recommendations = <MenuItem>[];
+    final recommendations = <eccore.MenuItem>[];
 
     if (hour >= 6 && hour < 11) {
       // Petit-déjeuner
       final breakfastItems = menuItems
           .where(
             (item) =>
-                item.category?.displayName
+                item.categoryName
                         .toLowerCase()
                         .contains('breakfast') ==
                     true ||
@@ -255,11 +256,11 @@ class AIRecommendationService extends ChangeNotifier {
       final lunchItems = menuItems
           .where(
             (item) =>
-                item.category?.displayName.toLowerCase().contains('lunch') ==
+                item.categoryName.toLowerCase().contains('lunch') ==
                     true ||
-                item.category?.displayName.toLowerCase().contains('burger') ==
+                item.categoryName.toLowerCase().contains('burger') ==
                     true ||
-                item.category?.displayName.toLowerCase().contains('sandwich') ==
+                item.categoryName.toLowerCase().contains('sandwich') ==
                     true,
           )
           .toList();
@@ -269,9 +270,9 @@ class AIRecommendationService extends ChangeNotifier {
       final snackItems = menuItems
           .where(
             (item) =>
-                item.category?.displayName.toLowerCase().contains('dessert') ==
+                item.categoryName.toLowerCase().contains('dessert') ==
                     true ||
-                item.category?.displayName.toLowerCase().contains('drink') ==
+                item.categoryName.toLowerCase().contains('drink') ==
                     true ||
                 item.name.toLowerCase().contains('snack'),
           )
@@ -282,13 +283,13 @@ class AIRecommendationService extends ChangeNotifier {
       final dinnerItems = menuItems
           .where(
             (item) =>
-                item.category?.displayName
+                item.categoryName
                         .toLowerCase()
                         .contains('pizza') ==
                     true ||
-                item.category?.displayName.toLowerCase().contains('pasta') ==
+                item.categoryName.toLowerCase().contains('pasta') ==
                     true ||
-                item.category?.displayName.toLowerCase().contains('dinner') ==
+                item.categoryName.toLowerCase().contains('dinner') ==
                     true,
           )
           .toList();
@@ -299,21 +300,21 @@ class AIRecommendationService extends ChangeNotifier {
   }
 
   /// Recommandations basées sur la météo (simulée)
-  List<MenuItem> _getWeatherBasedRecommendations(List<MenuItem> menuItems) {
+  List<eccore.MenuItem> _getWeatherBasedRecommendations(List<eccore.MenuItem> menuItems) {
     // Simulation de la météo
     final isHot = Random().nextBool();
-    final recommendations = <MenuItem>[];
+    final recommendations = <eccore.MenuItem>[];
 
     if (isHot) {
       // Temps chaud - boissons froides, salades
       final coldItems = menuItems
           .where(
             (item) =>
-                item.category?.displayName
+                item.categoryName
                         .toLowerCase()
                         .contains('drink') ==
                     true ||
-                item.category?.displayName.toLowerCase().contains('salad') ==
+                item.categoryName.toLowerCase().contains('salad') ==
                     true ||
                 item.name.toLowerCase().contains('ice') ||
                 item.name.toLowerCase().contains('cold'),
@@ -325,11 +326,11 @@ class AIRecommendationService extends ChangeNotifier {
       final hotItems = menuItems
           .where(
             (item) =>
-                item.category?.displayName.toLowerCase().contains('soup') ==
+                item.categoryName.toLowerCase().contains('soup') ==
                     true ||
                 item.name.toLowerCase().contains('hot') ||
                 item.name.toLowerCase().contains('warm') ||
-                item.category?.displayName.toLowerCase().contains('coffee') ==
+                item.categoryName.toLowerCase().contains('coffee') ==
                     true,
           )
           .toList();
@@ -340,7 +341,7 @@ class AIRecommendationService extends ChangeNotifier {
   }
 
   /// Recommandations populaires
-  List<MenuItem> _getPopularRecommendations(List<MenuItem> menuItems) {
+  List<eccore.MenuItem> _getPopularRecommendations(List<eccore.MenuItem> menuItems) {
     // Simulation des items populaires
     final popularItems = menuItems
         .where(
@@ -355,11 +356,11 @@ class AIRecommendationService extends ChangeNotifier {
   }
 
   /// Dédupliquer et classer les recommandations
-  List<MenuItem> _deduplicateAndRank(
-    List<MenuItem> recommendations,
+  List<eccore.MenuItem> _deduplicateAndRank(
+    List<eccore.MenuItem> recommendations,
     UserPreferences preferences,
   ) {
-    final uniqueItems = <String, MenuItem>{};
+    final uniqueItems = <String, eccore.MenuItem>{};
 
     for (final item in recommendations) {
       uniqueItems[item.id] = item;
@@ -379,35 +380,34 @@ class AIRecommendationService extends ChangeNotifier {
 
   /// Calcule le score de recommandation pour un item
   double _calculateRecommendationScore(
-    MenuItem item,
+    eccore.MenuItem item,
     UserPreferences preferences,
   ) {
     double score = 0.0;
 
     // Score basé sur les catégories favorites
-    if (item.category != null &&
-        preferences.favoriteCategories
-            .contains(item.category!.displayName.toLowerCase())) {
+    if (preferences.favoriteCategories
+        .contains(item.categoryName.toLowerCase())) {
       score += 0.3;
     }
 
     // Score basé sur la gamme de prix
-    if (item.price <= 10 && preferences.priceRange == PriceRange.low) {
+    if (item.prixAffiche <= 10 && preferences.priceRange == PriceRange.low) {
       score += 0.2;
-    } else if (item.price > 10 &&
-        item.price <= 20 &&
+    } else if (item.prixAffiche > 10 &&
+        item.prixAffiche <= 20 &&
         preferences.priceRange == PriceRange.medium) {
       score += 0.2;
-    } else if (item.price > 20 && preferences.priceRange == PriceRange.high) {
+    } else if (item.prixAffiche > 20 && preferences.priceRange == PriceRange.high) {
       score += 0.2;
     }
 
     // Score basé sur les restrictions alimentaires
     if (preferences.dietaryRestrictions.contains('vegetarian') &&
-        item.isVegetarian) {
+        item.estVegetarien) {
       score += 0.2;
     }
-    if (preferences.dietaryRestrictions.contains('vegan') && item.isVegan) {
+    if (preferences.dietaryRestrictions.contains('vegan') && item.estVegan) {
       score += 0.2;
     }
 
@@ -418,7 +418,7 @@ class AIRecommendationService extends ChangeNotifier {
   }
 
   /// Obtient les items du menu disponibles
-  Future<List<MenuItem>> _getAvailableMenuItems() async {
+  Future<List<eccore.MenuItem>> _getAvailableMenuItems() async {
     try {
       final appService = AppService();
       if (appService.isInitialized) {
@@ -461,21 +461,22 @@ class AIRecommendationService extends ChangeNotifier {
   }
 
   /// Obtient les recommandations pour un utilisateur
-  List<MenuItem> getRecommendationsForUser(String userId) {
+  List<eccore.MenuItem> getRecommendationsForUser(String userId) {
     return _recommendations[userId] ?? [];
   }
 
   /// Obtient les recommandations basées sur un item
-  List<MenuItem> getSimilarItems(MenuItem item) {
+  List<eccore.MenuItem> getSimilarItems(eccore.MenuItem item) {
     // Simulation d'items similaires
-    final similarItems = <MenuItem>[];
+    final similarItems = <eccore.MenuItem>[];
     final allItems = _recommendations.values.expand((list) => list).toList();
 
     // Trouver des items de la même catégorie
     final sameCategoryItems = allItems
         .where(
           (otherItem) =>
-              otherItem.category == item.category && otherItem.id != item.id,
+              otherItem.categorySlug == item.categorySlug &&
+              otherItem.id != item.id,
         )
         .toList();
 

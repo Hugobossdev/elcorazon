@@ -1,12 +1,13 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 
 class MenuItemCard extends StatelessWidget {
-  final MenuItem item;
+  final eccore.MenuItem item;
   final VoidCallback onTap;
   final VoidCallback? onAddToCart;
   final VoidCallback? onDecrement;
@@ -57,7 +58,7 @@ class MenuItemCard extends StatelessWidget {
                 color: theme.colorScheme.surfaceContainerHighest
                     .withValues(alpha: 0.5),
               ),
-              child: (item.imageUrl?.isNotEmpty == true)
+              child: (item.image?.isNotEmpty == true)
                   ? Hero(
                       tag: item.id.isNotEmpty
                           ? 'menu_item_${item.id}'
@@ -67,7 +68,7 @@ class MenuItemCard extends StatelessWidget {
                           top: Radius.circular(16),
                         ),
                         child: Image.network(
-                          item.imageUrl!,
+                          item.image!,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) {
                             return _buildPlaceholderImage(theme);
@@ -126,7 +127,7 @@ class MenuItemCard extends StatelessWidget {
                           maxLines: isSmallScreen && isGridView ? 1 : 2,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      if (onReviewsTap != null || item.rating > 0)
+                      if (onReviewsTap != null || item.ratingAverage > 0)
                         Padding(
                           padding: EdgeInsets.only(top: isSmallScreen ? 3 : 4),
                           child: Row(
@@ -145,15 +146,15 @@ class MenuItemCard extends StatelessWidget {
                                   size: isSmallScreen
                                       ? (isGridView ? 10 : 12)
                                       : (isGridView ? 12 : 14),
-                                  color: item.rating > 0
+                                  color: item.ratingAverage > 0
                                       ? Colors.amber
                                       : Colors.grey,
                                 ),
                               ),
-                              if (item.rating > 0) ...[
+                              if (item.ratingAverage > 0) ...[
                                 SizedBox(width: isSmallScreen ? 2 : 4),
                                 Text(
-                                  item.rating.toStringAsFixed(1),
+                                  item.ratingAverage.toStringAsFixed(1),
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     fontSize: isSmallScreen
                                         ? (isGridView ? 9 : 10)
@@ -180,7 +181,7 @@ class MenuItemCard extends StatelessWidget {
                     children: [
                       Flexible(
                         child: Text(
-                          formatPrice(item.price),
+                          formatPrice(item.prixAffiche),
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: theme.primaryColor,
                             fontWeight: FontWeight.bold,
@@ -298,7 +299,7 @@ class MenuItemCard extends StatelessWidget {
 }
 
 class MenuItemListCard extends StatelessWidget {
-  final MenuItem item;
+  final eccore.MenuItem item;
   final VoidCallback onTap;
   final VoidCallback? onAddToCart;
   final VoidCallback? onDecrement;
@@ -334,11 +335,11 @@ class MenuItemListCard extends StatelessWidget {
                 color: theme.colorScheme.surfaceContainerHighest
                     .withValues(alpha: 0.5),
               ),
-              child: (item.imageUrl?.isNotEmpty == true)
+              child: (item.image?.isNotEmpty == true)
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       child: Image.network(
-                        item.imageUrl!,
+                        item.image!,
                         fit: BoxFit.cover,
                         errorBuilder: (context, error, stackTrace) {
                           return Icon(
@@ -385,7 +386,7 @@ class MenuItemListCard extends StatelessWidget {
                     ),
                   const SizedBox(height: 8),
                   Text(
-                    formatPrice(item.price),
+                    formatPrice(item.prixAffiche),
                     style: theme.textTheme.titleMedium?.copyWith(
                       color: theme.primaryColor,
                       fontWeight: FontWeight.bold,

@@ -9,8 +9,6 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:elcora_fast/models/menu_item.dart';
-import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 
 /// Service complet de synchronisation hors ligne avec stockage persistant
@@ -36,8 +34,8 @@ class OfflineSyncService extends ChangeNotifier {
   final List<Map<String, dynamic>> _pendingCartUpdates = [];
 
   // Cache local
-  List<MenuItem>? _cachedMenuItems;
-  List<MenuCategory>? _cachedCategories;
+  List<eccore.MenuItem>? _cachedMenuItems;
+  List<eccore.Category>? _cachedCategories;
   DateTime? _menuCacheTime;
   static const Duration _cacheValidityDuration = Duration(hours: 24);
 
@@ -503,7 +501,7 @@ class OfflineSyncService extends ChangeNotifier {
   }
 
   /// Cache le menu localement
-  Future<void> cacheMenuItems(List<MenuItem> items) async {
+  Future<void> cacheMenuItems(List<eccore.MenuItem> items) async {
     try {
       _cachedMenuItems = items;
       _menuCacheTime = DateTime.now();
@@ -527,8 +525,8 @@ class OfflineSyncService extends ChangeNotifier {
           'cached_menu_items',
           {
             'id': item.id,
-            'data': json.encode(item.toMap()),
-            'category_id': item.category?.id,
+            'data': json.encode(item.toJson()),
+            'category_id': item.categorySlug,
             'cached_at': DateTime.now().millisecondsSinceEpoch,
             'expires_at': expiresAt,
           },
@@ -545,7 +543,7 @@ class OfflineSyncService extends ChangeNotifier {
   }
 
   /// Charge le menu depuis le cache local
-  Future<List<MenuItem>?> loadCachedMenuItems() async {
+  Future<List<eccore.MenuItem>?> loadCachedMenuItems() async {
     // Sur web, retourner le cache en mémoire si disponible
     if (!_isDatabaseAvailable) {
       if (_cachedMenuItems != null && _menuCacheTime != null) {
@@ -582,7 +580,7 @@ class OfflineSyncService extends ChangeNotifier {
       
       final items = cachedData.map((row) {
         final data = json.decode(row['data'] as String) as Map<String, dynamic>;
-        return MenuItem.fromMap(data);
+        return eccore.MenuItem.fromJson(data);
       }).toList();
       
       _cachedMenuItems = items;
@@ -597,7 +595,7 @@ class OfflineSyncService extends ChangeNotifier {
   }
 
   /// Cache les catégories localement
-  Future<void> cacheCategories(List<MenuCategory> categories) async {
+  Future<void> cacheCategories(List<eccore.Category> categories) async {
     // Sur web, utiliser seulement le cache en mémoire
     if (!_isDatabaseAvailable) {
       _cachedCategories = categories;
@@ -616,14 +614,10 @@ class OfflineSyncService extends ChangeNotifier {
           eccore.Journal.trace('⚠️ OfflineSyncService: Catégorie ignorée - name vide: id=${category.id}');
           return false;
         }
-        if (category.displayName.isEmpty) {
-          eccore.Journal.trace('⚠️ OfflineSyncService: Catégorie ignorée - displayName vide: id=${category.id}, name=${category.name}');
-          return false;
-        }
-        if (category.emoji.isEmpty) {
-          eccore.Journal.trace('⚠️ OfflineSyncService: Catégorie ignorée - emoji vide: id=${category.id}, name=${category.name}');
-          return false;
-        }
+        // L'emoji ne conditionne plus la mise en cache. Une catégorie qui n'en
+        // a pas disparaissait purement et simplement du mode hors ligne — un
+        // champ décoratif faisait perdre des données. L'écran affiche un repli
+        // (`CategorieAffichee.pastille`).
         return true;
       }).toList();
       
@@ -644,7 +638,7 @@ class OfflineSyncService extends ChangeNotifier {
       final expiresAt = DateTime.now().add(_cacheValidityDuration).millisecondsSinceEpoch;
       for (final category in validCategories) {
         try {
-          final categoryMap = category.toMap();
+          final categoryMap = category.toJson();
           
           // Vérifier que toMap() ne retourne pas de valeurs null pour les champs requis
           if (categoryMap['id'] == null || categoryMap['id'].toString().isEmpty) {
@@ -679,14 +673,14 @@ class OfflineSyncService extends ChangeNotifier {
         eccore.Journal.trace('   Nombre de catégories reçues: ${categories.length}');
         for (var i = 0; i < categories.length; i++) {
           final cat = categories[i];
-          eccore.Journal.trace('   Catégorie $i: id=${cat.id}, name=${cat.name}, displayName=${cat.displayName}, emoji=${cat.emoji}');
+          eccore.Journal.trace('   Catégorie $i: id=${cat.id}, name=${cat.name}, displayName=${cat.name}, emoji=${cat.emoji}');
         }
       }
     }
   }
 
   /// Charge les catégories depuis le cache local
-  Future<List<MenuCategory>?> loadCachedCategories() async {
+  Future<List<eccore.Category>?> loadCachedCategories() async {
     // Sur web, retourner le cache en mémoire si disponible
     if (!_isDatabaseAvailable) {
       if (_cachedCategories != null) {
@@ -716,7 +710,7 @@ class OfflineSyncService extends ChangeNotifier {
       
       final categories = cachedData.map((row) {
         final data = json.decode(row['data'] as String) as Map<String, dynamic>;
-        return MenuCategory.fromMap(data);
+        return eccore.Category.fromJson(data);
       }).toList();
       
       _cachedCategories = categories;

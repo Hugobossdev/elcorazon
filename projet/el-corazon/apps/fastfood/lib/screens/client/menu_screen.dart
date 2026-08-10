@@ -1,11 +1,11 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
 import 'package:elcora_fast/services/subscription_service.dart';
-import 'package:elcora_fast/models/menu_item.dart';
-import 'package:elcora_fast/models/menu_category.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/widgets/enhanced_app_bar_actions.dart';
@@ -32,7 +32,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
   late Animation<double> _scaleAnimation;
   late Animation<double> _filterHeightAnimation;
 
-  MenuCategory? _selectedCategory; // Utilise maintenant la classe MenuCategory
+  eccore.Category? _selectedCategory; // Utilise maintenant la classe eccore.Category
   String _searchQuery = '';
   bool _showFilters = false;
   bool _vegetarianOnly = false;
@@ -389,7 +389,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
               );
             }
             final filter = filters[index - 1];
-            final isSelected = _selectedCategory?.displayName == filter;
+            final isSelected = _selectedCategory?.name == filter;
             return Container(
               margin: const EdgeInsets.only(right: 12),
               child: FilterChip(
@@ -403,7 +403,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                           Provider.of<AppService>(context, listen: false);
                       _selectedCategory = appService.menuCategories.firstWhere(
                         (c) =>
-                            c.displayName.toLowerCase() == filter.toLowerCase(),
+                            c.name.toLowerCase() == filter.toLowerCase(),
                         orElse: () => appService.menuCategories.isNotEmpty
                             ? appService.menuCategories.first
                             : throw StateError('No categories available'),
@@ -630,13 +630,13 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                     child: Row(
                       children: [
                         Text(
-                          category.emoji,
+                          category.pastille,
                           style: const TextStyle(fontSize: 24),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            category.displayName,
+                            category.name,
                             style: const TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
@@ -666,8 +666,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                     ),
                   ),
                   // Description de la catégorie (si disponible)
-                  if (category.description != null &&
-                      category.description!.isNotEmpty)
+                  if (category.description.isNotEmpty)
                     Padding(
                       padding: EdgeInsets.fromLTRB(
                         isSmallScreen ? 16 : 20,
@@ -676,7 +675,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                         16,
                       ),
                       child: Text(
-                        category.description!,
+                        category.description,
                         style: const TextStyle(
                           fontSize: 14,
                           color: AppColors.textSecondary,
@@ -706,13 +705,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                                 favoritesService.isFavorite(item);
                             return DesignEnhancementService
                                 .createEnhancedMenuItemCard(
-                              name: item.name,
-                              description: item.description,
-                              price: item.price,
-                              imageUrl: item.imageUrl,
-                              isPopular: item.isPopular,
-                              isVegetarian: item.isVegetarian,
-                              isVegan: item.isVegan,
+                              item: item,
                               onTap: () =>
                                   context.navigateToItemCustomization(item),
                               onAddToCart: () {
@@ -760,37 +753,30 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
   }
 
   /// Groupe les plats par catégorie
-  Map<MenuCategory, List<MenuItem>> _groupItemsByCategory(
-    List<MenuItem> items,
-    List<MenuCategory> categories,
+  Map<eccore.Category, List<eccore.MenuItem>> _groupItemsByCategory(
+    List<eccore.MenuItem> items,
+    List<eccore.Category> categories,
   ) {
-    final Map<MenuCategory, List<MenuItem>> grouped = {};
+    final Map<eccore.Category, List<eccore.MenuItem>> grouped = {};
 
-    // Créer un map pour accéder rapidement aux catégories par ID
-    final categoryMap = {for (final cat in categories) cat.id: cat};
+    // Indexé par **slug** : c'est ce que l'article porte. L'ancien modèle
+    // local rangeait le slug dans son champ `id`, ce qui masquait l'écart ;
+    // `eccore.Category.id` est l'UUID, et la recherche n'aurait rien trouvé.
+    final categoryMap = {for (final cat in categories) cat.slug: cat};
 
-    // Grouper les items par catégorie
     for (final item in items) {
-      MenuCategory? category;
-
-      // Essayer de trouver la catégorie via categoryId
-      if (item.categoryId.isNotEmpty) {
-        category = categoryMap[item.categoryId];
-      }
-
-      // Si pas trouvé, essayer via item.category
-      if (category == null && item.category != null) {
-        category = item.category;
-      }
-
-      // Si toujours pas trouvé, créer une catégorie par défaut
-      category ??= MenuCategory(
-        id: item.categoryId.isNotEmpty ? item.categoryId : 'unknown',
-        name: 'unknown',
-        displayName: 'Autres',
-        emoji: '🍽️',
-        sortOrder: 999,
-      );
+      // Un article dont la catégorie n'est pas dans la liste est rangé à part
+      // plutôt que dans la première venue.
+      final category = categoryMap[item.categorySlug] ??
+          eccore.Category(
+            id: item.categorySlug.isEmpty ? 'inconnue' : item.categorySlug,
+            restaurantSlug: '',
+            name: 'Autres',
+            slug: item.categorySlug,
+            emoji: '🍽️',
+            description: '',
+            sortOrder: 999,
+          );
 
       // Ajouter l'item à la catégorie
       grouped.putIfAbsent(category, () => []).add(item);
@@ -803,7 +789,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
     return Map.fromEntries(sortedEntries);
   }
 
-  List<MenuItem> _getFilteredItems(List<MenuItem> items) {
+  List<eccore.MenuItem> _getFilteredItems(List<eccore.MenuItem> items) {
     // Droit VIP : un abonnement en cours côté backend (`loyalty/subscriptions`),
     // et non plus le nom d'un plan lu dans le portefeuille local.
     final isVipPremium =
@@ -811,21 +797,15 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
 
     return items.where((item) {
       // VIP Exclusive filter
-      if (item.isVipExclusive && !isVipPremium) {
+      if (item.vipExclusive && !isVipPremium) {
         return false;
       }
 
-      // Category filter - utiliser categoryId pour une comparaison plus fiable
-      if (_selectedCategory != null) {
-        // Comparer d'abord par categoryId (plus fiable)
-        if (item.categoryId.isEmpty ||
-            item.categoryId != _selectedCategory!.id) {
-          // Si categoryId ne correspond pas, vérifier aussi la catégorie parsée
-          if (item.category == null ||
-              item.category!.id != _selectedCategory!.id) {
-            return false;
-          }
-        }
+      // Le filtre porte sur le slug, seul identifiant que l'article partage
+      // avec la catégorie.
+      if (_selectedCategory != null &&
+          item.categorySlug != _selectedCategory!.slug) {
+        return false;
       }
 
       // Search filter
@@ -838,11 +818,11 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
       }
 
       // Diet filters
-      if (_vegetarianOnly && !item.isVegetarian) return false;
-      if (_veganOnly && !item.isVegan) return false;
+      if (_vegetarianOnly && !item.estVegetarien) return false;
+      if (_veganOnly && !item.estVegan) return false;
 
       // Price filter
-      if (item.price > _maxPrice) return false;
+      if (item.prixAffiche > _maxPrice) return false;
 
       return true;
     }).toList();

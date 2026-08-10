@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -7,7 +8,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/services/group_cart_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/models/order.dart';
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
@@ -28,7 +28,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
 
   bool _isCreatingGroup = false;
   String _currentFilter = 'all';
-  List<MenuItem> _filteredMenuItems = [];
+  List<eccore.MenuItem> _filteredMenuItems = [];
 
   /// Rafraîchit l'affichage du compte à rebours ; l'échéance elle-même vient du
   /// serveur (`closes_at`), jamais d'une horloge locale.
@@ -583,7 +583,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
     );
   }
 
-  void _applyFilter(String filter, List<MenuItem> allMenuItems) {
+  void _applyFilter(String filter, List<eccore.MenuItem> allMenuItems) {
     setState(() {
       _currentFilter = filter;
 
@@ -596,16 +596,16 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
               allMenuItems.where((item) => item.isAvailable).toList();
           break;
         case 'price_low':
-          _filteredMenuItems = List<MenuItem>.from(allMenuItems)
-            ..sort((a, b) => a.price.compareTo(b.price));
+          _filteredMenuItems = List<eccore.MenuItem>.from(allMenuItems)
+            ..sort((a, b) => a.prixAffiche.compareTo(b.prixAffiche));
           break;
         case 'price_high':
-          _filteredMenuItems = List<MenuItem>.from(allMenuItems)
-            ..sort((a, b) => b.price.compareTo(a.price));
+          _filteredMenuItems = List<eccore.MenuItem>.from(allMenuItems)
+            ..sort((a, b) => b.prixAffiche.compareTo(a.prixAffiche));
           break;
         case 'popular':
-          _filteredMenuItems = List<MenuItem>.from(allMenuItems)
-            ..sort((a, b) => b.rating.compareTo(a.rating));
+          _filteredMenuItems = List<eccore.MenuItem>.from(allMenuItems)
+            ..sort((a, b) => b.ratingAverage.compareTo(a.ratingAverage));
           break;
         default:
           _filteredMenuItems = [];
@@ -613,7 +613,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
     });
   }
 
-  Widget _buildMenuItemCard(MenuItem item) {
+  Widget _buildMenuItemCard(eccore.MenuItem item) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
@@ -637,7 +637,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Image.network(
-                  item.imageUrl ?? '',
+                  item.image ?? '',
                   width: 80,
                   height: 80,
                   fit: BoxFit.cover,
@@ -677,7 +677,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
                     Row(
                       children: [
                         Text(
-                          PriceFormatter.format(item.price),
+                          PriceFormatter.format(item.prixAffiche),
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             color: AppColors.primary,
@@ -1077,7 +1077,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
   }
 
   Future<void> _addToGroupCart(
-    MenuItem item, {
+    eccore.MenuItem item, {
     int quantity = 1,
     Map<String, dynamic>? customizations,
   }) async {

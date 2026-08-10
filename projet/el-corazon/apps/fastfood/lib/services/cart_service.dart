@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
@@ -174,7 +174,7 @@ class CartService extends ChangeNotifier {
   /// article aux options différentes restent deux lignes — la même règle que
   /// `CartService._identical_line` côté serveur.
   void addItem(
-    MenuItem menuItem, {
+    eccore.MenuItem menuItem, {
     int quantity = 1,
     Map<String, dynamic>? customizations,
     List<String> optionIds = const [],
@@ -213,9 +213,9 @@ class CartService extends ChangeNotifier {
         id: '${menuItem.id}_${DateTime.now().millisecondsSinceEpoch}',
         menuItemId: menuItem.id,
         name: menuItem.name,
-        price: menuItem.price,
+        price: menuItem.prixAffiche,
         quantity: quantity,
-        imageUrl: menuItem.imageUrl,
+        imageUrl: menuItem.image,
         customizations: normalizedCustomizations,
         selectedOptionIds: normalizedOptionIds,
       );

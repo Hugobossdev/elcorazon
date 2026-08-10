@@ -23,6 +23,18 @@ class Category {
     );
   }
 
+  /// L'inverse de [Category.fromJson] — voir [MenuItem.toJson] pour le
+  /// pourquoi : le cache local doit pouvoir relire ce qu'il a rangé.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'restaurant': restaurantSlug,
+        'name': name,
+        'slug': slug,
+        'emoji': emoji,
+        'description': description,
+        'sort_order': sortOrder,
+      };
+
   final String id;
   final String restaurantSlug;
   final String name;

@@ -1,10 +1,10 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcorazon_core/elcorazon_core.dart' show Review;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:elcora_fast/services/review_rating_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
-import 'package:elcora_fast/models/menu_item.dart';
 import 'package:elcora_fast/theme.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
 
@@ -14,7 +14,7 @@ String _initial(String fullName) =>
 
 /// Écran des reviews et ratings d'un produit
 class ProductReviewsScreen extends StatefulWidget {
-  final MenuItem menuItem;
+  final eccore.MenuItem menuItem;
 
   const ProductReviewsScreen({
     required this.menuItem, super.key,
@@ -419,7 +419,7 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
 
 /// Dialog de formulaire de review (utilisé aussi dans le TabView)
 class _ReviewFormDialog extends StatefulWidget {
-  final MenuItem menuItem;
+  final eccore.MenuItem menuItem;
   final VoidCallback onSubmit;
 
   const _ReviewFormDialog({
@@ -490,11 +490,11 @@ class _ReviewFormDialogState extends State<_ReviewFormDialog> {
                       borderRadius: BorderRadius.circular(12),
                       color: Colors.grey[200],
                     ),
-                    child: widget.menuItem.imageUrl != null
+                    child: widget.menuItem.image != null
                         ? ClipRRect(
                             borderRadius: BorderRadius.circular(12),
                             child: Image.network(
-                              widget.menuItem.imageUrl!,
+                              widget.menuItem.image!,
                               fit: BoxFit.cover,
                             ),
                           )
