@@ -349,6 +349,23 @@ Après la fermeture du catalogue (§3.8), deux modèles subsistent —
 `address` (14 consommateurs) et `cart_item` (9) — plus `order` (18) et trois
 modèles de paiement.
 
+**`address`, mesuré.** `eccore.Address` couvre le modèle local sauf trois
+champs, et chacun raconte quelque chose :
+
+- `isFavorite` n'existe pas côté serveur, et c'est **assumé** : `AddressService`
+  tient sa propre table d'ids favoris, persistée en `SharedPreferences`. Le
+  champ doit rester, porté par l'application. J'ai d'abord cru à une case à
+  cocher sans effet ; vérification faite, elle en a un ;
+- `postalCode` est écrit dans **`line2`** par l'adaptateur, et relu de là. Le
+  serveur n'a pas de code postal ; `line2` est la seconde ligne d'une adresse —
+  appartement, bâtiment. Les deux notions se marchent dessus : saisir un code
+  postal écrase la seconde ligne, et réciproquement ;
+- `userId` est passé à l'adaptateur pour être recopié dans le modèle local. Le
+  serveur cloisonne sur le jeton ; le champ n'apprend rien.
+
+La bascule croise `address_detail_bottom_sheet.dart`, en cours d'édition côté
+humain au moment de cette mesure.
+
 La correspondance avec le socle est directe — `price` en `Money`, `categoryId`
 en `categorySlug`, `imageUrl` en `image`, `preparationTime` en
 `preparationMinutes`, `rating`/`reviewCount` en `ratingAverage`/`ratingCount`,
