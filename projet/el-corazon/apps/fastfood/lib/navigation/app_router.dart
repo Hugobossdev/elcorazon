@@ -29,7 +29,7 @@ import 'package:elcora_fast/screens/client/advanced_search_screen.dart';
 import 'package:elcora_fast/screens/client/enhanced_orders_screen.dart';
 import 'package:elcora_fast/screens/client/driver_rating_screen.dart';
 import 'package:elcora_fast/screens/client/order_rating_screen.dart';
-import 'package:elcora_fast/models/payment_participant.dart';
+import 'package:elcora_fast/presentation/paiement_partage.dart';
 import 'package:elcora_fast/screens/client/social_groups_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
@@ -263,7 +263,7 @@ class AppRouter {
             orderId: args?['orderId'] ?? '',
             totalAmount: args?['totalAmount'] ?? 0.0,
             participants:
-                (args?['participants'] as List<PaymentParticipant>?) ?? [],
+                (args?['participants'] as List<ConviveDuPartage>?) ?? [],
           ),
           settings: settings,
         );

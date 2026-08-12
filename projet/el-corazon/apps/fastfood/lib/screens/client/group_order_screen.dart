@@ -12,7 +12,7 @@ import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcora_fast/models/payment_participant.dart';
+import 'package:elcora_fast/presentation/paiement_partage.dart';
 
 class GroupOrderScreen extends StatefulWidget {
   const GroupOrderScreen({super.key});
@@ -1334,7 +1334,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
 
     final participants = cart.members
         .map(
-          (member) => PaymentParticipant(
+          (member) => ConviveDuPartage(
             userId: member.id,
             name: member.fullName,
             // Ni adresse e-mail ni téléphone dans le contrat : chaque payeur

@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
-import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
+import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 
 /// Frais de livraison — **demandés au serveur**, jamais calculés ici.
 ///
@@ -35,11 +35,11 @@ class DeliveryFeeService extends ChangeNotifier {
       eccore.GeographyRepository(apiClient: apiClient);
 
   eccore.OrderQuote? _lastQuote;
-  DeliveryFeeBreakdown? _lastBreakdown;
+  FraisDeLivraison? _lastBreakdown;
 
   /// Dernier devis rendu par le serveur, ou `null` tant qu'aucun n'a abouti.
   eccore.OrderQuote? get lastQuote => _lastQuote;
-  DeliveryFeeBreakdown? get lastBreakdown => _lastBreakdown;
+  FraisDeLivraison? get lastBreakdown => _lastBreakdown;
 
   /// Frais du dernier devis, en unité majeure — pour l'affichage seulement.
   double? get lastCalculatedFee => _lastBreakdown?.totalFee;
@@ -58,15 +58,15 @@ class DeliveryFeeService extends ChangeNotifier {
   /// la distance et l'effet du panier ne sont connus que du devis. L'écran de
   /// choix d'adresse n'a pas besoin de plus — il répond « on livre ici, à peu
   /// près à ce prix, en tant de minutes ».
-  Future<DeliveryFeeBreakdown> breakdownForPoint({
+  Future<FraisDeLivraison> breakdownForPoint({
     required double latitude,
     required double longitude,
   }) async {
     final resolution = await resolveZone(latitude: latitude, longitude: longitude);
 
     final breakdown = resolution.zone == null
-        ? DeliveryFeeBreakdown.notServiceable()
-        : DeliveryFeeBreakdown.fromZone(resolution.zone!);
+        ? FraisDeLivraison.horsZone()
+        : FraisDeLivraison.depuisZone(resolution.zone!);
 
     _lastBreakdown = breakdown;
     notifyListeners();
@@ -95,7 +95,7 @@ class DeliveryFeeService extends ChangeNotifier {
   ///
   /// La zone est résolue en plus du devis, pour le nom du secteur et le délai
   /// annoncé : le devis rend des montants, pas le contexte qui les explique.
-  Future<DeliveryFeeBreakdown> breakdownForAddress({
+  Future<FraisDeLivraison> breakdownForAddress({
     required eccore.Address address,
     String promoCode = '',
   }) async {
@@ -108,7 +108,7 @@ class DeliveryFeeService extends ChangeNotifier {
         longitude: address.longitude,
       );
       if (!resolution.isCovered) {
-        final breakdown = DeliveryFeeBreakdown.notServiceable();
+        final breakdown = FraisDeLivraison.horsZone();
         _lastBreakdown = breakdown;
         notifyListeners();
         return breakdown;
@@ -120,7 +120,7 @@ class DeliveryFeeService extends ChangeNotifier {
       eccore.Journal.trace('DeliveryFeeService: zone non résolue — $e');
     }
 
-    final breakdown = DeliveryFeeBreakdown.fromQuote(quote, zone: zone);
+    final breakdown = FraisDeLivraison.depuisDevis(quote, zone: zone);
     _lastBreakdown = breakdown;
     notifyListeners();
     return breakdown;

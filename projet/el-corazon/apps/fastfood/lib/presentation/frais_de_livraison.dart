@@ -2,6 +2,15 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 /// Ce que le **serveur** dit de la livraison à une adresse donnée.
 ///
+/// Pourquoi ce fichier est dans `presentation/`
+/// --------------------------------------------
+///
+/// Il ne double aucune entité du socle : il en **compose deux** —
+/// `OrderQuote` et `DeliveryZone` — en ce qu'un écran a besoin de montrer, plus
+/// le cas « ce point n'est pas desservi », qui n'est l'entité de personne. Ce
+/// n'est donc pas de la dette héritée mais un modèle de vue, et il vivait dans
+/// `models/` par accident de rangement.
+///
 /// Rien ici n'est calculé sur le téléphone. La version précédente l'était
 /// entièrement : distance à vol d'oiseau depuis une position de restaurant en
 /// dur, forfait de 500 F, 200 F par kilomètre, franco à 10 000 F, plafond à
@@ -20,8 +29,8 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 /// serveur rend un montant de course, pas ses termes, et les réinventer pour
 /// remplir un tableau reviendrait à afficher deux lignes fausses dont la somme
 /// serait juste.
-class DeliveryFeeBreakdown {
-  const DeliveryFeeBreakdown({
+class FraisDeLivraison {
+  const FraisDeLivraison({
     required this.totalFee,
     this.isInServiceableZone = true,
     this.isFreeDelivery = false,
@@ -33,11 +42,11 @@ class DeliveryFeeBreakdown {
   });
 
   /// Devis d'une commande — la réponse qui fait foi, celle qui sera facturée.
-  factory DeliveryFeeBreakdown.fromQuote(
+  factory FraisDeLivraison.depuisDevis(
     eccore.OrderQuote quote, {
     eccore.DeliveryZone? zone,
   }) {
-    return DeliveryFeeBreakdown(
+    return FraisDeLivraison(
       totalFee: quote.deliveryFee.toMajorUnits(),
       isFreeDelivery: quote.isDeliveryFree,
       freeDeliveryReason: quote.isDeliveryFree ? 'Livraison offerte sur cette commande' : null,
@@ -52,8 +61,8 @@ class DeliveryFeeBreakdown {
   /// déplace le repère. Le montant montré est le **forfait de base** de la
   /// zone : le prix définitif dépend de la distance et du panier, que seul le
   /// devis connaît.
-  factory DeliveryFeeBreakdown.fromZone(eccore.DeliveryZone zone) {
-    return DeliveryFeeBreakdown(
+  factory FraisDeLivraison.depuisZone(eccore.DeliveryZone zone) {
+    return FraisDeLivraison(
       totalFee: zone.baseFee.toMajorUnits(),
       zoneName: zone.name,
       estimatedDeliveryTime: zone.estimatedDeliveryMinutes,
@@ -64,8 +73,8 @@ class DeliveryFeeBreakdown {
 
   /// Le point n'est couvert par aucune zone. Ce n'est pas une erreur : c'est
   /// la réponse du serveur à « livrez-vous ici ? ».
-  factory DeliveryFeeBreakdown.notServiceable() =>
-      const DeliveryFeeBreakdown(totalFee: 0, isInServiceableZone: false);
+  factory FraisDeLivraison.horsZone() =>
+      const FraisDeLivraison(totalFee: 0, isInServiceableZone: false);
 
   /// Frais facturés au client, en unité majeure (F CFA à Lomé).
   final double totalFee;
@@ -88,8 +97,8 @@ class DeliveryFeeBreakdown {
 
   @override
   String toString() {
-    if (!isInServiceableZone) return 'DeliveryFeeBreakdown(hors zone)';
-    if (isFreeDelivery) return 'DeliveryFeeBreakdown(offerte — $freeDeliveryReason)';
-    return 'DeliveryFeeBreakdown(${totalFee.toStringAsFixed(0)}, zone ${zoneName ?? "?"})';
+    if (!isInServiceableZone) return 'FraisDeLivraison(hors zone)';
+    if (isFreeDelivery) return 'FraisDeLivraison(offerte — $freeDeliveryReason)';
+    return 'FraisDeLivraison(${totalFee.toStringAsFixed(0)}, zone ${zoneName ?? "?"})';
   }
 }

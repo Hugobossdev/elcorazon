@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
+import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 
 /// Ce que le serveur dit de la livraison à l'adresse choisie.
@@ -11,7 +11,7 @@ import 'package:elcora_fast/utils/price_formatter.dart';
 /// l'exploitation le règle sans republier l'application. Deux lignes fausses
 /// dont la somme tombe juste valent moins qu'un montant seul.
 class DeliveryFeeBreakdownCard extends StatelessWidget {
-  final DeliveryFeeBreakdown breakdown;
+  final FraisDeLivraison breakdown;
   final bool showTitle;
   final EdgeInsetsGeometry? padding;
   final EdgeInsetsGeometry? margin;

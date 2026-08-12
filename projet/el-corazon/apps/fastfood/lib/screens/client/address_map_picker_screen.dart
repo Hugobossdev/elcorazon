@@ -5,7 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import 'package:elcora_fast/config/app_constants.dart';
-import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
+import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
@@ -20,7 +20,7 @@ class PickedLocation {
 
   /// Couverture au moment de la validation — l'écran appelant n'a pas à la
   /// redemander pour savoir si le point est desservi.
-  final DeliveryFeeBreakdown? breakdown;
+  final FraisDeLivraison? breakdown;
 
   PickedLocation({
     required this.location,
@@ -71,7 +71,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
   late LatLng _target;
 
   String? _formattedAddress;
-  DeliveryFeeBreakdown? _feeBreakdown;
+  FraisDeLivraison? _feeBreakdown;
   bool _isResolving = false;
   bool _isCameraMoving = false;
   bool _hasLocationPermission = false;
@@ -185,7 +185,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     // Couverture et barème : la question est posée au serveur, point par
     // point. Lui seul connaît les contours et les tarifs, qui se modifient
     // depuis le back-office sans republier l'application.
-    DeliveryFeeBreakdown? breakdown;
+    FraisDeLivraison? breakdown;
     String? error;
     try {
       breakdown = await _deliveryFeeService.breakdownForPoint(
@@ -621,7 +621,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     );
   }
 
-  Widget _buildFeeInfo(DeliveryFeeBreakdown breakdown) {
+  Widget _buildFeeInfo(FraisDeLivraison breakdown) {
     if (!breakdown.isInServiceableZone) {
       return _buildBanner(
         icon: Icons.cancel,

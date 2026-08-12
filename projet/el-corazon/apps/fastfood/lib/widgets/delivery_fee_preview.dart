@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
+import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
@@ -28,7 +28,7 @@ class DeliveryFeePreview extends StatefulWidget {
 
 class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
   final DeliveryFeeService _deliveryFeeService = DeliveryFeeService();
-  DeliveryFeeBreakdown? _cachedBreakdown;
+  FraisDeLivraison? _cachedBreakdown;
 
   @override
   void initState() {
@@ -140,7 +140,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
     );
   }
 
-  Widget _buildFreeDelivery(DeliveryFeeBreakdown breakdown) {
+  Widget _buildFreeDelivery(FraisDeLivraison breakdown) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -166,7 +166,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
     );
   }
 
-  Widget _buildCompact(DeliveryFeeBreakdown breakdown) {
+  Widget _buildCompact(FraisDeLivraison breakdown) {
     final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -195,7 +195,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
     );
   }
 
-  Widget _buildExpanded(DeliveryFeeBreakdown breakdown) {
+  Widget _buildExpanded(FraisDeLivraison breakdown) {
     final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.all(12),

@@ -6,7 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcora_fast/models/payment_participant.dart';
+import 'package:elcora_fast/presentation/paiement_partage.dart';
 
 /// Paiement partagé d'une commande — `/payments/{order}/split/` (Phase 6).
 ///
@@ -32,7 +32,7 @@ class SharedPaymentScreen extends StatefulWidget {
   final String groupId;
   final String orderId;
   final double totalAmount;
-  final List<PaymentParticipant> participants;
+  final List<ConviveDuPartage> participants;
 
   const SharedPaymentScreen({
     required this.groupId,

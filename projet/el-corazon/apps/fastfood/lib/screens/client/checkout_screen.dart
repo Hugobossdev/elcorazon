@@ -8,7 +8,7 @@ import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/adresse.dart';
-import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
+import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/widgets/auth_style_card.dart';
@@ -49,7 +49,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   eccore.Address? _selectedAddress;
   // La distance et le délai estimé ne sont plus recopiés ici : ils vivent sur
   // `_deliveryBreakdown`, d'où l'écran les lit déjà.
-  DeliveryFeeBreakdown? _deliveryBreakdown;
+  FraisDeLivraison? _deliveryBreakdown;
 
   final AddressService _addressService = AddressService();
   final DeliveryFeeService _deliveryFeeService = DeliveryFeeService();

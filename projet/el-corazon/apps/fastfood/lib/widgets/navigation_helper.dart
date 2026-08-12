@@ -4,7 +4,7 @@ import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/widgets/navigation_error_handler.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_fast/models/payment_participant.dart';
+import 'package:elcora_fast/presentation/paiement_partage.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Helper pour faciliter la navigation entre les écrans
@@ -313,7 +313,7 @@ class NavigationHelper {
     required String groupId,
     required String orderId,
     required double totalAmount,
-    required List<PaymentParticipant> participants,
+    required List<ConviveDuPartage> participants,
   }) async {
     try {
       await NavigationService.pushNamedWithArgs(
@@ -520,7 +520,7 @@ extension NavigationHelperExtension on BuildContext {
     required String groupId,
     required String orderId,
     required double totalAmount,
-    required List<PaymentParticipant> participants,
+    required List<ConviveDuPartage> participants,
   }) =>
       NavigationHelper.navigateToSharedPayment(
         this,

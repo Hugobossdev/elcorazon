@@ -1,4 +1,4 @@
-import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
+import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -43,7 +43,7 @@ void main() {
 
   group('Devis de commande', () {
     test('les frais affichés sont ceux du devis, sans recalcul', () {
-      final detail = DeliveryFeeBreakdown.fromQuote(devis(frais: 875), zone: zone());
+      final detail = FraisDeLivraison.depuisDevis(devis(frais: 875), zone: zone());
 
       expect(detail.totalFee, 875);
       expect(detail.isInServiceableZone, isTrue);
@@ -51,14 +51,14 @@ void main() {
     });
 
     test('des frais nuls sont une livraison offerte, pas une absence de frais', () {
-      final detail = DeliveryFeeBreakdown.fromQuote(devis(frais: 0));
+      final detail = FraisDeLivraison.depuisDevis(devis(frais: 0));
 
       expect(detail.isFreeDelivery, isTrue);
       expect(detail.freeDeliveryReason, isNotNull);
     });
 
     test('la zone n’apporte que le contexte : nom, délai et seuils', () {
-      final detail = DeliveryFeeBreakdown.fromQuote(
+      final detail = FraisDeLivraison.depuisDevis(
         devis(frais: 900),
         zone: zone(franco: xof(12000), minimum: xof(2000)),
       );
@@ -73,7 +73,7 @@ void main() {
     });
 
     test('un devis sans zone reste exploitable', () {
-      final detail = DeliveryFeeBreakdown.fromQuote(devis(frais: 900));
+      final detail = FraisDeLivraison.depuisDevis(devis(frais: 900));
 
       expect(detail.totalFee, 900);
       expect(detail.zoneName, isNull);
@@ -83,7 +83,7 @@ void main() {
 
   group('Barème d’une zone, sans commande', () {
     test('la carte annonce le forfait de base, pas un prix ferme', () {
-      final detail = DeliveryFeeBreakdown.fromZone(zone());
+      final detail = FraisDeLivraison.depuisZone(zone());
 
       expect(detail.totalFee, 600);
       expect(detail.estimatedDeliveryTime, 35);
@@ -91,7 +91,7 @@ void main() {
     });
 
     test('hors zone : aucun montant, et ce n’est pas une erreur', () {
-      final detail = DeliveryFeeBreakdown.notServiceable();
+      final detail = FraisDeLivraison.horsZone();
 
       expect(detail.isInServiceableZone, isFalse);
       expect(detail.totalFee, 0);
@@ -109,7 +109,7 @@ void main() {
         isOrderable: true,
       );
 
-      expect(DeliveryFeeBreakdown.fromQuote(quote).totalFee, 3.49);
+      expect(FraisDeLivraison.depuisDevis(quote).totalFee, 3.49);
     });
   });
 }

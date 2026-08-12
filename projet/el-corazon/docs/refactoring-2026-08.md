@@ -302,6 +302,30 @@ anglais dans un back-office français.
 *Critère de fin atteint* : plus aucun `import '…/models/order.dart'`, plus
 d'adaptateur, et 51 cas sur la logique déplacée.
 
+#### 3.13 — `fastfood`, deux modèles de vue mal rangés : **fait**
+
+Ni l'un ni l'autre ne doublait une entité du socle. Ils étaient dans `models/`
+par accident de rangement, et c'est ce que la mesure du §3.7 n'avait pas su
+distinguer : « modèle local » n'y voulait dire que « fichier sous `models/` ».
+
+- `delivery_fee_breakdown.dart` **compose** deux entités — `OrderQuote` et
+  `DeliveryZone` — en ce qu'un écran montre, plus le cas « ce point n'est pas
+  desservi », qui n'est l'entité de personne. Il devient
+  `presentation/frais_de_livraison.dart` ;
+- `payment_participant.dart` est une **saisie** : ce que l'initiateur d'un
+  partage renseigne avant d'envoyer la répartition. Un brouillon n'a pas
+  d'existence serveur tant qu'il n'est pas envoyé — même raison qui a mis
+  `BrouillonAdresse` hors des modèles. Il rejoint
+  `presentation/paiement_partage.dart`, à côté des états qu'il précède.
+
+Le déplacement n'est pas cosmétique : tant qu'ils étaient dans `models/`, le
+critère de fin du lot 3 — « plus aucun `import '…/models/…'` » — les comptait
+comme de la dette héritée, ce qu'ils n'étaient pas. Les compter à tort, c'est
+mal mesurer ce qui reste.
+
+**Il ne reste que `cart_item` et `order`** dans `apps/fastfood/lib/models/`, et
+rien dans les deux autres applications.
+
 #### 3.12 — `fastfood`, l'état de l'écran de règlement : **fait**
 
 `models/payment_status.dart` n'était pas un modèle : aucune de ses valeurs ne
