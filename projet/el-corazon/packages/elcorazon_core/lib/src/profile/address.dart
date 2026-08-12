@@ -67,6 +67,54 @@ class Address {
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
+  /// Une copie dont un ou plusieurs champs changent.
+  ///
+  /// Le carnet en a besoin pour deux gestes que le client pose sans
+  /// aller-retour serveur : marquer l'adresse par défaut — la base impose
+  /// qu'il n'y en ait qu'une, via l'index partiel
+  /// `one_default_address_per_user` — et rejouer une saisie corrigée sans
+  /// reconstruire les quinze champs à la main.
+  ///
+  /// Aucun paramètre n'accepte de remise à zéro : passer `null` conserve la
+  /// valeur actuelle. Pour vider une chaîne, passer la chaîne vide.
+  Address copyWith({
+    String? id,
+    String? label,
+    String? kind,
+    String? recipientName,
+    String? recipientPhone,
+    String? line1,
+    String? line2,
+    String? landmark,
+    String? city,
+    String? cityName,
+    double? latitude,
+    double? longitude,
+    String? deliveryInstructions,
+    bool? isDefault,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return Address(
+      id: id ?? this.id,
+      label: label ?? this.label,
+      kind: kind ?? this.kind,
+      recipientName: recipientName ?? this.recipientName,
+      recipientPhone: recipientPhone ?? this.recipientPhone,
+      line1: line1 ?? this.line1,
+      line2: line2 ?? this.line2,
+      landmark: landmark ?? this.landmark,
+      city: city ?? this.city,
+      cityName: cityName ?? this.cityName,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      deliveryInstructions: deliveryInstructions ?? this.deliveryInstructions,
+      isDefault: isDefault ?? this.isDefault,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   /// Forme d'écriture (`POST`/`PATCH`) — sans les champs en lecture seule.
   Map<String, dynamic> toJson() {
     return {
