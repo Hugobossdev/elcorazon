@@ -302,6 +302,25 @@ anglais dans un back-office français.
 *Critère de fin atteint* : plus aucun `import '…/models/order.dart'`, plus
 d'adaptateur, et 51 cas sur la logique déplacée.
 
+#### 3.12 — `fastfood`, l'état de l'écran de règlement : **fait**
+
+`models/payment_status.dart` n'était pas un modèle : aucune de ses valeurs ne
+voyage, et le serveur n'en connaît aucune. C'est l'état de l'écran, et il vit
+maintenant dans `presentation/etape_reglement.dart`.
+
+Son commentaire annonçait « une projection du statut de transaction rendu par
+le serveur ». C'était inexact, et l'inexactitude coûtait deux valeurs :
+`cancelled` et `refunded`, qu'**aucun chemin ne produisait**. Une annulation
+côté prestataire arrive ici comme un échec ; un remboursement se décide au
+back-office, longtemps après que l'écran a été refermé.
+
+Elles survivaient grâce à un test — « les six états couvrent le cycle de vie
+complet » — qui affirmait la longueur de la liste et nommait ses membres. Il
+vérifiait l'énumération, pas le cycle de vie qu'elle prétendait couvrir : c'est
+le test qui gardait la fiction en vie. Il dit maintenant ce qui est vrai, et
+que `reglee` ne s'atteint que sur `Transaction.isCompleted` — donc après le
+webhook signé.
+
 #### 3.11 — `dely`, domaine « conversation » : **fait** — l'application est finie
 
 `models/message.dart` est retiré, et `lib/models/` avec lui : **`dely` n'a plus

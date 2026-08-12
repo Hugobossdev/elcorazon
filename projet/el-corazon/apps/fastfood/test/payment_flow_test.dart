@@ -1,5 +1,5 @@
 import 'package:elcora_fast/models/order.dart';
-import 'package:elcora_fast/models/payment_status.dart';
+import 'package:elcora_fast/presentation/etape_reglement.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Parcours de paiement, côté client.
@@ -14,24 +14,29 @@ void main() {
     test('l’état par défaut n’est jamais « réglé »', () {
       // Une commande à payer à la livraison démarre à `none`, pas à
       // `completed` : c'est le serveur qui dit ce qui est encaissé.
-      expect(PaymentStatus.values.first, PaymentStatus.none);
+      expect(EtapeReglement.values.first, EtapeReglement.aucune);
     });
 
-    test('les six états couvrent le cycle de vie complet', () {
-      // Si le serveur gagne un état, cette liste doit bouger avec lui — sans
-      // quoi l'écran retomberait silencieusement sur un cas par défaut.
-      expect(PaymentStatus.values, hasLength(6));
-      expect(
-        PaymentStatus.values,
-        containsAll([
-          PaymentStatus.none,
-          PaymentStatus.pending,
-          PaymentStatus.completed,
-          PaymentStatus.cancelled,
-          PaymentStatus.error,
-          PaymentStatus.refunded,
-        ]),
-      );
+    test('quatre étapes, et chacune est atteignable', () {
+      // Le test d'avant affirmait qu'il y en avait six et les nommait. Deux
+      // — `cancelled` et `refunded` — n'étaient produites par aucun chemin :
+      // une annulation côté prestataire arrive ici comme un échec, et un
+      // remboursement se décide au back-office, longtemps après que cet écran
+      // a été refermé. Le test gardait en vie ce qu'il prétendait vérifier.
+      expect(EtapeReglement.values, [
+        EtapeReglement.aucune,
+        EtapeReglement.enAttente,
+        EtapeReglement.reglee,
+        EtapeReglement.echouee,
+      ]);
+    });
+
+    test('l’écran ne déclare pas lui-même qu’un paiement a abouti', () {
+      // `reglee` ne s'atteint que sur `Transaction.isCompleted`, c'est-à-dire
+      // après le webhook signé du prestataire — ou d'emblée pour un règlement
+      // à la livraison, où il n'y a rien à attendre en ligne.
+      expect(EtapeReglement.values.first, EtapeReglement.aucune);
+      expect(EtapeReglement.reglee.index, greaterThan(EtapeReglement.enAttente.index));
     });
   });
 

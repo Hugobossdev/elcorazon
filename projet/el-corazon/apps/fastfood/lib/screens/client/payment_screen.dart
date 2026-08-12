@@ -6,7 +6,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
-import 'package:elcora_fast/models/payment_status.dart';
+import 'package:elcora_fast/presentation/etape_reglement.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 
@@ -32,7 +32,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   final _paymentRepository = eccore.PaymentRepository(apiClient: apiClient);
 
   bool _isProcessing = true;
-  PaymentStatus _paymentStatus = PaymentStatus.none;
+  EtapeReglement _etape = EtapeReglement.aucune;
   Order? _order;
   eccore.CheckoutInstruction? _checkout;
   String? _errorMessage;
@@ -57,7 +57,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _pollTimer?.cancel();
     setState(() {
       _isProcessing = true;
-      _paymentStatus = PaymentStatus.pending;
+      _etape = EtapeReglement.enAttente;
       _errorMessage = null;
     });
 
@@ -66,7 +66,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (order == null) {
         setState(() {
           _isProcessing = false;
-          _paymentStatus = PaymentStatus.error;
+          _etape = EtapeReglement.echouee;
           _errorMessage = 'Commande introuvable.';
         });
         return;
@@ -81,7 +81,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         // (traçabilité comptable) mais rien à attendre ici.
         setState(() {
           _isProcessing = false;
-          _paymentStatus = PaymentStatus.completed;
+          _etape = EtapeReglement.reglee;
         });
         return;
       }
@@ -92,7 +92,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     } catch (e) {
       setState(() {
         _isProcessing = false;
-        _paymentStatus = PaymentStatus.error;
+        _etape = EtapeReglement.echouee;
         _errorMessage = e.toString();
       });
     }
@@ -117,14 +117,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
       if (current.isCompleted) {
         _pollTimer?.cancel();
-        setState(() => _paymentStatus = PaymentStatus.completed);
+        setState(() => _etape = EtapeReglement.reglee);
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted && context.mounted) Navigator.of(context).pop(true);
         });
       } else if (current.isFailed) {
         _pollTimer?.cancel();
         setState(() {
-          _paymentStatus = PaymentStatus.error;
+          _etape = EtapeReglement.echouee;
           _errorMessage = current.failureReason.isNotEmpty
               ? current.failureReason
               : 'Le paiement a échoué.';
@@ -186,16 +186,16 @@ class _PaymentScreenState extends State<PaymentScreen> {
     IconData iconData;
     Color iconColor;
 
-    switch (_paymentStatus) {
-      case PaymentStatus.completed:
+    switch (_etape) {
+      case EtapeReglement.reglee:
         iconData = Icons.check_circle;
         iconColor = Colors.green;
         break;
-      case PaymentStatus.error:
+      case EtapeReglement.echouee:
         iconData = Icons.error;
         iconColor = Colors.red;
         break;
-      case PaymentStatus.pending:
+      case EtapeReglement.enAttente:
         iconData = Icons.payment;
         iconColor = Theme.of(context).colorScheme.primary;
         break;
@@ -262,7 +262,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       );
     }
 
-    if (_isCashOnDelivery && _paymentStatus == PaymentStatus.completed) {
+    if (_isCashOnDelivery && _etape == EtapeReglement.reglee) {
       return Text(
         'À régler à la livraison 💵',
         style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -273,8 +273,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
       );
     }
 
-    switch (_paymentStatus) {
-      case PaymentStatus.completed:
+    switch (_etape) {
+      case EtapeReglement.reglee:
         return Text(
           'Paiement effectué avec succès ! 🎉',
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -283,7 +283,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
               ),
           textAlign: TextAlign.center,
         );
-      case PaymentStatus.error:
+      case EtapeReglement.echouee:
         return Column(
           children: [
             Text(
@@ -303,7 +303,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ],
           ],
         );
-      case PaymentStatus.pending:
+      case EtapeReglement.enAttente:
         final checkout = _checkout;
         final waitingTooLong = _pollDeadline != null && DateTime.now().isAfter(_pollDeadline!);
         return Column(
@@ -345,7 +345,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Widget _buildActionButtons() {
     return Column(
       children: [
-        if (_paymentStatus == PaymentStatus.error) ...[
+        if (_etape == EtapeReglement.echouee) ...[
           SizedBox(
             width: double.infinity,
             child: CustomButton(text: 'Réessayer', onPressed: _initializePayment),
@@ -355,8 +355,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         SizedBox(
           width: double.infinity,
           child: CustomButton(
-            text: _paymentStatus == PaymentStatus.completed ? 'Continuer' : 'Continuer vers le suivi',
-            onPressed: () => Navigator.of(context).pop(_paymentStatus == PaymentStatus.completed),
+            text: _etape == EtapeReglement.reglee ? 'Continuer' : 'Continuer vers le suivi',
+            onPressed: () => Navigator.of(context).pop(_etape == EtapeReglement.reglee),
           ),
         ),
       ],
