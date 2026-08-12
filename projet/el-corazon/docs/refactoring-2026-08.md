@@ -302,6 +302,72 @@ anglais dans un back-office français.
 *Critère de fin atteint* : plus aucun `import '…/models/order.dart'`, plus
 d'adaptateur, et 51 cas sur la logique déplacée.
 
+#### 3.9 — `fastfood`, domaine « adresse » : **fait**
+
+`models/address.dart` est retiré. `DjangoAddressRepository` ne traduit plus
+rien : il ne garde que ce que le socle ne fait pas — résoudre l'identifiant de
+la ville. 17 fichiers touchés.
+
+**La décision annoncée au §3.x est prise.** `isFavorite` n'existe pas côté
+serveur : c'est une préférence d'appareil, que `AddressService` persiste dans
+sa propre table. Le modèle local la portait, ce qui obligeait à réestampiller
+le carnet entier à chaque lecture et à le réécrire après chaque réponse du
+serveur. Elle reste où elle est rangée : `AddressService.estFavorite(id)`
+répond, et les cinq écrans qui s'en servent le demandent.
+`sortAddressesForDisplay` et `AddressCard` la reçoivent en paramètre — une
+adresse ne sait pas si on l'aime.
+
+Trois choses que la bascule a mises au jour :
+
+- **la reprise des carnets 2025 aurait cessé de fonctionner en silence.** Elle
+  lisait les entrées locales avec le `fromJson` du modèle local ; le socle
+  attend une autre forme — le point dans un objet `location`, pas à plat — et
+  la lecture aurait échoué sur chaque entrée, faisant disparaître le carnet de
+  tout appareil déjà installé. Ces entrées sont d'ailleurs des **brouillons** à
+  créer côté serveur, pas des adresses : `_depuisCarnet2025` les lit comme
+  tels ;
+- **le cache local ne pouvait pas se relire.** `Address.toJson` du socle est la
+  forme d'**écriture** : elle omet l'identifiant et les horodatages. `versCache`
+  produit la forme de lecture, celle que le serveur rend ;
+- **le tri par date tombait sur une adresse jamais synchronisée** —
+  `updatedAt` est nullable dans le socle et ne l'était pas dans le modèle local.
+
+`postalCode` devient `ligne2`, son nom réel : l'adaptateur l'y écrivait déjà,
+faute de code postal côté serveur. Le libellé du formulaire dit toujours
+« Code postal » — le changer se voit, et cela ne se décide pas ici.
+
+#### 3.10 — `fastfood`, domaine « panier » : mesuré, et un défaut à trancher
+
+9 consommateurs, `models/cart_item.dart` (158 l.) et un service de 918 lignes.
+La bascule est **plus qu'un changement de types**, pour une raison de fond : le
+panier est **local d'abord**. `CartService._items` est ce que l'écran affiche,
+et le serveur reçoit une réécriture intégrale à chaque modification. Une ligne
+locale n'a donc pas d'identifiant serveur tant qu'elle n'est pas partie — comme
+une adresse avant création. Il faudra ici aussi un brouillon distinct de
+l'entité, et `eccore.CartLine` ne servira qu'en lecture.
+
+Ce que le socle porte et que le modèle local jette : `isOrderable` et
+`unavailableReason` — le serveur dit qu'une ligne n'est pas commandable **et
+pourquoi**. `_fromRemoteLine` ne les lit pas.
+
+**Le défaut, qui ne dépend pas de la bascule.** Quand le serveur refuse une
+ligne à la synchronisation — article retiré du menu, option disparue,
+identifiant forgé hors catalogue —, `_replaceRemoteCart` la met de côté et
+écrit :
+
+```dart
+eccore.Journal.trace('⚠️ Lignes refusées par le serveur, non synchronisées : …');
+```
+
+`Journal.trace` est **muet hors du mode debug** (lot 5). En production, la
+ligne disparaît du panier serveur sans que rien ne le dise : l'écran continue
+de l'afficher, le client croit l'avoir commandée, et le devis — qui lit le
+panier **serveur** — chiffre autre chose que ce qu'il voit.
+
+Le corriger demande de remonter ces refus à l'écran, donc d'ajouter un message
+que personne n'a encore rédigé. C'est une décision de produit, pas de
+refactoring : elle est laissée ici plutôt que prise.
+
 #### 3.8 — `fastfood`, domaine « catalogue » : **fait**
 
 `models/menu_item.dart` et `models/menu_category.dart` sont retirés, et
@@ -345,9 +411,9 @@ retiré, et l'écran affiche un repli (`CategorieAffichee.pastille`).
 
 #### 3.7 — `fastfood`, ce qui reste : mesuré, pas exécuté
 
-Après la fermeture du catalogue (§3.8), deux modèles subsistent —
-`address` (14 consommateurs) et `cart_item` (9) — plus `order` (18) et trois
-modèles de paiement.
+Après la fermeture du catalogue (§3.8) et de l'adresse (§3.9), il reste
+`cart_item` (9 consommateurs, voir §3.10), `order` (18) et trois modèles de
+paiement.
 
 **`address`, mesuré.** `eccore.Address` couvre le modèle local sauf trois
 champs, et chacun raconte quelque chose :
