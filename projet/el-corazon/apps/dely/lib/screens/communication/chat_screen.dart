@@ -6,12 +6,11 @@ import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/chat_service.dart';
 import 'package:elcora_dely/services/agora_call_service.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
-import 'package:elcora_dely/models/message.dart';
 import 'package:elcora_dely/widgets/loading_widget.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 import 'package:elcora_dely/screens/communication/call_screen.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 class ChatScreen extends StatefulWidget {
   final Course order;
@@ -30,14 +29,14 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
-  List<Message> _messages = [];
+  List<eccore.ChatMessage> _messages = [];
   bool _isLoading = true;
   final bool _isTyping = false;
   bool _isConnected = false;
   bool _isSending = false;
 
   final ChatService _chatService = ChatService();
-  StreamSubscription<List<Message>>? _messagesSubscription;
+  StreamSubscription<List<eccore.ChatMessage>>? _messagesSubscription;
 
   @override
   void initState() {
@@ -79,7 +78,7 @@ class _ChatScreenState extends State<ChatScreen> {
       // S'abonner aux nouveaux messages en temps réel
       _subscribeToMessages();
     } catch (e) {
-      Journal.trace('Erreur initialisation chat: $e');
+      eccore.Journal.trace('Erreur initialisation chat: $e');
       setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -105,7 +104,7 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       },
       onError: (error) {
-        Journal.trace('Erreur stream messages: $error');
+        eccore.Journal.trace('Erreur stream messages: $error');
         if (mounted) {
           setState(() {
             _isConnected = false;
@@ -159,7 +158,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _scrollToBottom();
       });
     } catch (e) {
-      Journal.trace('Erreur envoi message: $e');
+      eccore.Journal.trace('Erreur envoi message: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -245,7 +244,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ));
       }
     } catch (e) {
-      Journal.trace('Erreur démarrage appel: $e');
+      eccore.Journal.trace('Erreur démarrage appel: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -431,7 +430,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
 
-                // Message input
+                // eccore.ChatMessage input
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -521,8 +520,11 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildMessageBubble(Message message) {
-    final isFromDriver = message.isFromDriver;
+  Widget _buildMessageBubble(eccore.ChatMessage message) {
+    // Le rôle tient lieu d'identité : le relais ne diffuse aucun
+    // identifiant d'utilisateur, et l'écran n'a besoin que de savoir de
+    // quel côté placer la bulle.
+    final isFromDriver = message.sender == 'courier';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -534,10 +536,9 @@ class _ChatScreenState extends State<ChatScreen> {
             CircleAvatar(
               radius: 16,
               backgroundColor: Colors.grey[300],
-              child: Text(
-                message.senderName.substring(0, 1).toUpperCase(),
-                style:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              child: const Text(
+                'C',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(width: 8),
@@ -562,7 +563,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    message.content,
+                    message.text,
                     style: TextStyle(
                       color: isFromDriver ? Colors.white : Colors.black87,
                       fontSize: 14,
@@ -570,7 +571,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _formatTime(message.timestamp),
+                    _formatTime(message.sentAt),
                     style: TextStyle(
                       color: isFromDriver
                           ? Colors.white.withValues(alpha: 0.7)

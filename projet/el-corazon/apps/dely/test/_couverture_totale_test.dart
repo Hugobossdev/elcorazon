@@ -12,7 +12,6 @@ import 'package:elcora_dely/l10n/app_localizations.dart';
 import 'package:elcora_dely/l10n/app_localizations_en.dart';
 import 'package:elcora_dely/l10n/app_localizations_fr.dart';
 import 'package:elcora_dely/main.dart';
-import 'package:elcora_dely/models/message.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';

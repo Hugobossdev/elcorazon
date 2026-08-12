@@ -4,7 +4,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import 'package:elcora_dely/models/message.dart';
 
 /// Conversation livreur ↔ client sur `ws/orders/{id}/chat/` (Phase 6).
 ///
@@ -26,8 +25,8 @@ class ChatService extends ChangeNotifier {
   factory ChatService() => _instance;
   ChatService._internal();
 
-  final Map<String, StreamController<List<Message>>> _controllers = {};
-  final Map<String, List<Message>> _messages = {};
+  final Map<String, StreamController<List<eccore.ChatMessage>>> _controllers = {};
+  final Map<String, List<eccore.ChatMessage>> _messages = {};
   final Map<String, eccore.RealtimeChannel> _channels = {};
   final Map<String, StreamSubscription<eccore.RealtimeEvent>> _subscriptions = {};
 
@@ -55,15 +54,15 @@ class ChatService extends ChangeNotifier {
 
   /// Messages reçus depuis l'ouverture du canal. Vide au départ : le serveur
   /// n'a pas d'historique à servir.
-  Future<List<Message>> loadMessages(String orderId) async {
-    return List.unmodifiable(_messages[orderId] ?? const <Message>[]);
+  Future<List<eccore.ChatMessage>> loadMessages(String orderId) async {
+    return List.unmodifiable(_messages[orderId] ?? const <eccore.ChatMessage>[]);
   }
 
-  List<Message> getCachedMessages(String orderId) {
-    return List.unmodifiable(_messages[orderId] ?? const <Message>[]);
+  List<eccore.ChatMessage> getCachedMessages(String orderId) {
+    return List.unmodifiable(_messages[orderId] ?? const <eccore.ChatMessage>[]);
   }
 
-  Stream<List<Message>> subscribeToMessages(String orderId) {
+  Stream<List<eccore.ChatMessage>> subscribeToMessages(String orderId) {
     // Fermés par `unsubscribe` via `_controllers.remove(orderId)?.close()`.
     // Le lint ne suit pas la fermeture au travers de la map.
     // ignore: close_sinks
@@ -72,7 +71,7 @@ class ChatService extends ChangeNotifier {
 
     // Même raison qu'au-dessus.
     // ignore: close_sinks
-    final controller = StreamController<List<Message>>.broadcast();
+    final controller = StreamController<List<eccore.ChatMessage>>.broadcast();
     _controllers[orderId] = controller;
     _messages[orderId] = [];
 
@@ -85,24 +84,10 @@ class ChatService extends ChangeNotifier {
     _subscriptions[orderId] = channel.connect().listen((event) {
       if (event.type != 'chat.message') return;
 
-      final payload = event.payload;
-      final sender = payload['sender'] as String? ?? '';
-      final message = Message(
-        id: '${event.seq}',
-        orderId: orderId,
-        // Le rôle tient lieu d'identité : le relais ne diffuse aucun
-        // identifiant d'utilisateur, et l'écran n'a besoin que de savoir de
-        // quel côté placer la bulle.
-        senderId: sender,
-        senderName: sender == 'courier' ? 'Vous' : 'Client',
-        content: payload['text'] as String? ?? '',
-        timestamp: payload['sent_at'] == null
-            ? DateTime.now()
-            : DateTime.parse(payload['sent_at'] as String),
-        isFromDriver: sender == 'courier',
-      );
-
-      _messages[orderId]!.add(message);
+      // Le socle sait lire la trame, et il la lit avec indulgence : un message
+      // mal formé devient un message vide plutôt que de faire tomber la
+      // conversation. `DateTime.parse` levait ici sur un horodatage abîmé.
+      _messages[orderId]!.add(eccore.ChatMessage.fromPayload(event.payload));
       if (!controller.isClosed) {
         controller.add(List.unmodifiable(_messages[orderId]!));
       }

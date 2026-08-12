@@ -31,7 +31,6 @@ application est une clé dans le binaire distribué.
 lib/
 ├── config/           api_config.dart — lecture du .env
 ├── l10n/             traductions
-├── models/           message.dart — dernier modèle local
 ├── presentation/     libelles_course.dart — vocabulaire d'affichage
 ├── repositories/     django_delivery_repository.dart
 ├── screens/          13 écrans
@@ -44,11 +43,14 @@ par-dessus les mots de l'écran livreur : c'est bien l'étape de la **course**
 qu'il nomme, pas le statut de la commande — côté livreur, ce sont ses propres
 gestes qui pilotent l'écran.
 
-## Ce qui reste à migrer
+## Rien à migrer ici
 
-`models/message.dart` et `repositories/django_delivery_repository.dart` sont les
-deux derniers vestiges de la pile héritée dans cette application. Voir
-[docs/refactoring-2026-08.md](../../docs/refactoring-2026-08.md), lot 3.
+Cette application n'a plus de modèle local ni d'adaptateur traducteur : le
+lot 3 est terminé pour elle. `django_delivery_repository.dart` subsiste, mais
+il ne traduit plus rien — il compose les courses à partir de l'`Assignment` et
+de l'`Order` du socle, ce que le socle ne fait pas à sa place.
+
+Voir [docs/refactoring-2026-08.md](../../docs/refactoring-2026-08.md), lot 3.
 
 ## Vérifier
 

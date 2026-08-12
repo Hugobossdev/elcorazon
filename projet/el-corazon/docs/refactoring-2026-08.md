@@ -302,6 +302,28 @@ anglais dans un back-office français.
 *Critère de fin atteint* : plus aucun `import '…/models/order.dart'`, plus
 d'adaptateur, et 51 cas sur la logique déplacée.
 
+#### 3.11 — `dely`, domaine « conversation » : **fait** — l'application est finie
+
+`models/message.dart` est retiré, et `lib/models/` avec lui : **`dely` n'a plus
+aucun modèle local**. Le lot 3 est terminé pour cette application, comme pour
+`admin`.
+
+Le modèle local était un modèle de vue par-dessus la charge utile du canal :
+`eccore.ChatMessage` porte les trois champs que `ws/orders/{id}/chat/`
+transporte, le local y ajoutait un numéro de séquence, un nom d'émetteur et un
+drapeau, tous trois dérivables. `fastfood` avait déjà pris cette route au même
+lot ; `dely` la suit.
+
+Un défaut tombe avec : le service lisait l'horodatage par `DateTime.parse`, qui
+**lève** sur une valeur abîmée — et l'exception, jetée dans l'écoute du flux,
+emportait la conversation. `ChatMessage.fromPayload` est indulgent par
+construction : un message mal formé devient un message vide, ce qui se voit,
+plutôt qu'une exception qui se perd.
+
+`django_delivery_repository.dart` subsiste et c'est normal : il ne traduit
+plus rien, il compose les courses à partir de l'`Assignment` et de l'`Order`
+du socle — un travail que le socle ne fait pas à sa place.
+
 #### 3.9 — `fastfood`, domaine « adresse » : **fait**
 
 `models/address.dart` est retiré. `DjangoAddressRepository` ne traduit plus
