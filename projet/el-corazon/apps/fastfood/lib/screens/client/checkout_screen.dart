@@ -7,7 +7,7 @@ import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/cart_item.dart';
-import 'package:elcora_fast/models/address.dart';
+import 'package:elcora_fast/presentation/adresse.dart';
 import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
@@ -46,7 +46,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       .cash; // Par défaut: cash (mobile money, credit card et debit card désactivés)
   bool _isLoading = false;
   bool _isCalculatingDeliveryFee = false;
-  Address? _selectedAddress;
+  eccore.Address? _selectedAddress;
   // La distance et le délai estimé ne sont plus recopiés ici : ils vivent sur
   // `_deliveryBreakdown`, d'où l'écran les lit déjà.
   DeliveryFeeBreakdown? _deliveryBreakdown;
@@ -96,7 +96,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       }
 
       _selectedAddress = address;
-      _addressController.text = address.fullAddress;
+      _addressController.text = address.uneLigne;
       await _calculateDeliveryFeeForAddress(address);
     } catch (e) {
       eccore.Journal.trace('Erreur chargement adresse: $e');
@@ -111,7 +111,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   /// `POST /orders/preview/`, qui emprunte le chemin de calcul de la création
   /// de commande. Ce qui s'affiche ici est donc, au centime près, ce qui sera
   /// facturé.
-  Future<void> _calculateDeliveryFeeForAddress(Address? address) async {
+  Future<void> _calculateDeliveryFeeForAddress(eccore.Address? address) async {
     if (address == null) return;
 
     setState(() {
@@ -169,17 +169,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // Plus de rattrapage de coordonnées ici : une `Address` en porte toujours,
+  // Plus de rattrapage de coordonnées ici : une `eccore.Address` en porte toujours,
   // par construction. Cet écran géocodait l'adresse choisie quand elle n'en
   // avait pas — un rattrapage qui n'existait que parce que le carnet laissait
   // créer des adresses sans point, et qui n'a plus d'objet.
 
   Future<void> _selectAddress() async {
-    final selected = await Navigator.of(context).push<Address>(
+    final selected = await Navigator.of(context).push<eccore.Address>(
       MaterialPageRoute(
         builder: (context) => AddressSelectorScreen(
           currentAddress: _selectedAddress,
-          onAddressSelected: (Address address) {
+          onAddressSelected: (eccore.Address address) {
             Navigator.of(context).pop(address);
           },
         ),
@@ -189,14 +189,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     if (selected != null && mounted) {
       setState(() {
         _selectedAddress = selected;
-        _addressController.text = selected.fullAddress;
+        _addressController.text = selected.uneLigne;
       });
       await _calculateDeliveryFeeForAddress(selected);
     }
   }
 
   // NOTE: V2 adresses: plus de saisie libre dans le checkout.
-  // L'utilisateur doit sélectionner une Address (avec lat/lng).
+  // L'utilisateur doit sélectionner une eccore.Address (avec lat/lng).
 
   @override
   Widget build(BuildContext context) {

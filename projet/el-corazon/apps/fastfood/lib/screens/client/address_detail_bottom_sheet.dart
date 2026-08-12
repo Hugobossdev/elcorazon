@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:provider/provider.dart';
 import 'package:elcora_fast/config/app_constants.dart';
-import 'package:elcora_fast/models/address.dart';
+import 'package:elcora_fast/presentation/adresse.dart';
+import 'package:elcora_fast/repositories/django_address_repository.dart';
 import 'package:elcora_fast/widgets/custom_text_field.dart';
 import 'package:elcora_fast/screens/client/address_map_picker_screen.dart';
 import 'package:elcora_fast/services/address_service.dart';
@@ -16,13 +18,13 @@ import 'package:elcora_fast/services/places_service.dart';
 /// Feuille de saisie d'une adresse — création si [address] est nul, édition
 /// sinon.
 ///
-/// Rend un [AddressDraft], et non plus une `Map<String, dynamic>` dont chaque
+/// Rend un [BrouillonAdresse], et non plus une `Map<String, dynamic>` dont chaque
 /// appelant relisait les clés à la main (`addressData['postalCode'] ?? ''`) :
 /// une clé mal orthographiée d'un côté passait la compilation et arrivait nulle
 /// de l'autre. Le point est obligatoire, et c'est le type qui le dit.
 class AddressDetailBottomSheet extends StatefulWidget {
-  final Address? address;
-  final Future<void> Function(AddressDraft) onSave;
+  final eccore.Address? address;
+  final Future<void> Function(BrouillonAdresse) onSave;
 
   const AddressDetailBottomSheet({
     required this.onSave,
@@ -53,7 +55,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
   final DeliveryFeeService _deliveryFeeService = DeliveryFeeService();
 
   LatLng? _pickedLatLng;
-  AddressType _selectedType = AddressType.home;
+  TypeAdresse _selectedType = TypeAdresse.maison;
   bool _isDefault = false;
   bool _isFavorite = false;
   bool _isLocating = false;
@@ -84,15 +86,15 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
 
   void _loadExistingAddress() {
     final addr = widget.address!;
-    _nameController.text = addr.name;
-    _addressController.text = addr.address;
+    _nameController.text = addr.label;
+    _addressController.text = addr.line1;
     _cityController.text = addr.city;
-    _postalCodeController.text = addr.postalCode;
+    _postalCodeController.text = addr.line2;
     _landmarkController.text = addr.landmark;
     _instructionsController.text = addr.deliveryInstructions;
     _selectedType = addr.type;
     _isDefault = addr.isDefault;
-    _isFavorite = addr.isFavorite;
+    _isFavorite = context.read<AddressService>().estFavorite(addr.id!);
     _pickedLatLng = LatLng(addr.latitude, addr.longitude);
   }
 
@@ -509,9 +511,9 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: AddressType.values.map((type) {
+          children: TypeAdresse.values.map((type) {
             final isSelected = _selectedType == type;
-            final color = type.color;
+            final color = type.couleur;
             return InkWell(
               onTap: () => setState(() => _selectedType = type),
               borderRadius: BorderRadius.circular(24),
@@ -531,10 +533,10 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(type.emoji, style: const TextStyle(fontSize: 20)),
+                    Text(type.pastille, style: const TextStyle(fontSize: 20)),
                     const SizedBox(width: 8),
                     Text(
-                      type.displayName,
+                      type.libelle,
                       style: TextStyle(
                         color: isSelected ? color : Colors.grey.shade700,
                         fontWeight:
@@ -671,13 +673,25 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
   ///
   /// La ville était devinée par `address.contains('Abidjan')`, une ville d'un
   /// autre pays : la condition était toujours fausse ici, et le champ gardait
-  /// ce qui s'y trouvait. On retient la ville configurée dès que l'adresse la
-  /// mentionne, sinon on laisse la saisie du client intacte.
-  void _applyResolvedAddress(String formatted) {
+  /// ce qui s'y trouvait.
+  ///
+  /// [city] est la ville que Google a **classée** comme telle
+  /// (`addressComponents`), disponible depuis la migration vers Places API
+  /// (New). Quand elle manque — position relevée, retour du sélecteur de
+  /// carte, qui passent par le géocodage —, on retombe sur la lecture du
+  /// texte : la ville configurée est retenue si l'adresse la mentionne, sinon
+  /// la saisie du client reste intacte.
+  void _applyResolvedAddress(String formatted, {String? city}) {
     _addressController.text = formatted;
-    const city = AppConstants.defaultCityName;
-    if (formatted.toLowerCase().contains(city.toLowerCase())) {
+
+    if (city != null && city.isNotEmpty) {
       _cityController.text = city;
+      return;
+    }
+
+    const configuree = AppConstants.defaultCityName;
+    if (formatted.toLowerCase().contains(configuree.toLowerCase())) {
+      _cityController.text = configuree;
     }
   }
 
@@ -783,7 +797,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
 
       setState(() {
         _pickedLatLng = details.location;
-        _applyResolvedAddress(details.formattedAddress);
+        _applyResolvedAddress(details.formattedAddress, city: details.city);
       });
 
       // Retour à l'onglet formulaire
@@ -838,16 +852,18 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
 
     if (!mounted) return;
 
-    final draft = AddressDraft(
-      name: _nameController.text.trim(),
-      address: _addressController.text.trim(),
-      city: _cityController.text.trim(),
-      postalCode: _postalCodeController.text.trim(),
-      landmark: _landmarkController.text.trim(),
-      deliveryInstructions: _instructionsController.text.trim(),
+    final draft = BrouillonAdresse(
+      nom: _nameController.text.trim(),
+      ligne1: _addressController.text.trim(),
+      // La ville n'est plus envoyée telle quelle : le serveur attend
+      // l'identifiant d'une `City`, que le dépôt résout. La saisie sert à
+      // l'affichage et au géocodage.
+      ligne2: _postalCodeController.text.trim(),
+      repere: _landmarkController.text.trim(),
+      consignes: _instructionsController.text.trim(),
       type: _selectedType,
-      isDefault: _isDefault,
-      isFavorite: _isFavorite,
+      estParDefaut: _isDefault,
+      estFavorite: _isFavorite,
       latitude: point.latitude,
       longitude: point.longitude,
     );

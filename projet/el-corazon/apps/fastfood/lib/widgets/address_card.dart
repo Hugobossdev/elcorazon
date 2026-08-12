@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:elcora_fast/models/address.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/adresse.dart';
 import 'package:elcora_fast/widgets/delivery_fee_preview.dart';
 
 /// Card moderne pour afficher une adresse avec expansion et actions
 class AddressCard extends StatefulWidget {
-  final Address address;
+  final eccore.Address address;
+
+  /// Le favori est une préférence d'appareil, tenue par `AddressService`.
+  /// L'entité du socle ne le porte pas : la carte le reçoit.
+  final bool isFavorite;
+
   final bool isSelected;
   final bool showDeliveryInfo;
   final VoidCallback? onTap;
@@ -16,6 +22,7 @@ class AddressCard extends StatefulWidget {
   const AddressCard({
     required this.address,
     super.key,
+    this.isFavorite = false,
     this.isSelected = false,
     this.showDeliveryInfo = true,
     this.onTap,
@@ -65,13 +72,13 @@ class _AddressCardState extends State<AddressCard>
     });
   }
 
-  Color _getAddressTypeColor(AddressType type) {
+  Color _getAddressTypeColor(TypeAdresse type) {
     switch (type) {
-      case AddressType.home:
+      case TypeAdresse.maison:
         return Colors.green;
-      case AddressType.work:
+      case TypeAdresse.travail:
         return Colors.blue;
-      case AddressType.other:
+      case TypeAdresse.autre:
         return Colors.orange;
     }
   }
@@ -146,7 +153,7 @@ class _AddressCardState extends State<AddressCard>
             ),
             child: Center(
               child: Text(
-                widget.address.type.emoji,
+                widget.address.type.pastille,
                 style: const TextStyle(fontSize: 24),
               ),
             ),
@@ -162,14 +169,14 @@ class _AddressCardState extends State<AddressCard>
                   children: [
                     Flexible(
                       child: Text(
-                        widget.address.name,
+                        widget.address.label,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (widget.address.isFavorite) ...[
+                    if (widget.isFavorite) ...[
                       const SizedBox(width: 6),
                       Icon(
                         Icons.star,
@@ -181,7 +188,7 @@ class _AddressCardState extends State<AddressCard>
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  widget.address.type.displayName,
+                  widget.address.type.libelle,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: _getAddressTypeColor(widget.address.type),
                     fontWeight: FontWeight.w600,
@@ -228,7 +235,7 @@ class _AddressCardState extends State<AddressCard>
                 child: Row(
                   children: [
                     Icon(
-                      widget.address.isFavorite
+                      widget.isFavorite
                           ? Icons.star
                           : Icons.star_border,
                       size: 20,
@@ -236,7 +243,7 @@ class _AddressCardState extends State<AddressCard>
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      widget.address.isFavorite
+                      widget.isFavorite
                           ? 'Retirer des favoris'
                           : 'Ajouter aux favoris',
                     ),
@@ -283,7 +290,7 @@ class _AddressCardState extends State<AddressCard>
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  widget.address.fullAddress,
+                  widget.address.uneLigne,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: Colors.grey.shade700,
                   ),
@@ -365,12 +372,12 @@ class _AddressCardState extends State<AddressCard>
               theme: theme,
             ),
 
-            if (widget.address.postalCode.isNotEmpty) ...[
+            if (widget.address.line2.isNotEmpty) ...[
               const SizedBox(height: 8),
               _buildDetailRow(
                 icon: Icons.markunread_mailbox,
                 label: 'Code postal',
-                value: widget.address.postalCode,
+                value: widget.address.line2,
                 theme: theme,
               ),
             ],
@@ -404,8 +411,8 @@ class _AddressCardState extends State<AddressCard>
                     theme: theme,
                   ),
                 _buildActionChip(
-                  label: widget.address.isFavorite ? 'Favori ★' : 'Favori ☆',
-                  icon: widget.address.isFavorite
+                  label: widget.isFavorite ? 'Favori ★' : 'Favori ☆',
+                  icon: widget.isFavorite
                       ? Icons.star
                       : Icons.star_border,
                   onTap: widget.onToggleFavorite,
@@ -548,7 +555,7 @@ class _AddressCardState extends State<AddressCard>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Supprimer l\'adresse'),
         content: Text(
-          'Êtes-vous sûr de vouloir supprimer "${widget.address.name}" ?',
+          'Êtes-vous sûr de vouloir supprimer "${widget.address.label}" ?',
         ),
         actions: [
           TextButton(

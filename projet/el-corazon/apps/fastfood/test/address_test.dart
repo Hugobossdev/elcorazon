@@ -1,6 +1,7 @@
 import 'dart:convert';
 
-import 'package:elcora_fast/models/address.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/adresse.dart';
 import 'package:elcora_fast/repositories/django_address_repository.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/utils/address_sorting.dart';
@@ -23,30 +24,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  Address adresse(
+  /// `isFavorite` n'est plus porté par l'adresse : c'est une préférence
+  /// d'appareil, que le service détient. Les tests qui trient par favori
+  /// passent désormais le prédicat.
+  eccore.Address adresse(
     String id, {
     required String name,
     bool isDefault = false,
-    bool isFavorite = false,
     double latitude = 6.13,
     double longitude = 1.20,
     String landmark = '',
-    AddressType type = AddressType.home,
+    TypeAdresse type = TypeAdresse.maison,
     DateTime? updatedAt,
   }) {
     final horodatage = updatedAt ?? DateTime(2026);
-    return Address(
+    return eccore.Address(
       id: id,
-      userId: 'client-1',
-      name: name,
-      address: 'Rue $name',
-      city: 'Lomé',
+      label: name,
+      kind: type.versServeur,
+      line1: 'Rue $name',
       landmark: landmark,
+      city: 'ville-lome',
+      cityName: 'Lomé',
       latitude: latitude,
       longitude: longitude,
-      type: type,
       isDefault: isDefault,
-      isFavorite: isFavorite,
       createdAt: horodatage,
       updatedAt: horodatage,
     );
@@ -59,24 +61,25 @@ void main() {
       final carnet = [
         adresse('4', name: 'Douane'),
         adresse('1', name: 'Atelier'),
-        adresse('3', name: 'Chantier', isFavorite: true),
+        adresse('3', name: 'Chantier'),
         adresse('2', name: 'Bureau'),
       ];
 
       final ordonne = sortAddressesForDisplay(
         carnet,
         sortType: AddressSortType.name,
+        isFavorite: (a) => a.id == '3',
       );
 
       expect(
-        ordonne.map((a) => a.name),
+        ordonne.map((a) => a.label),
         ['Chantier', 'Atelier', 'Bureau', 'Douane'],
       );
     });
 
     test('l\'adresse par défaut passe avant les favoris', () {
       final carnet = [
-        adresse('1', name: 'Bureau', isFavorite: true),
+        adresse('1', name: 'Bureau'),
         adresse('2', name: 'Maison', isDefault: true),
         adresse('3', name: 'Atelier'),
       ];
@@ -84,9 +87,10 @@ void main() {
       final ordonne = sortAddressesForDisplay(
         carnet,
         sortType: AddressSortType.name,
+        isFavorite: (a) => a.id == '1',
       );
 
-      expect(ordonne.map((a) => a.name), ['Maison', 'Bureau', 'Atelier']);
+      expect(ordonne.map((a) => a.label), ['Maison', 'Bureau', 'Atelier']);
     });
 
     test('le tri par distance range les adresses du plus proche au plus loin', () {
@@ -103,7 +107,7 @@ void main() {
         distanceFrom: (a) => distances[a.id]!,
       );
 
-      expect(ordonne.map((a) => a.name), ['Proche', 'Moyen', 'Loin']);
+      expect(ordonne.map((a) => a.label), ['Proche', 'Moyen', 'Loin']);
     });
 
     test('position inconnue : le tri par distance ne réordonne rien', () {
@@ -145,47 +149,64 @@ void main() {
         longitude: 1.2123,
       ).copyWith(deliveryInstructions: 'portail bleu, appeler en arrivant');
 
-      final relue = Address.fromJson(origine.toJson());
+      // `versCache` et non `toJson` : la seconde est la forme d'**écriture**,
+              // qui omet l'identifiant et les horodatages que le serveur seul
+              // établit. La relire échouerait — c'est précisément pourquoi le
+              // cache a sa propre forme.
+      final relue = eccore.Address.fromJson(origine.versCache());
 
       expect(relue.landmark, 'en face de la pharmacie du Golfe');
       expect(relue.deliveryInstructions, 'portail bleu, appeler en arrivant');
       expect(relue.latitude, 6.1375);
     });
 
-    test('une entrée sans point est refusée à la relecture', () {
+    test('une entrée du carnet 2025 n’est pas une adresse du socle', () {
       // Ces entrées existent : elles ont été écrites par la version où le
-      // carnet vivait en local. Elles ne peuvent pas devenir des `Address` —
-      // le serveur les refuserait — et c'est la reprise qui les traite.
+      // carnet vivait en local. Leur forme n'est pas celle du serveur — le
+      // point y était à plat plutôt que dans un objet `location` — et rien ne
+      // les rend lisibles ici. C'est la reprise qui les traite, avec son
+      // propre lecteur, et qui les crée côté serveur comme des brouillons.
       expect(
-        () => Address.fromJson(const {
+        () => eccore.Address.fromJson(const {
           'id': '1',
           'user_id': 'client-1',
           'name': 'Maison',
           'address': 'Rue des Cocotiers',
           'city': 'Lomé',
+          'latitude': 6.14,
+          'longitude': 1.21,
           'type': 'home',
           'is_default': true,
           'created_at': '2026-01-01T00:00:00.000',
           'updated_at': '2026-01-01T00:00:00.000',
         }),
-        throwsA(isA<FormatException>()),
+        throwsA(anything),
       );
+    });
+
+    test('la forme d’écriture ne se relit pas telle quelle', () {
+      // `toJson` omet l'identifiant et les horodatages : c'est ce que le
+      // serveur attend en `POST`, pas ce qu'il rend.
+      final origine = adresse('1', name: 'Maison');
+
+      expect(() => eccore.Address.fromJson(origine.toJson()), throwsA(anything));
+      expect(eccore.Address.fromJson(origine.versCache()).id, '1');
     });
 
     test('copyWith conserve le repère quand on ne le touche pas', () {
       final origine = adresse('1', name: 'Maison', landmark: 'près du marché');
 
-      expect(origine.copyWith(name: 'Chez moi').landmark, 'près du marché');
+      expect(origine.copyWith(label: 'Chez moi').landmark, 'près du marché');
     });
 
     test('l\'adresse sur une ligne n\'affiche pas de séparateur vide', () {
-      // Le code postal est vide dans la quasi-totalité des cas ici.
-      expect(adresse('1', name: 'Maison').fullAddress, 'Rue Maison, Lomé');
+      // La seconde ligne est vide dans la quasi-totalité des cas ici.
+      expect(adresse('1', name: 'Maison').uneLigne, 'Rue Maison');
     });
 
     test('un kind inconnu du client ne fait pas échouer la lecture', () {
-      expect(AddressType.fromKind('warehouse'), AddressType.other);
-      expect(AddressType.fromKind('work'), AddressType.work);
+      expect(TypeAdresse.depuisServeur('warehouse'), TypeAdresse.autre);
+      expect(TypeAdresse.depuisServeur('work'), TypeAdresse.travail);
     });
   });
 
@@ -199,23 +220,22 @@ void main() {
       service = AddressService.forTest(serveur);
     });
 
-    AddressDraft brouillon({
+    BrouillonAdresse brouillon({
       required String name,
       bool isDefault = false,
       bool isFavorite = false,
       double latitude = 6.14,
       double longitude = 1.21,
     }) {
-      return AddressDraft(
-        name: name,
-        address: 'Rue $name',
-        city: 'Lomé',
-        landmark: 'en face du marché',
+      return BrouillonAdresse(
+        nom: name,
+        ligne1: 'Rue $name',
+        repere: 'en face du marché',
         latitude: latitude,
         longitude: longitude,
-        type: AddressType.home,
-        isDefault: isDefault,
-        isFavorite: isFavorite,
+        type: TypeAdresse.maison,
+        estParDefaut: isDefault,
+        estFavorite: isFavorite,
       );
     }
 
@@ -229,7 +249,7 @@ void main() {
       expect(serveur.creees, hasLength(1));
       expect(creee.id, 'srv-1');
       expect(service.addresses.single.id, 'srv-1');
-      expect(serveur.creees.single.landmark, 'en face du marché');
+      expect(serveur.creees.single.repere, 'en face du marché');
     });
 
     test('sans session, aucune écriture ne part et l\'appel échoue', () async {
@@ -251,7 +271,7 @@ void main() {
       // Le serveur promeut lui-même la première (`perform_create`) ; le
       // carnet local ne doit pas rester sans défaut jusqu'à la synchro
       // suivante, sinon l'écran de commande ne pré-remplit rien.
-      expect(serveur.creees.single.isDefault, isTrue);
+      expect(serveur.creees.single.estParDefaut, isTrue);
       expect(service.defaultAddress?.id, 'srv-1');
       expect(service.selectedAddress?.id, 'srv-1');
     });
@@ -284,7 +304,7 @@ void main() {
       expect(serveur.supprimees, ['srv-1']);
       expect(service.defaultAddress?.id, 'srv-2');
       expect(serveur.modifiees.last.$1, 'srv-2');
-      expect(serveur.modifiees.last.$2.isDefault, isTrue);
+      expect(serveur.modifiees.last.$2.estParDefaut, isTrue);
     });
 
     test('une suppression refusée par le serveur ne retire rien de l\'écran', () async {
@@ -306,7 +326,7 @@ void main() {
 
       await service.toggleFavorite('srv-1');
 
-      expect(service.addresses.single.isFavorite, isTrue);
+      expect(service.estFavorite('srv-1'), isTrue);
       expect(serveur.modifiees.length, avant);
     });
 
@@ -319,7 +339,7 @@ void main() {
 
       // Le serveur ignore ce champ et rend `false` : sans report local,
       // l'étoile s'éteignait à chaque rechargement.
-      expect(service.addresses.single.isFavorite, isTrue);
+      expect(service.estFavorite('srv-1'), isTrue);
     });
 
     test('le choix du client survit à une synchronisation', () async {
@@ -405,9 +425,9 @@ void main() {
 
       // Sans cette reprise, la bascule ferait disparaître d'un coup le carnet
       // de chaque appareil déjà installé.
-      expect(serveur.creees.map((d) => d.name), ['Maison', 'Bureau']);
-      expect(service.addresses.map((a) => a.name), ['Maison', 'Bureau']);
-      expect(serveur.creees.first.landmark, 'près du marché');
+      expect(serveur.creees.map((d) => d.nom), ['Maison', 'Bureau']);
+      expect(service.addresses.map((a) => a.label), ['Maison', 'Bureau']);
+      expect(serveur.creees.first.repere, 'près du marché');
 
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.getStringList('user_addresses_guest'), isNull);
@@ -424,7 +444,7 @@ void main() {
 
       await service.initializeForUser('client-1');
 
-      expect(service.addresses.single.isFavorite, isTrue);
+      expect(service.estFavorite('srv-1'), isTrue);
     });
 
     test('une adresse locale sans point n\'est pas reprise', () async {
@@ -441,21 +461,20 @@ void main() {
 
       await service.initializeForUser('client-1');
 
-      expect(serveur.creees.map((d) => d.name), ['Maison']);
+      expect(serveur.creees.map((d) => d.nom), ['Maison']);
     });
 
     test('la reprise ne duplique pas une adresse déjà présente au serveur', () async {
       serveur.existantes.add(
         _AdresseServeur(
           id: 'srv-0',
-          draft: const AddressDraft(
-            name: 'Maison',
-            address: 'Rue Maison',
-            city: 'Lomé',
+          draft: const BrouillonAdresse(
+            nom: 'Maison',
+            ligne1: 'Rue Maison',
             latitude: 6.14,
             longitude: 1.21,
-            type: AddressType.home,
-            isDefault: true,
+            type: TypeAdresse.maison,
+            estParDefaut: true,
           ),
         ),
       );
@@ -493,7 +512,7 @@ class _AdresseServeur {
   _AdresseServeur({required this.id, required this.draft});
 
   final String id;
-  AddressDraft draft;
+  BrouillonAdresse draft;
 }
 
 /// Serveur de carnet en mémoire, appliquant les règles de `AddressViewSet` :
@@ -501,8 +520,8 @@ class _AdresseServeur {
 /// l'ancien défaut. Il ignore `isFavorite`, comme le vrai.
 class _FauxCarnet implements AddressBookRepository {
   final List<_AdresseServeur> existantes = [];
-  final List<AddressDraft> creees = [];
-  final List<(String, AddressDraft)> modifiees = [];
+  final List<BrouillonAdresse> creees = [];
+  final List<(String, BrouillonAdresse)> modifiees = [];
   final List<String> supprimees = [];
 
   bool echoueSurLecture = false;
@@ -511,20 +530,20 @@ class _FauxCarnet implements AddressBookRepository {
 
   int _prochainId = 0;
 
-  Address _rendu(_AdresseServeur stockee, String userId) {
-    return Address(
+  eccore.Address _rendu(_AdresseServeur stockee) {
+    return eccore.Address(
       id: stockee.id,
-      userId: userId,
-      name: stockee.draft.name,
-      address: stockee.draft.address,
-      city: stockee.draft.city,
-      postalCode: stockee.draft.postalCode,
-      landmark: stockee.draft.landmark,
-      deliveryInstructions: stockee.draft.deliveryInstructions,
+      label: stockee.draft.nom,
+      kind: stockee.draft.type.versServeur,
+      line1: stockee.draft.ligne1,
+      line2: stockee.draft.ligne2,
+      landmark: stockee.draft.repere,
+      deliveryInstructions: stockee.draft.consignes,
+      city: 'ville-lome',
+      cityName: 'Lomé',
       latitude: stockee.draft.latitude,
       longitude: stockee.draft.longitude,
-      type: stockee.draft.type,
-      isDefault: stockee.draft.isDefault,
+      isDefault: stockee.draft.estParDefaut,
       createdAt: DateTime(2026),
       updatedAt: DateTime(2026),
     );
@@ -532,45 +551,43 @@ class _FauxCarnet implements AddressBookRepository {
 
   void _retrograderLeDefaut() {
     for (final a in existantes) {
-      if (a.draft.isDefault) a.draft = a.draft.copyWith(isDefault: false);
+      if (a.draft.estParDefaut) {
+        a.draft = a.draft.copyWith(estParDefaut: false);
+      }
     }
   }
 
   @override
-  Future<List<Address>> list({required String userId}) async {
+  Future<List<eccore.Address>> list() async {
     if (echoueSurLecture) throw Exception('réseau indisponible');
-    return existantes.map((a) => _rendu(a, userId)).toList();
+    return existantes.map(_rendu).toList();
   }
 
   @override
-  Future<Address> create(AddressDraft draft, {required String userId}) async {
+  Future<eccore.Address> create(BrouillonAdresse draft) async {
     if (echoueSurCreation) throw Exception('création refusée');
     creees.add(draft);
 
     final premiere = existantes.isEmpty;
-    final estDefaut = draft.isDefault || premiere;
+    final estDefaut = draft.estParDefaut || premiere;
     if (estDefaut) _retrograderLeDefaut();
 
     final stockee = _AdresseServeur(
       id: 'srv-${++_prochainId}',
-      draft: draft.copyWith(isDefault: estDefaut),
+      draft: draft.copyWith(estParDefaut: estDefaut),
     );
     existantes.add(stockee);
-    return _rendu(stockee, userId);
+    return _rendu(stockee);
   }
 
   @override
-  Future<Address> update(
-    String id,
-    AddressDraft draft, {
-    required String userId,
-  }) async {
+  Future<eccore.Address> update(String id, BrouillonAdresse draft) async {
     modifiees.add((id, draft));
-    if (draft.isDefault) _retrograderLeDefaut();
+    if (draft.estParDefaut) _retrograderLeDefaut();
 
     final stockee = existantes.firstWhere((a) => a.id == id);
     stockee.draft = draft;
-    return _rendu(stockee, userId);
+    return _rendu(stockee);
   }
 
   @override

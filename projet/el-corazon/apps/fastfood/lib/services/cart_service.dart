@@ -9,7 +9,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/cart_item.dart';
-import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
@@ -400,7 +399,7 @@ class CartService extends ChangeNotifier {
   /// L'échec **n'invente pas de montant de repli** — il propage. Un « 1 000 F
   /// par défaut » affiché à la place d'une erreur réseau est un prix que
   /// personne ne facturera.
-  Future<eccore.OrderQuote> refreshQuote({Address? address}) async {
+  Future<eccore.OrderQuote> refreshQuote({eccore.Address? address}) async {
     // La commande est créée depuis le panier serveur : sans cette attente, le
     // devis chiffrerait l'état d'avant le dernier ajout.
     await ensureSynced();

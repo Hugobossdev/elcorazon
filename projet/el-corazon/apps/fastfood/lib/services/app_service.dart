@@ -17,7 +17,6 @@ import 'package:elcora_fast/services/notification_database_service.dart';
 import 'package:elcora_fast/services/push_notification_service.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/models/cart_item.dart';
-import 'package:elcora_fast/models/address.dart';
 
 class AppService extends ChangeNotifier {
   static AppService? _instance;
@@ -350,7 +349,7 @@ class AppService extends ChangeNotifier {
   }
 
   Future<String> placeOrderFromCartService(
-    Address? deliveryAddress,
+    eccore.Address? deliveryAddress,
     PaymentMethod paymentMethod,
     List<dynamic> cartItems,
     double subtotal,
@@ -360,7 +359,7 @@ class AppService extends ChangeNotifier {
   }) async {
     if (cartItems.isEmpty || _currentUser == null) return '';
 
-    // Le point n'est plus vérifié ici : une `Address` en porte toujours un, et
+    // Le point n'est plus vérifié ici : une `eccore.Address` en porte toujours un, et
     // elle provient toujours du carnet serveur.
     if (deliveryAddress == null) {
       throw Exception(

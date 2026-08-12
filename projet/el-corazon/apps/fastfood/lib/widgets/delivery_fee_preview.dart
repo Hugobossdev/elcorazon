@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:elcora_fast/models/address.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
@@ -13,7 +13,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 /// prix définitif dépend de la distance et du montant commandé. Le devis exact
 /// vient à la commande.
 class DeliveryFeePreview extends StatefulWidget {
-  final Address address;
+  final eccore.Address address;
   final bool compact;
 
   const DeliveryFeePreview({
@@ -84,7 +84,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
         : _buildExpanded(breakdown);
   }
 
-  // L'état « Position GPS manquante » n'existe plus : une `Address` porte
+  // L'état « Position GPS manquante » n'existe plus : une `eccore.Address` porte
   // toujours son point.
 
   Widget _buildLoading() {

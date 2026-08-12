@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/address_service.dart';
-import 'package:elcora_fast/models/address.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/widgets/address_card.dart';
 import 'package:elcora_fast/screens/client/address_management_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran de sélection rapide d'adresse avec preview des frais
 class AddressSelectorScreen extends StatefulWidget {
-  final Address? currentAddress;
-  final Function(Address) onAddressSelected;
+  final eccore.Address? currentAddress;
+  final Function(eccore.Address) onAddressSelected;
 
   const AddressSelectorScreen({
     required this.onAddressSelected,
@@ -143,13 +143,23 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
     }
 
     // Trier: défaut > favoris > autres
+    final service = context.read<AddressService>();
     addresses = [...addresses];
     addresses.sort((a, b) {
-      if (a.isDefault && !b.isDefault) return -1;
-      if (!a.isDefault && b.isDefault) return 1;
-      if (a.isFavorite && !b.isFavorite) return -1;
-      if (!a.isFavorite && b.isFavorite) return 1;
-      return b.updatedAt.compareTo(a.updatedAt);
+      if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
+
+      final favoriA = service.estFavorite(a.id ?? '');
+      final favoriB = service.estFavorite(b.id ?? '');
+      if (favoriA != favoriB) return favoriA ? -1 : 1;
+
+      // Une adresse jamais synchronisée n'a pas d'horodatage ; elle passe
+      // après celles qui en ont plutôt que de faire tomber le tri.
+      final gauche = a.updatedAt;
+      final droite = b.updatedAt;
+      if (gauche == null && droite == null) return 0;
+      if (gauche == null) return 1;
+      if (droite == null) return -1;
+      return droite.compareTo(gauche);
     });
 
     return ListView.builder(
@@ -161,6 +171,7 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
 
         return AddressCard(
           address: address,
+          isFavorite: service.estFavorite(address.id ?? ''),
           isSelected: isSelected,
           onTap: () => _selectAddress(address),
         );
@@ -265,12 +276,12 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
     );
   }
 
-  Future<void> _selectAddress(Address address) async {
+  Future<void> _selectAddress(eccore.Address address) async {
     // Le choix est aussi retenu par le service, et non seulement remonté à
     // l'écran appelant : sans cela, l'adresse choisie ici était oubliée dès
     // qu'on quittait la commande en cours.
     try {
-      await context.read<AddressService>().selectAddress(address.id);
+      await context.read<AddressService>().selectAddress(address.id!);
     } catch (e) {
       Journal.trace('Sélection non mémorisée : $e');
     }

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/adresse.dart';
 import 'package:elcora_fast/services/group_cart_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/models/order.dart';
@@ -1173,7 +1174,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
           'Vous allez commander pour le groupe.\n\n'
           'Total : ${PriceFormatter.format(_calculateGroupTotal())}\n'
           'Articles : ${cart.lines.length}\n'
-          'Livraison : ${address.fullAddress}',
+          'Livraison : ${address.uneLigne}',
         ),
         actions: [
           TextButton(
@@ -1195,7 +1196,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
     if (confirmed != true || !mounted) return;
 
     final order = await GroupCartService().confirm(
-      addressId: address.id,
+      addressId: address.id!,
       paymentMethod: PaymentMethod.mobileMoney,
     );
 

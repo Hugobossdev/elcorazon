@@ -1,4 +1,5 @@
-import 'package:elcora_fast/models/address.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/adresse.dart';
 
 /// Critère de tri du carnet d'adresses.
 enum AddressSortType {
@@ -23,20 +24,34 @@ enum AddressSortType {
 /// [distanceFrom] rend la distance à une adresse, ou `null` si la position de
 /// l'appareil est inconnue — auquel cas le tri par distance ne réordonne rien
 /// plutôt que de prétendre le faire.
-List<Address> sortAddressesForDisplay(
-  List<Address> addresses, {
+///
+/// [isFavorite] est passé plutôt que lu sur l'adresse : le favori est une
+/// préférence d'appareil, que `AddressService` détient. L'entité du socle ne
+/// le porte pas, et n'a pas à le porter.
+List<eccore.Address> sortAddressesForDisplay(
+  List<eccore.Address> addresses, {
   required AddressSortType sortType,
-  double Function(Address address)? distanceFrom,
+  double Function(eccore.Address address)? distanceFrom,
+  bool Function(eccore.Address address)? isFavorite,
 }) {
-  int byCriterion(Address a, Address b) {
+  bool favorite(eccore.Address a) => isFavorite?.call(a) ?? false;
+
+  int byCriterion(eccore.Address a, eccore.Address b) {
     switch (sortType) {
       case AddressSortType.name:
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+        return a.label.toLowerCase().compareTo(b.label.toLowerCase());
       case AddressSortType.distance:
         if (distanceFrom == null) return 0;
         return distanceFrom(a).compareTo(distanceFrom(b));
       case AddressSortType.recent:
-        return b.updatedAt.compareTo(a.updatedAt);
+        // Une adresse jamais synchronisée n'a pas d'horodatage ; elle passe
+        // après celles qui en ont plutôt que de faire tomber le tri.
+        final gauche = a.updatedAt;
+        final droite = b.updatedAt;
+        if (gauche == null && droite == null) return 0;
+        if (gauche == null) return 1;
+        if (droite == null) return -1;
+        return droite.compareTo(gauche);
       case AddressSortType.type:
         return a.type.index.compareTo(b.type.index);
     }
@@ -45,9 +60,9 @@ List<Address> sortAddressesForDisplay(
   final sorted = [...addresses];
   sorted.sort((a, b) {
     if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
-    if (a.isFavorite != b.isFavorite) return a.isFavorite ? -1 : 1;
+    if (favorite(a) != favorite(b)) return favorite(a) ? -1 : 1;
     final criterion = byCriterion(a, b);
-    return criterion != 0 ? criterion : a.id.compareTo(b.id);
+    return criterion != 0 ? criterion : (a.id ?? '').compareTo(b.id ?? '');
   });
   return sorted;
 }

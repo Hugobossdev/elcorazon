@@ -5,7 +5,6 @@ import 'package:geolocator/geolocator.dart' show Position;
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
-import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/utils/address_sorting.dart';
 import 'package:elcora_fast/widgets/address_card.dart';
 import 'package:elcora_fast/screens/client/address_detail_bottom_sheet.dart';
@@ -236,10 +235,12 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
                   itemBuilder: (context, index) {
                     final address = addresses[index];
                     final isSelected =
-                        addressService.selectedAddress?.id == address.id;
+                        addressService.selectedAddress?.id == address.id!;
 
                     return AddressCard(
                       address: address,
+                      isFavorite:
+                          addressService.estFavorite(address.id ?? ''),
                       isSelected: isSelected,
                       onTap: () => _selectAddress(address),
                       onEdit: () => _showEditAddressSheet(address),
@@ -467,7 +468,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     );
   }
 
-  List<Address> _filterAddresses(List<Address> addresses) {
+  List<eccore.Address> _filterAddresses(List<eccore.Address> addresses) {
     var filtered = addresses;
 
     if (_searchQuery.isNotEmpty) {
@@ -475,13 +476,15 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     }
 
     if (_favoritesOnly) {
-      filtered = filtered.where((a) => a.isFavorite).toList();
+      filtered = filtered
+          .where((a) => _addressService.estFavorite(a.id ?? ''))
+          .toList();
     }
 
     return filtered;
   }
 
-  List<Address> _sortAddresses(List<Address> addresses) {
+  List<eccore.Address> _sortAddresses(List<eccore.Address> addresses) {
     // `LocationService` est un singleton : cette position est celle relevée
     // par le reste de l'application. L'écran en construisait auparavant une
     // instance neuve, dont `currentPosition` valait toujours `null` — le tri
@@ -496,7 +499,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
   }
 
   /// Distance à vol d'oiseau, en kilomètres.
-  double _distanceFrom(Position origin, Address address) {
+  double _distanceFrom(Position origin, eccore.Address address) {
     return _calculateDistance(
       origin.latitude,
       origin.longitude,
@@ -528,7 +531,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     );
   }
 
-  void _showEditAddressSheet(Address address) {
+  void _showEditAddressSheet(eccore.Address address) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -536,7 +539,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
       builder: (context) => AddressDetailBottomSheet(
         address: address,
         onSave: (draft) async {
-          await _addressService.updateAddress(address.id, draft);
+          await _addressService.updateAddress(address.id!, draft);
           if (mounted) _showSnack('Adresse modifiée', Colors.green);
         },
       ),
@@ -547,31 +550,31 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
   // remontait en exception non capturée, et le message de confirmation
   // s'affichait de toute façon — y compris quand rien n'avait été enregistré.
 
-  Future<void> _selectAddress(Address address) async {
+  Future<void> _selectAddress(eccore.Address address) async {
     try {
-      await _addressService.selectAddress(address.id);
+      await _addressService.selectAddress(address.id!);
       if (mounted) {
-        _showSnack('Adresse sélectionnée : ${address.name}', Colors.green);
+        _showSnack('Adresse sélectionnée : ${address.label}', Colors.green);
       }
     } catch (e) {
       if (mounted) _showSnack(_messageFor(e), Colors.red);
     }
   }
 
-  Future<void> _toggleFavorite(Address address) async {
+  Future<void> _toggleFavorite(eccore.Address address) async {
     try {
-      await _addressService.toggleFavorite(address.id);
+      await _addressService.toggleFavorite(address.id!);
     } catch (e) {
       if (mounted) _showSnack(_messageFor(e), Colors.red);
     }
   }
 
-  Future<void> _setDefault(Address address) async {
+  Future<void> _setDefault(eccore.Address address) async {
     try {
-      await _addressService.setDefaultAddress(address.id);
+      await _addressService.setDefaultAddress(address.id!);
       if (mounted) {
         _showSnack(
-          '${address.name} définie comme adresse par défaut',
+          '${address.label} définie comme adresse par défaut',
           Colors.blue,
         );
       }
@@ -609,13 +612,13 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
   /// avec son repère disparaissait sur une pression, et la suppression est
   /// dure côté serveur (droit à l'effacement — `AddressViewSet`), donc
   /// définitive.
-  Future<void> _deleteAddress(Address address) async {
+  Future<void> _deleteAddress(eccore.Address address) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         icon: const Icon(Icons.delete_outline, color: Colors.orange),
         title: const Text('Supprimer cette adresse ?'),
-        content: Text('« ${address.name} » sera définitivement effacée.'),
+        content: Text('« ${address.label} » sera définitivement effacée.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -633,9 +636,9 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     if (confirmed != true) return;
 
     try {
-      await _addressService.deleteAddress(address.id);
+      await _addressService.deleteAddress(address.id!);
       if (mounted) {
-        _showSnack('Adresse supprimée : ${address.name}', Colors.orange);
+        _showSnack('Adresse supprimée : ${address.label}', Colors.orange);
       }
     } catch (e) {
       if (mounted) _showSnack(_messageFor(e), Colors.red);

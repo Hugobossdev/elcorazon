@@ -4,9 +4,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:elcora_fast/models/address.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'package:elcora_fast/presentation/adresse.dart';
 import 'package:elcora_fast/repositories/django_address_repository.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Levée par toute écriture tentée sans session.
 ///
@@ -60,7 +61,7 @@ class AddressService extends ChangeNotifier {
   AddressBookRepository? _repository;
   AddressBookRepository get _addresses => _repository ??= DjangoAddressRepository();
 
-  List<Address> _book = const [];
+  List<eccore.Address> _book = const [];
   Set<String> _favoriteIds = <String>{};
   String? _selectedId;
   String? _userId;
@@ -71,10 +72,19 @@ class AddressService extends ChangeNotifier {
   /// « tirer pour rafraîchir » pendant que l'ouverture de l'écran charge déjà.
   Future<void>? _pendingSync;
 
-  List<Address> get addresses => List.unmodifiable(_book);
-  Address? get selectedAddress => _book.where((a) => a.id == _selectedId).firstOrNull;
-  Address? get defaultAddress => _book.where((a) => a.isDefault).firstOrNull;
-  List<Address> get favoriteAddresses => _book.where((a) => a.isFavorite).toList();
+  List<eccore.Address> get addresses => List.unmodifiable(_book);
+  eccore.Address? get selectedAddress => _book.where((a) => a.id == _selectedId).firstOrNull;
+  eccore.Address? get defaultAddress => _book.where((a) => a.isDefault).firstOrNull;
+  List<eccore.Address> get favoriteAddresses =>
+      _book.where((a) => estFavorite(a.id!)).toList();
+
+  /// L'adresse est-elle marquée d'une étoile ?
+  ///
+  /// Le serveur ne connaît pas ce champ, et l'entité du socle non plus : c'est
+  /// une préférence d'appareil, rangée ici et persistée en `SharedPreferences`.
+  /// La porter sur l'adresse obligeait à réestampiller le carnet entier à
+  /// chaque lecture, et à la réécrire après chaque réponse du serveur.
+  bool estFavorite(String id) => _favoriteIds.contains(id);
   bool get isInitialized => _isInitialized;
   bool get hasAddresses => _book.isNotEmpty;
   bool get isSyncing => _isSyncing;
@@ -137,13 +147,13 @@ class AddressService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      var remote = await _addresses.list(userId: userId);
-      remote = await _adoptLegacyBook(remote, userId: userId);
-      _book = _withFavorites(remote);
+      var remote = await _addresses.list();
+      remote = await _adoptLegacyBook(remote);
+      _book = remote;
       _repairSelection();
       await _saveToCache();
     } catch (e) {
-      Journal.trace('AddressService: synchronisation impossible — $e');
+      eccore.Journal.trace('AddressService: synchronisation impossible — $e');
     } finally {
       _isSyncing = false;
       notifyListeners();
@@ -152,9 +162,6 @@ class AddressService extends ChangeNotifier {
 
   // ------------------------------------------------------------------ lecture
 
-  List<Address> _withFavorites(List<Address> addresses) {
-    return addresses.map((a) => a.copyWith(isFavorite: _favoriteIds.contains(a.id))).toList();
-  }
 
   /// Garde une sélection cohérente avec le carnet.
   ///
@@ -172,16 +179,17 @@ class AddressService extends ChangeNotifier {
   ///
   /// Le repère est inclus : « en face de la pharmacie » est souvent le seul
   /// terme dont il se souvienne, et le chercher sans lui ne renvoyait rien.
-  List<Address> searchAddresses(String query) {
+  List<eccore.Address> searchAddresses(String query) {
     final needle = query.trim().toLowerCase();
     if (needle.isEmpty) return addresses;
 
     return _book
         .where(
           (address) => [
-            address.name,
-            address.address,
-            address.city,
+            address.label,
+            address.line1,
+            address.line2,
+            address.cityName ?? '',
             address.landmark,
           ].any((field) => field.toLowerCase().contains(needle)),
         )
@@ -195,26 +203,25 @@ class AddressService extends ChangeNotifier {
   /// Dans cet ordre, et jamais l'inverse : c'est le serveur qui attribue
   /// l'identifiant, et une adresse affichée avant d'exister chez lui est une
   /// adresse avec laquelle on ne peut pas commander.
-  Future<Address> addAddress(AddressDraft draft) async {
-    final userId = _requireSession();
+  Future<eccore.Address> addAddress(BrouillonAdresse draft) async {
+    _requireSession();
 
     // Le serveur promeut lui-même la première adresse du carnet
     // (`AddressViewSet.perform_create`) ; l'annoncer ici évite que le carnet
     // local reste sans défaut jusqu'à la synchronisation suivante.
     final created = await _addresses.create(
-      _book.isEmpty ? draft.copyWith(isDefault: true) : draft,
-      userId: userId,
+      _book.isEmpty ? draft.copyWith(estParDefaut: true) : draft,
     );
 
-    if (draft.isFavorite) _favoriteIds.add(created.id);
+    if (draft.estFavorite) _favoriteIds.add(created.id!);
 
     // Les autres ne sont rétrogradées que si celle-ci prend le défaut — c'est
     // ce que fait le serveur (`_demote_current_default`). Rétrograder dans
     // tous les cas, comme on le faisait, retirait son défaut au carnet dès
     // qu'on y ajoutait une adresse ordinaire.
     _book = [
-      ...(created.isDefault ? _applyDefault(_book, created.id) : _book),
-      created.copyWith(isFavorite: draft.isFavorite),
+      ...(created.isDefault ? _applyDefault(_book, created.id!) : _book),
+      created,
     ];
     if (created.isDefault || _book.length == 1) _selectedId = created.id;
 
@@ -223,13 +230,13 @@ class AddressService extends ChangeNotifier {
     return created;
   }
 
-  Future<Address> updateAddress(String id, AddressDraft draft) async {
-    final userId = _requireSession();
+  Future<eccore.Address> updateAddress(String id, BrouillonAdresse draft) async {
+    _requireSession();
     _requireKnown(id);
 
-    final updated = await _addresses.update(id, draft, userId: userId);
+    final updated = await _addresses.update(id, draft);
 
-    if (draft.isFavorite) {
+    if (draft.estFavorite) {
       _favoriteIds.add(id);
     } else {
       _favoriteIds.remove(id);
@@ -238,7 +245,7 @@ class AddressService extends ChangeNotifier {
     // Même règle qu'à l'ajout : les autres ne bougent que si celle-ci vient de
     // prendre le défaut.
     _book = (updated.isDefault ? _applyDefault(_book, id) : _book)
-        .map((a) => a.id == id ? updated.copyWith(isFavorite: draft.isFavorite) : a)
+        .map((a) => a.id == id ? updated : a)
         .toList();
 
     await _saveToCache();
@@ -266,7 +273,7 @@ class AddressService extends ChangeNotifier {
     // ne pré-remplit plus rien. La promotion n'était auparavant écrite qu'en
     // mémoire — la base, elle, restait sans défaut.
     if (removed.isDefault && _book.isNotEmpty) {
-      await _promoteToDefault(_book.first.id);
+      await _promoteToDefault(_book.first.id!);
     }
 
     await _saveToCache();
@@ -289,14 +296,13 @@ class AddressService extends ChangeNotifier {
     final address = _book.firstWhere((a) => a.id == id);
     final promoted = await _addresses.update(
       id,
-      AddressDraft.from(address).copyWith(isDefault: true),
-      userId: userId,
+      BrouillonAdresse.depuis(address).copyWith(estParDefaut: true),
     );
 
     // Le serveur rétrograde l'ancien défaut dans la même transaction
     // (`_demote_current_default`) ; le carnet local s'aligne sans relire.
     _book = _applyDefault(_book, id)
-        .map((a) => a.id == id ? promoted.copyWith(isFavorite: _favoriteIds.contains(id)) : a)
+        .map((a) => a.id == id ? promoted : a)
         .toList();
   }
 
@@ -320,7 +326,6 @@ class AddressService extends ChangeNotifier {
     _requireKnown(id);
 
     if (!_favoriteIds.add(id)) _favoriteIds.remove(id);
-    _book = _withFavorites(_book);
 
     await _saveToCache();
     notifyListeners();
@@ -328,7 +333,7 @@ class AddressService extends ChangeNotifier {
 
   /// Un seul défaut dans le carnet, comme dans la base — l'index unique partiel
   /// `one_default_address_per_user` en fait une contrainte, pas une convention.
-  List<Address> _applyDefault(List<Address> book, String? defaultId) {
+  List<eccore.Address> _applyDefault(List<eccore.Address> book, String? defaultId) {
     return book.map((a) => a.copyWith(isDefault: a.id == defaultId)).toList();
   }
 
@@ -338,7 +343,7 @@ class AddressService extends ChangeNotifier {
     return userId;
   }
 
-  Address _requireKnown(String id) {
+  eccore.Address _requireKnown(String id) {
     final address = _book.where((a) => a.id == id).firstOrNull;
     if (address == null) {
       throw StateError('Adresse $id absente du carnet.');
@@ -361,17 +366,15 @@ class AddressService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       _favoriteIds = (prefs.getStringList(_favoritesKey) ?? const []).toSet();
       _selectedId = prefs.getString(_selectedKey);
-      _book = _withFavorites(
-        (prefs.getStringList(_bookKey) ?? const [])
-            .map((entry) => Address.fromJson(jsonDecode(entry) as Map<String, dynamic>))
-            .toList(),
-      );
+      _book = (prefs.getStringList(_bookKey) ?? const [])
+          .map((e) => eccore.Address.fromJson(jsonDecode(e) as Map<String, dynamic>))
+          .toList();
       _repairSelection();
     } catch (e) {
       // Cache illisible (format changé, écriture interrompue) : on repart d'un
       // carnet vide, que la synchronisation remplira. Aucune raison de faire
       // échouer l'ouverture de l'application pour un cache.
-      Journal.trace('AddressService: cache illisible, ignoré — $e');
+      eccore.Journal.trace('AddressService: cache illisible, ignoré — $e');
       _book = const [];
     }
   }
@@ -388,7 +391,7 @@ class AddressService extends ChangeNotifier {
       } else {
         await prefs.setStringList(
           _bookKey,
-          _book.map((a) => jsonEncode(a.toJson())).toList(),
+          _book.map((a) => jsonEncode(a.versCache())).toList(),
         );
       }
 
@@ -404,7 +407,7 @@ class AddressService extends ChangeNotifier {
         await prefs.setString(_selectedKey, selectedId);
       }
     } catch (e) {
-      Journal.trace('AddressService: cache non écrit — $e');
+      eccore.Journal.trace('AddressService: cache non écrit — $e');
     }
   }
 
@@ -430,15 +433,14 @@ class AddressService extends ChangeNotifier {
   /// Rend le carnet serveur augmenté des adresses reprises. Une reprise qui
   /// échoue laisse les clés en place : elle sera retentée au prochain
   /// démarrage, plutôt que de perdre l'adresse.
-  Future<List<Address>> _adoptLegacyBook(
-    List<Address> remote, {
-    required String userId,
-  }) async {
+  Future<List<eccore.Address>> _adoptLegacyBook(
+    List<eccore.Address> remote,
+  ) async {
     final SharedPreferences prefs;
     try {
       prefs = await SharedPreferences.getInstance();
     } catch (e) {
-      Journal.trace('AddressService: reprise impossible, stockage illisible — $e');
+      eccore.Journal.trace('AddressService: reprise impossible, stockage illisible — $e');
       return remote;
     }
 
@@ -457,46 +459,33 @@ class AddressService extends ChangeNotifier {
       return remote;
     }
 
-    final adopted = <Address>[];
+    final adopted = <eccore.Address>[];
     var allAdopted = true;
 
     for (final entry in legacy) {
-      final Address local;
-      try {
-        local = Address.fromJson(entry);
-      } on FormatException {
-        // Adresse sans coordonnées : le serveur la refuserait
-        // (`location` obligatoire), et rien ici ne peut inventer le point. Ces
-        // entrées ne pouvaient de toute façon servir à aucune commande.
-        Journal.trace('AddressService: adresse locale sans point, non reprise.');
-        continue;
-      } catch (e) {
-        Journal.trace('AddressService: adresse locale illisible, ignorée — $e');
-        continue;
-      }
-
-      if (_alreadyOnServer(local, [...remote, ...adopted])) continue;
+      final local = _depuisCarnet2025(entry);
+      if (local == null) continue;
+      if (_dejaSurLeServeur(local, [...remote, ...adopted])) continue;
 
       try {
         final created = await _addresses.create(
-          AddressDraft.from(local).copyWith(
+          local.copyWith(
             // Le défaut se rejoue seulement si le carnet serveur n'en a pas :
             // celui du serveur, plus récent, prime sur celui du cache.
-            isDefault: local.isDefault && remote.every((a) => !a.isDefault),
+            estParDefaut: local.estParDefaut && remote.every((a) => !a.isDefault),
           ),
-          userId: userId,
         );
-        if (local.isFavorite) _favoriteIds.add(created.id);
+        if (local.estFavorite) _favoriteIds.add(created.id!);
         adopted.add(created);
       } catch (e) {
-        Journal.trace('AddressService: reprise de "${local.name}" échouée — $e');
+        eccore.Journal.trace('AddressService: reprise de "${local.nom}" échouée — $e');
         allAdopted = false;
       }
     }
 
     if (allAdopted) await _forgetLegacyKeys(prefs);
     if (adopted.isNotEmpty) {
-      Journal.trace('AddressService: ${adopted.length} adresse(s) locale(s) reprise(s).');
+      eccore.Journal.trace('AddressService: ${adopted.length} adresse(s) locale(s) reprise(s).');
     }
     return [...remote, ...adopted];
   }
@@ -505,12 +494,55 @@ class AddressService extends ChangeNotifier {
   /// des coordonnées est tolérante d'environ dix mètres : le serveur reprojette
   /// en `geography`, et exiger l'égalité stricte de deux `double` créerait un
   /// doublon à chaque démarrage.
-  bool _alreadyOnServer(Address local, List<Address> book) {
+  bool _dejaSurLeServeur(BrouillonAdresse local, List<eccore.Address> book) {
     return book.any(
       (a) =>
-          a.name.trim().toLowerCase() == local.name.trim().toLowerCase() &&
+          a.label.trim().toLowerCase() == local.nom.trim().toLowerCase() &&
           (a.latitude - local.latitude).abs() < 0.0001 &&
           (a.longitude - local.longitude).abs() < 0.0001,
+    );
+  }
+
+  /// Lit une entrée du carnet purement local d'avant cette version.
+  ///
+  /// Ce n'est **pas** la forme du serveur : le modèle d'alors rangeait le point
+  /// à plat (`latitude`/`longitude`) plutôt que dans un objet `location`, et
+  /// nommait ses champs autrement. `eccore.Address.fromJson` ne saurait pas la
+  /// lire, et rien ne l'y obligeait — une entrée locale est un **brouillon** à
+  /// créer côté serveur, pas une adresse qui existe déjà.
+  ///
+  /// Rend `null` pour une entrée inexploitable. Sans point, le serveur
+  /// refuserait l'adresse (`location` obligatoire) et rien ici ne peut
+  /// inventer un lieu : ces entrées ne pouvaient de toute façon servir à
+  /// aucune commande.
+  BrouillonAdresse? _depuisCarnet2025(Map<String, dynamic> json) {
+    final latitude = (json['latitude'] as num?)?.toDouble();
+    final longitude = (json['longitude'] as num?)?.toDouble();
+    if (latitude == null || longitude == null) {
+      eccore.Journal.trace('AddressService: adresse locale sans point, non reprise.');
+      return null;
+    }
+
+    final nom = json['name'] as String?;
+    final ligne1 = json['address'] as String?;
+    if (nom == null || ligne1 == null) {
+      eccore.Journal.trace('AddressService: adresse locale illisible, ignorée.');
+      return null;
+    }
+
+    return BrouillonAdresse(
+      nom: nom,
+      ligne1: ligne1,
+      // `postal_code` du carnet 2025 : le serveur n'a pas de code postal, et
+      // c'est `line2` qui recueillait déjà cette saisie.
+      ligne2: json['postal_code'] as String? ?? '',
+      repere: json['landmark'] as String? ?? '',
+      consignes: json['delivery_instructions'] as String? ?? '',
+      latitude: latitude,
+      longitude: longitude,
+      type: TypeAdresse.depuisServeur(json['type'] as String? ?? ''),
+      estParDefaut: json['is_default'] as bool? ?? false,
+      estFavorite: json['is_favorite'] as bool? ?? false,
     );
   }
 

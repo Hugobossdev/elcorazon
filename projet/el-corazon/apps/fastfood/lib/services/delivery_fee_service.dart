@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
-import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/models/delivery_fee_breakdown.dart';
 
 /// Frais de livraison — **demandés au serveur**, jamais calculés ici.
@@ -97,7 +96,7 @@ class DeliveryFeeService extends ChangeNotifier {
   /// La zone est résolue en plus du devis, pour le nom du secteur et le délai
   /// annoncé : le devis rend des montants, pas le contexte qui les explique.
   Future<DeliveryFeeBreakdown> breakdownForAddress({
-    required Address address,
+    required eccore.Address address,
     String promoCode = '',
   }) async {
     final quote = await quoteOrder(addressId: address.id, promoCode: promoCode);

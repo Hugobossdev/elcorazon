@@ -1,7 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
-import 'package:elcora_fast/models/address.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/repositories/order_repository.dart';
 import 'package:uuid/uuid.dart';
@@ -43,7 +42,7 @@ class DjangoOrderRepository implements OrderRepository {
   /// (`CartService.ensureSynced`, à appeler par l'appelant avant celle-ci) —
   /// voir `docs/architecture/04-migration-flutter.md`.
   Future<Order> createFromServerCart({
-    required Address address,
+    required eccore.Address address,
     required PaymentMethod paymentMethod,
     String? instructions,
     String promoCode = '',
@@ -54,16 +53,16 @@ class DjangoOrderRepository implements OrderRepository {
     // d'un point, ce qui ne dit rien de la présence de l'adresse *chez le
     // serveur*. C'est cette confusion qui laissait partir des identifiants
     // locaux. Le carnet garantit désormais l'invariant à la source : toute
-    // `Address` vient de `/profiles/addresses/`.
+    // `eccore.Address` vient de `/profiles/addresses/`.
     final remote = await _orders.create(
       restaurantSlug: AppConstants.restaurantSlug,
-      addressId: address.id,
+      addressId: address.id!,
       paymentMethod: _toRemotePaymentMethod(paymentMethod),
       instructions: instructions ?? '',
       promoCode: promoCode,
       idempotencyKey: _uuid.v4(),
     );
-    return _toLocal(remote, userId: address.userId);
+    return _toLocal(remote, userId: '');
   }
 
   @override

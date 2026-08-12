@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:elcora_fast/models/address.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/order.dart';
@@ -183,7 +182,7 @@ class AppRouter {
 
       case addressSelector:
         final args = settings.arguments as Map<String, dynamic>?;
-        final onSelected = args?['onAddressSelected'] as void Function(Address)?;
+        final onSelected = args?['onAddressSelected'] as void Function(eccore.Address)?;
         return MaterialPageRoute(
           builder: (context) => AddressSelectorScreen(
             // Sans argument, cette route passait `null` à un paramètre non
