@@ -139,7 +139,10 @@
   -->
   <!-- Google Maps API - Required for google_maps_flutter on web -->
   <!-- IMPORTANT: Le script doit être chargé AVANT flutter_bootstrap.js pour éviter l'erreur "Cannot read properties of undefined (reading 'maps')" -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCtSGHbgwiNKhblSK7NpU7aVUvuxz-w-tM"></script>
+  <!-- Même clé que `GOOGLE_MAPS_API_KEY` dans `.env` : un seul projet Cloud
+       pour le navigateur et pour les appels REST. Toute rotation de clé doit
+       toucher les deux endroits. -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB3MBeE5jmbk3tt11Z9vIY4C_D9zZ2fd5E"></script>
   <script src="flutter_bootstrap.js" async=""></script>
 
 

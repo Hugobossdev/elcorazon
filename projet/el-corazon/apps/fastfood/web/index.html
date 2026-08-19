@@ -151,7 +151,13 @@
     // `loading=async` : chargement non bloquant recommandé par Google
     // (https://goo.gle/js-api-loading) — le callback reste le signal de
     // disponibilité de l'API.
-    mapsScript.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyCtSGHbgwiNKhblSK7NpU7aVUvuxz-w-tM&loading=async&callback=initGoogleMaps';
+    // Même clé que `GOOGLE_MAPS_API_KEY` dans `.env`, donc même projet Cloud
+    // que les appels REST du code Dart (géocodage, Places, Directions). Les
+    // deux avaient divergé : le navigateur chargeait un projet sans
+    // facturation active — carte grise et `BillingNotEnabledMapError` — tandis
+    // que le géocodage répondait normalement depuis l'autre. Toute rotation de
+    // clé doit toucher les deux endroits.
+    mapsScript.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyB3MBeE5jmbk3tt11Z9vIY4C_D9zZ2fd5E&loading=async&callback=initGoogleMaps';
     mapsScript.async = true;
     mapsScript.defer = true;
     mapsScript.onerror = function() {

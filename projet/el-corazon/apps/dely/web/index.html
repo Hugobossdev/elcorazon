@@ -33,7 +33,10 @@
   <link rel="manifest" href="manifest.json">
 
   <!-- Google Maps API -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCtSGHbgwiNKhblSK7NpU7aVUvuxz-w-tM&loading=async" async defer></script>
+  <!-- Même clé que `GOOGLE_MAPS_API_KEY` dans `.env` : un seul projet Cloud
+       pour le navigateur et pour les appels REST. Toute rotation de clé doit
+       toucher les deux endroits. -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB3MBeE5jmbk3tt11Z9vIY4C_D9zZ2fd5E&loading=async" async defer></script>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
