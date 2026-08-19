@@ -80,6 +80,8 @@ import 'package:elcorazon_core/src/promotions/promotion_repository.dart';
 import 'package:elcorazon_core/src/realtime/chat_message.dart';
 import 'package:elcorazon_core/src/realtime/realtime_channel.dart';
 import 'package:elcorazon_core/src/realtime/realtime_event.dart';
+import 'package:elcorazon_core/src/restaurants/managed_restaurant.dart';
+import 'package:elcorazon_core/src/restaurants/managed_restaurant_repository.dart';
 import 'package:elcorazon_core/src/search/search_repository.dart';
 import 'package:elcorazon_core/src/social/post.dart';
 import 'package:elcorazon_core/src/social/social_group.dart';

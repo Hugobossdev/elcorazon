@@ -23,6 +23,7 @@ class RealtimeChannel {
   final TokenStorage tokenStorage;
 
   static const _reconnectDelay = Duration(seconds: 3);
+  static const _closeTimeout = Duration(seconds: 2);
   static const _forbiddenCloseCode = 4403;
 
   WebSocketChannel? _socket;
@@ -53,6 +54,19 @@ class RealtimeChannel {
 
     final socket = WebSocketChannel.connect(uri);
     _socket = socket;
+
+    try {
+      // Une poignée de main refusée ne se manifeste pas sur le flux : elle
+      // rejette `ready`. Ne pas l'attendre laissait l'erreur remonter jusqu'à
+      // la console du navigateur — « Uncaught (in promise)
+      // WebSocketChannelException » — hors de portée de l'appelant, qui
+      // n'apprenait jamais que son canal n'existait pas.
+      await socket.ready;
+    } catch (_) {
+      _handleClosure();
+      return;
+    }
+
     _subscription = socket.stream.listen(
       _onData,
       onError: (_) => _handleClosure(),
@@ -101,7 +115,19 @@ class RealtimeChannel {
   Future<void> close() async {
     _closedByCaller = true;
     await _subscription?.cancel();
-    await _socket?.sink.close();
+
+    // Fermeture bornée : sur un socket dont la poignée de main a échoué, le
+    // puits ne se referme jamais — il n'a jamais été ouvert. `close()` restait
+    // alors suspendu pour toujours, et avec lui `RealtimeTrackingService`,
+    // dont chaque `trackOrder` commence par fermer le canal précédent : un
+    // seul refus interdisait toute connexion ultérieure, y compris celle qui
+    // aurait été acceptée.
+    await _socket?.sink
+        .close()
+        .timeout(_closeTimeout, onTimeout: () => null)
+        .catchError((Object _) => null);
+    _socket = null;
+
     await _controller?.close();
   }
 }

@@ -76,6 +76,8 @@ export 'src/profile/address_repository.dart';
 export 'src/realtime/chat_message.dart';
 export 'src/realtime/realtime_channel.dart';
 export 'src/realtime/realtime_event.dart';
+export 'src/restaurants/managed_restaurant.dart';
+export 'src/restaurants/managed_restaurant_repository.dart';
 export 'src/search/search_repository.dart';
 export 'src/social/post.dart';
 export 'src/social/social_group.dart';
