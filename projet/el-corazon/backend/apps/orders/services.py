@@ -288,7 +288,14 @@ class OrderService:
         """
         priced = price_cart(CartService.load(CartService.cart_for(user, restaurant)))
 
-        if address is not None:
+        # Un panier vide n'a pas de course à chiffrer, et le barème de zone le
+        # dirait mal : `quote_delivery` refuserait un sous-total de zéro au nom
+        # du minimum de commande — « commande minimum de 1 000 XOF » pour un
+        # panier qui ne contient rien, c'est-à-dire un refus qui nomme la
+        # mauvaise cause et transforme l'écran de panier vide en erreur. Le
+        # devis répond, `is_orderable` dit non ; la même règle vaut avec ou
+        # sans adresse.
+        if address is not None and priced.lines:
             frais = OrderService._quote_for(restaurant, address, priced.subtotal).fee
         else:
             # Sans adresse, le barème de l'établissement donne un ordre de

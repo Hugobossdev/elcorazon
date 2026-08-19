@@ -22,6 +22,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import Role, User, UserType
 from apps.carts.services import CartService
 from apps.catalog.models import MenuItem, VerifiedPurchase
+from apps.geography.models import DeliveryZone
 from apps.orders.models import Order, PaymentMethod
 from apps.orders.states import OrderStatus
 from apps.orders.views import CREATE_ENDPOINT
@@ -223,6 +224,59 @@ class TestNumeroJoignable:
 
         assert response.status_code == status.HTTP_409_CONFLICT
         assert "joignable" in response.data["detail"]
+
+
+class TestDevis:
+    def test_un_panier_vide_ne_se_voit_pas_reprocher_le_minimum(
+        self,
+        as_customer: APIClient,
+        restaurant: Restaurant,
+        address: Address,
+        zone: DeliveryZone,
+    ) -> None:
+        """Le devis d'un panier vide **répond**, même une adresse choisie.
+
+        Il refusait, et pour un motif faux : le barème de zone comparait un
+        sous-total de zéro au minimum de commande et renvoyait « commande
+        minimum de 1 000 XOF dans cette zone » — un reproche adressé au client
+        alors que son panier serveur était vide. Le diagnostic partait dans la
+        mauvaise direction : c'est la synchronisation du panier qu'il fallait
+        regarder, pas le montant.
+        """
+        zone.min_order_amount = Money(1_000, XOF)
+        zone.save(update_fields=["min_order_amount_minor", "min_order_amount_currency"])
+
+        response = as_customer.post(
+            reverse("v1:orders:order-preview"),
+            {"restaurant": restaurant.slug, "address": str(address.pk)},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["subtotal"] == {"amount": "0", "currency": XOF}
+        assert response.data["is_orderable"] is False
+
+    def test_un_panier_garni_reste_soumis_au_minimum(
+        self,
+        as_customer: APIClient,
+        restaurant: Restaurant,
+        address: Address,
+        zone: DeliveryZone,
+        garni: None,
+    ) -> None:
+        """La règle de zone n'est pas levée pour autant : elle s'applique dès
+        qu'il y a une course à faire."""
+        zone.min_order_amount = Money(50_000, XOF)
+        zone.save(update_fields=["min_order_amount_minor", "min_order_amount_currency"])
+
+        response = as_customer.post(
+            reverse("v1:orders:order-preview"),
+            {"restaurant": restaurant.slug, "address": str(address.pk)},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data["min_order_amount"] == "50000"
 
 
 class TestIdempotence:
