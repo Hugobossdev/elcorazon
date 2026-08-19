@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from corsheaders.defaults import default_headers
 from decouple import Csv, config
@@ -155,6 +157,56 @@ TEMPLATES = [
 
 # --------------------------------------------------------------- base de données
 
+# Certains hébergeurs ne publient la base que sous la forme d'une URL unique et
+# n'exposent pas l'hôte et le port séparément : le blueprint Render, par
+# exemple, ne sait injecter qu'une `connectionString`. Quand `DATABASE_URL` est
+# présente, elle fait donc autorité ; les variables `POSTGRES_*` restent la voie
+# normale en local et sous Docker Compose, où l'hôte est un nom de service.
+DATABASE_URL: str = config("DATABASE_URL", default="")
+
+
+def _database_from_url(url: str) -> dict[str, Any]:
+    """Décompose une URL `postgres://` en réglages Django.
+
+    Écrit à la main plutôt qu'en ajoutant `dj-database-url` : c'est une quinzaine
+    de lignes contre une dépendance de plus dans l'image, et le seul schéma que
+    ce projet ait jamais à lire est PostgreSQL.
+
+    Les identifiants sont déchiffrés (`unquote`) : un mot de passe engendré par
+    l'hébergeur contient des caractères réservés, que l'URL transporte
+    pourcent-encodés. Sans cette étape, un `+` dans le mot de passe devient un
+    espace et l'authentification échoue.
+    """
+    parsed = urlsplit(url)
+    # `sslmode` voyage dans la chaîne de requête chez la plupart des hébergeurs,
+    # alors que Django l'attend dans OPTIONS. Recopié tel quel plutôt que forcé
+    # à `require` : le réseau interne de Render ne chiffre pas, et l'imposer
+    # ferait échouer la connexion privée sans rien protéger de plus.
+    query = dict(parse_qsl(parsed.query))
+    options: dict[str, str] = {}
+    if "sslmode" in query:
+        options["sslmode"] = query["sslmode"]
+    return {
+        "NAME": unquote(parsed.path).lstrip("/"),
+        "USER": unquote(parsed.username or ""),
+        "PASSWORD": unquote(parsed.password or ""),
+        "HOST": parsed.hostname or "",
+        "PORT": str(parsed.port or 5432),
+        "OPTIONS": options,
+    }
+
+
+def _database_from_env() -> dict[str, Any]:
+    """Réglages issus des variables discrètes — le chemin historique."""
+    return {
+        "NAME": config("POSTGRES_DB", default="elcorazon"),
+        "USER": config("POSTGRES_USER", default="elcorazon"),
+        "PASSWORD": config("POSTGRES_PASSWORD", default=""),
+        "HOST": config("POSTGRES_HOST", default="localhost"),
+        "PORT": config("POSTGRES_PORT", default="5432"),
+    }
+
+
 DATABASES = {
     "default": {
         "ENGINE": (
@@ -162,11 +214,7 @@ DATABASES = {
             if GIS_ENABLED
             else "django.db.backends.postgresql"
         ),
-        "NAME": config("POSTGRES_DB", default="elcorazon"),
-        "USER": config("POSTGRES_USER", default="elcorazon"),
-        "PASSWORD": config("POSTGRES_PASSWORD", default=""),
-        "HOST": config("POSTGRES_HOST", default="localhost"),
-        "PORT": config("POSTGRES_PORT", default="5432"),
+        **(_database_from_url(DATABASE_URL) if DATABASE_URL else _database_from_env()),
         "CONN_MAX_AGE": config("POSTGRES_CONN_MAX_AGE", default=60, cast=int),
         "ATOMIC_REQUESTS": False,  # les transactions sont explicites, dans les services
     }
@@ -324,20 +372,29 @@ SPECTACULAR_SETTINGS = {
 # --------------------------------------------------------------- JWT (ADR-004)
 
 
-def _read_key(path_var: str, inline_var: str) -> str:
-    """Lit une clé depuis un fichier monté, sinon depuis l'environnement.
+def _read_key(var: str) -> str:
+    r"""Lit une clé PEM depuis l'environnement.
 
-    Le fichier est la voie recommandée : une clé PEM est multiligne, ce que ni
-    `env_file` de Docker Compose ni la plupart des gestionnaires de
-    configuration ne savent porter sans échappement fragile. C'est aussi la
-    forme qu'attendent les `Secret` Kubernetes montés en volume.
+    Une seule voie, la variable. Le fichier monté — `JWT_PRIVATE_KEY_PATH`,
+    `JWT_PUBLIC_KEY_PATH` — a été retiré : aucun des hébergements visés ne monte
+    de volume sur `/run/secrets/`, et ce chemin hérité d'un `.env` de
+    développement a fait échouer deux déploiements d'affilée en désignant un
+    fichier qui n'existait pas. Une seule voie, c'est une seule chose à vérifier
+    le jour où une clé manque.
 
-    La variable en clair reste acceptée pour les déploiements simples.
+    Les deux écritures d'un PEM multiligne sont acceptées, et c'est ce qui rend
+    la variable suffisante :
+
+      — le texte tel quel, sur plusieurs lignes, que le tableau de bord de Render
+        et un `Secret` Kubernetes transportent sans dommage ;
+      — la même clé repliée sur une ligne, sauts de ligne échappés en `\n` —
+        seule forme qu'un `env_file` de Docker Compose sait porter.
+
+    Une clé absente rend la chaîne vide plutôt que de lever : c'est `prod.py` qui
+    tranche, parce que lui seul sait que l'absence y est fatale — en test la paire
+    est régénérée, et `dev.py` n'a pas à refuser de démarrer pour autant.
     """
-    path = config(path_var, default="")
-    if path:
-        return Path(path).read_text(encoding="utf-8")
-    return str(config(inline_var, default="")).replace("\\n", "\n")
+    return str(config(var, default="")).replace("\\n", "\n")
 
 
 SIMPLE_JWT = {
@@ -347,8 +404,8 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": True,
     "ALGORITHM": "RS256",
-    "SIGNING_KEY": _read_key("JWT_PRIVATE_KEY_PATH", "JWT_SIGNING_KEY"),
-    "VERIFYING_KEY": _read_key("JWT_PUBLIC_KEY_PATH", "JWT_VERIFYING_KEY"),
+    "SIGNING_KEY": _read_key("JWT_SIGNING_KEY"),
+    "VERIFYING_KEY": _read_key("JWT_VERIFYING_KEY"),
     "AUTH_HEADER_TYPES": ("Bearer",),
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "sub",

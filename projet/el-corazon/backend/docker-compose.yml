@@ -4,6 +4,12 @@
 #
 # Il porte PostGIS et Redis, que le poste Windows du projet n'a pas. C'est donc
 # ici — et en CI — que la suite de tests complète s'exécute.
+#
+# Chaque service porte `restart: unless-stopped`, comme en production. Le motif
+# est différent ici : ce n'est pas la disponibilité qu'on vise, c'est de ne pas
+# perdre l'après-midi à chercher une panne réseau côté Flutter alors que Docker
+# Desktop a simplement redémarré sous les pieds du poste. Les conteneurs
+# repartent alors seuls ; un `docker compose stop` explicite, lui, est respecté.
 
 name: elcorazon
 
@@ -23,6 +29,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -36,6 +43,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
 
   api:
     build:
@@ -63,6 +71,7 @@ services:
       # répondre avant l'API — sinon `docker compose up` échoue sur une
       # installation neuve.
       minio: {condition: service_healthy}
+    restart: unless-stopped
 
   worker:
     build:
@@ -90,6 +99,7 @@ services:
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_healthy}
+    restart: unless-stopped
 
   beat:
     build:
@@ -126,6 +136,7 @@ services:
       start_period: 60s
     depends_on:
       redis: {condition: service_healthy}
+    restart: unless-stopped
 
   # Stockage objet compatible S3 (ADR-011). L'API et la console d'administration
   # sont exposées séparément : la première est parlée par le backend, la seconde
@@ -149,6 +160,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
 
   nginx:
     image: nginx:alpine
@@ -158,6 +170,7 @@ services:
       - "80:80"
     depends_on:
       - api
+    restart: unless-stopped
 
 volumes:
   pgdata:

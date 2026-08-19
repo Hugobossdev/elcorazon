@@ -40,6 +40,11 @@ dependencies = [
     # l'enregistrement, ce qui évite qu'un fichier arbitraire renommé en .jpg
     # atterrisse dans le stockage objet.
     "Pillow==12.*",
+    # Sert les fichiers statiques depuis le processus applicatif. Sous Compose,
+    # c'est Nginx qui s'en charge et WhiteNoise ne fait rien ; sur un hébergeur
+    # où nous ne posons pas notre propre reverse proxy, c'est lui ou rien — sans
+    # lui, l'admin, l'API navigable de DRF et Swagger arrivent sans CSS.
+    "whitenoise[brotli]==6.*",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,168 @@
+# Blueprint Render — backend El Corazón.
+#
+# La racine de ce dépôt est le Bureau ; le backend vit dans
+# projet/el-corazon/backend. `dockerfilePath` et `dockerContext` se lisent depuis
+# la racine du dépôt et non depuis ce fichier : d'où les chemins préfixés.
+#
+# ADR-001 — une seule image, trois rôles. L'API, le worker et le battement
+# partagent le même Dockerfile ; seule la commande de démarrage les distingue.
+#
+# Procédure pas à pas : projet/el-corazon/docs/deploiement-render.md
+
+databases:
+  - name: elcorazon-db
+    databaseName: elcorazon
+    user: elcorazon
+    region: frankfurt
+    postgresMajorVersion: "17"
+    plan: basic-256mb
+    ipAllowList: []          # joignable seulement depuis le réseau privé Render
+
+services:
+  # ------------------------------------------------------------------ Redis
+  - type: keyvalue
+    name: elcorazon-redis
+    region: frankfurt
+    plan: starter
+    ipAllowList: []
+    # Le cache, la couche Channels et la file Celery partagent cette instance.
+    # `noeviction` n'est pas un réglage de confort : sous `allkeys-lru`, Redis
+    # jette des clés quand la mémoire sature, et une clé jetée dans la file est
+    # une tâche perdue en silence — un paiement jamais confirmé, une
+    # notification jamais partie. Mieux vaut une écriture en erreur, visible.
+    maxmemoryPolicy: noeviction
+
+  # ------------------------------------------------------------------ API
+  - type: web
+    name: elcorazon-api
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    branch: feat/v2-django-architecture
+    dockerfilePath: ./projet/el-corazon/backend/Dockerfile
+    dockerContext: ./projet/el-corazon/backend
+    healthCheckPath: /health/
+    # Une seule instance tant que `migrate` vit dans la commande de démarrage :
+    # deux conteneurs qui migrent la même base en parallèle se marchent dessus.
+    # Pour passer à l'échelle, déplacer `migrate` vers `preDeployCommand`, qui
+    # s'exécute une fois par déploiement — mais surtout pas `collectstatic`, qui
+    # écrit dans un conteneur jetable dont le service ne verra jamais le disque.
+    numInstances: 1
+    dockerCommand: >-
+      sh -c "python manage.py migrate --noinput &&
+      python manage.py collectstatic --noinput &&
+      uvicorn config.asgi:application --host 0.0.0.0 --port 8000
+      --workers 2 --proxy-headers --forwarded-allow-ips '*'"
+    envVars:
+      - fromGroup: elcorazon-commun
+      - key: DATABASE_URL
+        fromDatabase: { name: elcorazon-db, property: connectionString }
+      # `config/settings/prod.py` refuse de démarrer sur un POSTGRES_PASSWORD
+      # vide. La valeur vient de la base elle-même : le garde-fou est honoré
+      # sans qu'un secret soit recopié à la main quelque part.
+      - key: POSTGRES_PASSWORD
+        fromDatabase: { name: elcorazon-db, property: password }
+      - key: REDIS_URL
+        fromService: { type: keyvalue, name: elcorazon-redis, property: connectionString }
+
+  # ------------------------------------------------------------------ worker
+  - type: worker
+    name: elcorazon-worker
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    branch: feat/v2-django-architecture
+    dockerfilePath: ./projet/el-corazon/backend/Dockerfile
+    dockerContext: ./projet/el-corazon/backend
+    dockerCommand: celery -A config worker --loglevel=INFO --concurrency=2
+    envVars:
+      - fromGroup: elcorazon-commun
+      - key: DATABASE_URL
+        fromDatabase: { name: elcorazon-db, property: connectionString }
+      - key: POSTGRES_PASSWORD
+        fromDatabase: { name: elcorazon-db, property: password }
+      - key: REDIS_URL
+        fromService: { type: keyvalue, name: elcorazon-redis, property: connectionString }
+
+  # ------------------------------------------------------------------ battement
+  - type: worker
+    name: elcorazon-beat
+    runtime: docker
+    region: frankfurt
+    plan: starter
+    branch: feat/v2-django-architecture
+    dockerfilePath: ./projet/el-corazon/backend/Dockerfile
+    dockerContext: ./projet/el-corazon/backend
+    # Un seul battement, jamais deux : deux ordonnanceurs sur la même file
+    # émettent chaque tâche périodique en double.
+    numInstances: 1
+    # L'échéancier va dans /tmp plutôt que sur un disque Render, parce qu'un
+    # disque est monté à root alors que l'image tourne en uid 10001 — beat
+    # n'aurait pas le droit d'y écrire. Le prix de ce choix : au redémarrage,
+    # les intervalles repartent de zéro. Il est acceptable ici, les six tâches
+    # planifiées étant toutes des purges ou des expirations idempotentes, qui
+    # ne trouvent simplement rien à faire quand elles passent trop tôt.
+    dockerCommand: >-
+      celery -A config beat --loglevel=INFO
+      --schedule /tmp/celerybeat-schedule
+    envVars:
+      - fromGroup: elcorazon-commun
+      - key: DATABASE_URL
+        fromDatabase: { name: elcorazon-db, property: connectionString }
+      - key: POSTGRES_PASSWORD
+        fromDatabase: { name: elcorazon-db, property: password }
+      - key: REDIS_URL
+        fromService: { type: keyvalue, name: elcorazon-redis, property: connectionString }
+
+# --------------------------------------------------------------------------
+# Réglages communs aux trois services. Un groupe plutôt que trois copies : la
+# clé de signature et le sel doivent être *identiques* partout, sans quoi un
+# jeton émis par l'API serait rejeté par le worker. Les références de ressources
+# (`fromDatabase`, `fromService`) ne sont pas admises dans un groupe — elles
+# restent déclarées service par service ci-dessus.
+envVarGroups:
+  - name: elcorazon-commun
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.prod
+      - key: DJANGO_ALLOWED_HOSTS
+        # Le point de tête vaut « et tous les sous-domaines ». Ajouter ici le
+        # domaine propre au projet le jour où il est branché.
+        value: .onrender.com
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: GIS_ENABLED
+        value: "true"
+
+      # -- à renseigner dans le tableau de bord Render ---------------------
+      # `sync: false` crée la variable sans valeur : Render la réclame au
+      # premier déploiement. Aucun de ces secrets ne doit atterrir dans le dépôt.
+      # SIMPLE_JWT tourne en RS256 : ce sont des clés RSA, pas Ed25519.
+      # `base.py` sait lire un PEM multiligne collé tel quel, et accepte aussi
+      # la forme ou les retours sont replies, si le tableau de bord s'y prete mal.
+      - key: JWT_SIGNING_KEY          # clé privée RSA, format PEM
+        sync: false
+      - key: JWT_VERIFYING_KEY        # clé publique RSA correspondante
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_BUCKET_MEDIA
+        sync: false
+      - key: S3_BUCKET_PRIVATE
+        sync: false

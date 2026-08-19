@@ -13,5 +13,8 @@
 /*
 
 !/.gitignore
+# Blueprint Render. Il doit vivre à la racine du dépôt : c'est là que Render le
+# cherche, et les chemins Docker qu'il contient s'y rapportent.
+!/render.yaml
 !/.github/
 !/projet/

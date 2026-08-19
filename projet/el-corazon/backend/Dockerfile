@@ -75,16 +75,37 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Utilisateur non privilégié : un conteneur compromis ne doit pas être root.
 RUN useradd --create-home --uid 10001 corazon
 COPY --chown=corazon:corazon . /app
+
+# `/app` appartient à root : il est créé par le `WORKDIR` de l'étage de base,
+# avant même que l'utilisateur existe, et le `--chown` du `COPY` ne s'applique
+# qu'aux fichiers copiés, pas au répertoire qui les porte. Or `staticfiles/` est
+# dans `.dockerignore` — il n'arrive donc jamais par la copie — et
+# `collectstatic` le crée au démarrage, sous l'identité de `corazon` :
+# `PermissionError` au premier déploiement où les migrations sont enfin passées.
+#
+# Seul ce répertoire change de propriétaire, et non `/app` tout entier : le
+# processus n'a aucune raison de pouvoir réécrire son propre code.
+RUN mkdir -p /app/staticfiles && chown corazon:corazon /app/staticfiles
+
 USER corazon
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8000/health/ || exit 1
+    CMD curl -fsS "http://localhost:${PORT:-8000}/health/" || exit 1
 
 # Rôle par défaut : l'API. Les autres sont choisis par `command:` dans compose
 # ou par l'`args` du déploiement Kubernetes.
-CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000"]
+#
+# Un script plutôt qu'un appel direct à uvicorn : migrations et fichiers
+# statiques doivent précéder le service, et cette préparation doit voyager avec
+# l'image. Confiée au `dockerCommand` du blueprint Render, elle ne s'appliquait
+# qu'aux services créés par ce blueprint — un service créé à la main depuis le
+# tableau de bord démarrait sur une base sans tables. Voir `deploy/start-api.sh`.
+#
+# `sh <script>` et non `./script` : le bit d'exécution ne survit pas toujours à
+# un dépôt cloné depuis Windows, où il n'existe pas.
+CMD ["sh", "/app/deploy/start-api.sh"]
 
 # ---------------------------------------------------------------- développement
 # Étage supplémentaire portant l'outillage de test et de qualité. C'est la cible
@@ -99,3 +120,14 @@ USER root
 RUN --mount=type=cache,target=/root/.cache/pip \
     PIP_NO_CACHE_DIR=0 /opt/venv/bin/pip install -e ".[dev]"
 USER corazon
+
+# ---------------------------------------------------------------- cible livrée
+# `dev` dérive de `runtime` : il ne peut pas être déclaré avant lui. Or BuildKit
+# construit le **dernier** étage quand aucune cible n'est donnée, et le blueprint
+# Render n'offre aucun champ pour en choisir une — un build sans `--target` y
+# livrerait donc l'image de développement, pytest, ruff et mypy compris.
+#
+# Cet alias remet la cible de production en dernière position. Il n'ajoute aucun
+# calque : CMD, HEALTHCHECK, EXPOSE et l'utilisateur non privilégié viennent tels
+# quels de `runtime`. Compose, lui, continue de nommer ses cibles explicitement.
+FROM runtime AS production
