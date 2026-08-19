@@ -10,6 +10,7 @@ import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
@@ -32,15 +33,19 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   StreamSubscription? _driversSubscription;
   late final DeliveryZoneService _zoneService;
 
-  static const CameraPosition _initialPosition = CameraPosition(
-    target: LatLng(14.6928, -17.4467), // Dakar, Senegal
-    zoom: 12,
-  );
+  /// Zoom d'ouverture — une ville et sa périphérie. Il n'y a pas de position
+  /// d'ouverture écrite ici : la carte s'ouvre sur l'établissement supervisé,
+  /// que le serveur rend avec ses coordonnées. Elle s'ouvrait auparavant sur
+  /// `14.6928, -17.4467` — Dakar, à deux mille kilomètres du restaurant
+  /// qu'elle prétendait montrer, et faux pour toute autre enseigne par-dessus
+  /// le marché.
+  static const double _zoomVille = 12;
 
   @override
   void initState() {
     super.initState();
     _zoneService = DeliveryZoneService();
+    unawaited(RestaurantScopeService().resolve());
     _startAutoRefresh();
   }
 
@@ -468,22 +473,63 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
 
   Widget _buildMapWidget(
       Set<Marker> markers, Set<Polyline> polylines, List<eccore.CourierProfile> drivers,) {
-    return GoogleMap(
-      initialCameraPosition: _initialPosition,
-      markers: markers,
-      polylines: polylines,
-      onMapCreated: (GoogleMapController controller) {
-        _mapController = controller;
-        // Ajuster la caméra pour afficher tous les marqueurs
-        if (drivers.isNotEmpty) {
-          _fitBounds(drivers);
-        }
+    return Consumer<RestaurantScopeService>(
+      builder: (context, scope, child) {
+        final etablissement = scope.current;
+
+        // `initialCameraPosition` n'est lu qu'à la création de la carte : la
+        // reconstruire avec une autre valeur ne la déplace pas. On attend donc
+        // de savoir où l'ouvrir plutôt que de l'ouvrir quelque part et de
+        // corriger après — une carte qui saute d'un continent à l'autre au
+        // chargement est pire qu'une carte qui met une seconde à venir.
+        if (etablissement == null) return _carteSansAncrage(scope);
+
+        return GoogleMap(
+          initialCameraPosition: CameraPosition(
+            target: LatLng(etablissement.latitude, etablissement.longitude),
+            zoom: _zoomVille,
+          ),
+          markers: markers,
+          polylines: polylines,
+          onMapCreated: (GoogleMapController controller) {
+            _mapController = controller;
+            // Ajuster la caméra pour afficher tous les marqueurs
+            if (drivers.isNotEmpty) {
+              _fitBounds(drivers);
+            }
+          },
+          myLocationEnabled: true,
+          mapToolbarEnabled: false,
+          onTap: (LatLng position) {
+            // Fermer les info windows si on clique ailleurs
+          },
+        );
       },
-      myLocationEnabled: true,
-      mapToolbarEnabled: false,
-      onTap: (LatLng position) {
-        // Fermer les info windows si on clique ailleurs
-      },
+    );
+  }
+
+  /// Ce qu'on montre tant qu'on ne sait pas où centrer la carte.
+  Widget _carteSansAncrage(RestaurantScopeService scope) {
+    if (scope.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.location_off, size: 48, color: Colors.grey[500]),
+            const SizedBox(height: 12),
+            Text(
+              scope.error ?? RestaurantScopeService.sansPerimetre,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

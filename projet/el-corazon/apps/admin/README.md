@@ -32,7 +32,7 @@ binaire distribué.
 lib/
 ├── presentation/     vocabulaire d'affichage et vues nommées (20 fichiers)
 ├── screens/          37 écrans, dont 33 sous admin/
-├── services/         19 services, tous ChangeNotifier
+├── services/         20 services, tous ChangeNotifier
 ├── ui/               jetons de couleur (AdminColorTokens)
 ├── dialogs/  theme/  utils/  widgets/  core/
 ```
@@ -40,6 +40,12 @@ lib/
 Il n'y a **pas** de `lib/models/` : les entités viennent de
 `packages/elcorazon_core`, qui reflète les sérialiseurs du backend. Le dernier
 modèle local a été retiré au lot 3 du refactoring.
+
+Il n'y a **pas** non plus de slug d'établissement écrit dans le code.
+`RestaurantScopeService` lit `/restaurants/manage/`, que le serveur restreint
+au périmètre du compte connecté. Les lectures n'en ont pas besoin — les routes
+d'exploitation cloisonnent déjà — et les écritures y prennent l'établissement à
+qui rattacher ce qu'elles créent.
 
 📖 [docs/architecture.md](docs/architecture.md) — structure détaillée, principes
 et ce que l'ancienne documentation promettait à tort.

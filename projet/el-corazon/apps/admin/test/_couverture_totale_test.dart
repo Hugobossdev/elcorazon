@@ -85,6 +85,7 @@ import 'package:admin/services/menu_service.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/payments_service.dart';
 import 'package:admin/services/promotion_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/services/role_management_service.dart';
 import 'package:admin/theme/modern_theme.dart';
 import 'package:admin/ui/admin_color_tokens.dart';

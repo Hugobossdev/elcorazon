@@ -2,6 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
 import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 
 /// Catégories du catalogue — `/api/v1/catalog/manage/categories/` (Phase 6).
 ///
@@ -13,12 +14,12 @@ import 'package:admin/services/admin_auth_service.dart';
 /// ou un 409 que cet écran affiche.
 ///
 class CategoryManagementService extends ChangeNotifier {
-  /// Établissement supervisé. Le jour où le back-office en gérera plusieurs,
-  /// ce champ devient une sélection alimentée par `/restaurants/`.
-  static const String _restaurantSlug = 'el-corazon-lome';
-
   eccore.ManagedCatalogRepository get _catalog =>
       eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient);
+
+  /// À qui rattacher une catégorie créée. Une lecture n'en a pas besoin — le
+  /// serveur cloisonne — mais une écriture doit nommer son établissement.
+  final RestaurantScopeService _scope = RestaurantScopeService();
 
   List<eccore.ManagedCategory> _categories = [];
   bool _isLoading = false;
@@ -38,7 +39,10 @@ class CategoryManagementService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final remote = await _catalog.categories(restaurantSlug: _restaurantSlug);
+      // Sans filtre d'établissement : le serveur rend déjà le périmètre du
+      // compte, et le restreindre ici à une enseigne écrite dans le code
+      // viderait l'écran de tout gérant rattaché à une autre.
+      final remote = await _catalog.categories();
       _categories = remote;
       eccore.Journal.trace('CategoryManagementService: ${_categories.length} catégorie(s)');
     } on eccore.ApiException catch (e) {
@@ -70,10 +74,16 @@ class CategoryManagementService extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final etablissement = await _scope.requireSlug();
+      if (etablissement == null) {
+        _error = RestaurantScopeService.sansPerimetre;
+        return null;
+      }
+
       // L'unicité du slug est une contrainte de base : la vérifier ici par une
       // lecture préalable laissait passer le doublon créé entre-temps.
       final created = await _catalog.createCategory(
-        restaurantSlug: _restaurantSlug,
+        restaurantSlug: etablissement,
         name: displayName.isEmpty ? name : displayName,
         slug: _slugifier(name),
         emoji: emoji,

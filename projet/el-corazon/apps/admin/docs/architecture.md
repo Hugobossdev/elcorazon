@@ -32,7 +32,7 @@ lib/
 │   ├── admin/              # 33 écrans, à plat
 │   │   └── gamification/   # seul regroupement, issu du lot 4
 │   └── auth/
-├── services/               # 19 services, tous ChangeNotifier
+├── services/               # 20 services, tous ChangeNotifier
 ├── theme/
 ├── ui/                     # jetons de couleur (AdminColorTokens)
 ├── utils/
@@ -44,7 +44,7 @@ lot 3, les écrans lisent les entités de `packages/elcorazon_core`.
 
 ## Principes qui tiennent
 
-**État.** Provider, sans exception : les 19 services étendent `ChangeNotifier`,
+**État.** Provider, sans exception : les 20 services étendent `ChangeNotifier`,
 18 écrans les lisent par `Consumer`. Le socle expose par ailleurs des
 fournisseurs Riverpod pour la session ; les deux coexistent.
 
@@ -62,6 +62,14 @@ porter n'ont jamais été écrits.
 **Responsive.** Trois écrans seulement utilisent `LayoutBuilder`. La promesse
 d'origine — barre de navigation basse sur mobile, barre latérale sur poste de
 travail — n'est pas tenue partout.
+
+**Périmètre.** L'établissement supervisé vient du serveur, jamais du code.
+`RestaurantScopeService` le lit sur `/restaurants/manage/` — route que
+`ManagedRestaurantViewSet` restreint aux établissements du compte connecté — et
+le tient pour la durée de la session, oublié à la déconnexion. Cinq fichiers
+portaient auparavant `el-corazon-lome` en constante ; ils s'en servaient aussi
+pour *filtrer* leurs lectures, alors que `_ScopedCatalogViewSet` cloisonne déjà
+côté serveur. Le filtre ne protégeait rien et rétrécissait le périmètre réel.
 
 ## Ce que le document promettait et qui n'existe pas
 

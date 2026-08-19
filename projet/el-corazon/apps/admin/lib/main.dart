@@ -21,6 +21,7 @@ import 'package:admin/services/gamification_service.dart';
 import 'package:admin/services/driver_schedule_service.dart';
 import 'package:admin/services/driver_document_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/screens/admin/admin_navigation_screen.dart';
 import 'package:admin/screens/auth/admin_auth_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart';
@@ -90,6 +91,14 @@ class AdminApp extends StatelessWidget {
       providers: [
         // Services admin uniquement
         ChangeNotifierProvider(create: (_) => AdminAuthService(container)),
+        // Établissement supervisé, lu sur `/restaurants/manage/`. Construit
+        // sans attendre qu'un écran le demande (`lazy: false`) : il s'abonne à
+        // la session, et une session restaurée au démarrage est déjà ouverte
+        // quand cette liste se monte.
+        ChangeNotifierProvider(
+          create: (_) => RestaurantScopeService(),
+          lazy: false,
+        ),
         ChangeNotifierProvider(create: (_) => OrderManagementService()),
         ChangeNotifierProvider(create: (_) => DriverManagementService()),
         ChangeNotifierProvider(create: (_) => AnalyticsService()),

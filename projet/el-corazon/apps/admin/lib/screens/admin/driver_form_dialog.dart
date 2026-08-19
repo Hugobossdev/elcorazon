@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/widgets/custom_button.dart';
@@ -27,10 +28,10 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
   /// sans compte associé — le livreur ne pouvait pas se connecter.
   final _passwordController = TextEditingController();
 
-  /// Établissement de rattachement. Le back-office ne gère qu'un établissement
-  /// pour l'instant ; le jour où il en gérera plusieurs, ce champ devient un
-  /// sélecteur alimenté par `/restaurants/`.
-  static const String _restaurantSlug = 'el-corazon-lome';
+  /// Établissement de rattachement, lu sur `/restaurants/manage/` : embaucher,
+  /// c'est rattacher quelqu'un à un établissement précis, et l'écrire dans le
+  /// code rattachait tout le monde à la même enseigne.
+  final RestaurantScopeService _scope = RestaurantScopeService();
 
   StatutLivreur _selectedStatus = StatutLivreur.disponible;
   String? _selectedVehicleType;
@@ -471,12 +472,25 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
       bool success;
 
       if (widget.driver == null) {
+        final etablissement = await _scope.requireSlug();
+        if (etablissement == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(RestaurantScopeService.sansPerimetre),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+
         // Embauche : le compte et le dossier naissent ensemble, côté serveur.
         success = await driverService.provisionDriver(
           email: _emailController.text.trim(),
           password: _passwordController.text,
           fullName: _nameController.text.trim(),
-          restaurantSlug: _restaurantSlug,
+          restaurantSlug: etablissement,
           vehicleType: _selectedVehicleType ?? 'motorcycle',
           phone: _phoneController.text.trim(),
           vehiclePlate: _vehicleNumberController.text.trim(),

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 
 /// Écriture du catalogue — `/api/v1/catalog/manage/*` (Phase 6).
 ///
@@ -22,8 +23,9 @@ class MenuService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  /// Établissement supervisé — une seule enseigne pour l'instant.
-  static const String _restaurantSlug = 'el-corazon-lome';
+  /// À qui rattacher un article créé. La lecture s'en passe : le serveur rend
+  /// déjà le périmètre du compte.
+  final RestaurantScopeService _scope = RestaurantScopeService();
 
   /// Plafond accepté pour une photo de produit.
   ///
@@ -112,10 +114,7 @@ class MenuService extends ChangeNotifier {
     }
 
     try {
-      final remote = await _catalog.menuItems(
-        restaurantSlug: _restaurantSlug,
-        categoryId: categoryId,
-      );
+      final remote = await _catalog.menuItems(categoryId: categoryId);
       return remote;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
@@ -151,8 +150,14 @@ class MenuService extends ChangeNotifier {
     int sortOrder = 0,
   }) async {
     try {
+      final etablissement = await _scope.requireSlug();
+      if (etablissement == null) {
+        _error = RestaurantScopeService.sansPerimetre;
+        return null;
+      }
+
       return await _catalog.createMenuItem(
-        restaurantSlug: _restaurantSlug,
+        restaurantSlug: etablissement,
         categoryId: categoryId,
         name: name,
         slug: _slugifier(name),

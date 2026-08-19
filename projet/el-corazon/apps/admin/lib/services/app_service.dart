@@ -33,9 +33,6 @@ class AppService extends ChangeNotifier {
   eccore.ManagedCatalogRepository get _catalog =>
       eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient);
 
-  /// Établissement supervisé — une seule enseigne pour l'instant.
-  static const String _restaurantSlug = 'el-corazon-lome';
-
   bool _isInitialized = false;
   List<eccore.ManagedMenuItem> _menuItems = [];
   List<eccore.ManagedCategory> _categories = [];
@@ -84,12 +81,13 @@ class AppService extends ChangeNotifier {
       final commandes = await _orders.list();
       _allOrders = commandes;
 
-      final articles = await _catalog.menuItems(restaurantSlug: _restaurantSlug);
+      // Aucun filtre d'établissement : `/catalog/manage/*` rend déjà le
+      // périmètre du compte connecté (`_ScopedCatalogViewSet`). Le slug écrit
+      // ici ne protégeait rien et rétrécissait ce périmètre à une enseigne.
+      final articles = await _catalog.menuItems();
       _menuItems = articles;
 
-      final categories = await _catalog.categories(
-        restaurantSlug: _restaurantSlug,
-      );
+      final categories = await _catalog.categories();
       _categories = categories;
     } on eccore.ApiException catch (e) {
       _error = e.detail;

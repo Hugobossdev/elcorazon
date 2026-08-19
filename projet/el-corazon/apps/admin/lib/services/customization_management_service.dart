@@ -2,6 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
 import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 
 /// Option de la bibliothèque réutilisable — miroir local d'`OptionTemplate`.
 ///
@@ -102,8 +103,9 @@ class MenuItemCustomization {
 /// une option, c'est donc la supprimer du groupe de l'article, pas rompre une
 /// association.
 class CustomizationManagementService extends ChangeNotifier {
-  /// Établissement supervisé — une seule enseigne pour l'instant.
-  static const String _restaurantSlug = 'el-corazon-lome';
+  /// À qui rattacher un modèle d'option créé. La lecture s'en passe : le
+  /// serveur rend déjà le périmètre du compte.
+  final RestaurantScopeService _scope = RestaurantScopeService();
 
   eccore.ManagedCatalogRepository get _catalog =>
       eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient);
@@ -131,12 +133,10 @@ class CustomizationManagementService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final modeles = await _catalog.optionTemplates(
-        restaurantSlug: _restaurantSlug,
-      );
+      final modeles = await _catalog.optionTemplates();
       _options = modeles.map(_toLocalOption).toList();
 
-      final articles = await _catalog.menuItems(restaurantSlug: _restaurantSlug);
+      final articles = await _catalog.menuItems();
       _menuItems = articles;
 
       // Les options réellement posées sur les articles sont celles de leurs
@@ -179,8 +179,15 @@ class CustomizationManagementService extends ChangeNotifier {
     int sortOrder = 0,
   }) async {
     try {
+      final etablissement = await _scope.requireSlug();
+      if (etablissement == null) {
+        _error = RestaurantScopeService.sansPerimetre;
+        notifyListeners();
+        return null;
+      }
+
       final cree = await _catalog.createOptionTemplate(
-        restaurantSlug: _restaurantSlug,
+        restaurantSlug: etablissement,
         name: name,
         groupName: category,
         priceDelta: _versMoney(priceModifier),
