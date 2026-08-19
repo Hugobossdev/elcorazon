@@ -1,4 +1,3 @@
-import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/cart_service.dart';
@@ -7,6 +6,7 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/models/cart_item.dart' as cart_item;
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/widgets/menu_item_card.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
 import 'package:elcora_fast/services/design_enhancement_service.dart';
@@ -127,8 +127,6 @@ class CartScreen extends StatelessWidget {
                                     cartService,
                                   );
                                 },
-                                animationDelay:
-                                    Duration(milliseconds: index * 100),
                               ),
                             );
                           },
@@ -445,115 +443,41 @@ class CartScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
-              SizedBox(
-                height: 160,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: suggestions.length,
-                  itemBuilder: (context, index) {
-                    final item = suggestions[index];
-                    return Container(
-                      width: 160,
-                      margin: const EdgeInsets.only(right: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.05),
-                            blurRadius: 10,
-                            offset: const Offset(0, 2),
+              // Les suggestions réemploient la carte du menu au lieu d'en
+              // redessiner une à la main. La copie locale enfermait une photo
+              // de 100 px et son texte dans une boîte de 160 px : il en
+              // manquait deux ou trois, et le bouton d'ajout passait sous le
+              // bord. Elle divergeait en outre du reste de l'application à
+              // chaque retouche du catalogue.
+              Builder(
+                builder: (context) {
+                  const largeurCarte = 170.0;
+                  return SizedBox(
+                    height: MenuItemCard.hauteurPour(context, largeurCarte),
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: suggestions.length,
+                      itemBuilder: (context, index) {
+                        final item = suggestions[index];
+                        return Container(
+                          width: largeurCarte,
+                          margin: const EdgeInsets.only(right: 12),
+                          child: MenuItemCard(
+                            item: item,
+                            onTap: () =>
+                                context.navigateToItemCustomization(item),
+                            onAddToCart: () {
+                              cartService.addItem(item);
+                              context.showSuccessMessage(
+                                '${item.name} ajouté !',
+                              );
+                            },
                           ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Image
-                          ClipRRect(
-                            borderRadius: const BorderRadius.only(
-                              topLeft: Radius.circular(16),
-                              topRight: Radius.circular(16),
-                            ),
-                            child: Container(
-                              height: 100,
-                              width: double.infinity,
-                              color: Colors.grey[200],
-                              child: item.image != null
-                                  ? Image.network(
-                                      item.image!,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Icon(
-                                        Icons.restaurant,
-                                        color: Colors.grey[400],
-                                      ),
-                                    )
-                                  : Icon(
-                                      Icons.restaurant,
-                                      color: Colors.grey[400],
-                                    ),
-                            ),
-                          ),
-                          // Info
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.name,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        PriceFormatter.format(item.prixAffiche),
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: AppColors.primary,
-                                        ),
-                                      ),
-                                      GestureDetector(
-                                        onTap: () {
-                                          cartService.addItem(item);
-                                          context.showSuccessMessage(
-                                            '${item.name} ajouté !',
-                                          );
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.all(4),
-                                          decoration: const BoxDecoration(
-                                            color: AppColors.primary,
-                                            shape: BoxShape.circle,
-                                          ),
-                                          child: const Icon(
-                                            Icons.add,
-                                            color: Colors.white,
-                                            size: 16,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                        );
+                      },
+                    ),
+                  );
+                },
               ),
             ],
           ),

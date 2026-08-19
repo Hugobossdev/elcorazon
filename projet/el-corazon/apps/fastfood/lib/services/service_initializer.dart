@@ -201,6 +201,8 @@ class ServiceInitializer {
           Provider.of<NotificationDatabaseService>(context, listen: false);
       final subscriptionService =
           Provider.of<SubscriptionService>(context, listen: false);
+      final aiRecommendationService =
+          Provider.of<AIRecommendationService>(context, listen: false);
 
       // Charger l'historique de notifications du compte. Plus d'identifiant à
       // passer : le serveur cloisonne sur le jeton.
@@ -217,6 +219,14 @@ class ServiceInitializer {
       // (pas besoin de passer context car le service est déjà capturé)
       await _initializeServiceWithoutContext(
         () => realtimeTrackingService.initialize(),
+      );
+
+      // Recommandations : sans cet appel, la table des suggestions restait
+      // vide et la section « Nos suggestions » de l'accueil se réduisait à un
+      // `SizedBox.shrink()` — invisible depuis toujours, sans erreur nulle
+      // part pour le signaler.
+      await _initializeServiceWithoutContext(
+        () => aiRecommendationService.initializeUser(user.id),
       );
 
       Journal.trace('✅ Services utilisateur initialisés');

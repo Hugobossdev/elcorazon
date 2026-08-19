@@ -76,7 +76,7 @@ void main() async {
 
   final tokenStorage = TokenStorage();
   final apiClient = ApiClient(
-    baseUrl: dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1',
+    baseUrl: adresseDeLApi(dotenv.env['API_BASE_URL']),
     tokenStorage: tokenStorage,
   );
   _providerContainer = ProviderContainer(
@@ -97,6 +97,43 @@ void main() async {
 }
 
 /// Initialize only essential services at startup for optimal performance
+/// Adresse de l'API, telle que `.env` la déclare.
+///
+/// ## Pourquoi ce contrôle existe
+///
+/// `API_BASE_URL` a été écrit un jour `localhost:8000/api/v1`, sans `http://`.
+/// Le navigateur lit alors `localhost:` comme un **nom de protocole** et
+/// refuse la requête avec « Cross origin requests are only supported for
+/// protocol schemes… » — un message qui accuse le CORS alors que la requête
+/// n'a jamais quitté l'onglet. Le serveur, lui, répondait parfaitement.
+///
+/// Sur mobile, la même omission passe encore plus mal : l'erreur est un
+/// `SocketException` sur un hôte introuvable.
+///
+/// L'oubli est donc rattrapé ici, et **tracé** : un réglage corrigé en silence
+/// est un réglage qui reste faux dans le fichier.
+@visibleForTesting
+String adresseDeLApi(String? valeurDeclaree) {
+  const repli = 'http://10.0.2.2:8000/api/v1';
+  final declaree = valeurDeclaree?.trim();
+
+  if (declaree == null || declaree.isEmpty) return repli;
+
+  final uri = Uri.tryParse(declaree);
+  if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+    return declaree;
+  }
+
+  final rattrapee = 'http://$declaree';
+  Journal.trace(
+    "⚠️ API_BASE_URL ne porte pas de schéma : '$declaree'. "
+    "Utilisation de '$rattrapee'. Corrigez .env, puis **relancez** — "
+    'le fichier est embarqué comme asset au moment de la compilation, '
+    'un rechargement à chaud ne le renouvelle pas.',
+  );
+  return rattrapee;
+}
+
 Future<void> _initializeEssentialServices() async {
   // Firebase (Phase 6) — requis avant tout usage de `FirebaseMessaging`.
   // Non bloquant : aucun projet Firebase réel n'est encore configuré (voir

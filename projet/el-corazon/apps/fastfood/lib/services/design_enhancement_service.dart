@@ -107,6 +107,17 @@ class DesignEnhancementService {
   /// Créer une carte de produit améliorée
   /// [item] passe **entier**.
   ///
+  /// ## Pourquoi la révélation en cascade a disparu
+  ///
+  /// Un `animationDelay` retardait l'apparition de chaque carte, et le compte
+  /// à rebours rendait `SizedBox.shrink()` en attendant son terme. Sur la
+  /// grille du menu, l'échelonnement atteignait plusieurs secondes pour les
+  /// derniers plats : la carte du restaurant se remplissait au goutte-à-goutte
+  /// sous les yeux du client. Pire, le `Future.delayed` naissait dans `build`,
+  /// donc **chaque reconstruction le relançait** — une carte qui revenait à
+  /// l'écran en défilant disparaissait puis reparaissait. Les articles
+  /// s'affichent désormais tous ensemble, ce qu'on attend d'un menu.
+  ///
   /// Les appelants démontaient l'article en une dizaine de scalaires pour que
   /// cette fabrique en reconstruise un autre — avec `categoryId: 'burgers'`
   /// écrit en dur, et sans note, ni disponibilité, ni exclusivité VIP. La
@@ -119,7 +130,6 @@ class DesignEnhancementService {
     VoidCallback? onDecrement,
     VoidCallback? onFavoriteTap,
     bool isFavorite = false,
-    Duration animationDelay = Duration.zero,
     int quantity = 0,
   }) {
     final card = MenuItemCard(
@@ -129,34 +139,10 @@ class DesignEnhancementService {
       onDecrement: onDecrement,
       onFavoriteTap: onFavoriteTap,
       isFavorite: isFavorite,
-      isGridView: true,
       quantity: quantity,
     );
 
-    if (animationDelay == Duration.zero) return card;
-
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.easeOutQuart,
-      builder: (context, value, child) {
-        return Transform.translate(
-          offset: Offset(0, 20 * (1 - value)),
-          child: Opacity(
-            opacity: value,
-            child: child,
-          ),
-        );
-      },
-      child: FutureBuilder(
-        future: Future.delayed(animationDelay),
-        builder: (context, snapshot) {
-          return snapshot.connectionState == ConnectionState.done
-              ? card
-              : const SizedBox.shrink(); // Wait for delay
-        },
-      ),
-    );
+    return card;
   }
 
   /// Créer une carte de panier améliorée

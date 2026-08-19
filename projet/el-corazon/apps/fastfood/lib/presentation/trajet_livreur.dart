@@ -1,3 +1,4 @@
+import 'package:elcora_fast/models/position_livreur.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 /// Ce qu'on sait du trajet d'un livreur d'après les positions relevées.
@@ -37,10 +38,10 @@ class StatistiquesTrajet {
 ///
 /// Deux sources de vitesse coexistent et sont **toutes deux** retenues quand
 /// elles existent : celle déduite de la distance et du temps, et celle que le
-/// GPS rapporte dans `speed` (en m/s). Les valeurs hors de `]0, 100[` km/h
-/// sont écartées comme aberrantes.
+/// GPS rapporte. Les valeurs hors de `]0, 100[` km/h sont écartées comme
+/// aberrantes.
 StatistiquesTrajet statistiquesDuTrajet(
-  List<Map<String, dynamic>> historique, {
+  List<PositionLivreur> historique, {
   required double Function(LatLng, LatLng) distanceEntre,
 }) {
   if (historique.length < 2) {
@@ -54,22 +55,18 @@ StatistiquesTrajet statistiquesDuTrajet(
     final recent = historique[i];
     final precedent = historique[i + 1];
 
-    final distance = distanceEntre(
-      _position(recent),
-      _position(precedent),
-    );
+    final distance = distanceEntre(recent.point, precedent.point);
     distanceTotale += distance;
 
-    final secondes = (recent['timestamp'] as DateTime)
-        .difference(precedent['timestamp'] as DateTime)
-        .inSeconds;
+    final secondes =
+        recent.releveeA.difference(precedent.releveeA).inSeconds;
     if (secondes > 0) {
       _retenirSiPlausible(vitesses, distance / (secondes / 3600));
     }
 
-    final gps = recent['speed'] as double?;
+    final gps = recent.vitesseKmH;
     if (gps != null) {
-      _retenirSiPlausible(vitesses, gps * 3.6);
+      _retenirSiPlausible(vitesses, gps);
     }
   }
 
@@ -80,11 +77,6 @@ StatistiquesTrajet statistiquesDuTrajet(
         : vitesses.reduce((a, b) => a + b) / vitesses.length,
   );
 }
-
-LatLng _position(Map<String, dynamic> releve) => LatLng(
-      releve['latitude'] as double,
-      releve['longitude'] as double,
-    );
 
 void _retenirSiPlausible(List<double> vitesses, double kmh) {
   if (kmh > 0 && kmh < 100) vitesses.add(kmh);

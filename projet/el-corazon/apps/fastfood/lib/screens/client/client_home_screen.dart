@@ -10,6 +10,7 @@ import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/widgets/enhanced_app_bar_actions.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
 import 'package:elcora_fast/services/design_enhancement_service.dart';
+import 'package:elcora_fast/widgets/menu_item_card.dart';
 import 'package:elcora_fast/screens/client/widgets/quick_actions_widget.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/screens/client/widgets/home_section_header.dart';
@@ -410,7 +411,12 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
     final cardWidth = isSmallScreen ? 170.0 : 190.0;
-    final listHeight = isSmallScreen ? 240.0 : 260.0;
+    // Hauteur **demandée par la carte** pour cette largeur et l'échelle de
+    // police en vigueur, marge basse comprise. Les 240/260 px ronds
+    // d'avant écrasaient le nom, le prix et le bouton d'ajout sous le
+    // bandeau de débordement dès la taille de police par défaut.
+    final listHeight = MenuItemCard.hauteurPour(context, cardWidth) +
+        (isSmallScreen ? 4 : 8);
 
     return SliverToBoxAdapter(
       child: Container(
@@ -458,8 +464,6 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
                         child:
                             DesignEnhancementService.createEnhancedMenuItemCard(
                           item: item,
-                          animationDelay:
-                              Duration(milliseconds: 200 + (index * 100)),
                           onTap: () =>
                               context.navigateToItemCustomization(item),
                           onAddToCart: () {
@@ -486,14 +490,27 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
     final cardWidth = isSmallScreen ? 170.0 : 190.0;
-    final listHeight = isSmallScreen ? 240.0 : 260.0;
+    // Hauteur **demandée par la carte** pour cette largeur et l'échelle de
+    // police en vigueur, marge basse comprise. Les 240/260 px ronds
+    // d'avant écrasaient le nom, le prix et le bouton d'ajout sous le
+    // bandeau de débordement dès la taille de police par défaut.
+    final listHeight = MenuItemCard.hauteurPour(context, cardWidth) +
+        (isSmallScreen ? 4 : 8);
 
     return SliverToBoxAdapter(
-      child: Consumer<AIRecommendationService>(
-        builder: (context, aiService, child) {
+      child: Consumer2<AIRecommendationService, AppService>(
+        builder: (context, aiService, appService, child) {
+          // L'identifiant **du compte connecté**, et non la chaîne
+          // `'current_user'` : les suggestions sont rangées sous l'identifiant
+          // avec lequel elles ont été calculées, si bien que cette clé
+          // inventée ne désignait jamais rien. La section restait vide quoi
+          // qu'il arrive.
+          final identifiant = appService.currentUser?.id;
+          if (identifiant == null) return const SizedBox.shrink();
+
           // Obtenir les recommandations basées sur les produits populaires
           final recommendations = aiService
-              .getRecommendationsForUser('current_user')
+              .getRecommendationsForUser(identifiant)
               .where((item) => item.isPopular && item.ratingAverage > 4.0)
               .take(3)
               .toList();
@@ -533,8 +550,6 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
                             child: DesignEnhancementService
                                 .createEnhancedMenuItemCard(
                               item: item,
-                              animationDelay:
-                                  Duration(milliseconds: 400 + (index * 100)),
                               onTap: () =>
                                   context.navigateToItemCustomization(item),
                               onAddToCart: () {
@@ -576,7 +591,12 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
     final cardWidth = isSmallScreen ? 160.0 : 180.0;
-    final listHeight = isSmallScreen ? 200.0 : 220.0;
+    // Hauteur **demandée par la carte** pour cette largeur et l'échelle de
+    // police en vigueur, marge basse comprise. Les 240/260 px ronds
+    // d'avant écrasaient le nom, le prix et le bouton d'ajout sous le
+    // bandeau de débordement dès la taille de police par défaut.
+    final listHeight = MenuItemCard.hauteurPour(context, cardWidth) +
+        (isSmallScreen ? 4 : 8);
 
     return SliverToBoxAdapter(
       child: Consumer<FavoritesService>(
@@ -620,8 +640,6 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
                         child:
                             DesignEnhancementService.createEnhancedMenuItemCard(
                           item: item,
-                          animationDelay:
-                              Duration(milliseconds: 600 + (index * 100)),
                           onTap: () =>
                               context.navigateToItemCustomization(item),
                           onAddToCart: () {

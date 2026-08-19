@@ -245,21 +245,16 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         // L'écran lisait ces notifications au travers de deux traductions
         // successives, dont la seconde remplaçait l'identifiant du serveur par
         // un `hashCode` avant de le ranger à côté sous un autre nom.
-        var notifications = unreadOnly
-            ? notificationService.getUnreadNotifications()
-            : notificationService.notifications;
-
-        if (_selectedFilter != null) {
-          notifications =
-              notifications.where((n) => n.genre == _selectedFilter).toList();
-        }
-
-        if (_showUnreadOnly && !unreadOnly) {
-          notifications = notifications.where((n) => !n.isRead).toList();
-        }
-
-        // Trier par date (plus récentes en premier)
-        notifications.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        //
+        // Le filtrage et le tri vivent dans `notificationsAAfficher` : c'est
+        // là qu'est décrite la règle, et là qu'elle est éprouvée.
+        final notifications = notificationsAAfficher(
+          unreadOnly
+              ? notificationService.getUnreadNotifications()
+              : notificationService.notifications,
+          genre: _selectedFilter,
+          nonLuesSeulement: _showUnreadOnly && !unreadOnly,
+        );
 
         if (notifications.isEmpty) {
           return RefreshIndicator(

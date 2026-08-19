@@ -1,3 +1,4 @@
+import 'package:elcora_fast/models/position_livreur.dart';
 import 'package:elcora_fast/presentation/trajet_livreur.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -10,19 +11,20 @@ void main() {
   /// Une distance factice : un kilomètre par degré de latitude.
   double unKmParDegre(LatLng a, LatLng b) => (a.latitude - b.latitude).abs();
 
-  Map<String, dynamic> releve({
+  PositionLivreur releve({
     required double lat,
     required DateTime quand,
     double? vitesseGps,
   }) =>
-      {
-        'latitude': lat,
-        'longitude': 1.23,
-        'timestamp': quand,
-        'speed': vitesseGps,
-      };
+      PositionLivreur(
+        commandeId: 'commande-1',
+        latitude: lat,
+        longitude: 1.23,
+        releveeA: quand,
+        vitesseMetresParSeconde: vitesseGps,
+      );
 
-  StatistiquesTrajet mesure(List<Map<String, dynamic>> historique) =>
+  StatistiquesTrajet mesure(List<PositionLivreur> historique) =>
       statistiquesDuTrajet(historique, distanceEntre: unKmParDegre);
 
   group('Trop peu de relevés', () {

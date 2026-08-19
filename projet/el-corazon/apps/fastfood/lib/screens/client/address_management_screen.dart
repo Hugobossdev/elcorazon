@@ -28,6 +28,9 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   AddressSortType _sortType = AddressSortType.recent;
+
+  /// Un relevé de position est en cours pour le tri par distance.
+  bool _releveDePositionEnCours = false;
   bool _favoritesOnly = false;
 
   @override
@@ -138,8 +141,21 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
 
         // Menu de tri
         PopupMenuButton<AddressSortType>(
-          onSelected: (type) => setState(() => _sortType = type),
-          icon: const Icon(Icons.sort),
+          onSelected: _choisirTri,
+          // Relever une position prend une à deux secondes, et davantage au
+          // premier appel, quand le système demande l'autorisation. Sans ce
+          // témoin, le menu se refermait sur une liste inchangée et le geste
+          // paraissait ignoré.
+          icon: _releveDePositionEnCours
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.sort),
           tooltip: 'Trier',
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -482,6 +498,38 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     }
 
     return filtered;
+  }
+
+  /// Applique le tri choisi.
+  ///
+  /// Le tri par distance a besoin de la position de l'appareil. Elle n'était
+  /// jamais demandée ici : si rien ne l'avait relevée auparavant — permission
+  /// refusée, ou simple fait de n'avoir pas encore ouvert la carte —, l'option
+  /// se cochait dans le menu et **l'ordre ne changeait pas d'une ligne**, sans
+  /// un mot d'explication. On la demande maintenant au moment où elle sert, et
+  /// on dit pourquoi quand on ne l'obtient pas.
+  Future<void> _choisirTri(AddressSortType type) async {
+    if (type != AddressSortType.distance ||
+        _locationService.currentPosition != null) {
+      setState(() => _sortType = type);
+      return;
+    }
+
+    setState(() => _releveDePositionEnCours = true);
+    final position = await _locationService.getCurrentLocation();
+    if (!mounted) return;
+
+    setState(() {
+      _releveDePositionEnCours = false;
+      if (position != null) _sortType = type;
+    });
+
+    if (position == null) {
+      _showSnack(
+        'Autorisez la localisation pour trier par distance.',
+        Colors.orange,
+      );
+    }
   }
 
   List<eccore.Address> _sortAddresses(List<eccore.Address> addresses) {

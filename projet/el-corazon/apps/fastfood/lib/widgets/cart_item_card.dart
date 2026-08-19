@@ -11,6 +11,12 @@ class CartItemCard extends StatelessWidget {
     required this.item, required this.onRemove, required this.onQuantityChanged, super.key,
   });
 
+  /// Largeur de la colonne de droite — supprimer, compter, total.
+  ///
+  /// Fixe et non intrinsèque : c'est ce qui empêche l'échelle de police de
+  /// pousser la ligne hors de la carte.
+  static const double _largeurColonneQuantite = 92;
+
   /// Résume la personnalisation d'une ligne.
   ///
   /// La clé `note` est ce que la ligne transmet au serveur en texte libre
@@ -116,11 +122,20 @@ class CartItemCard extends StatelessWidget {
               ),
             ),
 
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
 
             // Quantity controls and remove
-            Column(
-              children: [
+            //
+            // Largeur **arrêtée**. Cette colonne se dimensionnait sur son
+            // contenu : à grande échelle de police, le compteur et le total
+            // s'élargissaient jusqu'à pousser la ligne hors de la carte —
+            // 5,7 px de débordement à droite, soit le dernier chiffre du
+            // total tranché. Elle prend désormais une largeur fixe, et c'est
+            // la description, extensible, qui cède.
+            SizedBox(
+              width: _largeurColonneQuantite,
+              child: Column(
+                children: [
                 // Remove button
                 GestureDetector(
                   onTap: onRemove,
@@ -169,13 +184,18 @@ class CartItemCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          item.quantity.toString(),
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onSurface,
+                      // Ce qui cède dans le compteur, c'est le chiffre —
+                      // les deux boutons gardent une cible tactile entière.
+                      Expanded(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            item.quantity.toString(),
+                            maxLines: 1,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onSurface,
+                            ),
                           ),
                         ),
                       ),
@@ -197,14 +217,23 @@ class CartItemCard extends StatelessWidget {
                 const SizedBox(height: 8),
 
                 // Total price
-                Text(
-                  PriceFormatter.format(item.totalPrice),
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: theme.primaryColor,
-                    fontWeight: FontWeight.bold,
+                //
+                // Réduit plutôt que tronqué : un total est un chiffre qu'on
+                // lit en entier ou pas du tout. `ellipsis` en aurait mangé la
+                // fin — c'est-à-dire les unités.
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    PriceFormatter.format(item.totalPrice),
+                    maxLines: 1,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.primaryColor,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-              ],
+                ],
+              ),
             ),
           ],
         ),

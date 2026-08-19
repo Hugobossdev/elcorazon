@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/order.dart';
+import 'package:elcora_fast/models/position_livreur.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 
@@ -31,7 +32,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   StreamSubscription<eccore.RealtimeEvent>? _channelSubscription;
   final _orderUpdatesController = StreamController<Order>.broadcast();
   final _deliveryLocationUpdatesController =
-      StreamController<Map<String, dynamic>>.broadcast();
+      StreamController<PositionLivreur>.broadcast();
 
   bool _isConnected = false;
 
@@ -41,7 +42,7 @@ class RealtimeTrackingService extends ChangeNotifier {
 
   // Suivi de commande (Django, Phase 6)
   Stream<Order> get orderUpdates => _orderUpdatesController.stream;
-  Stream<Map<String, dynamic>> get deliveryLocationUpdates =>
+  Stream<PositionLivreur> get deliveryLocationUpdates =>
       _deliveryLocationUpdatesController.stream;
 
   bool get isConnected => _isConnected;
@@ -92,18 +93,11 @@ class RealtimeTrackingService extends ChangeNotifier {
           }
           break;
         case 'tracking.position':
-          // `speed`/`heading` ne sont pas relayés par ce canal côté serveur
-          // (voir `apps/tracking/consumers.py OrderTrackingConsumer`) — le
-          // livreur les émet, mais la diffusion ne les porte pas.
-          final payload = event.payload;
-          _deliveryLocationUpdatesController.add({
-            'orderId': orderId,
-            'latitude': (payload['lat'] as num).toDouble(),
-            'longitude': (payload['lon'] as num).toDouble(),
-            'timestamp': DateTime.parse(payload['recorded_at'] as String),
-            'speed': null,
-            'heading': null,
-          });
+          final position =
+              PositionLivreur.depuisDiffusion(orderId, event.payload);
+          if (position != null) {
+            _deliveryLocationUpdatesController.add(position);
+          }
           break;
       }
     });

@@ -57,3 +57,37 @@ extension NotificationAffichee on eccore.AppNotification {
     return valeur is String && valeur.isNotEmpty ? valeur : null;
   }
 }
+
+/// Les notifications à afficher : filtrées, puis rangées de la plus récente à
+/// la plus ancienne.
+///
+/// Pourquoi cette fonction existe
+/// ------------------------------
+///
+/// L'écran filtrait et triait dans son `build`, et le tri se faisait **en
+/// place**. Or `NotificationDatabaseService.notifications` rend une
+/// `List.unmodifiable` : trier cette liste-là levait
+/// `Unsupported operation: sort`, et l'écran affichait le bandeau rouge à la
+/// place de ses notifications.
+///
+/// Le défaut ne se produisait que dans un cas sur quatre — onglet « Toutes »,
+/// filtre « Tous », bascule éteinte — c'est-à-dire exactement à l'ouverture de
+/// l'écran. Dès qu'un filtre s'appliquait, le `.where(…).toList()` produisait
+/// une copie, et le tri passait. C'est ce qui l'a si longtemps masqué.
+///
+/// Ici, le filtrage rend **toujours** une liste neuve, y compris sans critère :
+/// la faute n'est plus seulement corrigée, elle est devenue impossible.
+List<eccore.AppNotification> notificationsAAfficher(
+  List<eccore.AppNotification> notifications, {
+  GenreNotification? genre,
+  bool nonLuesSeulement = false,
+}) {
+  final retenues = notifications.where((notification) {
+    if (genre != null && notification.genre != genre) return false;
+    if (nonLuesSeulement && notification.isRead) return false;
+    return true;
+  }).toList();
+
+  retenues.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return retenues;
+}

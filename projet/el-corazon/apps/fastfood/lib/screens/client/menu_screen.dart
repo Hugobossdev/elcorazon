@@ -9,6 +9,7 @@ import 'package:elcora_fast/services/subscription_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/widgets/enhanced_app_bar_actions.dart';
+import 'package:elcora_fast/widgets/menu_item_card.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
@@ -29,7 +30,6 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
 
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-  late Animation<double> _scaleAnimation;
   late Animation<double> _filterHeightAnimation;
 
   eccore.Category? _selectedCategory; // Utilise maintenant la classe eccore.Category
@@ -73,16 +73,6 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
       ),
     );
 
-    _scaleAnimation = Tween<double>(
-      begin: 0.9,
-      end: 1.0,
-    ).animate(
-      CurvedAnimation(
-        parent: _mainController,
-        curve: Curves.elasticOut,
-      ),
-    );
-
     // Animation des filtres
     _filterController = AnimationController(
       duration: const Duration(milliseconds: 400),
@@ -120,24 +110,22 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      // Une ouverture en fondu et un léger glissement, sans le
+      // `ScaleTransition` en `elasticOut` qui faisait tressauter la carte
+      // entière à chaque venue sur l'écran : une liste qui rebondit se lit mal
+      // et se touche encore plus mal, puisque les cibles bougent sous le doigt.
       body: FadeTransition(
         opacity: _fadeAnimation,
         child: SlideTransition(
           position: _slideAnimation,
-          child: ScaleTransition(
-            scale: _scaleAnimation,
-            child: CustomScrollView(
-              slivers: [
-                _buildEnhancedAppBar(),
-                _buildSearchSection(),
-                _buildCategoryFilters(),
-                SliverToBoxAdapter(
-                  child: _buildAdvancedFeaturesSection(context),
-                ),
-                if (_showFilters) _buildFiltersSection(),
-                _buildMenuItems(),
-              ],
-            ),
+          child: CustomScrollView(
+            slivers: [
+              _buildEnhancedAppBar(),
+              _buildSearchSection(),
+              _buildCategoryFilters(),
+              if (_showFilters) _buildFiltersSection(),
+              _buildMenuItems(),
+            ],
           ),
         ),
       ),
@@ -348,12 +336,17 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                     },
                   )
                 : null,
+            // Même rayon que le conteneur qui le porte. À 25 contre 28, le
+            // fond du champ rentrait dans les angles arrondis de la carte et
+            // y laissait quatre encoches claires.
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(25),
+              borderRadius: BorderRadius.circular(28),
               borderSide: BorderSide.none,
             ),
-            filled: true,
-            fillColor: AppColors.surface,
+            // Le champ ne repeint plus son fond : il laisse voir celui du
+            // conteneur. Les deux surfaces se superposaient dans deux teintes
+            // différentes, et c'est la seconde qu'on voyait.
+            filled: false,
           ),
         ),
       ),
@@ -362,69 +355,86 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
 
   Widget _buildCategoryFilters() {
     final filters = _getCategoryFilters();
+
     return SliverToBoxAdapter(
-      child: Container(
-        height: 50,
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: filters.length + 1,
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              final isSelected = _selectedCategory == null;
-              return Container(
-                margin: const EdgeInsets.only(right: 12),
-                child: FilterChip(
-                  label: const Text('Tous'),
-                  selected: isSelected,
-                  onSelected: (selected) {
-                    setState(() {
-                      _selectedCategory = null;
-                    });
-                  },
-                  selectedColor: AppColors.primary.withValues(alpha: 0.2),
-                  checkmarkColor: AppColors.primary,
-                ),
-              );
-            }
-            final filter = filters[index - 1];
-            final isSelected = _selectedCategory?.name == filter;
-            return Container(
-              margin: const EdgeInsets.only(right: 12),
-              child: FilterChip(
-                label: Text(filter),
-                selected: isSelected,
-                onSelected: (selected) {
-                  setState(() {
-                    if (selected) {
-                      // Trouver la catégorie depuis AppService
-                      final appService =
-                          Provider.of<AppService>(context, listen: false);
-                      _selectedCategory = appService.menuCategories.firstWhere(
-                        (c) =>
-                            c.name.toLowerCase() == filter.toLowerCase(),
-                        orElse: () => appService.menuCategories.isNotEmpty
-                            ? appService.menuCategories.first
-                            : throw StateError('No categories available'),
-                      );
-                    } else {
-                      _selectedCategory = null;
-                    }
-                  });
-                },
-                selectedColor: AppColors.primary.withValues(alpha: 0.2),
-                checkmarkColor: AppColors.primary,
+      // Hauteur laissée aux pastilles plutôt qu'arrêtée à 50 px : un
+      // `FilterChip` grandit avec l'échelle de police du système, et une bande
+      // fixe lui coupait le bas dès le premier cran d'agrandissement.
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          spacing: 8,
+          children: [
+            _pastilleCategorie(
+              libelle: 'Tous',
+              selectionnee: _selectedCategory == null,
+              onSelection: () => setState(() => _selectedCategory = null),
+            ),
+            for (final filtre in filters)
+              _pastilleCategorie(
+                libelle: filtre,
+                selectionnee: _selectedCategory?.name == filtre,
+                onSelection: () => _selectionnerCategorie(filtre),
               ),
-            );
-          },
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildAdvancedFeaturesSection(BuildContext context) {
-    return const SizedBox.shrink();
+  /// Pastille d'une catégorie.
+  ///
+  /// Elle porte sa sélection dans sa couleur de fond et son texte, sans coche :
+  /// la coche du `FilterChip` élargissait la pastille au moment du choix, ce
+  /// qui décalait toutes les suivantes sous le doigt.
+  Widget _pastilleCategorie({
+    required String libelle,
+    required bool selectionnee,
+    required VoidCallback onSelection,
+  }) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: selectionnee ? AppColors.primary : theme.colorScheme.surface,
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: selectionnee
+              ? AppColors.primary
+              : theme.colorScheme.outlineVariant,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onSelection,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Text(
+            libelle,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: selectionnee ? FontWeight.w600 : FontWeight.w500,
+              color: selectionnee ? Colors.white : AppColors.textSecondary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Retient la catégorie nommée [libelle], ou revient à « Tous » si le nom ne
+  /// correspond à rien de connu.
+  ///
+  /// La version précédente se rabattait sur la **première** catégorie de la
+  /// liste : cliquer sur « Desserts » pouvait afficher les entrées. Elle levait
+  /// même une `StateError` quand le catalogue n'était pas encore chargé.
+  void _selectionnerCategorie(String libelle) {
+    final appService = Provider.of<AppService>(context, listen: false);
+    final trouvee = appService.menuCategories
+        .where((c) => c.name.toLowerCase() == libelle.toLowerCase())
+        .firstOrNull;
+
+    setState(() => _selectedCategory = trouvee);
   }
 
   List<String> _getCategoryFilters() {
@@ -600,13 +610,22 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
         final itemsByCategory =
             _groupItemsByCategory(filteredItems, appService.menuCategories);
 
-        // Adapter le childAspectRatio en fonction de la taille de l'écran
         final screenWidth = MediaQuery.of(context).size.width;
         final screenHeight = MediaQuery.of(context).size.height;
         final isSmallScreen = screenWidth < 360 || screenHeight < 640;
 
-        // Réduire childAspectRatio pour les petits écrans
-        final childAspectRatio = isSmallScreen ? 0.52 : 0.56;
+        // Nombre de colonnes déduit d'une largeur de carte **souhaitée**, et
+        // non figé à deux. Deux colonnes sur un navigateur de bureau donnaient
+        // des cartes de 600 px de large pour une photo de 400 px ; six
+        // colonnes de 200 px montrent la carte du restaurant, ce qu'on est
+        // venu voir.
+        final marge = isSmallScreen ? 12.0 : 16.0;
+        final gouttiere = isSmallScreen ? 12.0 : 16.0;
+        final grille = GeometrieGrille.calculer(
+          context: context,
+          largeurDisponible: screenWidth - 2 * marge,
+          gouttiere: gouttiere,
+        );
 
         return SliverList(
           delegate: SliverChildBuilderDelegate(
@@ -620,11 +639,16 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // En-tête de catégorie
+                  //
+                  // Aligné sur la **même marge que la grille**. L'en-tête
+                  // s'écartait de 16 ou 20 px quand les cartes commençaient à
+                  // 12 ou 16 : le titre flottait de quelques pixels à droite
+                  // de la colonne qu'il annonce.
                   Padding(
                     padding: EdgeInsets.fromLTRB(
-                      isSmallScreen ? 16 : 20,
+                      marge,
                       categoryIndex == 0 ? (isSmallScreen ? 12 : 16) : 24,
-                      isSmallScreen ? 16 : 20,
+                      marge,
                       12,
                     ),
                     child: Row(
@@ -637,6 +661,10 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                         Expanded(
                           child: Text(
                             category.name,
+                            // Sans limite, un intitulé long chassait le
+                            // compteur hors de la ligne.
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.bold,
@@ -668,12 +696,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                   // Description de la catégorie (si disponible)
                   if (category.description.isNotEmpty)
                     Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        isSmallScreen ? 16 : 20,
-                        0,
-                        isSmallScreen ? 16 : 20,
-                        16,
-                      ),
+                      padding: EdgeInsets.fromLTRB(marge, 0, marge, 16),
                       child: Text(
                         category.description,
                         style: const TextStyle(
@@ -684,17 +707,18 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                     ),
                   // Grille des plats de cette catégorie
                   Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isSmallScreen ? 12 : 16,
-                    ),
+                    padding: EdgeInsets.symmetric(horizontal: marge),
                     child: GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        crossAxisSpacing: isSmallScreen ? 12 : 16,
-                        mainAxisSpacing: isSmallScreen ? 12 : 16,
-                        childAspectRatio: childAspectRatio,
+                        crossAxisCount: grille.colonnes,
+                        crossAxisSpacing: gouttiere,
+                        mainAxisSpacing: gouttiere,
+                        // Hauteur **réservée**, pas déduite d'un rapport : la
+                        // carte annonce ce qu'il lui faut pour l'échelle de
+                        // police en vigueur, la grille le lui accorde.
+                        mainAxisExtent: grille.hauteurCellule,
                       ),
                       itemCount: items.length,
                       itemBuilder: (context, itemIndex) {
@@ -728,11 +752,6 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                                 }
                               },
                               isFavorite: isFavorite,
-                              animationDelay: Duration(
-                                milliseconds: 800 +
-                                    (categoryIndex * 200) +
-                                    (itemIndex * 100),
-                              ),
                             );
                           },
                         );

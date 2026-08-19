@@ -13,7 +13,9 @@ import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/directions_service.dart';
 import 'package:elcora_fast/services/driver_rating_service.dart';
+import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/models/order.dart';
+import 'package:elcora_fast/models/position_livreur.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/screens/client/chat_screen.dart';
 import 'package:elcora_fast/screens/client/call_screen.dart';
@@ -36,7 +38,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
   Order? _order;
   bool _isLoading = true;
   String? _errorMessage;
-  Map<String, dynamic>? _deliveryLocation;
+  PositionLivreur? _deliveryLocation;
   String? _estimatedDeliveryTime;
   Map<String, dynamic>? _driverProfile;
   double? _driverRating; // Note moyenne du livreur
@@ -49,7 +51,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
   LatLng? _deliveryLatLng;
 
   StreamSubscription<Order>? _orderUpdatesSubscription;
-  StreamSubscription<Map<String, dynamic>>? _deliveryLocationSubscription;
+  StreamSubscription<PositionLivreur>? _deliveryLocationSubscription;
   RealtimeTrackingService? _trackingService;
 
   /// Statuts pendant lesquels `ws/orders/{id}/tracking/` accepte une
@@ -82,7 +84,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       _orderRefreshTimer; // Timer pour rafraîchir périodiquement depuis la DB
 
   // Nouvelles fonctionnalités
-  List<Map<String, dynamic>> _locationHistory = []; // Historique des positions
+  List<PositionLivreur> _locationHistory = [];
   bool _proximityAlertShown = false; // Pour éviter les alertes répétées
   double _averageSpeed = 0.0; // Vitesse moyenne en km/h
   double _totalDistance = 0.0; // Distance totale parcourue en km
@@ -190,14 +192,15 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       final position = tracking.lastPosition;
       if (position != null && mounted) {
         setState(() {
-          _deliveryLocation = {
-            'latitude': position.latitude,
-            'longitude': position.longitude,
-            'timestamp': position.recordedAt,
-            'accuracy': position.accuracyMeters,
-            'speed': position.speedMetersPerSecond,
-            'heading': position.headingDegrees,
-          };
+          _deliveryLocation = PositionLivreur(
+            commandeId: widget.orderId,
+            latitude: position.latitude,
+            longitude: position.longitude,
+            releveeA: position.recordedAt,
+            precisionMetres: position.accuracyMeters,
+            vitesseMetresParSeconde: position.speedMetersPerSecond,
+            capDegres: position.headingDegrees,
+          );
         });
 
         await _calculateEstimatedDeliveryTime();
@@ -265,16 +268,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
     // Marker livreur avec rotation et informations améliorées
     if (_deliveryLocation != null) {
-      final driverPos = LatLng(
-        _deliveryLocation!['latitude'] as double,
-        _deliveryLocation!['longitude'] as double,
-      );
-
-      final heading =
-          (_deliveryLocation!['heading'] as num?)?.toDouble() ?? 0.0;
-      final speed = _deliveryLocation!['speed'] != null
-          ? ((_deliveryLocation!['speed'] as double) * 3.6).toStringAsFixed(0)
-          : null;
+      final driverPos = _deliveryLocation!.point;
+      final heading = _deliveryLocation!.capDegres ?? 0.0;
+      final speed = _deliveryLocation!.vitesseKmH?.toStringAsFixed(0);
 
       markers.add(
         Marker(
@@ -411,9 +407,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
   void _updateLocationHistoryPolyline() {
     if (_locationHistory.length < 2) return;
 
-    final points = _locationHistory.reversed.map((loc) {
-      return LatLng(loc['latitude'] as double, loc['longitude'] as double);
-    }).toList();
+    final points = _locationHistory.reversed.map((loc) => loc.point).toList();
 
     if (mounted) {
       setState(() {
@@ -443,10 +437,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       return;
     }
 
-    final driverPos = LatLng(
-      _deliveryLocation!['latitude'] as double,
-      _deliveryLocation!['longitude'] as double,
-    );
+    final driverPos = _deliveryLocation!.point;
 
     final distance =
         _geocodingService!.calculateDistance(driverPos, _deliveryLatLng!);
@@ -572,22 +563,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       // S'abonner aux mises à jour de position du livreur
       _deliveryLocationSubscription =
           _trackingService!.deliveryLocationUpdates.listen(
-        (locationUpdate) {
+        (newLocation) {
           // Filtrer pour cette commande uniquement
-          if (locationUpdate['orderId'] == widget.orderId && mounted) {
-            final newLocation = {
-              'latitude': locationUpdate['latitude'] as double,
-              'longitude': locationUpdate['longitude'] as double,
-              'timestamp':
-                  DateTime.parse(locationUpdate['timestamp'] as String),
-              'speed': locationUpdate['speed'] != null
-                  ? (locationUpdate['speed'] as num).toDouble()
-                  : null,
-              'heading': locationUpdate['heading'] != null
-                  ? (locationUpdate['heading'] as num).toDouble()
-                  : null,
-            };
-
+          if (newLocation.commandeId == widget.orderId && mounted) {
             setState(() {
               // Ajouter à l'historique
               _locationHistory.insert(0, newLocation);
@@ -741,10 +719,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       }
 
       // Coordonnées du livreur
-      final driverCoords = LatLng(
-        _deliveryLocation!['latitude'] as double,
-        _deliveryLocation!['longitude'] as double,
-      );
+      final driverCoords = _deliveryLocation!.point;
 
       // Calculer le temps de trajet estimé
       final travelTime = await _geocodingService!
@@ -1456,16 +1431,16 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         try {
           return GoogleMap(
             initialCameraPosition: CameraPosition(
-              target: _deliveryLocation != null
-                  ? LatLng(
-                      _deliveryLocation!['latitude'] as double,
-                      _deliveryLocation!['longitude'] as double,
-                    )
-                  : (_deliveryLatLng ??
-                      const LatLng(
-                        5.3600,
-                        -4.0080,
-                      )), // Default fallback (Abidjan usually)
+              // Repli sur le restaurant, et non sur Abidjan : les
+              // coordonnées écrites ici pointaient à 600 km de
+              // l'établissement, si bien qu'une commande sans position connue
+              // ouvrait la carte sur une autre ville, dans un autre pays.
+              target: _deliveryLocation?.point ??
+                  _deliveryLatLng ??
+                  const LatLng(
+                    AppConstants.restaurantLatitude,
+                    AppConstants.restaurantLongitude,
+                  ),
               zoom: 15,
             ),
             onMapCreated: (controller) {

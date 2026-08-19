@@ -1,133 +1,147 @@
+import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
+/// Plats mis en favori par le client.
+///
+/// ## Ce qui était perdu à chaque redémarrage
+///
+/// Le service enregistrait bien les identifiants des favoris, mais son
+/// chargement les lisait pour aussitôt `clear()` la liste sans rien en faire —
+/// « pour l'instant, on garde juste les IDs ». Les favoris étaient donc écrits
+/// sur le disque et jamais relus : rouvrir l'application les effaçait tous.
+///
+/// ## Les identifiants font foi, pas les objets
+///
+/// Ce qu'on retient d'un favori, c'est **l'identifiant du plat**, pas la copie
+/// du plat telle qu'elle était le jour du clic. Un prix qui change, une photo
+/// remplacée, une description corrigée : le favori doit suivre le catalogue,
+/// pas figer un instantané. [favorites] résout donc les identifiants sur le
+/// catalogue courant à chaque lecture.
+///
+/// Cela règle aussi l'ordre d'arrivée : le cœur s'affiche juste dès le
+/// démarrage, avant même que le menu ne soit chargé, puisque [isFavorite] ne
+/// consulte que les identifiants.
 class FavoritesService extends ChangeNotifier {
   static final FavoritesService _instance = FavoritesService._internal();
   factory FavoritesService() => _instance;
   FavoritesService._internal();
 
-  final List<eccore.MenuItem> _favorites = [];
-  bool _isInitialized = false;
+  static const String _cle = 'favorites';
 
-  List<eccore.MenuItem> get favorites => List.unmodifiable(_favorites);
-  int get count => _favorites.length;
-  bool get isEmpty => _favorites.isEmpty;
+  /// Identifiants des plats en favori. La seule chose qui se persiste.
+  final Set<String> _identifiants = <String>{};
+
+  bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
 
-  /// Initialiser le service de favoris
+  /// Favoris **résolus sur le catalogue courant**.
+  ///
+  /// Un plat retiré de la carte disparaît de la liste sans être oublié : son
+  /// identifiant reste en mémoire, et il reparaît si le restaurant le remet.
+  List<eccore.MenuItem> get favorites {
+    final catalogue = _catalogue();
+    return List.unmodifiable(
+      catalogue.where((item) => _identifiants.contains(item.id)),
+    );
+  }
+
+  /// Nombre de favoris **affichables** — ceux que le catalogue sait résoudre.
+  /// C'est ce que compte la liste, donc c'est ce qu'il faut annoncer.
+  int get count => favorites.length;
+
+  bool get isEmpty => favorites.isEmpty;
+
+  /// Catalogue courant, ou rien s'il n'est pas encore disponible.
+  ///
+  /// `AppService` lève tant qu'il n'a pas été construit avec son conteneur
+  /// Riverpod — au démarrage, et dans un test qui ne monte pas l'application.
+  /// Un favori ne vaut pas de faire tomber l'écran qui l'affiche.
+  List<eccore.MenuItem> _catalogue() {
+    try {
+      return AppService().menuItems;
+    } catch (e) {
+      Journal.trace('FavoritesService : catalogue indisponible ($e)');
+      return const [];
+    }
+  }
+
+  /// Relit les favoris enregistrés.
   Future<void> initialize() async {
     if (_isInitialized) return;
 
     try {
-      await _loadFavoritesFromStorage();
+      final prefs = await SharedPreferences.getInstance();
+      _identifiants
+        ..clear()
+        ..addAll(prefs.getStringList(_cle) ?? const []);
+
       _isInitialized = true;
+      Journal.trace('FavoritesService : ${_identifiants.length} favoris relus');
       notifyListeners();
     } catch (e) {
-      Journal.trace('Error initializing FavoritesService: $e');
+      Journal.trace('FavoritesService : échec de la relecture ($e)');
+      // Le service reste utilisable : les favoris du jour fonctionneront,
+      // seule la mémoire des sessions précédentes manque.
+      _isInitialized = true;
     }
   }
 
-  /// Charger les favoris depuis le stockage
-  Future<void> _loadFavoritesFromStorage() async {
+  /// Remet le service à l'état d'avant sa première lecture.
+  ///
+  /// Le service est un singleton : sans ce point de reprise, deux cas de test
+  /// se transmettraient leurs favoris et le second mesurerait l'état laissé
+  /// par le premier.
+  @visibleForTesting
+  void reinitialiser() {
+    _identifiants.clear();
+    _isInitialized = false;
+  }
+
+  Future<void> _enregistrer() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final favoriteIds = prefs.getStringList('favorites') ?? [];
-
-      // Convertir les IDs en MenuItems
-      // Pour l'instant, on garde juste les IDs
-      _favorites.clear();
-      Journal.trace('Loaded ${favoriteIds.length} favorites from storage');
+      await prefs.setStringList(_cle, _identifiants.toList());
     } catch (e) {
-      Journal.trace('Error loading favorites from storage: $e');
+      Journal.trace('FavoritesService : échec de l\'enregistrement ($e)');
     }
   }
 
-  /// Sauvegarder les favoris dans le stockage
-  Future<void> _saveFavoritesToStorage() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final favoriteIds = _favorites.map((item) => item.id).toList();
-      await prefs.setStringList('favorites', favoriteIds);
-      Journal.trace('Saved ${favoriteIds.length} favorites to storage');
-    } catch (e) {
-      Journal.trace('Error saving favorites to storage: $e');
-    }
-  }
+  bool isFavorite(eccore.MenuItem item) => _identifiants.contains(item.id);
 
-  /// Vérifier si un produit est en favori
-  bool isFavorite(eccore.MenuItem item) {
-    return _favorites.any((favorite) => favorite.id == item.id);
-  }
-
-  /// Ajouter un produit aux favoris
+  /// Ajoute un plat. Rend `false` s'il y était déjà.
   Future<bool> addToFavorites(eccore.MenuItem item) async {
-    try {
-      if (!isFavorite(item)) {
-        _favorites.add(item);
-        await _saveFavoritesToStorage();
-        notifyListeners();
-        Journal.trace('Added ${item.name} to favorites');
-        return true;
-      }
-      return false;
-    } catch (e) {
-      Journal.trace('Error adding to favorites: $e');
-      return false;
-    }
-  }
+    if (!_identifiants.add(item.id)) return false;
 
-  /// Retirer un produit des favoris
-  Future<bool> removeFromFavorites(eccore.MenuItem item) async {
-    try {
-      final initialLength = _favorites.length;
-      _favorites.removeWhere((favorite) => favorite.id == item.id);
-      final removed = initialLength > _favorites.length;
-      
-      if (removed) {
-        await _saveFavoritesToStorage();
-        notifyListeners();
-        Journal.trace('Removed ${item.name} from favorites');
-        return true;
-      }
-      return false;
-    } catch (e) {
-      Journal.trace('Error removing from favorites: $e');
-      return false;
-    }
-  }
-
-  /// Basculer l'état favori d'un produit
-  Future<bool> toggleFavorite(eccore.MenuItem item) async {
-    if (isFavorite(item)) {
-      return await removeFromFavorites(item);
-    } else {
-      return await addToFavorites(item);
-    }
-  }
-
-  /// Récupérer tous les favoris
-  List<eccore.MenuItem> getFavorites() {
-    return List.unmodifiable(_favorites);
-  }
-
-  /// Supprimer tous les favoris
-  Future<void> clearFavorites() async {
-    _favorites.clear();
-    await _saveFavoritesToStorage();
     notifyListeners();
-    Journal.trace('Cleared all favorites');
+    await _enregistrer();
+    return true;
   }
 
-  /// Mettre à jour un produit dans les favoris
-  Future<void> updateFavorite(eccore.MenuItem item) async {
-    final index = _favorites.indexWhere((favorite) => favorite.id == item.id);
-    if (index != -1) {
-      _favorites[index] = item;
-      await _saveFavoritesToStorage();
-      notifyListeners();
-    }
+  /// Retire un plat. Rend `false` s'il n'y était pas.
+  Future<bool> removeFromFavorites(eccore.MenuItem item) async {
+    if (!_identifiants.remove(item.id)) return false;
+
+    notifyListeners();
+    await _enregistrer();
+    return true;
+  }
+
+  Future<bool> toggleFavorite(eccore.MenuItem item) {
+    return isFavorite(item)
+        ? removeFromFavorites(item)
+        : addToFavorites(item);
+  }
+
+  List<eccore.MenuItem> getFavorites() => favorites;
+
+  Future<void> clearFavorites() async {
+    if (_identifiants.isEmpty) return;
+
+    _identifiants.clear();
+    notifyListeners();
+    await _enregistrer();
   }
 }
-
