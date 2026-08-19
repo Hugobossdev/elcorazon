@@ -4,6 +4,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'package:elcora_fast/main.dart' show adresseWebSocket;
 
 /// Conversation client ↔ livreur sur `ws/orders/{id}/chat/` (Phase 6).
 ///
@@ -35,14 +36,7 @@ class ChatService extends ChangeNotifier {
   }
 
   static String _chatWsUrl(String orderId) {
-    final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1';
-    final apiUri = Uri.parse(apiBaseUrl);
-    return Uri(
-      scheme: apiUri.scheme == 'https' ? 'wss' : 'ws',
-      host: apiUri.host,
-      port: apiUri.port,
-      path: '/ws/orders/$orderId/chat/',
-    ).toString();
+    return adresseWebSocket(dotenv.env['API_BASE_URL'], '/ws/orders/$orderId/chat/');
   }
 
   /// Flux de la conversation d'une commande. La liste part vide : le serveur

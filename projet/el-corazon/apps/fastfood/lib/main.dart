@@ -134,6 +134,42 @@ String adresseDeLApi(String? valeurDeclaree) {
   return rattrapee;
 }
 
+/// Adresse d'un canal WebSocket, dérivée de celle de l'API.
+///
+/// ## Pourquoi cette fonction existe
+///
+/// Les quatre services temps réel — conversation, suivi, appels, panier de
+/// groupe — dérivaient chacun leur adresse en relisant `API_BASE_URL` **brut**,
+/// sans passer par [adresseDeLApi]. Le rattrapage du schéma manquant ne les
+/// atteignait donc pas, et l'omission que [adresseDeLApi] existe précisément
+/// pour absorber les cassait en silence :
+///
+///     Uri.parse('localhost:8000/api/v1')
+///       → scheme: 'localhost', host: '', port: 0
+///       → 'ws:///ws/me/'   ← aucun hôte
+///
+/// Le REST continuait de fonctionner, réparé par [adresseDeLApi] ; seul le
+/// temps réel tombait. Une panne partielle est plus coûteuse à diagnostiquer
+/// qu'une panne franche : l'application s'ouvre, le menu s'affiche, et seuls
+/// le chat et le suivi restent muets — on cherche alors du côté des
+/// consumers Django, qui n'y sont pour rien.
+///
+/// Le `path` n'emporte pas `/api/v1` : Channels monte `ws/` à la racine
+/// (`config/routing.py`), pas sous le préfixe de l'API.
+///
+/// Publique, contrairement à [adresseDeLApi] : les services temps réel
+/// l'appellent. C'est le but — une seule dérivation, au lieu de quatre copies
+/// qui divergent.
+String adresseWebSocket(String? valeurDeclaree, String chemin) {
+  final api = Uri.parse(adresseDeLApi(valeurDeclaree));
+  return Uri(
+    scheme: api.scheme == 'https' ? 'wss' : 'ws',
+    host: api.host,
+    port: api.port,
+    path: chemin,
+  ).toString();
+}
+
 Future<void> _initializeEssentialServices() async {
   // Firebase (Phase 6) — requis avant tout usage de `FirebaseMessaging`.
   // Non bloquant : aucun projet Firebase réel n'est encore configuré (voir

@@ -4,7 +4,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import 'package:elcora_fast/main.dart' show apiClient;
+import 'package:elcora_fast/main.dart' show adresseWebSocket, apiClient;
 import 'package:elcora_fast/services/agora_service.dart';
 
 /// État d'un appel, côté écran.
@@ -147,14 +147,7 @@ class CallService extends ChangeNotifier {
     _userId = userId;
     await _closeChannel();
 
-    final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1';
-    final apiUri = Uri.parse(apiBaseUrl);
-    final wsUrl = Uri(
-      scheme: apiUri.scheme == 'https' ? 'wss' : 'ws',
-      host: apiUri.host,
-      port: apiUri.port,
-      path: '/ws/me/',
-    ).toString();
+    final wsUrl = adresseWebSocket(dotenv.env['API_BASE_URL'], '/ws/me/');
 
     final channel = eccore.RealtimeChannel(wsUrl: wsUrl, tokenStorage: eccore.TokenStorage());
     _channel = channel;

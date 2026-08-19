@@ -4,6 +4,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/main.dart' show adresseWebSocket;
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/position_livreur.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
@@ -59,15 +60,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   }
 
   String _trackingWsUrl(String orderId) {
-    final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1';
-    final apiUri = Uri.parse(apiBaseUrl);
-    final scheme = apiUri.scheme == 'https' ? 'wss' : 'ws';
-    return Uri(
-      scheme: scheme,
-      host: apiUri.host,
-      port: apiUri.port,
-      path: '/ws/orders/$orderId/tracking/',
-    ).toString();
+    return adresseWebSocket(dotenv.env['API_BASE_URL'], '/ws/orders/$orderId/tracking/');
   }
 
   /// Suit une commande spécifique — `ws/orders/{id}/tracking/` (Django).

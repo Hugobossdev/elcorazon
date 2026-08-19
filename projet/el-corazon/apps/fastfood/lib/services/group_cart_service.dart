@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'package:elcora_fast/config/app_constants.dart';
-import 'package:elcora_fast/main.dart' show apiClient;
+import 'package:elcora_fast/main.dart' show adresseWebSocket, apiClient;
 import 'package:elcora_fast/models/order.dart';
 
 /// Commande de groupe, contre `/api/v1/group-carts/` (Phase 6).
@@ -239,14 +239,10 @@ class GroupCartService extends ChangeNotifier {
   /// Les événements ne portent que ce qui a changé ; on relit le panier plutôt
   /// que d'appliquer un delta, pour que les totaux restent ceux du serveur.
   void _listen(String groupCartId) {
-    final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1';
-    final apiUri = Uri.parse(apiBaseUrl);
-    final wsUrl = Uri(
-      scheme: apiUri.scheme == 'https' ? 'wss' : 'ws',
-      host: apiUri.host,
-      port: apiUri.port,
-      path: '/ws/group-carts/$groupCartId/',
-    ).toString();
+    final wsUrl = adresseWebSocket(
+      dotenv.env['API_BASE_URL'],
+      '/ws/group-carts/$groupCartId/',
+    );
 
     final channel = eccore.RealtimeChannel(wsUrl: wsUrl, tokenStorage: eccore.TokenStorage());
     _channel = channel;
