@@ -4,9 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' show Position;
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/address_service.dart';
+import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/utils/address_sorting.dart';
+import 'package:elcora_fast/navigation/navigation_service.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/address_card.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
 import 'package:elcora_fast/screens/client/address_detail_bottom_sheet.dart';
 
 // `AddressSortType` et l'ordre d'affichage vivent désormais dans
@@ -53,93 +59,58 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: _buildAppBar(),
+      backgroundColor: theme.colorScheme.surface,
+      appBar: _barre(theme),
       body: Consumer<AddressService>(
         builder: (context, addressService, child) {
           // Le carnet vit côté serveur : sans session il n'y en a pas, et le
           // formulaire d'ajout mènerait à un refus. Le dire ici évite de faire
           // saisir une adresse pour rien.
-          if (!addressService.canEdit) return _buildSignedOutState();
+          if (!addressService.canEdit) return _etatDeconnecte(theme);
 
-          if (!addressService.hasAddresses) {
-            return _buildEmptyState();
-          }
+          if (!addressService.hasAddresses) return _etatVide();
 
           return RefreshIndicator(
             onRefresh: _refresh,
-            child: _buildContent(addressService),
+            child: _contenu(theme, addressService),
           );
         },
       ),
-      floatingActionButton: Consumer<AddressService>(
+      bottomNavigationBar: Consumer<AddressService>(
         builder: (context, addressService, child) {
-          if (!addressService.canEdit) return const SizedBox.shrink();
-          return FloatingActionButton.extended(
-            onPressed: _showAddAddressSheet,
-            icon: const Icon(Icons.add_location),
-            label: const Text('Ajouter'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+          if (!addressService.canEdit || !addressService.hasAddresses) {
+            return const SizedBox.shrink();
+          }
+          // La maquette place « Add New Address » en bas de la liste. Une
+          // barre ancrée plutôt qu'un bouton flottant : le bouton flottant
+          // masquait la dernière carte, celle qu'on vient justement d'ajouter.
+          return GlassBottomBar(
+            child: ActionButton(
+              label: 'Ajouter une adresse',
+              emphasis: ActionEmphasis.gradient,
+              icon: Icons.add_location_alt_outlined,
+              onPressed: _showAddAddressSheet,
+            ),
           );
         },
       ),
     );
   }
 
-  Widget _buildSignedOutState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 48),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.lock_outline, size: 80, color: Colors.grey.shade400),
-            const SizedBox(height: 24),
-            Text(
-              'Connectez-vous',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Colors.grey.shade600,
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Vos adresses de livraison sont rattachées à votre compte : '
-              'elles vous suivent d\'un appareil à l\'autre.',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyLarge
-                  ?.copyWith(color: Colors.grey.shade500),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
-      title: const Text('Mes Adresses'),
-      backgroundColor: Theme.of(context).colorScheme.primary,
-      foregroundColor: Theme.of(context).colorScheme.onPrimary,
+  PreferredSizeWidget _barre(ThemeData theme) {
+    return GlassAppBar(
+      title: 'Mes adresses',
       actions: [
-        // Filtre favoris
-        IconButton(
-          onPressed: () {
-            setState(() {
-              _favoritesOnly = !_favoritesOnly;
-            });
-          },
-          icon: Icon(
-            _favoritesOnly ? Icons.star : Icons.star_border,
-            color: _favoritesOnly ? Colors.amber : null,
-          ),
-          tooltip: 'Favoris uniquement',
+        GlassIconButton(
+          icon: _favoritesOnly ? Icons.star_rounded : Icons.star_outline_rounded,
+          tooltip: _favoritesOnly ? 'Toutes les adresses' : 'Favoris seulement',
+          filled: false,
+          color: _favoritesOnly ? AppColors.secondaryDeep : null,
+          onPressed: () => setState(() => _favoritesOnly = !_favoritesOnly),
         ),
-
-        // Menu de tri
         PopupMenuButton<AddressSortType>(
           onSelected: _choisirTri,
           // Relever une position prend une à deux secondes, et davantage au
@@ -147,39 +118,37 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
           // témoin, le menu se refermait sur une liste inchangée et le geste
           // paraissait ignoré.
           icon: _releveDePositionEnCours
-              ? const SizedBox(
+              ? SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    valueColor:
+                        AlwaysStoppedAnimation(theme.colorScheme.primary),
                   ),
                 )
-              : const Icon(Icons.sort),
+              : Icon(Icons.sort_rounded, color: theme.colorScheme.primary),
           tooltip: 'Trier',
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
           itemBuilder: (context) => [
-            _buildSortMenuItem(
+            _entreeDeTri(
               AddressSortType.recent,
               'Récemment utilisées',
-              Icons.schedule,
+              Icons.schedule_rounded,
             ),
-            _buildSortMenuItem(
+            _entreeDeTri(
               AddressSortType.name,
-              'Nom (A-Z)',
-              Icons.sort_by_alpha,
+              'Nom (A–Z)',
+              Icons.sort_by_alpha_rounded,
             ),
-            _buildSortMenuItem(
+            _entreeDeTri(
               AddressSortType.distance,
               'Distance',
-              Icons.straighten,
+              Icons.straighten_rounded,
             ),
-            _buildSortMenuItem(
+            _entreeDeTri(
               AddressSortType.type,
               'Type',
-              Icons.category,
+              Icons.category_outlined,
             ),
           ],
         ),
@@ -187,300 +156,196 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     );
   }
 
-  PopupMenuEntry<AddressSortType> _buildSortMenuItem(
+  PopupMenuEntry<AddressSortType> _entreeDeTri(
     AddressSortType type,
-    String label,
-    IconData icon,
+    String libelle,
+    IconData icone,
   ) {
-    final isSelected = _sortType == type;
+    final retenu = _sortType == type;
+    final theme = Theme.of(context);
+
     return PopupMenuItem(
       value: type,
       child: Row(
         children: [
           Icon(
-            icon,
-            size: 20,
-            color: isSelected ? Theme.of(context).colorScheme.primary : null,
+            icone,
+            size: DesignConstants.iconSizeSmall + 4,
+            color: retenu ? theme.colorScheme.primary : null,
           ),
-          const SizedBox(width: 12),
-          Text(
-            label,
-            style: TextStyle(
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              color: isSelected ? Theme.of(context).colorScheme.primary : null,
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Text(
+              libelle,
+              style: retenu
+                  ? AppTypography.labelLg(color: theme.colorScheme.primary)
+                  : null,
             ),
           ),
-          if (isSelected) ...[
-            const Spacer(),
+          if (retenu)
             Icon(
-              Icons.check,
-              size: 20,
-              color: Theme.of(context).colorScheme.primary,
+              Icons.check_rounded,
+              size: DesignConstants.iconSizeSmall + 4,
+              color: theme.colorScheme.primary,
             ),
-          ],
         ],
       ),
     );
   }
 
-  Widget _buildContent(AddressService addressService) {
+  Widget _etatDeconnecte(ThemeData theme) {
+    return etats.EmptyStateWidget(
+      title: 'Connectez-vous',
+      message: 'Votre carnet d’adresses est rattaché à votre compte : '
+          'il vous suit d’un appareil à l’autre.',
+      icon: Icons.lock_outline_rounded,
+      actionText: 'Se connecter',
+      onAction: () => NavigationService.navigateToAuth(context),
+    );
+  }
+
+  Widget _etatVide() {
+    return etats.EmptyStateWidget(
+      title: 'Aucune adresse enregistrée',
+      message: 'Ajoutez-en une pour commander en deux gestes la prochaine fois.',
+      icon: Icons.location_off_outlined,
+      actionText: 'Ajouter une adresse',
+      onAction: _showAddAddressSheet,
+    );
+  }
+
+  Widget _contenu(ThemeData theme, AddressService addressService) {
     var addresses = _filterAddresses(addressService.addresses);
     addresses = _sortAddresses(addresses);
 
-    return Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        DesignConstants.edgeMargin,
+        DesignConstants.spacingM,
+        DesignConstants.edgeMargin,
+        DesignConstants.spacingXL,
+      ),
       children: [
-        // Barre de recherche. Le seuil était de « plus de 3 adresses » : sous
-        // ce nombre, une recherche déjà saisie restait active sans plus aucun
-        // moyen de l'effacer, et la liste semblait vide sans raison visible.
-        if (addressService.addresses.length > 3 || _searchQuery.isNotEmpty)
-          _buildSearchBar(),
-
-        // Stats card
-        _buildStatsCard(addressService),
-
-        // Active filters chips
-        if (_hasActiveFilters) _buildActiveFiltersChips(),
-
-        // Liste des adresses
-        Expanded(
-          child: addresses.isEmpty
-              ? _buildNoResults()
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: addresses.length,
-                  itemBuilder: (context, index) {
-                    final address = addresses[index];
-                    final isSelected =
-                        addressService.selectedAddress?.id == address.id!;
-
-                    return AddressCard(
-                      address: address,
-                      isFavorite:
-                          addressService.estFavorite(address.id ?? ''),
-                      isSelected: isSelected,
-                      onTap: () => _selectAddress(address),
-                      onEdit: () => _showEditAddressSheet(address),
-                      onDelete: () => _deleteAddress(address),
-                      onToggleFavorite: () => _toggleFavorite(address),
-                      onSetDefault: () => _setDefault(address),
-                    );
-                  },
-                ),
+        Text(
+          'Gérez où vos plats sont livrés.',
+          style: AppTypography.bodyLg(color: theme.colorScheme.onSurfaceVariant),
         ),
+        const SizedBox(height: DesignConstants.spacingM),
+        _reperes(theme, addressService),
+        // Le seuil était de « plus de 3 adresses » : sous ce nombre, une
+        // recherche déjà saisie restait active sans plus aucun moyen de
+        // l'effacer, et la liste semblait vide sans raison visible.
+        if (addressService.addresses.length > 3 || _searchQuery.isNotEmpty) ...[
+          const SizedBox(height: DesignConstants.spacingM),
+          AppSearchField(
+            controller: _searchController,
+            hintText: 'Nom, quartier, repère…',
+            onChanged: (value) => setState(() => _searchQuery = value),
+            trailing: _searchQuery.isEmpty
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: 'Effacer la recherche',
+                    onPressed: _clearSearch,
+                  ),
+          ),
+        ],
+        if (_hasActiveFilters) ...[
+          const SizedBox(height: DesignConstants.spacingM),
+          _puceDeFiltres(theme),
+        ],
+        const SizedBox(height: DesignConstants.spacingM),
+        if (addresses.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              vertical: DesignConstants.spacingXL,
+            ),
+            child: etats.EmptyStateWidget(
+              title: 'Aucune adresse ne correspond',
+              message: 'Modifiez votre recherche ou vos filtres.',
+              icon: Icons.search_off_rounded,
+              actionText: 'Tout afficher',
+              onAction: () => setState(() {
+                _clearSearch();
+                _favoritesOnly = false;
+              }),
+            ),
+          )
+        else
+          for (final address in addresses)
+            AddressCard(
+              address: address,
+              isFavorite: addressService.estFavorite(address.id ?? ''),
+              isSelected: addressService.selectedAddress?.id == address.id,
+              onTap: () => _selectAddress(address),
+              onEdit: () => _showEditAddressSheet(address),
+              onDelete: () => _deleteAddress(address),
+              onToggleFavorite: () => _toggleFavorite(address),
+              onSetDefault: () => _setDefault(address),
+            ),
       ],
     );
   }
 
-  Widget _buildSearchBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      child: TextField(
-        controller: _searchController,
-        decoration: InputDecoration(
-          hintText: 'Nom, quartier, repère…',
-          prefixIcon: const Icon(Icons.search),
-          suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear),
-                  onPressed: _clearSearch,
-                )
-              : null,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          filled: true,
-          fillColor: Colors.grey.shade100,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-        ),
-        onChanged: (value) => setState(() => _searchQuery = value),
-      ),
-    );
-  }
-
-  Widget _buildStatsCard(AddressService addressService) {
+  /// Trois repères en puces, là où une carte dégradée occupait 90 px.
+  ///
+  /// L'information — combien d'adresses, combien de favorites, y a-t-il une
+  /// adresse par défaut — ne justifiait pas un bandeau à deux couleurs au-dessus
+  /// de la liste qu'on vient consulter.
+  Widget _reperes(ThemeData theme, AddressService addressService) {
     final total = addressService.addresses.length;
     final favorites = addressService.favoriteAddresses.length;
+    final aUnDefaut = addressService.defaultAddress != null;
 
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Theme.of(context).colorScheme.primaryContainer,
-            Theme.of(context).colorScheme.secondaryContainer,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildStatItem(
-            icon: Icons.location_on,
-            value: '$total',
-            label: 'Adresses',
-          ),
-          Container(
-            width: 1,
-            height: 40,
-            color: Colors.white.withValues(alpha: 0.5),
-          ),
-          _buildStatItem(
-            icon: Icons.star,
-            value: '$favorites',
-            label: 'Favoris',
-            iconColor: Colors.amber.shade600,
-          ),
-          Container(
-            width: 1,
-            height: 40,
-            color: Colors.white.withValues(alpha: 0.5),
-          ),
-          _buildStatItem(
-            icon: Icons.check_circle,
-            value: addressService.defaultAddress != null ? '1' : '0',
-            label: 'Défaut',
-            iconColor: Colors.green,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatItem({
-    required IconData icon,
-    required String value,
-    required String label,
-    Color? iconColor,
-  }) {
-    return Column(
+    return Wrap(
+      spacing: DesignConstants.spacingS,
+      runSpacing: DesignConstants.spacingS,
       children: [
-        Icon(icon, color: iconColor, size: 28),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
-          ),
+        StatusChip(
+          label: total <= 1 ? '$total adresse' : '$total adresses',
+          icon: Icons.location_on_outlined,
+          background: theme.colorScheme.surfaceContainerHigh,
+          foreground: theme.colorScheme.onSurfaceVariant,
         ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Theme.of(context)
-                .colorScheme
-                .onPrimaryContainer
-                .withValues(alpha: 0.8),
+        if (favorites > 0)
+          StatusChip(
+            label: favorites <= 1 ? '$favorites favorite' : '$favorites favorites',
+            icon: Icons.star_rounded,
+            background: theme.colorScheme.secondaryContainer,
+            foreground: theme.colorScheme.onSecondaryContainer,
           ),
-        ),
+        // Pas de puce « 0 défaut » : l'absence se signale, elle ne se compte
+        // pas. Quand aucune adresse n'est par défaut, c'est cela qu'il faut
+        // dire — et c'est utile, car le règlement en réclamera une.
+        if (!aUnDefaut && total > 0)
+          StatusChip(
+            label: 'Aucune adresse par défaut',
+            icon: Icons.info_outline_rounded,
+            background: theme.colorScheme.errorContainer,
+            foreground: theme.colorScheme.onErrorContainer,
+          ),
       ],
     );
   }
 
   bool get _hasActiveFilters => _searchQuery.isNotEmpty || _favoritesOnly;
 
-  Widget _buildActiveFiltersChips() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Wrap(
-        spacing: 8,
-        children: [
-          if (_searchQuery.isNotEmpty)
-            Chip(
-              avatar: const Icon(Icons.search, size: 18),
-              label: Text('Recherche: "$_searchQuery"'),
-              onDeleted: _clearSearch,
-              deleteIcon: const Icon(Icons.close, size: 18),
-            ),
-          if (_favoritesOnly)
-            Chip(
-              avatar: const Icon(Icons.star, size: 18, color: Colors.amber),
-              label: const Text('Favoris uniquement'),
-              onDeleted: () => setState(() => _favoritesOnly = false),
-              deleteIcon: const Icon(Icons.close, size: 18),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNoResults() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
-          const SizedBox(height: 16),
-          Text(
-            'Aucune adresse trouvée',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.grey.shade600,
-                ),
+  Widget _puceDeFiltres(ThemeData theme) {
+    return Wrap(
+      spacing: DesignConstants.spacingS,
+      runSpacing: DesignConstants.spacingS,
+      children: [
+        if (_searchQuery.isNotEmpty)
+          InputChip(
+            label: Text('« $_searchQuery »'),
+            onDeleted: _clearSearch,
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Essayez de modifier vos filtres',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.grey.shade500,
-                ),
+        if (_favoritesOnly)
+          InputChip(
+            label: const Text('Favoris'),
+            onDeleted: () => setState(() => _favoritesOnly = false),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.location_off,
-            size: 100,
-            color: Colors.grey.shade400,
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Aucune adresse enregistrée',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 48),
-            child: Text(
-              'Ajoutez votre première adresse pour faciliter vos commandes',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Colors.grey.shade500,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 32),
-          FilledButton.icon(
-            onPressed: _showAddAddressSheet,
-            icon: const Icon(Icons.add_location),
-            label: const Text('Ajouter une adresse'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-            ),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -525,10 +390,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     });
 
     if (position == null) {
-      _showSnack(
-        'Autorisez la localisation pour trier par distance.',
-        Colors.orange,
-      );
+      _signaler('Autorisez la localisation pour trier par distance.');
     }
   }
 
@@ -573,7 +435,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
       builder: (context) => AddressDetailBottomSheet(
         onSave: (draft) async {
           await _addressService.addAddress(draft);
-          if (mounted) _showSnack('Adresse ajoutée', Colors.green);
+          if (mounted) _annoncer('Adresse ajoutée');
         },
       ),
     );
@@ -588,7 +450,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
         address: address,
         onSave: (draft) async {
           await _addressService.updateAddress(address.id!, draft);
-          if (mounted) _showSnack('Adresse modifiée', Colors.green);
+          if (mounted) _annoncer('Adresse modifiée');
         },
       ),
     );
@@ -602,10 +464,10 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     try {
       await _addressService.selectAddress(address.id!);
       if (mounted) {
-        _showSnack('Adresse sélectionnée : ${address.label}', Colors.green);
+        _annoncer('Adresse sélectionnée : ${address.label}');
       }
     } catch (e) {
-      if (mounted) _showSnack(_messageFor(e), Colors.red);
+      if (mounted) _signaler(_messageFor(e));
     }
   }
 
@@ -613,7 +475,7 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     try {
       await _addressService.toggleFavorite(address.id!);
     } catch (e) {
-      if (mounted) _showSnack(_messageFor(e), Colors.red);
+      if (mounted) _signaler(_messageFor(e));
     }
   }
 
@@ -621,13 +483,10 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     try {
       await _addressService.setDefaultAddress(address.id!);
       if (mounted) {
-        _showSnack(
-          '${address.label} définie comme adresse par défaut',
-          Colors.blue,
-        );
+        _annoncer('${address.label} est votre adresse par défaut');
       }
     } catch (e) {
-      if (mounted) _showSnack(_messageFor(e), Colors.red);
+      if (mounted) _signaler(_messageFor(e));
     }
   }
 
@@ -643,15 +502,21 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     return 'Opération impossible pour le moment. Réessayez.';
   }
 
-  void _showSnack(String message, Color background) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: background,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
+  /// Annonce une réussite.
+  ///
+  /// L'ancienne signature était `_showSnack(String, Color)` : chaque appelant
+  /// choisissait un vert, un rouge ou un orange de Material, et un
+  /// « Adresse supprimée » se retrouvait en orange quand un
+  /// « Adresse ajoutée » était en vert, sans que rien ne le justifie. Nommer
+  /// l'intention plutôt que la teinte laisse le design system trancher.
+  void _annoncer(String message) {
+    if (!mounted) return;
+    context.showSuccessMessage(message);
+  }
+
+  void _signaler(String message) {
+    if (!mounted) return;
+    context.showErrorMessage(message);
   }
 
   /// Confirme avant de supprimer.
@@ -664,7 +529,10 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        icon: const Icon(Icons.delete_outline, color: Colors.orange),
+        icon: Icon(
+          Icons.delete_outline_rounded,
+          color: Theme.of(context).colorScheme.error,
+        ),
         title: const Text('Supprimer cette adresse ?'),
         content: Text('« ${address.label} » sera définitivement effacée.'),
         actions: [
@@ -674,7 +542,10 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             child: const Text('Supprimer'),
           ),
         ],
@@ -686,10 +557,10 @@ class _AddressManagementScreenState extends State<AddressManagementScreen> {
     try {
       await _addressService.deleteAddress(address.id!);
       if (mounted) {
-        _showSnack('Adresse supprimée : ${address.label}', Colors.orange);
+        _annoncer('Adresse supprimée : ${address.label}');
       }
     } catch (e) {
-      if (mounted) _showSnack(_messageFor(e), Colors.red);
+      if (mounted) _signaler(_messageFor(e));
     }
   }
 
