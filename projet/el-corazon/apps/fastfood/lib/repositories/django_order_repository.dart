@@ -110,6 +110,7 @@ class DjangoOrderRepository implements OrderRepository {
   Order _toLocal(eccore.Order remote, {required String userId}) {
     return Order(
       id: remote.id,
+      reference: remote.reference,
       userId: userId,
       items: remote.lines.map(_toLocalItem).toList(),
       subtotal: remote.subtotal.toMajorUnits(),
@@ -124,6 +125,24 @@ class DjangoOrderRepository implements OrderRepository {
       createdAt: remote.createdAt,
       estimatedDeliveryTime: remote.estimatedDeliveryAt,
       specialInstructions: remote.deliveryInstructions,
+      statusUpdates: remote.statusEvents.map(_toLocalStatusUpdate).toList(),
+    );
+  }
+
+  /// Une étape du cycle de vie, telle que le serveur l'a horodatée.
+  ///
+  /// ## Ce qui était perdu
+  ///
+  /// `OrderSerializer` publie `status_events` — chaque passage d'un statut à
+  /// un autre, avec son motif et son horodatage — et l'adaptateur les jetait :
+  /// `statusUpdates` retombait sur sa valeur par défaut, la liste vide. La
+  /// chronologie du détail de commande ne pouvait donc afficher aucune heure,
+  /// alors que le serveur les connaissait toutes.
+  static OrderStatusUpdate _toLocalStatusUpdate(eccore.OrderStatusEvent event) {
+    return OrderStatusUpdate(
+      status: _toLocalStatus(event.toStatus),
+      timestamp: event.createdAt,
+      message: event.reason.isEmpty ? null : event.reason,
     );
   }
 
@@ -138,7 +157,31 @@ class DjangoOrderRepository implements OrderRepository {
       unitPrice: line.unitPrice.toMajorUnits(),
       totalPrice: line.lineTotal.toMajorUnits(),
       notes: line.notes,
+      customizations: _toLocalOptions(line.options),
     );
+  }
+
+  /// Les options retenues, groupe par groupe.
+  ///
+  /// ## Ce qui était perdu
+  ///
+  /// `OrderLineSerializer` publie `options` — chaque choix avec son groupe
+  /// (« Cuisson », « Suppléments ») et son écart de prix. L'adaptateur ne les
+  /// lisait pas, si bien que `customizations` restait vide : le détail d'une
+  /// commande affichait « Le Classique Burger » sans jamais dire qu'il avait
+  /// été commandé sans oignons. L'information avait pourtant traversé tout le
+  /// chemin, du panier au serveur, pour être jetée à la dernière marche.
+  ///
+  /// Plusieurs choix dans un même groupe sont réunis sur une ligne, séparés
+  /// par une virgule — c'est ainsi que le panier les montre déjà.
+  static Map<String, String> _toLocalOptions(List<eccore.ChosenOption> options) {
+    final parGroupe = <String, List<String>>{};
+    for (final option in options) {
+      parGroupe.putIfAbsent(option.groupName, () => <String>[]).add(option.optionName);
+    }
+    return {
+      for (final entree in parGroupe.entries) entree.key: entree.value.join(', '),
+    };
   }
 
   static OrderStatus _toLocalStatus(String remote) {

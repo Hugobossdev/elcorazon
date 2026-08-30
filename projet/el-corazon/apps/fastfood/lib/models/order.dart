@@ -2,6 +2,15 @@ import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class Order {
   final String id;
+
+  /// La référence lisible que le serveur attribue — « EC-4921 ».
+  ///
+  /// Distincte de [id], qui est un UUID. L'écran de détail affichait jusqu'ici
+  /// les huit premiers caractères de l'UUID faute de mieux ; le serveur
+  /// publiait pourtant `reference` depuis le début, et c'est ce numéro-là que
+  /// le support demande au téléphone.
+  final String reference;
+
   final String userId;
   final List<OrderItem> items;
   final double subtotal;
@@ -25,7 +34,7 @@ class Order {
     required this.userId,
     required this.items,
     required this.subtotal,
-    required this.total, required this.deliveryAddress, required this.paymentMethod, required this.orderTime, required this.createdAt, this.deliveryFee = 5.0,
+    required this.total, required this.deliveryAddress, required this.paymentMethod, required this.orderTime, required this.createdAt, this.reference = '', this.deliveryFee = 5.0,
     this.status = OrderStatus.pending,
     this.deliveryNotes,
     this.promoCode,
@@ -38,6 +47,7 @@ class Order {
 
   Order copyWith({
     String? id,
+    String? reference,
     String? userId,
     List<OrderItem>? items,
     double? subtotal,
@@ -58,6 +68,7 @@ class Order {
   }) {
     return Order(
       id: id ?? this.id,
+      reference: reference ?? this.reference,
       userId: userId ?? this.userId,
       items: items ?? this.items,
       subtotal: subtotal ?? this.subtotal,
@@ -82,6 +93,7 @@ class Order {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'reference': reference,
       'userId': userId,
       'subtotal': subtotal,
       'deliveryFee': deliveryFee,

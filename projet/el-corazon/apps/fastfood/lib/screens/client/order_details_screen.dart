@@ -1,10 +1,41 @@
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/models/order.dart';
-import 'package:elcora_fast/widgets/custom_button.dart';
-import 'package:elcora_fast/widgets/loading_widget.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
+import 'package:elcora_fast/presentation/suivi_commande.dart';
+import 'package:elcora_fast/repositories/django_order_repository.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/navigation_helper.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show ApiException, Journal;
 
+/// Détail d'une commande.
+///
+/// ## Le défaut que cette refonte corrige
+///
+/// L'écran recevait un `Order` **en argument de route** et ne le relisait
+/// jamais. Le statut affiché était donc celui du moment où la liste avait été
+/// chargée : on ouvrait « En préparation » sur une commande livrée depuis
+/// vingt minutes. Or la maquette `order_details` met précisément une
+/// **chronologie de statut** au premier plan — l'information la plus
+/// périssable de l'écran.
+///
+/// La commande reçue sert désormais de premier rendu — l'écran s'ouvre plein,
+/// sans attente — et `GET /orders/{id}/` la remplace dès qu'il répond. Une
+/// panne de réseau laisse la version connue à l'affichage, avec un bandeau qui
+/// le dit, plutôt qu'un écran vide.
+///
+/// ## Trois données que l'adaptateur jetait
+///
+/// Corrigées dans `django_order_repository.dart`, elles arrivent enfin ici :
+///
+/// * `reference` — le numéro lisible (« EC-4921 ») que le support demande au
+///   téléphone. L'écran affichait les huit premiers caractères de l'UUID ;
+/// * `statusEvents` — chaque changement de statut avec son horodatage, ce qui
+///   donne à la chronologie ses heures réelles ;
+/// * les `options` de chaque ligne — « sans oignons » avait traversé tout le
+///   chemin du panier au serveur pour être jeté à la dernière marche.
 class OrderDetailsScreen extends StatefulWidget {
   final Order order;
 
@@ -18,712 +49,567 @@ class OrderDetailsScreen extends StatefulWidget {
 }
 
 class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
-  final bool _isLoading = false;
+  late Order _commande;
+  bool _relecture = false;
+  bool _relectureEchouee = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _commande = widget.order;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _relire());
+  }
+
+  Future<void> _relire() async {
+    if (!mounted) return;
+    setState(() {
+      _relecture = true;
+      _relectureEchouee = false;
+    });
+
+    try {
+      final fraiche = await DjangoOrderRepository().getOrderById(_commande.id);
+      if (!mounted) return;
+      setState(() {
+        // `null` = 404 : la commande n'est plus visible. On garde ce qu'on
+        // avait plutôt que de vider l'écran — c'est encore ce que le client a
+        // vu de plus récent.
+        if (fraiche != null) _commande = fraiche;
+        _relecture = false;
+      });
+    } on ApiException catch (e) {
+      Journal.trace('Relecture de la commande ${_commande.id}: ${e.code}');
+      if (!mounted) return;
+      setState(() {
+        _relecture = false;
+        _relectureEchouee = true;
+      });
+    } catch (e) {
+      Journal.trace('Relecture de la commande ${_commande.id}: $e');
+      if (!mounted) return;
+      setState(() {
+        _relecture = false;
+        _relectureEchouee = true;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Text('Commande #${widget.order.id}'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Commande ${_reference()}',
         actions: [
-          IconButton(
-            onPressed: _shareOrder,
-            icon: const Icon(Icons.share),
-            tooltip: 'Partager',
+          GlassIconButton(
+            icon: Icons.help_outline_rounded,
+            tooltip: 'Aide sur cette commande',
+            filled: false,
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRouter.support),
           ),
         ],
       ),
-      body: OverlayLoadingWidget(
-        isLoading: _isLoading,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Status card
-              _buildStatusCard(),
-              const SizedBox(height: 16),
-
-              // Timeline
-              _buildTimeline(),
-              const SizedBox(height: 16),
-
-              // Order items
-              _buildOrderItems(),
-              const SizedBox(height: 16),
-
-              // Delivery information
-              if (widget.order.deliveryAddress.isNotEmpty) _buildDeliveryInfo(),
-              const SizedBox(height: 16),
-
-              // Payment information
-              _buildPaymentInfo(),
-              const SizedBox(height: 16),
-
-              // Actions
-              _buildActions(),
-            ],
+      body: RefreshIndicator(
+        onRefresh: _relire,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            DesignConstants.edgeMargin,
+            DesignConstants.spacingM,
+            DesignConstants.edgeMargin,
+            DesignConstants.spacingXL,
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusCard() {
-    final theme = Theme.of(context);
-
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            colors: [
-              _getStatusColor(widget.order.status.displayName),
-              _getStatusColor(widget.order.status.displayName)
-                  .withValues(alpha: 0.8),
+          children: [
+            if (_relectureEchouee) ...[
+              _bandeauHorsLigne(theme),
+              const SizedBox(height: DesignConstants.spacingM),
             ],
+            _chronologie(theme),
+            const SizedBox(height: DesignConstants.spacingL),
+            _livraison(theme),
+            const SizedBox(height: DesignConstants.spacingL),
+            _articles(theme),
+            const SizedBox(height: DesignConstants.spacingL),
+            _recapitulatif(theme),
+            const SizedBox(height: DesignConstants.spacingL),
+            ..._actions(theme),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// La référence du serveur, ou le début de l'identifiant à défaut.
+  String _reference() {
+    if (_commande.reference.isNotEmpty) return '#${_commande.reference}';
+    if (_commande.id.isEmpty) return '#—';
+    final court =
+        _commande.id.length <= 8 ? _commande.id : _commande.id.substring(0, 8);
+    return '#${court.toUpperCase()}';
+  }
+
+  Widget _bandeauHorsLigne(ThemeData theme) {
+    return SectionCard(
+      color: theme.colorScheme.errorContainer,
+      shadow: false,
+      child: Row(
+        children: [
+          Icon(
+            Icons.cloud_off_rounded,
+            size: DesignConstants.iconSizeMedium,
+            color: theme.colorScheme.onErrorContainer,
           ),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              _getStatusIcon(widget.order.status.displayName),
-              size: 48,
-              color: Colors.white,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _getStatusText(widget.order.status.displayName),
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Text(
+              'Statut non actualisé — voici la dernière version connue. '
+              'Tirez vers le bas pour réessayer.',
+              style: AppTypography.bodyMd(
+                color: theme.colorScheme.onErrorContainer,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              _getStatusDescription(widget.order.status.displayName),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: Colors.white.withValues(alpha: 0.9),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Commande passée le ${_formatDate(widget.order.orderTime)}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: Colors.white.withValues(alpha: 0.8),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildTimeline() {
-    final theme = Theme.of(context);
-    final steps = _getOrderSteps();
+  // ---------------------------------------------------------- chronologie
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Suivi de commande',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ...steps.asMap().entries.map((entry) {
-              final index = entry.key;
-              final step = entry.value;
-              final isLast = index == steps.length - 1;
-
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Timeline indicator
-                  Column(
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: step['completed']
-                              ? theme.primaryColor
-                              : theme.colorScheme.outline
-                                  .withValues(alpha: 0.3),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          step['completed'] ? Icons.check : Icons.circle,
-                          size: 12,
-                          color: Colors.white,
-                        ),
-                      ),
-                      if (!isLast)
-                        Container(
-                          width: 2,
-                          height: 40,
-                          color: step['completed']
-                              ? theme.primaryColor
-                              : theme.colorScheme.outline
-                                  .withValues(alpha: 0.3),
-                        ),
-                    ],
-                  ),
-
-                  const SizedBox(width: 16),
-
-                  // Step content
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          step['title'],
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: step['completed']
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                            color: step['completed']
-                                ? theme.colorScheme.onSurface
-                                : theme.colorScheme.onSurface
-                                    .withValues(alpha: 0.6),
-                          ),
-                        ),
-                        if (step['time'] != null)
-                          Text(
-                            step['time'],
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurface
-                                  .withValues(alpha: 0.6),
-                            ),
-                          ),
-                        const SizedBox(height: 16),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            }),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderItems() {
-    final theme = Theme.of(context);
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Articles commandés',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            ...widget.order.items.map(
-              (item) => Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surface.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.restaurant),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            item.menuItemName,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            'Quantité: ${item.quantity}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurface
-                                  .withValues(alpha: 0.7),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(
-                      PriceFormatter.format(item.totalPrice),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: theme.primaryColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const Divider(),
-
-            // Total
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Total',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  PriceFormatter.format(widget.order.total),
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.primaryColor,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDeliveryInfo() {
-    final theme = Theme.of(context);
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.location_on,
-                  color: theme.primaryColor,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Adresse de livraison',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              widget.order.deliveryAddress,
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            if (widget.order.status == OrderStatus.onTheWay)
-              CustomButton(
-                text: 'Suivre le livreur',
-                onPressed: () {
-                  // Navigate to live tracking
-                  Navigator.pushNamed(
-                    context,
-                    AppRouter.deliveryTracking,
-                    arguments: {'orderId': widget.order.id},
-                  );
-                },
-                icon: Icons.map,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPaymentInfo() {
-    final theme = Theme.of(context);
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.payment,
-                  color: theme.primaryColor,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Paiement',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Mode de paiement'),
-                Text(widget.order.paymentMethod.displayName),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Statut'),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                    'Payé',
-                    style: TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActions() {
-    final theme = Theme.of(context);
+  /// Les quatre jalons de la maquette, marqués depuis le statut **réel**.
+  ///
+  /// L'horodatage de chaque étape vient de `statusEvents` quand le serveur
+  /// l'a enregistrée. Une étape franchie sans événement correspondant reste
+  /// cochée sans heure : on sait qu'elle a eu lieu, on ne prétend pas savoir
+  /// quand.
+  Widget _chronologie(ThemeData theme) {
+    final etapes = etapesDeSuivi(_commande);
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (widget.order.status == OrderStatus.pending) ...[
-          CustomButton(
-            text: 'Annuler la commande',
-            onPressed: _cancelOrder,
-            backgroundColor: theme.colorScheme.error,
-            icon: Icons.cancel,
-          ),
-          const SizedBox(height: 12),
-        ],
-        CustomButton(
-          text: 'Contacter le support',
-          onPressed: _contactSupport,
-          outlined: true,
-          icon: Icons.support_agent,
+        Row(
+          children: [
+            const Expanded(child: SectionHeader(title: 'Suivi')),
+            if (_relecture)
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
         ),
-        const SizedBox(height: 12),
-        CustomButton(
-          text: 'Renouveler la commande',
-          onPressed: _reorderItems,
-          outlined: true,
-          icon: Icons.refresh,
-        ),
-        if (widget.order.status == OrderStatus.delivered) ...[
-          const SizedBox(height: 12),
-          CustomButton(
-            text: 'Noter la commande',
-            onPressed: () {
-              Navigator.pushNamed(
-                context,
-                AppRouter.orderRating,
-                arguments: {'order': widget.order},
-              );
-            },
-            icon: Icons.star,
-            backgroundColor: Colors.amber,
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          child: Column(
+            children: [
+              for (var i = 0; i < etapes.length; i++)
+                _jalon(theme, etapes[i], dernier: i == etapes.length - 1),
+            ],
           ),
-        ],
+        ),
       ],
     );
   }
 
-  void _shareOrder() {
-    // Implement share functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Partage de la commande...')),
-    );
-  }
+  Widget _jalon(ThemeData theme, EtapeDeSuivi etape, {required bool dernier}) {
+    final Color teinte;
+    if (etape.annulation) {
+      teinte = theme.colorScheme.error;
+    } else if (etape.franchie) {
+      teinte = AppColors.success;
+    } else {
+      teinte = theme.colorScheme.outlineVariant;
+    }
 
-  void _cancelOrder() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Annuler la commande'),
-        content:
-            const Text('Êtes-vous sûr de vouloir annuler cette commande ?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Non'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // Implement cancellation logic
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Commande annulée'),
-                  backgroundColor: Colors.orange,
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: etape.franchie || etape.annulation
+                      ? teinte
+                      : theme.colorScheme.surfaceContainerHigh,
+                  shape: BoxShape.circle,
                 ),
-              );
-            },
-            child: const Text('Oui, annuler'),
+                child: Icon(
+                  etape.annulation
+                      ? Icons.close_rounded
+                      : etape.franchie
+                          ? Icons.check_rounded
+                          : _icone(etape.jalon),
+                  size: 16,
+                  color: etape.franchie || etape.annulation
+                      ? theme.colorScheme.onPrimary
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (!dernier)
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    color: etape.franchie
+                        ? teinte
+                        : theme.colorScheme.outlineVariant,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: dernier ? 0 : DesignConstants.spacingL,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          etape.annulation
+                              ? libelleDeSortie(_commande.status)
+                              : etape.jalon.libelle,
+                          style: AppTypography.titleLg(
+                            color: etape.franchie || etape.annulation
+                                ? theme.colorScheme.onSurface
+                                : theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      if (etape.horodatage != null)
+                        Text(
+                          _heure(etape.horodatage!),
+                          style: AppTypography.bodyMd(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (etape.courante && !etape.annulation) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      etape.jalon.description,
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  void _contactSupport() {
-    // Implement support contact
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ouverture du chat support...')),
+  // ------------------------------------------------------------- livraison
+
+  Widget _livraison(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Livraison'),
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _ligneInfo(
+                theme,
+                Icons.location_on_outlined,
+                'Adresse',
+                _commande.deliveryAddress.isEmpty
+                    ? 'Adresse non renseignée'
+                    : _commande.deliveryAddress,
+              ),
+              if (_commande.estimatedDeliveryTime != null) ...[
+                const SizedBox(height: DesignConstants.spacingM),
+                _ligneInfo(
+                  theme,
+                  Icons.schedule_rounded,
+                  'Arrivée estimée',
+                  _heure(_commande.estimatedDeliveryTime!),
+                ),
+              ],
+              if ((_commande.deliveryNotes ?? '').isNotEmpty) ...[
+                const SizedBox(height: DesignConstants.spacingM),
+                _ligneInfo(
+                  theme,
+                  Icons.sticky_note_2_outlined,
+                  'Consignes',
+                  _commande.deliveryNotes!,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 
-  void _reorderItems() {
-    // Implement reorder functionality
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Articles ajoutés au panier')),
+  Widget _ligneInfo(
+    ThemeData theme,
+    IconData icone,
+    String libelle,
+    String valeur,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          icone,
+          size: DesignConstants.iconSizeMedium,
+          color: theme.colorScheme.primary,
+        ),
+        const SizedBox(width: DesignConstants.spacingM),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                libelle,
+                style: AppTypography.labelLg(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                valeur,
+                style: AppTypography.bodyLg(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-      case 'en_attente':
-        return Colors.orange;
-      case 'confirmed':
-      case 'confirmé':
-        return Colors.blue;
-      case 'preparing':
-      case 'en_preparation':
-        return Colors.purple;
-      case 'ready':
-      case 'prêt':
-        return Colors.green;
-      case 'delivering':
-      case 'en_livraison':
-        return Colors.teal;
-      case 'delivered':
-      case 'livré':
-        return Colors.green;
-      case 'cancelled':
-      case 'annulé':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
+  // -------------------------------------------------------------- articles
+
+  Widget _articles(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(
+          title: 'Articles',
+          subtitle: _commande.items.length <= 1
+              ? '${_commande.items.length} article'
+              : '${_commande.items.length} articles',
+        ),
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          child: Column(
+            children: [
+              for (var i = 0; i < _commande.items.length; i++) ...[
+                _ligneArticle(theme, _commande.items[i]),
+                if (i < _commande.items.length - 1)
+                  Divider(
+                    height: DesignConstants.spacingL,
+                    color:
+                        theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
-  IconData _getStatusIcon(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-      case 'en_attente':
-        return Icons.hourglass_empty;
-      case 'confirmed':
-      case 'confirmé':
-        return Icons.check_circle;
-      case 'preparing':
-      case 'en_preparation':
-        return Icons.restaurant;
-      case 'ready':
-      case 'prêt':
-        return Icons.done_all;
-      case 'delivering':
-      case 'en_livraison':
-        return Icons.delivery_dining;
-      case 'delivered':
-      case 'livré':
-        return Icons.check_circle;
-      case 'cancelled':
-      case 'annulé':
-        return Icons.cancel;
-      default:
-        return Icons.info;
-    }
+  Widget _ligneArticle(ThemeData theme, OrderItem article) {
+    // Les options du serveur, groupe par groupe — « Cuisson : bien cuit ».
+    final options = article.customizations.entries
+        .where((e) => e.value.trim().isNotEmpty)
+        .map((e) => '${e.key} : ${e.value}')
+        .toList();
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DesignConstants.spacingS,
+            vertical: 2,
+          ),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHigh,
+            borderRadius: DesignConstants.borderRadiusSmall,
+          ),
+          child: Text(
+            '${article.quantity}×',
+            style: AppTypography.labelLg(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        const SizedBox(width: DesignConstants.spacingM),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                article.name,
+                style: AppTypography.titleLg(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              for (final option in options) ...[
+                const SizedBox(height: 2),
+                Text(
+                  option,
+                  style: AppTypography.bodyMd(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              if ((article.notes ?? '').isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  article.notes!,
+                  style: AppTypography.bodyMd(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ).copyWith(fontStyle: FontStyle.italic),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: DesignConstants.spacingS),
+        Text(
+          PriceFormatter.format(article.totalPrice),
+          style: AppTypography.titleLg(color: theme.colorScheme.onSurface),
+        ),
+      ],
+    );
   }
 
-  String _getStatusText(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-      case 'en_attente':
-        return 'En attente';
-      case 'confirmed':
-      case 'confirmé':
-        return 'Confirmée';
-      case 'preparing':
-      case 'en_preparation':
-        return 'En préparation';
-      case 'ready':
-      case 'prêt':
-      case 'prête':
-        return 'Prête';
-      case 'picked_up':
-      case 'pickedup':
-      case 'récupérée':
-        return 'Récupérée';
-      case 'on_the_way':
-      case 'ontheway':
-      case 'delivering':
-      case 'en_livraison':
-        return 'En livraison';
-      case 'delivered':
-      case 'livré':
-      case 'livrée':
-        return 'Livrée';
-      case 'cancelled':
-      case 'annulé':
-      case 'annulée':
-        return 'Annulée';
-      default:
-        return status;
-    }
+  // --------------------------------------------------------- récapitulatif
+
+  Widget _recapitulatif(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Récapitulatif'),
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          child: Column(
+            children: [
+              SummaryRow(
+                label: 'Sous-total',
+                value: PriceFormatter.format(_commande.subtotal),
+              ),
+              SummaryRow(
+                label: 'Frais de livraison',
+                value: PriceFormatter.format(_commande.deliveryFee),
+              ),
+              if (_commande.discount > 0)
+                SummaryRow(
+                  // Le code promotionnel n'est pas porté par la commande — le
+                  // serveur ne le publie pas sur `OrderSerializer`. Le montant,
+                  // lui, est exact : c'est celui qui a été déduit.
+                  label: (_commande.promoCode ?? '').isEmpty
+                      ? 'Remise'
+                      : 'Remise (${_commande.promoCode})',
+                  value: '-${PriceFormatter.format(_commande.discount)}',
+                  isDiscount: true,
+                ),
+              const SummaryDivider(),
+              SummaryRow(
+                label: 'Total',
+                value: PriceFormatter.format(_commande.total),
+                isTotal: true,
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              Row(
+                children: [
+                  Icon(
+                    Icons.check_circle_outline_rounded,
+                    size: DesignConstants.iconSizeSmall,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: DesignConstants.spacingS),
+                  Expanded(
+                    child: Text(
+                      'Réglé par ${_commande.paymentMethod.displayName}',
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
-  String _getStatusDescription(String status) {
-    switch (status.toLowerCase()) {
-      case 'pending':
-      case 'en_attente':
-        return 'Nous traitons votre commande';
-      case 'confirmed':
-      case 'confirmé':
-        return 'Votre commande a été confirmée';
-      case 'preparing':
-      case 'en_preparation':
-        return 'Nos chefs préparent votre commande';
-      case 'ready':
-      case 'prêt':
-        return 'Votre commande est prête';
-      case 'delivering':
-      case 'en_livraison':
-        return 'Notre livreur est en route';
-      case 'delivered':
-      case 'livré':
-        return 'Votre commande a été livrée';
-      case 'cancelled':
-      case 'annulé':
-        return 'Cette commande a été annulée';
-      default:
-        return 'Statut de la commande';
-    }
-  }
+  // --------------------------------------------------------------- actions
 
-  List<Map<String, dynamic>> _getOrderSteps() {
-    final currentStatus = widget.order.status;
+  List<Widget> _actions(ThemeData theme) {
+    final enCours = _commande.status != OrderStatus.delivered &&
+        _commande.status != OrderStatus.cancelled &&
+        _commande.status != OrderStatus.refunded &&
+        _commande.status != OrderStatus.failed;
 
     return [
-      {
-        'title': 'Commande passée',
-        'completed': true,
-        'time': _formatTime(widget.order.orderTime),
-      },
-      {
-        'title': 'Commande confirmée',
-        'completed': _isStatusCompleted(OrderStatus.confirmed, currentStatus),
-        'time': _isStatusCompleted(OrderStatus.confirmed, currentStatus)
-            ? '5 min'
-            : null,
-      },
-      {
-        'title': 'En préparation',
-        'completed': _isStatusCompleted(OrderStatus.preparing, currentStatus),
-        'time': _isStatusCompleted(OrderStatus.preparing, currentStatus)
-            ? '15 min'
-            : null,
-      },
-      {
-        'title': 'Prête',
-        'completed': _isStatusCompleted(OrderStatus.ready, currentStatus),
-        'time': _isStatusCompleted(OrderStatus.ready, currentStatus)
-            ? '25 min'
-            : null,
-      },
-      {
-        'title': 'En livraison',
-        'completed': _isStatusCompleted(OrderStatus.onTheWay, currentStatus),
-        'time': _isStatusCompleted(OrderStatus.onTheWay, currentStatus)
-            ? '35 min'
-            : null,
-      },
-      {
-        'title': 'Livrée',
-        'completed': _isStatusCompleted(OrderStatus.delivered, currentStatus),
-        'time': _isStatusCompleted(OrderStatus.delivered, currentStatus)
-            ? '45 min'
-            : null,
-      },
+      if (enCours)
+        ActionButton(
+          label: 'Suivre la livraison',
+          emphasis: ActionEmphasis.gradient,
+          icon: Icons.navigation_rounded,
+          onPressed: () => context.navigateToDeliveryTracking(_commande.id),
+        )
+      else if (_commande.status == OrderStatus.delivered)
+        ActionButton(
+          label: 'Noter cette commande',
+          emphasis: ActionEmphasis.gradient,
+          icon: Icons.star_outline_rounded,
+          onPressed: () => Navigator.of(context).pushNamed(
+            AppRouter.orderRating,
+            arguments: {'order': _commande},
+          ),
+        ),
+      const SizedBox(height: DesignConstants.spacingS),
+      ActionButton(
+        label: 'Besoin d’aide ?',
+        emphasis: ActionEmphasis.outlined,
+        icon: Icons.support_agent_rounded,
+        onPressed: () => Navigator.of(context).pushNamed(AppRouter.support),
+      ),
     ];
   }
 
-  bool _isStatusCompleted(OrderStatus stepStatus, OrderStatus currentStatus) {
-    const statusOrder = [
-      OrderStatus.pending,
-      OrderStatus.confirmed,
-      OrderStatus.preparing,
-      OrderStatus.ready,
-      OrderStatus.onTheWay,
-      OrderStatus.delivered,
-    ];
-
-    final stepIndex = statusOrder.indexOf(stepStatus);
-    final currentIndex = statusOrder.indexOf(currentStatus);
-
-    return currentIndex >= stepIndex;
+  String _heure(DateTime date) {
+    final h = date.hour.toString().padLeft(2, '0');
+    final m = date.minute.toString().padLeft(2, '0');
+    return '$h:$m';
   }
 
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
-
-  String _formatTime(DateTime date) {
-    return '${date.hour}:${date.minute.toString().padLeft(2, '0')}';
+  IconData _icone(JalonDeSuivi jalon) {
+    switch (jalon) {
+      case JalonDeSuivi.confirmee:
+        return Icons.receipt_long_rounded;
+      case JalonDeSuivi.enPreparation:
+        return Icons.local_fire_department_rounded;
+      case JalonDeSuivi.enRoute:
+        return Icons.two_wheeler_rounded;
+      case JalonDeSuivi.livree:
+        return Icons.task_alt_rounded;
+    }
   }
 }
