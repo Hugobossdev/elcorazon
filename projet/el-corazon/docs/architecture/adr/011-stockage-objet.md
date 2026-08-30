@@ -1,6 +1,11 @@
 # ADR-011 — Stockage objet : S3 servi par MinIO
 
-**Statut** : accepté · **Date** : 2026-08-05
+**Statut** : **remplacé** par [ADR-012](012-stockage-objet-cloudinary.md) (2026-08-21) · **Date** : 2026-08-05
+
+> Le stockage est passé à Cloudinary. Les décisions d'architecture posées ici — les deux
+> visibilités, la porte unique, le stockage par défaut privé, les fabriques par le registre
+> — sont **reconduites** par ADR-012 ; seul l'hébergement change. Ce document reste la trace
+> du raisonnement qui les a établies.
 
 ## Contexte
 

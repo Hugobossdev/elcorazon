@@ -1152,6 +1152,24 @@ class CustomizationService extends ChangeNotifier {
         .any((option) => option.isRemote);
   }
 
+  /// Vrai quand le catalogue impose un choix sur cet article — une cuisson,
+  /// une taille, un accompagnement.
+  ///
+  /// Le détail de l'article est chargé si besoin : la liste du menu ne porte
+  /// pas ses groupes d'options, si bien qu'un « + » posé sur une carte ne peut
+  /// pas savoir, sans cet appel, qu'il compose une ligne que
+  /// `POST /carts/{slug}/lines/` refusera en 409.
+  Future<bool> exigeUnChoix(String menuItemId, {String? fallbackName}) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+    if (_isInitialized) {
+      await _loadOptionsForMenuItem(menuItemId);
+    }
+    return _getOptionsForMenuItem(menuItemId, fallbackName: fallbackName)
+        .any((option) => option.isRemote && option.minSelections > 0);
+  }
+
   // Validate customization for an item
   Map<String, dynamic> validateCustomization(
       String sessionId, String menuItemName,) {

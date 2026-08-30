@@ -1,488 +1,158 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:elcora_fast/services/cart_service.dart';
-import 'package:elcora_fast/services/app_service.dart';
-// import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
 import 'package:elcora_fast/models/cart_item.dart' as cart_item;
 import 'package:elcora_fast/navigation/navigation_service.dart';
+import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcora_fast/services/cart_service.dart';
+import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/widgets/cart_item_card.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart';
 import 'package:elcora_fast/widgets/menu_item_card.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
-// import '../../widgets/enhanced_animations.dart'; // Supprimé
-import 'package:elcora_fast/services/design_enhancement_service.dart';
-import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-/// Écran de panier
+/// Écran du panier.
+///
+/// ## Trois blocs, et une barre
+///
+/// La maquette empile les lignes, le code promotionnel et le récapitulatif,
+/// puis ancre en bas une barre qui répète le total et porte l'action. La
+/// répétition du total est voulue : le récapitulatif se trouve souvent hors de
+/// l'écran au moment où l'on décide de valider.
+///
+/// ## Ce que la refonte corrige au passage
+///
+/// Les lignes passaient par `DesignEnhancementService.createEnhancedCartItemCard`,
+/// qui **reconstruisait un `CartItem` de toutes pièces** — identifiants vidés,
+/// personnalisations perdues — et à qui cet écran passait la description
+/// littérale « Plat délicieux ». Les suppléments choisis à l'écran de
+/// personnalisation n'apparaissaient donc jamais dans le panier, alors qu'ils
+/// étaient bien facturés. La ligne reçoit désormais le vrai `CartItem`.
 class CartScreen extends StatelessWidget {
   const CartScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Row(
-          children: [
-            const Icon(Icons.shopping_cart_rounded, size: 24),
-            const SizedBox(width: 8),
-            Consumer<CartService>(
-              builder: (context, cartService, child) {
-                return Text(
-                  'Mon Panier${cartService.itemCount > 0 ? ' (${cartService.itemCount})' : ''}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                AppColors.primary,
-                AppColors.primaryDark,
-              ],
-            ),
-          ),
-        ),
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Mon panier',
         actions: [
           Consumer<CartService>(
             builder: (context, cartService, child) {
-              if (cartService.itemCount > 0) {
-                return Tooltip(
-                  message: 'Vider le panier',
-                  child: IconButton(
-                    icon: const Icon(Icons.delete_sweep_rounded),
-                    onPressed: () => _showClearCartDialog(context),
-                  ),
-                );
-              }
-              return const SizedBox.shrink();
+              if (cartService.isEmpty) return const SizedBox(width: 44);
+              return GlassIconButton(
+                icon: Icons.delete_sweep_rounded,
+                tooltip: 'Vider le panier',
+                filled: false,
+                onPressed: () => _showClearCartDialog(context),
+              );
             },
           ),
         ],
       ),
       body: Consumer<CartService>(
         builder: (context, cartService, child) {
-          final cartItems = cartService.items;
+          if (cartService.isEmpty) return _panierVide(context);
 
-          if (cartItems.isEmpty) {
-            return _buildEmptyCart(context);
-          }
-
-          return Column(
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingM,
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingL,
+            ),
             children: [
-              Expanded(
-                child: CustomScrollView(
-                  slivers: [
-                    // Liste des articles du panier
-                    SliverPadding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      sliver: SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final items = cartService.items;
-                            if (index >= items.length) {
-                              return const SizedBox.shrink();
-                            }
-
-                            final cartItem = items[index];
-                            return Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                16,
-                                0,
-                                16,
-                                12,
-                              ),
-                              child: DesignEnhancementService
-                                  .createEnhancedCartItemCard(
-                                name: cartItem.name,
-                                description: 'Plat délicieux',
-                                price: cartItem.price,
-                                imageUrl: cartItem.imageUrl,
-                                quantity: cartItem.quantity,
-                                onIncrement: () {
-                                  cartService.incrementItemQuantity(
-                                    cartItem.menuItemId,
-                                  );
-                                },
-                                onDecrement: () {
-                                  cartService.decrementItemQuantity(
-                                    cartItem.menuItemId,
-                                  );
-                                },
-                                onRemove: () {
-                                  _showDeleteItemDialog(
-                                    context,
-                                    cartItem,
-                                    index,
-                                    cartService,
-                                  );
-                                },
-                              ),
-                            );
-                          },
-                          childCount: cartService.items.length,
-                        ),
-                      ),
-                    ),
-                    // Suggestions
-                    SliverToBoxAdapter(
-                      child: _buildSuggestions(context, cartService),
-                    ),
-                  ],
+              for (var index = 0; index < cartService.items.length; index++)
+                CartItemCard(
+                  item: cartService.items[index],
+                  onQuantityChanged: (quantite) => _changerQuantite(
+                    cartService,
+                    index,
+                    quantite,
+                  ),
+                  onRemove: () => _showDeleteItemDialog(
+                    context,
+                    cartService.items[index],
+                    index,
+                    cartService,
+                  ),
+                ),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => context.goBack(),
+                  icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
+                  label: const Text('Ajouter d’autres articles'),
                 ),
               ),
-              _buildCartSummary(context, cartService),
+              const SizedBox(height: DesignConstants.spacingM),
+              _ChampCodePromo(cartService: cartService),
+              const SizedBox(height: DesignConstants.spacingM),
+              _Recapitulatif(cartService: cartService),
+              _Suggestions(cartService: cartService),
             ],
+          );
+        },
+      ),
+      bottomNavigationBar: Consumer<CartService>(
+        builder: (context, cartService, child) {
+          if (cartService.isEmpty) return const SizedBox.shrink();
+
+          return GlassBottomBar(
+            child: StickySummaryBar(
+              label: cartService.hasQuote ? 'Total' : 'Total hors livraison',
+              amount: PriceFormatter.format(cartService.total),
+              action: ActionButton(
+                label: 'Commander',
+                emphasis: ActionEmphasis.gradient,
+                trailingIcon: Icons.arrow_forward_rounded,
+                onPressed: () => _commander(context),
+              ),
+            ),
           );
         },
       ),
     );
   }
 
-  Widget _buildEmptyCart(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.shopping_cart_outlined,
-            size: 120,
-            color: AppColors.textSecondary.withValues(alpha: 0.3),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Votre panier est vide',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Ajoutez des plats délicieux à votre panier',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 32),
-          DesignEnhancementService.createEnhancedButton(
-            text: 'Découvrir le menu',
-            icon: Icons.restaurant_menu,
-            onPressed: () {
-              context.goBack();
-            },
-            backgroundColor: AppColors.primary,
-            isFullWidth: true,
-          ),
-        ],
-      ),
-    );
+  // ------------------------------------------------------------------ actions
+
+  /// Le décrément s'arrête à un : passer à zéro effacerait la ligne sans rien
+  /// demander, et un appui de trop sur le moins est vite arrivé. C'est la
+  /// corbeille, avec sa confirmation, qui retire.
+  void _changerQuantite(CartService cartService, int index, int quantite) {
+    if (quantite < 1) return;
+    cartService.updateItemQuantity(index, quantite);
   }
 
-  Widget _buildCartSummary(BuildContext context, CartService cartService) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
+  Future<void> _commander(BuildContext context) async {
+    final appService = context.read<AppService>();
+
+    if (!appService.isLoggedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Connectez-vous pour valider votre commande'),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 20,
-            offset: const Offset(0, -5),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Ligne de séparation décorative
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 20),
+      );
+      NavigationService.navigateToAuth(context);
+      return;
+    }
 
-          // Résumé des prix
-          _buildPriceSummary(cartService),
-          const SizedBox(height: 20),
-
-          // Codes promo
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _openPromoCodes(context, cartService),
-              icon: const Icon(Icons.local_offer_outlined),
-              label: Text(
-                cartService.promoCode != null
-                    ? 'Modifier le code promo'
-                    : 'Ajouter un code promo',
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                side:
-                    BorderSide(color: AppColors.primary.withValues(alpha: 0.4)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Bouton de commande
-          DesignEnhancementService.createEnhancedButton(
-            text: 'Commander maintenant',
-            icon: Icons.shopping_bag,
-            onPressed: () async {
-              final appService =
-                  Provider.of<AppService>(context, listen: false);
-              if (!appService.isLoggedIn) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Veuillez vous connecter pour valider votre commande',
-                    ),
-                    backgroundColor: AppColors.primary,
-                  ),
-                );
-                NavigationService.navigateToAuth(context);
-              } else {
-                await context.navigateToCheckout();
-              }
-            },
-            backgroundColor: AppColors.primary,
-            isFullWidth: true,
-          ),
-          const SizedBox(height: 12),
-
-          // Bouton continuer les achats
-          DesignEnhancementService.createEnhancedButton(
-            text: 'Continuer les achats',
-            onPressed: () {
-              context.goBack();
-            },
-            backgroundColor: AppColors.surface,
-            textColor: AppColors.primary,
-            isFullWidth: true,
-          ),
-        ],
-      ),
-    );
+    await context.navigateToCheckout();
   }
 
-  Widget _buildPriceSummary(CartService cartService) {
-    final subtotal = cartService.subtotal;
-    final discount = cartService.discount;
-    final total = cartService.total;
-
-    return Column(
-      children: [
-        _buildPriceRow(
-          'Sous-total (${cartService.itemCount} article${cartService.itemCount > 1 ? 's' : ''})',
-          subtotal,
-        ),
-        const SizedBox(height: 8),
-        // Tant qu'aucune adresse n'est choisie, personne ne connaît le prix de
-        // la course : elle dépend de la zone d'arrivée. Le panier affichait
-        // « 500 F » par défaut — un montant que le serveur n'aurait presque
-        // jamais confirmé.
-        if (cartService.hasQuote)
-          _buildPriceRow('Livraison', cartService.deliveryFee)
-        else
-          _buildPendingRow('Livraison', 'calculée à la validation'),
-        if (discount > 0) ...[
-          const SizedBox(height: 8),
-          _buildPriceRow(
-            'Remise${cartService.promoCode != null ? ' (${cartService.promoCode})' : ''}',
-            -discount,
-            isDiscount: true,
-          ),
-        ],
-        const Divider(height: 20),
-        _buildPriceRow(
-          cartService.hasQuote ? 'Total' : 'Total (hors livraison)',
-          total,
-          isTotal: true,
-        ),
-      ],
-    );
-  }
-
-  Future<void> _openPromoCodes(
-    BuildContext context,
-    CartService cartService,
-  ) async {
-    // Sans adresse : seule la remise nous intéresse ici, et elle porte sur le
-    // sous-total. Les frais du devis ne sont pas lus.
-    await context.navigateToPromoCodes(
-      null,
-      (String code, double discount) {
-        cartService.applyPromoDiscount(code: code, discount: discount);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Code $code appliqué: -${discount.toStringAsFixed(0)} FCFA',
-            ),
-            backgroundColor: AppColors.success,
-          ),
-        );
-      },
-    );
-  }
-
-  /// Ligne dont le montant n'est pas encore connu du serveur. Dire « calculée
-  /// à la validation » vaut mieux qu'un zéro, qui se lit « offerte ».
-  Widget _buildPendingRow(String label, String note) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 16, color: AppColors.textSecondary),
-        ),
-        Text(
-          note,
-          style: const TextStyle(
-            fontSize: 14,
-            fontStyle: FontStyle.italic,
-            color: AppColors.textSecondary,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPriceRow(
-    String label,
-    double amount, {
-    bool isTotal = false,
-    bool isDiscount = false,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: isTotal ? 18 : 16,
-            fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-            color: isTotal ? AppColors.textPrimary : AppColors.textSecondary,
-          ),
-        ),
-        Text(
-          // Pas de signe ajouté ici : la remise arrive déjà négative (`-discount`)
-          // et le formateur du socle rend le signe. Le préfixer une seconde fois
-          // écrivait « --.500 CFA ». `isDiscount` ne pilote plus que la couleur.
-          PriceFormatter.format(amount),
-          style: TextStyle(
-            fontSize: isTotal ? 18 : 16,
-            fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-            color: isDiscount
-                ? AppColors.success
-                : isTotal
-                    ? AppColors.primary
-                    : AppColors.textPrimary,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSuggestions(BuildContext context, CartService cartService) {
-    return Consumer<AppService>(
-      builder: (context, appService, child) {
-        // Récupérer les produits populaires non déjà dans le panier
-        final cartItemIds = cartService.items.map((e) => e.menuItemId).toSet();
-        final suggestions = appService.menuItems
-            .where(
-              (item) =>
-                  !cartItemIds.contains(item.id) &&
-                  item.isPopular &&
-                  item.isAvailable,
-            )
-            .take(5)
-            .toList();
-
-        if (suggestions.isEmpty) {
-          return const SizedBox.shrink();
-        }
-
-        return Container(
-          margin: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.lightbulb_outline, color: AppColors.primary),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Suggestions pour vous',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textPrimary,
-                        ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // Les suggestions réemploient la carte du menu au lieu d'en
-              // redessiner une à la main. La copie locale enfermait une photo
-              // de 100 px et son texte dans une boîte de 160 px : il en
-              // manquait deux ou trois, et le bouton d'ajout passait sous le
-              // bord. Elle divergeait en outre du reste de l'application à
-              // chaque retouche du catalogue.
-              Builder(
-                builder: (context) {
-                  const largeurCarte = 170.0;
-                  return SizedBox(
-                    height: MenuItemCard.hauteurPour(context, largeurCarte),
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: suggestions.length,
-                      itemBuilder: (context, index) {
-                        final item = suggestions[index];
-                        return Container(
-                          width: largeurCarte,
-                          margin: const EdgeInsets.only(right: 12),
-                          child: MenuItemCard(
-                            item: item,
-                            onTap: () =>
-                                context.navigateToItemCustomization(item),
-                            onAddToCart: () {
-                              cartService.addItem(item);
-                              context.showSuccessMessage(
-                                '${item.name} ajouté !',
-                              );
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
+  Widget _panierVide(BuildContext context) {
+    return EmptyStateWidget(
+      title: 'Votre panier est vide',
+      message: 'Ajoutez des plats et ils apparaîtront ici.',
+      icon: Icons.shopping_cart_outlined,
+      actionText: 'Découvrir le menu',
+      onAction: () => context.goBack(),
     );
   }
 
@@ -493,10 +163,9 @@ class CartScreen extends StatelessWidget {
     CartService cartService,
   ) {
     context.showEnhancedDialog(
-      title: 'Supprimer l\'article',
-      content:
-          'Êtes-vous sûr de vouloir supprimer "${cartItem.name}" de votre panier ?',
-      confirmText: 'Supprimer',
+      title: 'Retirer l’article',
+      content: 'Retirer « ${cartItem.name} » de votre panier ?',
+      confirmText: 'Retirer',
       cancelText: 'Annuler',
       isDestructive: true,
       onConfirm: () {
@@ -510,17 +179,303 @@ class CartScreen extends StatelessWidget {
   void _showClearCartDialog(BuildContext context) {
     context.showEnhancedDialog(
       title: 'Vider le panier',
-      content:
-          'Êtes-vous sûr de vouloir supprimer tous les articles de votre panier ?',
+      content: 'Retirer tous les articles de votre panier ?',
       confirmText: 'Vider',
       cancelText: 'Annuler',
       isDestructive: true,
       onConfirm: () {
-        Provider.of<CartService>(context, listen: false).clear();
+        context.read<CartService>().clear();
         context.showSuccessMessage('Panier vidé');
       },
-      onCancel: () {
-        context.showSuccessMessage('Action annulée');
+      onCancel: () {},
+    );
+  }
+}
+
+// ------------------------------------------------------------------- promo
+
+/// Saisie du code promotionnel, en ligne.
+///
+/// La maquette la met dans le panier plutôt que derrière un écran dédié, et
+/// c'est le bon endroit : le code se saisit en même temps qu'on relit son
+/// total. L'écran dédié reste accessible depuis le règlement, où l'adresse est
+/// connue et le devis complet.
+///
+/// La vérification passe par `CartService.appliquerCodePromo`, donc par
+/// `POST /orders/preview/` : aucune remise n'est calculée ici.
+class _ChampCodePromo extends StatefulWidget {
+  const _ChampCodePromo({required this.cartService});
+
+  final CartService cartService;
+
+  @override
+  State<_ChampCodePromo> createState() => _ChampCodePromoState();
+}
+
+class _ChampCodePromoState extends State<_ChampCodePromo> {
+  final _controleur = TextEditingController();
+  bool _enCours = false;
+  String? _erreur;
+
+  @override
+  void dispose() {
+    _controleur.dispose();
+    super.dispose();
+  }
+
+  Future<void> _appliquer() async {
+    setState(() {
+      _enCours = true;
+      _erreur = null;
+    });
+
+    final erreur = await widget.cartService.appliquerCodePromo(
+      _controleur.text,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _enCours = false;
+      _erreur = erreur;
+    });
+
+    if (erreur == null) {
+      _controleur.clear();
+      context.showSuccessMessage('Code promo appliqué');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final applique = widget.cartService.promoCode;
+
+    if (applique != null && applique.isNotEmpty) {
+      return SectionCard(
+        child: Row(
+          children: [
+            Icon(
+              Icons.local_activity_rounded,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: DesignConstants.spacingS + 2),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    applique,
+                    style: AppTypography.titleLg(
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  Text(
+                    'Remise de ${PriceFormatter.format(widget.cartService.discount)}',
+                    style: AppTypography.bodyMd(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: widget.cartService.removePromoCode,
+              child: const Text('Retirer'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SectionCard(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.local_activity_outlined,
+                color: theme.colorScheme.outline,
+              ),
+              const SizedBox(width: DesignConstants.spacingS + 2),
+              Expanded(
+                child: TextField(
+                  controller: _controleur,
+                  textCapitalization: TextCapitalization.characters,
+                  onSubmitted: (_) => _enCours ? null : _appliquer(),
+                  style: AppTypography.bodyLg(
+                    color: theme.colorScheme.onSurface,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Code promo',
+                    filled: false,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    hintStyle: AppTypography.bodyLg(
+                      color: theme.colorScheme.onSurfaceVariant
+                          .withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: DesignConstants.spacingS),
+              ActionButton(
+                label: 'Appliquer',
+                expand: false,
+                height: 40,
+                isLoading: _enCours,
+                backgroundColor:
+                    theme.colorScheme.primary.withValues(alpha: 0.12),
+                foregroundColor: theme.colorScheme.primary,
+                onPressed: _appliquer,
+              ),
+            ],
+          ),
+          if (_erreur != null) ...[
+            const SizedBox(height: DesignConstants.spacingS),
+            Text(
+              _erreur!,
+              style: AppTypography.bodyMd(color: theme.colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------ récapitulatif
+
+class _Recapitulatif extends StatelessWidget {
+  const _Recapitulatif({required this.cartService});
+
+  final CartService cartService;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final articles = cartService.itemCount;
+    final pluriel = articles > 1 ? 's' : '';
+
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Récapitulatif',
+            style: AppTypography.titleLg(color: theme.colorScheme.onSurface),
+          ),
+          const SizedBox(height: DesignConstants.spacingS),
+          SummaryRow(
+            label: 'Sous-total',
+            subtitle: '$articles article$pluriel',
+            value: PriceFormatter.format(cartService.subtotal),
+          ),
+          // Tant qu'aucune adresse n'est choisie, personne ne connaît le prix
+          // de la course : elle dépend de la zone d'arrivée. Afficher « 0 F »
+          // se lirait « offerte », et « 500 F » serait un montant que le
+          // serveur ne confirmerait presque jamais.
+          if (cartService.hasQuote)
+            SummaryRow(
+              label: 'Livraison',
+              value: PriceFormatter.format(cartService.deliveryFee),
+            )
+          else
+            const SummaryRow(
+              label: 'Livraison',
+              value: 'à la validation',
+              subtitle: 'Selon votre zone de livraison',
+            ),
+          if (cartService.discount > 0)
+            SummaryRow(
+              label: cartService.promoCode == null
+                  ? 'Remise'
+                  : 'Remise (${cartService.promoCode})',
+              value: PriceFormatter.format(-cartService.discount),
+              isDiscount: true,
+            ),
+          const SummaryDivider(),
+          SummaryRow(
+            label: cartService.hasQuote ? 'Total' : 'Total hors livraison',
+            value: PriceFormatter.format(cartService.total),
+            isTotal: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------- suggestions
+
+/// Plats populaires absents du panier.
+///
+/// Ils réemploient la carte du menu plutôt qu'une copie locale : la copie
+/// d'avant enfermait une photo de 100 px et son texte dans une boîte de
+/// 160 px, où le bouton d'ajout passait sous le bord.
+class _Suggestions extends StatelessWidget {
+  const _Suggestions({required this.cartService});
+
+  final CartService cartService;
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AppService>(
+      builder: (context, appService, child) {
+        final auPanier = cartService.items.map((e) => e.menuItemId).toSet();
+        final suggestions = appService.menuItems
+            .where(
+              (item) =>
+                  !auPanier.contains(item.id) &&
+                  item.isPopular &&
+                  item.isAvailable,
+            )
+            .take(6)
+            .toList();
+
+        if (suggestions.isEmpty) return const SizedBox.shrink();
+
+        const largeurCarte = 170.0;
+
+        return Padding(
+          padding: const EdgeInsets.only(top: DesignConstants.spacingL),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SectionHeader(
+                title: 'Cela irait bien avec',
+                subtitle: 'Les plats les plus commandés',
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              SizedBox(
+                height: MenuItemCard.hauteurPour(context, largeurCarte),
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: suggestions.length,
+                  separatorBuilder: (_, __) =>
+                      const SizedBox(width: DesignConstants.spacingM),
+                  itemBuilder: (context, index) {
+                    final item = suggestions[index];
+                    return SizedBox(
+                      width: largeurCarte,
+                      child: MenuItemCard(
+                        item: item,
+                        onTap: () => context.navigateToItemCustomization(item),
+                        onAddToCart: () => context.addToCartOrCustomize(item),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
       },
     );
   }

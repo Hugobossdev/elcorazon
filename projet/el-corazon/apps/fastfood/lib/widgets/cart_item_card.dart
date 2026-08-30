@@ -1,21 +1,53 @@
-import 'package:flutter/material.dart';
 import 'package:elcora_fast/models/cart_item.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/widgets/design/food_image.dart';
+import 'package:elcora_fast/widgets/design/quantity_stepper.dart';
+import 'package:flutter/material.dart';
 
+/// Une ligne du panier.
+///
+/// ## Disposition
+///
+/// Photo carrée à gauche, puis, à droite, une colonne en trois temps : le nom
+/// et la corbeille, la personnalisation, enfin le total de la ligne face au
+/// sélecteur de quantité. C'est celle de la maquette, à une chose près — la
+/// corbeille, que la maquette n'a pas.
+///
+/// ## Pourquoi la corbeille existe malgré tout
+///
+/// Dans la maquette, on suppose que le moins ramène à zéro et retire la ligne.
+/// Ici il s'arrête à un, et c'est délibéré : le retrait passe par une
+/// confirmation (`cart_screen.dart`), parce qu'un panier se compose parfois
+/// longuement et qu'un appui de trop ne doit pas en effacer une ligne en
+/// silence. Il faut donc une commande distincte pour retirer, et elle est
+/// posée en haut à droite plutôt qu'à côté du moins : accolée, on la
+/// toucherait en voulant décrémenter.
+///
+/// ## Le total de ligne, et pourquoi il ne s'élide jamais
+///
+/// Un montant tronqué — « 4 50… » — se lit comme un autre montant, pas comme
+/// un montant incomplet. Sur un écran de 320 px à l'échelle de police 1,3, le
+/// total et le sélecteur ne tiennent plus côte à côte ; le montant est alors
+/// **réduit** ([FittedBox]) plutôt que coupé. C'est la seule concession que
+/// cette carte fait à l'échelle de police, et elle ne coûte rien à la
+/// lisibilité : le montant reste entier.
 class CartItemCard extends StatelessWidget {
   final CartItem item;
   final VoidCallback onRemove;
   final ValueChanged<int> onQuantityChanged;
 
   const CartItemCard({
-    required this.item, required this.onRemove, required this.onQuantityChanged, super.key,
+    required this.item,
+    required this.onRemove,
+    required this.onQuantityChanged,
+    super.key,
   });
 
-  /// Largeur de la colonne de droite — supprimer, compter, total.
-  ///
-  /// Fixe et non intrinsèque : c'est ce qui empêche l'échelle de police de
-  /// pousser la ligne hors de la carte.
-  static const double _largeurColonneQuantite = 92;
+  /// Côté de la photo. Fixe : c'est ce qui aligne les lignes entre elles, et
+  /// la maquette montre bien une colonne de photos de même largeur.
+  static const double _cotePhoto = 76;
 
   /// Résume la personnalisation d'une ligne.
   ///
@@ -35,335 +67,126 @@ class CartItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final personnalisation = item.customization;
+    final resume = (personnalisation != null && personnalisation.isNotEmpty)
+        ? _describe(personnalisation)
+        : '';
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+    return Container(
+      margin: const EdgeInsets.only(bottom: DesignConstants.spacingM),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: DesignConstants.borderRadiusLarge,
+        boxShadow: DesignConstants.shadowLow,
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // Image
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: theme.colorScheme.surfaceContainerHighest,
-              ),
-              child: (item.imageUrl?.isNotEmpty == true)
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        item.imageUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Icon(
-                            Icons.restaurant,
-                            size: 24,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          );
-                        },
-                      ),
-                    )
-                  : Icon(
-                      Icons.restaurant,
-                      size: 24,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
+      padding: const EdgeInsets.all(DesignConstants.spacingS + 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: DesignConstants.borderRadiusMedium,
+            child: SizedBox(
+              width: _cotePhoto,
+              height: _cotePhoto,
+              child: FoodImage(url: item.imageUrl, iconSize: 28),
             ),
-
-            const SizedBox(width: 16),
-
-            // Content
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.name,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: theme.colorScheme.onSurface,
+          ),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.titleLg(
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
                     ),
+                    _Corbeille(onTap: onRemove, nom: item.name),
+                  ],
+                ),
+                if (resume.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    resume,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-
-                  // Customizations
-                  if (item.customization != null &&
-                      item.customization!.isNotEmpty) ...[
-                    Text(
-                      _describe(item.customization!),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color:
-                            theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                        fontStyle: FontStyle.italic,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    style: AppTypography.bodyMd(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                    const SizedBox(height: 4),
+                  ),
+                ],
+                const SizedBox(height: DesignConstants.spacingS),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          PriceFormatter.format(item.totalPrice),
+                          maxLines: 1,
+                          style: AppTypography.priceDisplay(
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: DesignConstants.spacingS),
+                    QuantityStepper(
+                      quantity: item.quantity,
+                      compact: true,
+                      onDecrement: () => onQuantityChanged(item.quantity - 1),
+                      onIncrement: () => onQuantityChanged(item.quantity + 1),
+                    ),
                   ],
-
-                  // Price
-                  Text(
-                    PriceFormatter.format(item.price),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.primaryColor,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-
-            const SizedBox(width: 12),
-
-            // Quantity controls and remove
-            //
-            // Largeur **arrêtée**. Cette colonne se dimensionnait sur son
-            // contenu : à grande échelle de police, le compteur et le total
-            // s'élargissaient jusqu'à pousser la ligne hors de la carte —
-            // 5,7 px de débordement à droite, soit le dernier chiffre du
-            // total tranché. Elle prend désormais une largeur fixe, et c'est
-            // la description, extensible, qui cède.
-            SizedBox(
-              width: _largeurColonneQuantite,
-              child: Column(
-                children: [
-                // Remove button
-                GestureDetector(
-                  onTap: onRemove,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.error.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Icon(
-                      Icons.delete_outline,
-                      size: 16,
-                      color: theme.colorScheme.error,
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Quantity controls
-                Container(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: theme.colorScheme.outline.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          if (item.quantity > 1) {
-                            onQuantityChanged(item.quantity - 1);
-                          }
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          child: Icon(
-                            Icons.remove,
-                            size: 16,
-                            color: item.quantity > 1
-                                ? theme.colorScheme.onSurface
-                                : theme.colorScheme.onSurface
-                                    .withValues(alpha: 0.3),
-                          ),
-                        ),
-                      ),
-                      // Ce qui cède dans le compteur, c'est le chiffre —
-                      // les deux boutons gardent une cible tactile entière.
-                      Expanded(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            item.quantity.toString(),
-                            maxLines: 1,
-                            style: theme.textTheme.labelLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.onSurface,
-                            ),
-                          ),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () => onQuantityChanged(item.quantity + 1),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          child: Icon(
-                            Icons.add,
-                            size: 16,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 8),
-
-                // Total price
-                //
-                // Réduit plutôt que tronqué : un total est un chiffre qu'on
-                // lit en entier ou pas du tout. `ellipsis` en aurait mangé la
-                // fin — c'est-à-dire les unités.
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    PriceFormatter.format(item.totalPrice),
-                    maxLines: 1,
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      color: theme.primaryColor,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class CartSummary extends StatelessWidget {
-  final List<CartItem> items;
-  final double deliveryFee;
-  final double discount;
-  final double tax;
+/// Retrait de la ligne. Discrète au repos — c'est une action destructrice, pas
+/// une action courante — mais dans les couleurs de l'erreur pour que sa nature
+/// soit claire au premier regard.
+class _Corbeille extends StatelessWidget {
+  const _Corbeille({required this.onTap, required this.nom});
 
-  const CartSummary({
-    required this.items, super.key,
-    this.deliveryFee = 0,
-    this.discount = 0,
-    this.tax = 0,
-  });
-
-  double get subtotal => items.fold(0, (sum, item) => sum + item.totalPrice);
-  double get total => subtotal + deliveryFee + tax - discount;
+  final VoidCallback onTap;
+  final String nom;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Résumé de la commande',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: theme.colorScheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Subtotal
-            _buildSummaryRow(
-              'Sous-total',
-              PriceFormatter.format(subtotal),
-              theme,
-            ),
-
-            // Delivery fee
-            if (deliveryFee > 0)
-              _buildSummaryRow(
-                'Frais de livraison',
-                PriceFormatter.format(deliveryFee),
-                theme,
-              ),
-
-            // Tax
-            if (tax > 0)
-              _buildSummaryRow(
-                'TVA',
-                PriceFormatter.format(tax),
-                theme,
-              ),
-
-            // Discount
-            if (discount > 0)
-              _buildSummaryRow(
-                'Remise',
-                '-${PriceFormatter.format(discount)}',
-                theme,
-                color: Colors.green,
-              ),
-
-            const SizedBox(height: 12),
-            const Divider(),
-            const SizedBox(height: 12),
-
-            // Total
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Total',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-                Text(
-                  PriceFormatter.format(total),
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.primaryColor,
-                  ),
-                ),
-              ],
-            ),
-          ],
+    return Semantics(
+      button: true,
+      label: 'Retirer $nom du panier',
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 32,
+          height: 32,
+          child: Icon(
+            Icons.delete_outline_rounded,
+            size: 18,
+            color: theme.colorScheme.error.withValues(alpha: 0.8),
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSummaryRow(String label, String value, ThemeData theme,
-      {Color? color,}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-            ),
-          ),
-          Text(
-            value,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: color ?? theme.colorScheme.onSurface,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
       ),
     );
   }

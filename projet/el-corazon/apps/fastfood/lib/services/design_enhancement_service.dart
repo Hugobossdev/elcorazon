@@ -3,8 +3,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/menu_item_card.dart';
-import 'package:elcora_fast/widgets/cart_item_card.dart';
-import 'package:elcora_fast/models/cart_item.dart' as cart_item;
 
 /// Service pour intégrer facilement les améliorations de design
 class DesignEnhancementService {
@@ -143,39 +141,6 @@ class DesignEnhancementService {
     );
 
     return card;
-  }
-
-  /// Créer une carte de panier améliorée
-  static Widget createEnhancedCartItemCard({
-    required String name,
-    required String description,
-    required double price,
-    required int quantity,
-    String? imageUrl,
-    VoidCallback? onIncrement,
-    VoidCallback? onDecrement,
-    VoidCallback? onRemove,
-    Duration animationDelay = Duration.zero,
-  }) {
-    return CartItemCard(
-      item: cart_item.CartItem(
-        id: '',
-        menuItemId: '',
-        name: name,
-        price: price,
-        quantity: quantity,
-        imageUrl: imageUrl,
-        customizations: {},
-      ),
-      onRemove: onRemove ?? () {},
-      onQuantityChanged: (newQuantity) {
-        if (newQuantity > quantity && onIncrement != null) {
-          onIncrement();
-        } else if (newQuantity < quantity && onDecrement != null) {
-          onDecrement();
-        }
-      },
-    );
   }
 
   /// Créer une carte améliorée générique

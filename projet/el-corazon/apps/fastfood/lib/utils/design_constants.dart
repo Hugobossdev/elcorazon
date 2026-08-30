@@ -1,3 +1,4 @@
+import 'package:elcora_fast/theme.dart';
 import 'package:flutter/material.dart';
 
 /// Constantes de design pour garantir la cohérence dans toute l'application
@@ -13,6 +14,12 @@ class DesignConstants {
   static const double spacingL = 24.0;
   static const double spacingXL = 32.0;
   static const double spacingXXL = 48.0;
+
+  /// Marge horizontale de tous les écrans, sans exception.
+  static const double edgeMargin = 16.0;
+
+  /// Écart entre deux colonnes d'une grille.
+  static const double gutter = 12.0;
 
   /// EdgeInsets pré-définis pour un usage rapide
   static const EdgeInsets paddingXS = EdgeInsets.all(spacingXS);
@@ -57,48 +64,74 @@ class DesignConstants {
   static const double elevationHigh = 8.0; // Modals, bottom sheets
 
   // === OMBRES ===
+  //
+  // Le design system proscrit les ombres lourdes : la profondeur vient des
+  // niveaux de surface (« Tonal Layers »), et l'ombre ne fait que décoller
+  // légèrement l'élément de son fond. La teinte n'est donc pas noire mais
+  // `#1A1A1A`, le noir chaud de la palette — un noir pur grise le blanc cassé
+  // du fond et le fait paraître sale.
 
+  /// Repos d'une carte de contenu — 2 dp. `0 2px 8px rgba(26,26,26,.08)`.
   static List<BoxShadow> get shadowLow => [
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.05),
-          blurRadius: 4,
+          color: _teinteOmbre.withValues(alpha: 0.08),
+          blurRadius: 8,
           offset: const Offset(0, 2),
         ),
       ];
 
+  /// Carte pressée, bouton posé — 4 dp.
   static List<BoxShadow> get shadowMedium => [
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.1),
-          blurRadius: 8,
+          color: _teinteOmbre.withValues(alpha: 0.12),
+          blurRadius: 12,
           offset: const Offset(0, 4),
         ),
       ];
 
+  /// Barre flottante, feuille, bouton d'action — 8 dp.
   static List<BoxShadow> get shadowHigh => [
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.15),
-          blurRadius: 16,
+          color: _teinteOmbre.withValues(alpha: 0.16),
+          blurRadius: 24,
           offset: const Offset(0, 8),
         ),
       ];
 
+  /// Halo rouge sous une action de premier plan. Suit [AppColors.primary] :
+  /// la valeur était figée sur l'ancien `#E53E3E` et survivait au changement
+  /// de palette, si bien qu'un bouton bordeaux projetait un halo vermillon.
   static List<BoxShadow> get shadowPrimary => [
         BoxShadow(
-          color: const Color(0xFFE53E3E).withValues(alpha: 0.3),
+          color: AppColors.primary.withValues(alpha: 0.28),
           blurRadius: 12,
           offset: const Offset(0, 4),
-          spreadRadius: 2,
+          spreadRadius: 1,
         ),
       ];
 
+  /// Ombre ambiante très diffuse, pour une section entière plutôt qu'un
+  /// élément — elle ne dessine pas de contour.
   static List<BoxShadow> get shadowSoft => [
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.03),
+          color: _teinteOmbre.withValues(alpha: 0.05),
           blurRadius: 20,
           offset: const Offset(0, 10),
           spreadRadius: -5,
         ),
       ];
+
+  /// Ombre montante, pour une barre ancrée en bas de l'écran : le décalage
+  /// est négatif, sinon l'ombre tombe hors de l'écran et ne sépare rien.
+  static List<BoxShadow> get shadowBottomBar => [
+        BoxShadow(
+          color: _teinteOmbre.withValues(alpha: 0.08),
+          blurRadius: 8,
+          offset: const Offset(0, -2),
+        ),
+      ];
+
+  static const Color _teinteOmbre = Color(0xFF1A1A1A);
 
   // === DURÉES D'ANIMATION ===
 

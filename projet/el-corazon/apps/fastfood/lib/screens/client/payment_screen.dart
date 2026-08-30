@@ -7,8 +7,10 @@ import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/presentation/etape_reglement.dart';
-import 'package:elcora_fast/widgets/custom_button.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
 
 /// Écran de paiement — Phase 6 : ouvre une demande de paiement Django
 /// (`POST /payments/{order}/initiate/`) pour une commande **déjà créée**, et
@@ -151,213 +153,312 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Paiement'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildPaymentIcon(),
-                    const SizedBox(height: 24),
-                    _buildPaymentInfo(),
-                    const SizedBox(height: 32),
-                    _buildPaymentStatus(),
-                  ],
-                ),
-              ),
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Paiement sécurisé',
+        // Le cadenas n'est pas décoratif : il est le seul signe visible que la
+        // transaction ne se règle pas dans cette page mais chez le
+        // prestataire, et il tient la place de l'action symétrique du retour.
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: DesignConstants.spacingS),
+            child: Icon(
+              Icons.lock_rounded,
+              size: 20,
+              color: theme.colorScheme.primary,
             ),
-            _buildActionButtons(),
-          ],
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          DesignConstants.edgeMargin,
+          DesignConstants.spacingL,
+          DesignConstants.edgeMargin,
+          DesignConstants.spacingL,
         ),
+        children: [
+          _montantDu(theme),
+          const SizedBox(height: DesignConstants.spacingXL),
+          _moyenRetenu(theme),
+          const SizedBox(height: DesignConstants.spacingL),
+          _buildPaymentStatus(),
+        ],
       ),
+      bottomNavigationBar: GlassBottomBar(child: _buildActionButtons()),
     );
   }
 
-  Widget _buildPaymentIcon() {
-    IconData iconData;
-    Color iconColor;
+  /// Le montant, en grand, et la référence de commande sous lui.
+  ///
+  /// La devise est composée en `headline-md` et alignée en haut du nombre :
+  /// c'est ce que fait la maquette, et cela évite qu'un « CFA » à la même
+  /// taille que le montant ne prenne autant de place que lui.
+  Widget _montantDu(ThemeData theme) {
+    final montant = _order?.total ?? 0;
+    final reference = widget.orderId.length >= 8
+        ? widget.orderId.substring(0, 8).toUpperCase()
+        : widget.orderId.toUpperCase();
 
-    switch (_etape) {
-      case EtapeReglement.reglee:
-        iconData = Icons.check_circle;
-        iconColor = Colors.green;
-        break;
-      case EtapeReglement.echouee:
-        iconData = Icons.error;
-        iconColor = Colors.red;
-        break;
-      case EtapeReglement.enAttente:
-        iconData = Icons.payment;
-        iconColor = Theme.of(context).colorScheme.primary;
-        break;
-      default:
-        iconData = Icons.payment;
-        iconColor = Colors.grey;
-    }
-
-    return Container(
-      width: 100,
-      height: 100,
-      decoration: BoxDecoration(
-        color: iconColor.withValues(alpha: 0.1),
-        shape: BoxShape.circle,
-      ),
-      child: Icon(iconData, size: 50, color: iconColor),
-    );
-  }
-
-  Widget _buildPaymentInfo() {
-    final order = _order;
     return Column(
       children: [
         Text(
-          'Commande #${widget.orderId.substring(0, 8).toUpperCase()}',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Montant à payer',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          PriceFormatter.format(order?.total ?? 0),
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-        ),
-        if (order != null) ...[
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(order.paymentMethod.emoji),
-              const SizedBox(width: 8),
-              Text(order.paymentMethod.displayName, style: Theme.of(context).textTheme.titleMedium),
-            ],
+          'Montant à régler',
+          style: AppTypography.bodyMd(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
-        ],
+        ),
+        const SizedBox(height: DesignConstants.spacingS),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            PriceFormatter.format(montant),
+            maxLines: 1,
+            style: AppTypography.displayLg(color: theme.colorScheme.primary),
+          ),
+        ),
+        const SizedBox(height: DesignConstants.spacingM),
+        StatusChip(label: 'COMMANDE $reference', icon: Icons.receipt_long_rounded),
       ],
     );
   }
 
-  Widget _buildPaymentStatus() {
-    if (_isProcessing) {
-      return Column(
+  /// Le moyen de paiement retenu à la commande.
+  ///
+  /// Il n'est pas modifiable ici, et c'est volontaire : la transaction est
+  /// déjà ouverte côté serveur pour ce moyen-là. En changer suppose de
+  /// revenir au règlement, ce que le bouton de retour permet.
+  Widget _moyenRetenu(ThemeData theme) {
+    final order = _order;
+    if (order == null) return const SizedBox.shrink();
+
+    return SectionCard(
+      child: Row(
         children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 16),
-          Text('Ouverture du paiement...', style: Theme.of(context).textTheme.bodyLarge),
+          Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHigh,
+              borderRadius: DesignConstants.borderRadiusMedium,
+            ),
+            child: Text(
+              order.paymentMethod.emoji,
+              style: const TextStyle(fontSize: 22),
+            ),
+          ),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  order.paymentMethod.displayName,
+                  style: AppTypography.titleLg(
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                Text(
+                  order.paymentMethod.description,
+                  style: AppTypography.bodyMd(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  /// Encart d'attention — instructions du prestataire, échec, confirmation.
+  ///
+  /// Un seul composant pour les trois, parce qu'ils occupent la même place et
+  /// disent la même chose sous des couleurs différentes : voilà où en est le
+  /// paiement. Les faire diverger ferait sauter la mise en page à chaque
+  /// changement d'état.
+  Widget _encart({
+    required IconData icone,
+    required String titre,
+    required Color fond,
+    required Color teinte,
+    String? texte,
+    Widget? complement,
+  }) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(DesignConstants.spacingM),
+      decoration: BoxDecoration(
+        color: fond,
+        borderRadius: DesignConstants.borderRadiusLarge,
+        border: Border.all(color: teinte.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(color: teinte, shape: BoxShape.circle),
+            child: Icon(icone, size: 18, color: theme.colorScheme.surface),
+          ),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  titre,
+                  style: AppTypography.titleLg(
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                if (texte != null && texte.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    texte,
+                    style: AppTypography.bodyMd(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                if (complement != null) ...[
+                  const SizedBox(height: DesignConstants.spacingS),
+                  complement,
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentStatus() {
+    final theme = Theme.of(context);
+
+    if (_isProcessing) {
+      return _encart(
+        icone: Icons.hourglass_top_rounded,
+        titre: 'Ouverture du paiement…',
+        texte: 'Nous préparons votre transaction.',
+        fond: theme.colorScheme.surfaceContainerLow,
+        teinte: theme.colorScheme.outline,
       );
     }
 
     if (_isCashOnDelivery && _etape == EtapeReglement.reglee) {
-      return Text(
-        'À régler à la livraison 💵',
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              color: Colors.green,
-              fontWeight: FontWeight.bold,
-            ),
-        textAlign: TextAlign.center,
+      return _encart(
+        icone: Icons.payments_rounded,
+        titre: 'À régler à la livraison',
+        texte: 'Préparez l’appoint : le livreur encaissera à la remise.',
+        fond: theme.colorScheme.secondaryContainer.withValues(alpha: 0.35),
+        teinte: theme.colorScheme.secondary,
       );
     }
 
     switch (_etape) {
       case EtapeReglement.reglee:
-        return Text(
-          'Paiement effectué avec succès ! 🎉',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.green,
-                fontWeight: FontWeight.bold,
-              ),
-          textAlign: TextAlign.center,
+        return _encart(
+          icone: Icons.check_rounded,
+          titre: 'Paiement confirmé',
+          texte: 'Votre commande est en préparation.',
+          fond: AppColors.success.withValues(alpha: 0.1),
+          teinte: AppColors.success,
         );
+
       case EtapeReglement.echouee:
-        return Column(
-          children: [
-            Text(
-              'Erreur de paiement',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Colors.red,
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _errorMessage!,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.red[700]),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ],
+        return _encart(
+          icone: Icons.priority_high_rounded,
+          titre: 'Paiement non abouti',
+          texte: _errorMessage,
+          fond: theme.colorScheme.errorContainer.withValues(alpha: 0.5),
+          teinte: theme.colorScheme.error,
         );
+
       case EtapeReglement.enAttente:
         final checkout = _checkout;
-        final waitingTooLong = _pollDeadline != null && DateTime.now().isAfter(_pollDeadline!);
-        return Column(
-          children: [
-            if (!waitingTooLong) ...[
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
+        final tropLong =
+            _pollDeadline != null && DateTime.now().isAfter(_pollDeadline!);
+
+        return _encart(
+          icone: Icons.notifications_active_rounded,
+          titre: tropLong
+              ? 'Toujours en attente'
+              : 'Confirmez sur votre téléphone',
+          texte: checkout != null && checkout.instructions.isNotEmpty
+              ? checkout.instructions
+              : 'Validez la demande reçue de votre opérateur pour finaliser.',
+          fond: theme.colorScheme.secondaryContainer.withValues(alpha: 0.35),
+          teinte: theme.colorScheme.secondary,
+          complement: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!tropLong)
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: DesignConstants.spacingS),
+                    Text(
+                      'Vérification en cours…',
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              if (checkout != null)
+                TextButton.icon(
+                  onPressed: _openCheckoutUrl,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                  label: const Text('Ouvrir la page de paiement'),
+                ),
             ],
-            Text(
-              waitingTooLong
-                  ? 'Toujours en attente de confirmation.'
-                  : 'En attente de confirmation du paiement...',
-              style: Theme.of(context).textTheme.bodyLarge,
-              textAlign: TextAlign.center,
-            ),
-            if (checkout != null && checkout.instructions.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                checkout.instructions,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
-                textAlign: TextAlign.center,
-              ),
-            ],
-            if (checkout != null) ...[
-              const SizedBox(height: 16),
-              TextButton.icon(
-                onPressed: _openCheckoutUrl,
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('Ouvrir la page de paiement'),
-              ),
-            ],
-          ],
+          ),
         );
+
       default:
         return const SizedBox.shrink();
     }
   }
 
   Widget _buildActionButtons() {
+    final regle = _etape == EtapeReglement.reglee;
+
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         if (_etape == EtapeReglement.echouee) ...[
-          SizedBox(
-            width: double.infinity,
-            child: CustomButton(text: 'Réessayer', onPressed: _initializePayment),
+          ActionButton(
+            label: 'Réessayer',
+            icon: Icons.refresh_rounded,
+            onPressed: _initializePayment,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: DesignConstants.spacingS + 4),
         ],
-        SizedBox(
-          width: double.infinity,
-          child: CustomButton(
-            text: _etape == EtapeReglement.reglee ? 'Continuer' : 'Continuer vers le suivi',
-            onPressed: () => Navigator.of(context).pop(_etape == EtapeReglement.reglee),
-          ),
+        ActionButton(
+          label: regle ? 'Continuer' : 'Continuer vers le suivi',
+          emphasis: regle ? ActionEmphasis.gradient : ActionEmphasis.outlined,
+          trailingIcon: Icons.arrow_forward_rounded,
+          onPressed: () => Navigator.of(context).pop(regle),
         ),
       ],
     );

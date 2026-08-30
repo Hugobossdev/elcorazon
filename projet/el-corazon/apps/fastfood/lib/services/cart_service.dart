@@ -439,29 +439,55 @@ class CartService extends ChangeNotifier {
     _persistChanges();
   }
 
-  /// Valide et applique un code promo via PromoCodeService
+  /// Soumet un code promotionnel au serveur et l'applique s'il est retenu.
   ///
-  /// ⚠️ DÉPRÉCIÉ: Cette méthode est dépréciée car elle ne peut pas accéder au Provider.
-  /// Utilisez `PromoCodeService.validateAndApplyPromoCode` directement via Provider dans les écrans.
+  /// Rend `null` en cas de succès, sinon le message à montrer au client.
   ///
-  /// Pour appliquer un code promo, utilisez:
-  /// ```dart
-  /// final promoCodeService = Provider.of<PromoCodeService>(context, listen: false);
-  /// final result = await promoCodeService.validateAndApplyPromoCode(...);
-  /// if (result.isValid) {
-  ///   cartService.applyPromoDiscount(code: result.promoCode!.code, discount: result.discountAmount);
-  /// }
-  /// ```
-  @Deprecated(
-      'Utilisez PromoCodeService.validateAndApplyPromoCode directement avec Provider',)
-  Future<bool> validatePromoCode(
-    String code,
-    double orderAmount,
-    List<String> categoryNames,
-  ) async {
-    eccore.Journal.trace(
-        '⚠️ validatePromoCode est déprécié. Utilisez PromoCodeService directement via Provider.',);
-    return false;
+  /// ## Ce qu'elle remplace
+  ///
+  /// `validatePromoCode`, dépréciée, qui traçait un avertissement et rendait
+  /// `false` sans rien tenter : tout code passé par là était refusé, quel
+  /// qu'il soit. Les écrans qui savaient l'éviter réécrivaient chacun les
+  /// vingt lignes ci-dessous — `PromoCodesScreen` les avait, le panier ne les
+  /// avait pas.
+  ///
+  /// ## Pourquoi c'est le serveur qui tranche
+  ///
+  /// La remise dépend du panier, de la zone de livraison et du barème en
+  /// vigueur, qu'aucun d'eux n'est connu ici avec certitude. `POST
+  /// /orders/preview/` relit le panier **serveur**, applique le code et rend
+  /// la remise réelle. Une remise calculée par l'application est une promesse
+  /// que la facture peut démentir.
+  ///
+  /// [addressId] affine le devis quand une adresse est déjà choisie : les
+  /// frais de livraison entrent dans le total, et certains codes portent sur
+  /// eux. Sans adresse, seule la remise sur le sous-total est exploitée.
+  Future<String?> appliquerCodePromo(String code, {String? addressId}) async {
+    final normalise = code.trim().toUpperCase();
+    if (normalise.isEmpty) return 'Entrez un code promo';
+
+    try {
+      final quote = await _deliveryFeeService.quoteOrder(
+        addressId: addressId,
+        promoCode: normalise,
+      );
+
+      // Le serveur rend un code **vide** quand il l'a refusé. Le distinguer
+      // d'une remise nulle importe : un code périmé doit se voir, pas se
+      // taire.
+      if (!quote.hasPromotion) return 'Code promo refusé ou expiré';
+
+      applyPromoDiscount(
+        code: quote.promotionCode,
+        discount: quote.discount.toMajorUnits(),
+      );
+      _quote = quote;
+      notifyListeners();
+      return null;
+    } catch (e) {
+      eccore.Journal.trace('❌ Code promo « $normalise » : $e');
+      return 'Impossible de vérifier le code pour le moment';
+    }
   }
 
   /// Retire le code promo

@@ -1,22 +1,53 @@
-import 'dart:ui';
+import 'dart:async';
+
+import 'package:elcora_fast/navigation/navigation_service.dart';
+import 'package:elcora_fast/presentation/catalogue.dart';
+import 'package:elcora_fast/screens/client/widgets/quick_actions_widget.dart';
+import 'package:elcora_fast/services/address_service.dart';
+import 'package:elcora_fast/services/ai_recommendation_service.dart';
+import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcora_fast/services/design_enhancement_service.dart';
+import 'package:elcora_fast/services/favorites_service.dart';
+import 'package:elcora_fast/services/notification_database_service.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart';
+import 'package:elcora_fast/widgets/menu_item_card.dart';
+import 'package:elcora_fast/widgets/navigation_helper.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:elcora_fast/services/app_service.dart';
-import 'package:elcora_fast/services/cart_service.dart';
-import 'package:elcora_fast/services/ai_recommendation_service.dart';
-import 'package:elcora_fast/services/favorites_service.dart';
-import 'package:elcora_fast/theme.dart';
-import 'package:elcora_fast/widgets/navigation_helper.dart';
-import 'package:elcora_fast/widgets/enhanced_app_bar_actions.dart';
-// import '../../widgets/enhanced_animations.dart'; // Supprimé
-import 'package:elcora_fast/services/design_enhancement_service.dart';
-import 'package:elcora_fast/widgets/menu_item_card.dart';
-import 'package:elcora_fast/screens/client/widgets/quick_actions_widget.dart';
-import 'package:elcora_fast/navigation/navigation_service.dart';
-import 'package:elcora_fast/screens/client/widgets/home_section_header.dart';
-import 'package:elcora_fast/screens/client/widgets/home_highlight_card.dart';
 
-/// Écran d'accueil client
+/// Accueil du client.
+///
+/// ## L'ordre des sections, et pourquoi il est celui-là
+///
+/// La maquette range l'accueil du plus général au plus personnel : on cherche,
+/// on découvre une mise en avant, on filtre par catégorie, puis on parcourt.
+/// Cet écran suit le même ordre, en y insérant ce que l'application sait de
+/// vous et que la maquette ignore — vos suggestions et vos favoris — juste
+/// avant la liste générale : ce qui vous est propre passe avant ce qui est
+/// commun à tous.
+///
+/// ## Ce qui a disparu, et pourquoi ce n'est pas une perte
+///
+/// Le carrousel « Bienvenue chez El Corazón » proposait quatre destinations :
+/// Menu, Commandes groupées, Livraison rapide, Récompenses. Les deux premières
+/// et la quatrième sont déjà dans les actions rapides, juste dessous ; la
+/// troisième ouvrait l'onglet Commandes, que la barre du bas atteint en un
+/// geste. C'était donc 200 px de hauteur, quatre pages à faire défiler et une
+/// animation permanente pour proposer une seconde fois ce qui était déjà à
+/// portée. Aucune destination n'est devenue inatteignable.
+///
+/// ## La bannière ne promet rien qu'on ne puisse tenir
+///
+/// La maquette y affiche « Livraison offerte ». Il n'existe **aucune route
+/// publique de promotion** — `/promotions/` est réservé au back-office, et
+/// `PromotionRepository` le documente — si bien qu'annoncer une offre ici
+/// reviendrait à l'inventer. La bannière met donc en avant un vrai plat du
+/// catalogue, avec sa vraie note et son vrai prix : la même place, la même
+/// intention commerciale, et rien qui ne vienne du serveur.
 class ClientHomeScreen extends StatefulWidget {
   final Function(int)? onNavigateToTab;
 
@@ -30,109 +61,93 @@ class ClientHomeScreen extends StatefulWidget {
 }
 
 class _ClientHomeScreenState extends State<ClientHomeScreen>
-    with TickerProviderStateMixin {
-  late AnimationController _mainController;
-  late PageController _highlightController;
+    with SingleTickerProviderStateMixin {
+  late AnimationController _apparition;
+  late Animation<double> _fondu;
+  late Animation<Offset> _montee;
 
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _scaleAnimation;
-  int _currentHighlightPage = 0;
+  /// Catégorie mise en avant dans le rail de puces. `-1` = « Tout ».
+  ///
+  /// Elle **filtre la liste de cet écran** plutôt que d'ouvrir le menu : la
+  /// maquette montre un rail qui réordonne le contenu sous lui, et renvoyer
+  /// vers un autre écran à chaque puce ferait perdre la position de lecture.
+  int _categorieRetenue = -1;
 
   @override
   void initState() {
     super.initState();
-    _initializeAnimations();
-  }
-
-  void _initializeAnimations() {
-    // Animation principale
-    _mainController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
+    _apparition = AnimationController(
+      duration: DesignConstants.animationSlow,
       vsync: this,
     );
-
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(
-      CurvedAnimation(
-        parent: _mainController,
-        curve: Curves.easeInOut,
-      ),
-    );
-
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
+    _fondu = CurvedAnimation(parent: _apparition, curve: Curves.easeOut);
+    _montee = Tween<Offset>(
+      begin: const Offset(0, 0.04),
       end: Offset.zero,
     ).animate(
-      CurvedAnimation(
-        parent: _mainController,
-        curve: Curves.easeOutCubic,
-      ),
+      CurvedAnimation(parent: _apparition, curve: Curves.easeOutCubic),
     );
-
-    _scaleAnimation = Tween<double>(
-      begin: 0.8,
-      end: 1.0,
-    ).animate(
-      CurvedAnimation(
-        parent: _mainController,
-        curve: Curves.elasticOut,
-      ),
-    );
-
-    // Démarrer les animations
-    _mainController.forward();
-
-    _highlightController = PageController(viewportFraction: 0.88);
-    _highlightController.addListener(() {
-      final page = _highlightController.page?.round() ?? 0;
-      if (page != _currentHighlightPage) {
-        setState(() => _currentHighlightPage = page);
-      }
-    });
+    _apparition.forward();
   }
 
   @override
   void dispose() {
-    _mainController.dispose();
-    _highlightController.dispose();
+    _apparition.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              AppColors.background,
-              AppColors.surfaceVariant.withValues(alpha: 0.3),
-            ],
-          ),
-        ),
-        child: FadeTransition(
-          opacity: _fadeAnimation,
-          child: SlideTransition(
-            position: _slideAnimation,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
-              child: CustomScrollView(
-                slivers: [
-                  _buildEnhancedAppBar(),
-                  _buildHeroSection(),
-                  _buildQuickActions(),
-                  _buildAIRecommendations(context),
-                  _buildFavoritesSection(context),
-                  _buildFeaturedItems(context),
-                  const SliverToBoxAdapter(child: SizedBox(height: 32)),
-                ],
-              ),
+      backgroundColor: theme.colorScheme.surface,
+      // `extendBodyBehindAppBar` : sans lui, le flou de la barre n'aurait rien
+      // à filtrer — le contenu s'arrêterait à son bord inférieur.
+      extendBodyBehindAppBar: true,
+      appBar: GlassAppBar(
+        showBack: false,
+        centerTitle: false,
+        titleWidget: const _EnteteLivraison(),
+        actions: [_Cloche(onTap: () => context.navigateToNotifications())],
+      ),
+      body: FadeTransition(
+        opacity: _fondu,
+        child: SlideTransition(
+          position: _montee,
+          child: RefreshIndicator(
+            onRefresh: () => context.read<AppService>().initialize(),
+            child: CustomScrollView(
+              slivers: [
+                // Compense la barre translucide, qui recouvre le haut du
+                // contenu.
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: GlassAppBar.hauteur +
+                        MediaQuery.paddingOf(context).top +
+                        DesignConstants.spacingM,
+                  ),
+                ),
+                const SliverToBoxAdapter(child: _BarreDeRecherche()),
+                const SliverToBoxAdapter(
+                  child: SizedBox(height: DesignConstants.spacingL),
+                ),
+                const SliverToBoxAdapter(child: _BanniereDuJour()),
+                const SliverToBoxAdapter(
+                  child: SizedBox(height: DesignConstants.spacingL),
+                ),
+                SliverToBoxAdapter(child: _railDeCategories()),
+                const SliverToBoxAdapter(
+                  child: SizedBox(height: DesignConstants.spacingL),
+                ),
+                SliverToBoxAdapter(child: _actionsRapides()),
+                SliverToBoxAdapter(child: _suggestions()),
+                SliverToBoxAdapter(child: _favoris()),
+                SliverToBoxAdapter(child: _platsALaUne()),
+                const SliverToBoxAdapter(
+                  child: SizedBox(height: DesignConstants.spacingXL),
+                ),
+              ],
             ),
           ),
         ),
@@ -140,532 +155,515 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
     );
   }
 
-  Widget _buildEnhancedAppBar() {
-    return SliverAppBar(
-      expandedHeight: 120,
-      pinned: true,
-      backgroundColor: AppColors.primary,
-      elevation: 0,
-      flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.only(left: 16, bottom: 16),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Petit logo dans l'AppBar quand réduit
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
+  // ---------------------------------------------------------------- sections
+
+  Widget _railDeCategories() {
+    return Consumer<AppService>(
+      builder: (context, appService, child) {
+        final categories = appService.menuCategories;
+        if (categories.isEmpty) return const SizedBox.shrink();
+
+        // « Tout » n'est pas une catégorie du serveur : c'est l'absence de
+        // filtre, placée en tête parce que c'est l'état initial et celui vers
+        // lequel on revient.
+        final libelles = ['Tout', for (final c in categories) c.name];
+
+        return CategoryChipBar(
+          labels: libelles,
+          selectedIndex: _categorieRetenue + 1,
+          leadingBuilder: (index) =>
+              index == 0 ? null : categories[index - 1].pastille,
+          onSelected: (index) =>
+              setState(() => _categorieRetenue = index - 1),
+        );
+      },
+    );
+  }
+
+  Widget _actionsRapides() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(horizontal: DesignConstants.edgeMargin),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeader(
+            title: 'Actions rapides',
+            subtitle: 'Vos raccourcis, à portée de pouce',
+          ),
+          QuickActionsWidget(),
+        ],
+      ),
+    );
+  }
+
+  Widget _suggestions() {
+    return Consumer2<AIRecommendationService, AppService>(
+      builder: (context, aiService, appService, child) {
+        // L'identifiant **du compte connecté**, et non la chaîne
+        // `'current_user'` : les suggestions sont rangées sous l'identifiant
+        // avec lequel elles ont été calculées, si bien que cette clé inventée
+        // ne désignait jamais rien. La section restait vide quoi qu'il arrive.
+        final identifiant = appService.currentUser?.id;
+        if (identifiant == null) return const SizedBox.shrink();
+
+        final suggestions = aiService
+            .getRecommendationsForUser(identifiant)
+            .where((item) => item.isPopular && item.ratingAverage > 4.0)
+            .take(6)
+            .toList();
+
+        if (suggestions.isEmpty) return const SizedBox.shrink();
+
+        return _Carrousel(
+          titre: 'Nos suggestions',
+          sousTitre: 'Inspirées de vos commandes récentes',
+          articles: suggestions,
+        );
+      },
+    );
+  }
+
+  Widget _favoris() {
+    return Consumer<FavoritesService>(
+      builder: (context, favoritesService, child) {
+        final favoris = favoritesService.favorites;
+        if (favoris.isEmpty) return const SizedBox.shrink();
+
+        final pluriel = favoris.length > 1 ? 's' : '';
+
+        return _Carrousel(
+          titre: 'Mes favoris',
+          sousTitre:
+              '${favoris.length} plat$pluriel sauvegardé$pluriel',
+          articles: favoris,
+          actionLibelle: 'Voir tout',
+          onAction: () => widget.onNavigateToTab?.call(1),
+        );
+      },
+    );
+  }
+
+  /// Liste principale — des cartes pleine largeur, comme la maquette.
+  ///
+  /// Le filtre du rail de catégories s'applique ici, et le titre le dit :
+  /// laisser « Plats à la une » au-dessus d'une liste filtrée par « Boissons »
+  /// donnerait l'impression que le filtre n'a pas pris.
+  Widget _platsALaUne() {
+    return Consumer<AppService>(
+      builder: (context, appService, child) {
+        final categorie = _categorieRetenue >= 0 &&
+                _categorieRetenue < appService.menuCategories.length
+            ? appService.menuCategories[_categorieRetenue]
+            : null;
+
+        final articles = appService.menuItems
+            .where((item) => item.isAvailable)
+            .where(
+              (item) =>
+                  categorie == null || item.categorySlug == categorie.slug,
+            )
+            .where((item) => categorie != null || item.isPopular)
+            .take(8)
+            .toList();
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DesignConstants.edgeMargin,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SectionHeader(
+                title: categorie?.name ?? 'Plats à la une',
+                subtitle: categorie == null
+                    ? 'Les préférés de nos clients'
+                    : 'Toute la carte de cette catégorie',
+                actionLabel: 'Tout voir',
+                onActionPressed: () => widget.onNavigateToTab?.call(1),
               ),
-              child: Image.asset(
-                'assets/logo/logo.png',
-                height: 24,
-                width: 24,
-              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              if (!appService.isInitialized && articles.isEmpty)
+                const FoodCardSkeletonList(padding: EdgeInsets.zero)
+              else if (articles.isEmpty)
+                EmptyStateWidget(
+                  title: categorie == null
+                      ? 'Le menu arrive'
+                      : 'Rien dans « ${categorie.name} »',
+                  message: categorie == null
+                      ? 'Aucun plat populaire pour le moment.'
+                      : 'Essayez une autre catégorie.',
+                  icon: Icons.restaurant_menu_rounded,
+                )
+              else
+                for (final article in articles) ...[
+                  _CarteDePlat(article: article),
+                  const SizedBox(height: DesignConstants.spacingM),
+                ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ------------------------------------------------------------------ entête
+
+/// « Livrer à » suivi de l'adresse retenue.
+///
+/// L'adresse est celle que le carnet a sélectionnée, à défaut celle marquée
+/// par défaut. Sans carnet — visiteur, ou client qui n'a rien enregistré — la
+/// ligne invite à en ajouter une plutôt que d'afficher un vide : c'est l'étape
+/// qui bloquera le règlement, autant la proposer maintenant.
+class _EnteteLivraison extends StatelessWidget {
+  const _EnteteLivraison();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Consumer2<AddressService, AppService>(
+      builder: (context, addressService, appService, child) {
+        final adresse =
+            addressService.selectedAddress ?? addressService.defaultAddress;
+        final libelle = adresse == null
+            ? 'Ajouter une adresse'
+            : (adresse.label.isNotEmpty ? adresse.label : adresse.line1);
+
+        return InkWell(
+          onTap: () {
+            if (appService.isLoggedIn) {
+              context.navigateToAddressManagement();
+            } else {
+              NavigationService.navigateToAuth(context);
+            }
+          },
+          borderRadius: BorderRadius.circular(DesignConstants.radiusMedium),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: DesignConstants.spacingS,
+              vertical: 4,
             ),
-            const SizedBox(width: 8),
-            const Text(
-              'El Corazón',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-              ),
-            ),
-          ],
-        ),
-        background: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Fond dégradé de base
-            Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppColors.primary,
-                    AppColors.primaryDark,
-                  ],
-                ),
-              ),
-            ),
-            // Cercles décoratifs
-            Positioned(
-              top: -50,
-              right: -50,
-              child: Container(
-                width: 200,
-                height: 200,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            Positioned(
-              bottom: -30,
-              left: 20,
-              child: Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
-            // Effet Glassmorphism par dessus
-            Positioned.fill(
-              child: ClipRect(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                  child: Container(
-                    color: Colors.white.withValues(alpha: 0.05),
-                  ),
-                ),
-              ),
-            ),
-            // Message de bienvenue
-            Positioned(
-              bottom: 60,
-              left: 16,
-              right: 16,
-              child: Consumer<AppService>(
-                builder: (context, appService, child) {
-                  return Column(
+            child: Row(
+              children: [
+                _Avatar(utilisateur: appService.currentUser),
+                const SizedBox(width: DesignConstants.spacingS + 4),
+                Expanded(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Bonjour ${appService.currentUser?.fullName ?? 'Gourmand'} !',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
+                        'Livrer à',
+                        style: AppTypography.bodyMd(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ).copyWith(fontSize: 12, height: 1.2),
                       ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Que voulez-vous manger ?',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              libelle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTypography.titleLg(
+                                color: theme.colorScheme.primary,
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            Icons.expand_more_rounded,
+                            size: 18,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ],
                       ),
                     ],
-                  );
-                },
-              ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
-      actions: const [
-        EnhancedAppBarActions(),
-      ],
+          ),
+        );
+      },
     );
   }
+}
 
-  Widget _buildHeroSection() {
+/// Photo du compte, ou son initiale.
+///
+/// `User.avatar` est facultatif côté serveur : la pastille à initiale n'est
+/// pas un état d'erreur mais le cas courant, et elle doit donc être aussi
+/// soignée que la photo.
+class _Avatar extends StatelessWidget {
+  const _Avatar({required this.utilisateur});
+
+  final eccore.User? utilisateur;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final highlightCards = [
-      HomeHighlightCard(
-        title: 'Menu Signature',
-        description: 'Découvrez nos créations exclusives du chef.',
-        colors: AppColors.primaryGradient,
-        illustration:
-            const Icon(Icons.restaurant_menu, color: Colors.white, size: 64),
-        onPressed: () => widget.onNavigateToTab?.call(1),
-      ),
-      HomeHighlightCard(
-        title: 'Commandes Groupées',
-        description: 'Commandez ensemble et partagez les frais de livraison.',
-        colors: const [
-          Color(0xFF6C5CE7), // Violet
-          Color(0xFFA29BFE), // Violet clair
-        ],
-        illustration: const Icon(Icons.group, color: Colors.white, size: 64),
-        onPressed: () {
-          final appService = Provider.of<AppService>(context, listen: false);
-          if (appService.isLoggedIn) {
-            context.navigateToGroupOrder();
-          } else {
-            NavigationService.navigateToAuth(context);
-          }
-        },
-      ),
-      HomeHighlightCard(
-        title: 'Livraison Rapide',
-        description: 'Vos plats préférés livrés en un éclair.',
-        colors: AppColors.secondaryGradient,
-        illustration:
-            const Icon(Icons.delivery_dining, color: Colors.white, size: 64),
-        onPressed: () => widget.onNavigateToTab?.call(2),
-      ),
-      HomeHighlightCard(
-        title: 'Récompenses',
-        description: 'Cumulez des points à chaque commande.',
-        colors: AppColors.successGradient,
-        illustration: const Icon(Icons.stars, color: Colors.white, size: 64),
-        onPressed: () {
-          final appService = Provider.of<AppService>(context, listen: false);
-          if (appService.isLoggedIn) {
-            context.navigateToRewards();
-          } else {
-            NavigationService.navigateToAuth(context);
-          }
-        },
-      ),
-    ];
+    final avatar = utilisateur?.avatar;
+    final nom = utilisateur?.fullName ?? '';
+    final initiale = nom.isEmpty ? '?' : nom.characters.first.toUpperCase();
 
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: HomeSectionHeader(
-                title: 'Bienvenue chez El Corazón',
-                subtitle: 'Votre moment gourmand livré avec passion',
-                actionLabel: 'Explorer le menu',
-                onActionPressed: () => widget.onNavigateToTab?.call(1),
-              ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 200,
-              child: PageView.builder(
-                controller: _highlightController,
-                itemCount: highlightCards.length,
-                itemBuilder: (context, index) {
-                  return AnimatedBuilder(
-                    animation: _highlightController,
-                    builder: (context, child) {
-                      final isActive = index == _currentHighlightPage;
-                      return AnimatedPadding(
-                        duration: const Duration(milliseconds: 250),
-                        padding: EdgeInsets.only(
-                          right: 16,
-                          left: index == 0 ? 16 : 0,
-                          top: isActive ? 0 : 12,
-                          bottom: isActive ? 0 : 12,
-                        ),
-                        child: child,
-                      );
-                    },
-                    child: highlightCards[index],
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(highlightCards.length, (index) {
-                final isActive = index == _currentHighlightPage;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: isActive ? 20 : 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: isActive
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.primary.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                );
-              }),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickActions() {
-    return SliverToBoxAdapter(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16),
-        child: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            HomeSectionHeader(
-              title: 'Actions rapides',
-              subtitle: 'Vos raccourcis préférés à portée de main',
-            ),
-            SizedBox(height: 12),
-            QuickActionsWidget(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFeaturedItems(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
-    final cardWidth = isSmallScreen ? 170.0 : 190.0;
-    // Hauteur **demandée par la carte** pour cette largeur et l'échelle de
-    // police en vigueur, marge basse comprise. Les 240/260 px ronds
-    // d'avant écrasaient le nom, le prix et le bouton d'ajout sous le
-    // bandeau de débordement dès la taille de police par défaut.
-    final listHeight = MenuItemCard.hauteurPour(context, cardWidth) +
-        (isSmallScreen ? 4 : 8);
-
-    return SliverToBoxAdapter(
-      child: Container(
-        margin: EdgeInsets.symmetric(horizontal: isSmallScreen ? 12 : 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            HomeSectionHeader(
-              title: 'Plats à la une',
-              subtitle: 'Sélectionnés pour vous',
-              actionLabel: 'Tout voir',
-              onActionPressed: () => widget.onNavigateToTab?.call(1),
-            ),
-            SizedBox(height: isSmallScreen ? 12 : 16),
-            Consumer<AppService>(
-              builder: (context, appService, child) {
-                final featuredItems = appService.menuItems
-                    .where((item) => item.isPopular)
-                    .take(3)
-                    .toList();
-
-                if (featuredItems.isEmpty) {
-                  return DesignEnhancementService.createEnhancedCard(
-                    child: const Center(
-                      child: Text('Aucun plat populaire disponible'),
+    return ClipOval(
+      child: SizedBox(
+        width: 40,
+        height: 40,
+        child: (avatar != null && avatar.isNotEmpty)
+            ? FoodImage(
+                url: avatar,
+                icon: Icons.person_rounded,
+                iconSize: 22,
+              )
+            : ColoredBox(
+                color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                child: Center(
+                  child: Text(
+                    initiale,
+                    style: AppTypography.titleLg(
+                      color: theme.colorScheme.primary,
                     ),
-                  );
-                }
-
-                return SizedBox(
-                  height: listHeight,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    shrinkWrap: true,
-                    physics: const ClampingScrollPhysics(),
-                    itemCount: featuredItems.length,
-                    itemBuilder: (context, index) {
-                      final item = featuredItems[index];
-                      return Container(
-                        width: cardWidth,
-                        margin: EdgeInsets.only(
-                          right: isSmallScreen ? 12 : 16,
-                          bottom: isSmallScreen ? 4 : 8,
-                        ),
-                        child:
-                            DesignEnhancementService.createEnhancedMenuItemCard(
-                          item: item,
-                          onTap: () =>
-                              context.navigateToItemCustomization(item),
-                          onAddToCart: () {
-                            Provider.of<CartService>(context, listen: false)
-                                .addItem(item);
-                            context.showSuccessMessage(
-                              '${item.name} ajouté au panier !',
-                            );
-                          },
-                        ),
-                      );
-                    },
                   ),
-                );
-              },
-            ),
-          ],
-        ),
+                ),
+              ),
       ),
     );
   }
+}
 
-  Widget _buildAIRecommendations(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
-    final cardWidth = isSmallScreen ? 170.0 : 190.0;
-    // Hauteur **demandée par la carte** pour cette largeur et l'échelle de
-    // police en vigueur, marge basse comprise. Les 240/260 px ronds
-    // d'avant écrasaient le nom, le prix et le bouton d'ajout sous le
-    // bandeau de débordement dès la taille de police par défaut.
-    final listHeight = MenuItemCard.hauteurPour(context, cardWidth) +
-        (isSmallScreen ? 4 : 8);
+/// Cloche de notifications, avec le compte de non-lues.
+class _Cloche extends StatelessWidget {
+  const _Cloche({required this.onTap});
 
-    return SliverToBoxAdapter(
-      child: Consumer2<AIRecommendationService, AppService>(
-        builder: (context, aiService, appService, child) {
-          // L'identifiant **du compte connecté**, et non la chaîne
-          // `'current_user'` : les suggestions sont rangées sous l'identifiant
-          // avec lequel elles ont été calculées, si bien que cette clé
-          // inventée ne désignait jamais rien. La section restait vide quoi
-          // qu'il arrive.
-          final identifiant = appService.currentUser?.id;
-          if (identifiant == null) return const SizedBox.shrink();
+  final VoidCallback onTap;
 
-          // Obtenir les recommandations basées sur les produits populaires
-          final recommendations = aiService
-              .getRecommendationsForUser(identifiant)
-              .where((item) => item.isPopular && item.ratingAverage > 4.0)
-              .take(3)
-              .toList();
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<NotificationDatabaseService>(
+      builder: (context, service, child) {
+        final nonLues = service.unreadCount;
+        return GlassIconButton(
+          icon: nonLues > 0
+              ? Icons.notifications_active_rounded
+              : Icons.notifications_none_rounded,
+          tooltip: nonLues > 0
+              ? '$nonLues notification${nonLues > 1 ? 's' : ''} non lue${nonLues > 1 ? 's' : ''}'
+              : 'Notifications',
+          badge: nonLues,
+          onPressed: onTap,
+        );
+      },
+    );
+  }
+}
 
-          if (recommendations.isEmpty) {
-            return const SizedBox.shrink();
-          }
+// ----------------------------------------------------------------- recherche
 
-          return Container(
-            margin: EdgeInsets.all(isSmallScreen ? 12 : 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const HomeSectionHeader(
-                  title: 'Nos suggestions',
-                  subtitle: 'Inspirées de vos commandes récentes',
-                ),
-                SizedBox(height: isSmallScreen ? 12 : 16),
-                SizedBox(
-                  height: listHeight,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    shrinkWrap: true,
-                    physics: const ClampingScrollPhysics(),
-                    itemCount: recommendations.length,
-                    itemBuilder: (context, index) {
-                      final item = recommendations[index];
-                      return Consumer<FavoritesService>(
-                        builder: (context, favoritesService, child) {
-                          final isFavorite = favoritesService.isFavorite(item);
-                          return Container(
-                            width: cardWidth,
-                            margin: EdgeInsets.only(
-                              right: isSmallScreen ? 12 : 16,
-                              bottom: isSmallScreen ? 4 : 8,
-                            ),
-                            child: DesignEnhancementService
-                                .createEnhancedMenuItemCard(
-                              item: item,
-                              onTap: () =>
-                                  context.navigateToItemCustomization(item),
-                              onAddToCart: () {
-                                Provider.of<CartService>(context, listen: false)
-                                    .addItem(item);
-                                context.showSuccessMessage(
-                                  '${item.name} ajouté au panier !',
-                                );
-                              },
-                              onFavoriteTap: () {
-                                favoritesService.toggleFavorite(item);
-                                if (isFavorite) {
-                                  context.showSuccessMessage(
-                                    '${item.name} retiré des favoris',
-                                  );
-                                } else {
-                                  context.showSuccessMessage(
-                                    '${item.name} ajouté aux favoris',
-                                  );
-                                }
-                              },
-                              isFavorite: isFavorite,
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+/// Barre de recherche en mode bouton : elle ouvre l'écran de recherche
+/// avancée au lieu de déplier le clavier ici.
+///
+/// C'est un choix de la maquette, et il tient : la recherche de l'accueil ne
+/// peut rien filtrer sur place — les plats affichés sont une sélection, pas la
+/// carte — alors que l'écran dédié cherche dans tout le catalogue.
+class _BarreDeRecherche extends StatelessWidget {
+  const _BarreDeRecherche();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: DesignConstants.edgeMargin,
+      ),
+      child: AppSearchField(
+        onTap: () => context.navigateToAdvancedSearch(),
       ),
     );
   }
+}
 
-  Widget _buildFavoritesSection(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
-    final cardWidth = isSmallScreen ? 160.0 : 180.0;
-    // Hauteur **demandée par la carte** pour cette largeur et l'échelle de
-    // police en vigueur, marge basse comprise. Les 240/260 px ronds
-    // d'avant écrasaient le nom, le prix et le bouton d'ajout sous le
-    // bandeau de débordement dès la taille de police par défaut.
-    final listHeight = MenuItemCard.hauteurPour(context, cardWidth) +
-        (isSmallScreen ? 4 : 8);
+// ----------------------------------------------------------------- bannière
 
-    return SliverToBoxAdapter(
-      child: Consumer<FavoritesService>(
-        builder: (context, favoritesService, child) {
-          final favorites = favoritesService.favorites;
+/// Mise en avant d'un plat réel du catalogue.
+///
+/// Le choix est déterministe — le mieux noté parmi les populaires disponibles,
+/// à égalité le premier dans l'ordre du serveur — pour que la bannière ne
+/// change pas d'un rendu à l'autre. Une bannière qui tourne à chaque
+/// reconstruction du widget se lit comme un défaut, pas comme une rotation
+/// éditoriale.
+class _BanniereDuJour extends StatelessWidget {
+  const _BanniereDuJour();
 
-          if (favorites.isEmpty) {
-            return const SizedBox.shrink();
-          }
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AppService>(
+      builder: (context, appService, child) {
+        final candidats = appService.menuItems
+            .where((item) => item.isAvailable && item.isPopular)
+            .toList()
+          ..sort((a, b) => b.ratingAverage.compareTo(a.ratingAverage));
 
-          return Container(
-            margin: EdgeInsets.all(isSmallScreen ? 12 : 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                HomeSectionHeader(
-                  title: 'Mes favoris ❤️',
-                  subtitle:
-                      '${favorites.length} plat${favorites.length > 1 ? 's' : ''} sauvegardé${favorites.length > 1 ? 's' : ''}',
-                  actionLabel: favorites.isEmpty ? null : 'Voir tout',
-                  onActionPressed: favorites.isEmpty
-                      ? null
-                      : () => widget.onNavigateToTab?.call(1),
-                ),
-                SizedBox(height: isSmallScreen ? 12 : 16),
-                SizedBox(
-                  height: listHeight,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    shrinkWrap: true,
-                    physics: const ClampingScrollPhysics(),
-                    itemCount: favorites.length,
-                    itemBuilder: (context, index) {
-                      final item = favorites[index];
-                      return Container(
-                        width: cardWidth,
-                        margin: EdgeInsets.only(
-                          right: isSmallScreen ? 12 : 16,
-                          bottom: isSmallScreen ? 4 : 8,
-                        ),
-                        child:
-                            DesignEnhancementService.createEnhancedMenuItemCard(
-                          item: item,
-                          onTap: () =>
-                              context.navigateToItemCustomization(item),
-                          onAddToCart: () {
-                            Provider.of<CartService>(context, listen: false)
-                                .addItem(item);
-                            context.showSuccessMessage(
-                              '${item.name} ajouté au panier !',
-                            );
-                          },
-                          onFavoriteTap: () {
-                            favoritesService.removeFromFavorites(item);
-                            context.showSuccessMessage(
-                              '${item.name} retiré des favoris',
-                            );
-                          },
-                          isFavorite: true,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+        if (candidats.isEmpty) return const SizedBox.shrink();
+        final vedette = candidats.first;
+
+        final details = <String>[
+          if (vedette.ratingAverage > 0)
+            '${vedette.ratingAverage.toStringAsFixed(1)}/5',
+          if (vedette.preparationMinutes > 0)
+            'prêt en ${vedette.preparationMinutes} min',
+          vedette.price.format(),
+        ];
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DesignConstants.edgeMargin,
+          ),
+          child: PromoBanner(
+            title: vedette.name,
+            subtitle: details.join(' · '),
+            actionLabel: 'Commander',
+            imageUrl: vedette.image,
+            onPressed: () => context.navigateToItemCustomization(vedette),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------- carrousels
+
+/// Rangée horizontale de cartes compactes — suggestions, favoris.
+///
+/// La hauteur est **demandée à la carte** plutôt que devinée : c'est ce qui
+/// empêche le prix et le bouton d'ajout de passer sous le bandeau de
+/// débordement quand le système grossit la police.
+class _Carrousel extends StatelessWidget {
+  const _Carrousel({
+    required this.titre,
+    required this.articles,
+    this.sousTitre,
+    this.actionLibelle,
+    this.onAction,
+  });
+
+  final String titre;
+  final String? sousTitre;
+  final List<eccore.MenuItem> articles;
+  final String? actionLibelle;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final petitEcran = MediaQuery.sizeOf(context).width < 360;
+    final largeurCarte = petitEcran ? 170.0 : 190.0;
+    final hauteur = MenuItemCard.hauteurPour(context, largeurCarte) +
+        (petitEcran ? 4 : 8);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DesignConstants.spacingL),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionHeader(
+            title: titre,
+            subtitle: sousTitre,
+            actionLabel: actionLibelle,
+            onActionPressed: onAction,
+            padding: const EdgeInsets.symmetric(
+              horizontal: DesignConstants.edgeMargin,
             ),
-          );
-        },
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          SizedBox(
+            height: hauteur,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(
+                horizontal: DesignConstants.edgeMargin,
+              ),
+              itemCount: articles.length,
+              separatorBuilder: (_, __) =>
+                  const SizedBox(width: DesignConstants.spacingM),
+              itemBuilder: (context, index) => SizedBox(
+                width: largeurCarte,
+                child: _CarteCompacte(article: articles[index]),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
+}
+
+/// Carte compacte branchée sur le panier et les favoris réels.
+class _CarteCompacte extends StatelessWidget {
+  const _CarteCompacte({required this.article});
+
+  final eccore.MenuItem article;
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<FavoritesService>(
+      builder: (context, favoritesService, child) {
+        final estFavori = favoritesService.isFavorite(article);
+
+        return MenuItemCard(
+          item: article,
+          onTap: () => context.navigateToItemCustomization(article),
+          onAddToCart: () => _ajouterAuPanier(context, article),
+          onFavoriteTap: () {
+            favoritesService.toggleFavorite(article);
+            context.showSuccessMessage(
+              estFavori
+                  ? '${article.name} retiré des favoris'
+                  : '${article.name} ajouté aux favoris',
+            );
+          },
+          isFavorite: estFavori,
+        );
+      },
+    );
+  }
+}
+
+/// Carte pleine largeur de la liste principale.
+class _CarteDePlat extends StatelessWidget {
+  const _CarteDePlat({required this.article});
+
+  final eccore.MenuItem article;
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<FavoritesService>(
+      builder: (context, favoritesService, child) {
+        final estFavori = favoritesService.isFavorite(article);
+
+        return FoodCard(
+          item: article,
+          isFavorite: estFavori,
+          onTap: () => context.navigateToItemCustomization(article),
+          onFavoriteTap: () {
+            favoritesService.toggleFavorite(article);
+            context.showSuccessMessage(
+              estFavori
+                  ? '${article.name} retiré des favoris'
+                  : '${article.name} ajouté aux favoris',
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// Ajout au panier — ou personnalisation quand la carte impose un choix.
+///
+/// Un burger sans cuisson, une pizza sans taille : le serveur les refuse
+/// (`validate_selection`). Le raccourci ne vaut donc que pour les articles
+/// qui n'attendent rien de plus.
+void _ajouterAuPanier(BuildContext context, eccore.MenuItem article) {
+  unawaited(context.addToCartOrCustomize(article));
 }

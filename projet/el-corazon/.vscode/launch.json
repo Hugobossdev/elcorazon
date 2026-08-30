@@ -5,6 +5,31 @@
     "version": "0.2.0",
     "configurations": [
         {
+            // Port **fixe**, et c'est tout l'intérêt de cette configuration.
+            //
+            // Flutter Web en tire un au hasard à chaque lancement (53340, puis
+            // un autre demain). Or une origine autorisée par CORS se déclare au
+            // port près : `http://localhost:53340` et `http://localhost:4122`
+            // sont deux origines distinctes pour le navigateur. Whitelister un
+            // port tiré au sort revient donc à recommencer à chaque `flutter
+            // run` — et l'erreur qu'on obtient sinon ne parle pas de port, elle
+            // dit seulement « No 'Access-Control-Allow-Origin' header », ce qui
+            // envoie chercher la panne côté serveur.
+            //
+            // Équivalent en ligne de commande, depuis `apps/fastfood` :
+            //     flutter run -d chrome --web-port=5000
+            //
+            // L'origine à déclarer dans `CORS_ALLOWED_ORIGINS` côté backend est
+            // alors `http://localhost:5000`, une bonne fois.
+            "name": "fastfood — Chrome (port fixe 5000)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "cwd": "apps/fastfood",
+            "deviceId": "chrome",
+            "args": ["--web-port", "5000"]
+        },
+        {
             "type": "chrome",
             "request": "launch",
             "name": "Launch Chrome against localhost",

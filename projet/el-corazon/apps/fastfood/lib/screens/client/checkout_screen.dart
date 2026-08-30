@@ -9,14 +9,14 @@ import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/adresse.dart';
 import 'package:elcora_fast/presentation/frais_de_livraison.dart';
-import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
-import 'package:elcora_fast/widgets/auth_style_card.dart';
-import 'package:elcora_fast/widgets/auth_style_text_field.dart';
-import 'package:elcora_fast/widgets/auth_style_button.dart';
 import 'package:elcora_fast/widgets/delivery_fee_breakdown_card.dart';
 import 'package:elcora_fast/widgets/zone_not_serviceable_dialog.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart';
 import 'package:elcora_fast/screens/client/payment_screen.dart';
 import 'package:elcora_fast/screens/client/address_selector_screen.dart';
 
@@ -46,6 +46,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       .cash; // Par défaut: cash (mobile money, credit card et debit card désactivés)
   bool _isLoading = false;
   bool _isCalculatingDeliveryFee = false;
+
+  /// Vrai dès qu'on a tenté de commander sans adresse. Ce n'est qu'à ce
+  /// moment que la carte d'adresse se signale en rouge : la souligner dès
+  /// l'ouverture reprocherait au client de ne pas avoir fait ce qu'on ne lui
+  /// a pas encore demandé.
+  bool _adresseReclamee = false;
   eccore.Address? _selectedAddress;
   // La distance et le délai estimé ne sont plus recopiés ici : ils vivent sur
   // `_deliveryBreakdown`, d'où l'écran les lit déjà.
@@ -191,6 +197,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         _selectedAddress = selected;
         _addressController.text = selected.uneLigne;
       });
+      setState(() => _adresseReclamee = false);
       await _calculateDeliveryFeeForAddress(selected);
     }
   }
@@ -200,11 +207,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Finaliser la commande'),
-        // UX: checkout = focus (notifications ailleurs)
-      ),
+      backgroundColor: theme.colorScheme.surface,
+      // Pas de cloche ni de panier dans cette barre : à l'étape du règlement,
+      // toute sortie latérale est une commande perdue.
+      appBar: const GlassAppBar(title: 'Finaliser la commande'),
       body: Consumer2<AppService, CartService>(
         builder: (context, appService, cartService, child) {
           final isGroupOrder = widget.existingOrderId != null;
@@ -232,37 +241,38 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             child: Column(
               children: [
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildStepHeader(context, '1. Récapitulatif'),
-                        const SizedBox(height: 8),
-                        _buildOrderSummary(
-                          context,
-                          cartItems,
-                          subtotal,
-                          deliveryFee,
-                          discount,
-                          total,
-                          cartService.itemCount,
-                          cartService.promoCode,
-                        ),
-                        const SizedBox(height: 24),
-                        _buildStepHeader(context, '2. Livraison'),
-                        const SizedBox(height: 8),
-                        _buildDeliverySection(context),
-                        const SizedBox(height: 24),
-                        _buildStepHeader(context, '3. Paiement'),
-                        const SizedBox(height: 8),
-                        _buildPaymentSection(context),
-                        const SizedBox(height: 24),
-                        _buildStepHeader(context, '4. Notes'),
-                        const SizedBox(height: 8),
-                        _buildNotesSection(context),
-                      ],
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(
+                      DesignConstants.edgeMargin,
+                      DesignConstants.spacingM,
+                      DesignConstants.edgeMargin,
+                      DesignConstants.spacingL,
                     ),
+                    children: [
+                      _buildStepHeader(context, 'Adresse de livraison'),
+                      _buildDeliverySection(context),
+                      const SizedBox(height: DesignConstants.spacingL),
+                      _buildStepHeader(context, 'Mode de paiement'),
+                      _buildPaymentSection(context),
+                      const SizedBox(height: DesignConstants.spacingL),
+                      _buildStepHeader(context, 'Instructions pour le livreur'),
+                      _buildNotesSection(context),
+                      const SizedBox(height: DesignConstants.spacingL),
+                      _buildStepHeader(context, 'Code promo'),
+                      _buildPromoSection(context, cartService),
+                      const SizedBox(height: DesignConstants.spacingL),
+                      _buildStepHeader(context, 'Récapitulatif'),
+                      _buildOrderSummary(
+                        context,
+                        cartItems,
+                        subtotal,
+                        deliveryFee,
+                        discount,
+                        total,
+                        cartService.itemCount,
+                        cartService.promoCode,
+                      ),
+                    ],
                   ),
                 ),
                 _buildCheckoutButton(context, appService, cartService, total),
@@ -275,50 +285,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Widget _buildStepHeader(BuildContext context, String title) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DesignConstants.spacingS),
+      child: Text(
+        title,
+        style: AppTypography.titleLg(
+          color: Theme.of(context).colorScheme.onSurface,
         ),
-      ],
+      ),
     );
   }
 
   Widget _buildEmptyCart(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.shopping_cart_outlined,
-            size: 100,
-            color: Theme.of(
-              context,
-            ).colorScheme.onSurface.withValues(alpha: 0.3),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Votre panier est vide',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Ajoutez des plats à votre panier avant de commander',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.6),
-                ),
-          ),
-          const SizedBox(height: 30),
-          CustomButton(text: 'Voir le menu', onPressed: () => context.goBack()),
-        ],
-      ),
+    return EmptyStateWidget(
+      title: 'Votre panier est vide',
+      message: 'Ajoutez des plats avant de commander.',
+      icon: Icons.shopping_cart_outlined,
+      actionText: 'Voir le menu',
+      onAction: () => context.goBack(),
     );
   }
 
@@ -332,303 +316,400 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     int itemCount,
     String? promoCode,
   ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Résumé de la commande',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ...cartItems.map((item) => _buildOrderItem(context, item)),
+          const SummaryDivider(),
+          SummaryRow(
+            label: 'Sous-total',
+            subtitle:
+                '${cartItems.length} article${cartItems.length > 1 ? 's' : ''}',
+            value: PriceFormatter.format(subtotal),
+          ),
+          SummaryRow(
+            label: 'Livraison',
+            value: PriceFormatter.format(deliveryFee),
+          ),
+          if (discount > 0)
+            SummaryRow(
+              label: 'Remise${promoCode != null ? ' ($promoCode)' : ''}',
+              value: '-${PriceFormatter.format(discount)}',
+              isDiscount: true,
             ),
-            const SizedBox(height: 16),
-            ...cartItems.map((item) => _buildOrderItem(context, item)),
-            const Divider(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          const SummaryDivider(),
+          SummaryRow(
+            label: 'Total',
+            value: PriceFormatter.format(total),
+            isTotal: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Une ligne du récapitulatif : vignette, nom, quantité, total de ligne.
+  ///
+  /// La personnalisation choisie est reprise ici — c'est la dernière occasion
+  /// de vérifier qu'on commande bien ce qu'on a composé, et l'ancienne version
+  /// ne l'affichait nulle part.
+  Widget _buildOrderItem(BuildContext context, CartItem item) {
+    final theme = Theme.of(context);
+    final personnalisation = item.customization;
+    final resume = (personnalisation != null && personnalisation.isNotEmpty)
+        ? personnalisation.entries
+            .where((e) => e.key != 'note' || personnalisation.length == 1)
+            .map((e) => '${e.key}: ${e.value}')
+            .join(', ')
+        : '';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DesignConstants.spacingS + 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: DesignConstants.borderRadiusSmall,
+            child: SizedBox(
+              width: 44,
+              height: 44,
+              child: FoodImage(url: item.imageUrl, iconSize: 20),
+            ),
+          ),
+          const SizedBox(width: DesignConstants.spacingS + 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Sous-total (${cartItems.length} article${cartItems.length > 1 ? 's' : ''})',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  '${item.quantity} × ${item.name}',
+                  style: AppTypography.bodyLg(
+                    color: theme.colorScheme.onSurface,
+                  ),
                 ),
-                Text(
-                  PriceFormatter.format(subtotal),
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+                if (resume.isNotEmpty)
+                  Text(
+                    resume,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.bodyMd(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
               ],
             ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Livraison',
-                  style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(width: DesignConstants.spacingS),
+          Text(
+            PriceFormatter.format(item.totalPrice),
+            style: AppTypography.bodyLg(color: theme.colorScheme.onSurface)
+                .copyWith(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Adresse de livraison, sous forme de carte cliquable.
+  ///
+  /// Le champ de texte désactivé qu'affichait la version précédente était un
+  /// leurre : il ressemblait à une saisie, ne s'ouvrait jamais, et il fallait
+  /// trouver le bouton « Changer » à côté. La carte entière ouvre désormais le
+  /// sélecteur, ce que le chevron annonce.
+  Widget _buildDeliverySection(BuildContext context) {
+    final theme = Theme.of(context);
+    final adresse = _selectedAddress;
+
+    return Column(
+      children: [
+        SectionCard(
+          onTap: _selectAddress,
+          borderColor: (_adresseReclamee && adresse == null)
+              ? theme.colorScheme.error
+              : null,
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                  borderRadius: DesignConstants.borderRadiusMedium,
                 ),
-                Text(
-                  PriceFormatter.format(deliveryFee),
-                  style: Theme.of(context).textTheme.bodyMedium,
+                child: Icon(
+                  adresse == null
+                      ? Icons.add_location_alt_outlined
+                      : Icons.location_on_rounded,
+                  color: theme.colorScheme.primary,
                 ),
-              ],
-            ),
-            if (discount > 0) ...[
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Remise${promoCode != null ? ' ($promoCode)' : ''}',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.green),
-                  ),
-                  Text(
-                    '-${PriceFormatter.format(discount)}',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.green),
-                  ),
-                ],
+              ),
+              const SizedBox(width: DesignConstants.spacingM),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      adresse == null
+                          ? 'Choisir une adresse'
+                          : (adresse.label.isNotEmpty
+                              ? adresse.label
+                              : adresse.line1),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.titleLg(
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                    Text(
+                      adresse == null
+                          ? 'Obligatoire pour estimer la livraison'
+                          : _addressController.text,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ],
-            const Divider(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Total',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+          ),
+        ),
+        // Le validateur du formulaire porte toujours sur l'adresse : il est
+        // resté sur un champ, désormais invisible, pour que `_placeOrder`
+        // continue de refuser une commande sans destination.
+        Offstage(
+          child: TextFormField(
+            controller: _addressController,
+            enabled: false,
+            validator: (_) => _selectedAddress == null
+                ? 'Veuillez sélectionner une adresse'
+                : null,
+          ),
+        ),
+        if (_isCalculatingDeliveryFee) ...[
+          const SizedBox(height: DesignConstants.spacingM),
+          Row(
+            children: [
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: DesignConstants.spacingS + 4),
+              Text(
+                'Calcul des frais de livraison…',
+                style: AppTypography.bodyMd(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
-                Text(
-                  PriceFormatter.format(total),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
+              ),
+            ],
+          ),
+        ],
+        if (_deliveryBreakdown != null && !_isCalculatingDeliveryFee) ...[
+          const SizedBox(height: DesignConstants.spacingM),
+          DeliveryFeeBreakdownCard(
+            breakdown: _deliveryBreakdown!,
+            showTitle: false,
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Modes de paiement, en lignes plutôt qu'en puces.
+  ///
+  /// ## Pourquoi les modes indisponibles restent affichés
+  ///
+  /// Mobile Money et les cartes ne sont pas encore raccordés. Les masquer
+  /// laisserait croire qu'ils n'existeront jamais et ferait douter du sérieux
+  /// du service ; les afficher à demi-opacité, comme avant, laissait croire à
+  /// un bogue. Ils portent donc une mention explicite — « bientôt » — et ne
+  /// répondent pas au toucher.
+  ///
+  /// Le portefeuille, lui, est bien retiré : il n'est pas différé, il est
+  /// abandonné.
+  Widget _buildPaymentSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final modes = PaymentMethod.values
+        .where((method) => method != PaymentMethod.wallet)
+        .toList();
+
+    return Column(
+      children: [
+        for (final mode in modes) ...[
+          Builder(
+            builder: (context) {
+              final indisponible = mode == PaymentMethod.mobileMoney ||
+                  mode == PaymentMethod.creditCard ||
+                  mode == PaymentMethod.debitCard;
+              final retenu = _selectedPayment == mode && !indisponible;
+
+              return Padding(
+                padding: const EdgeInsets.only(
+                  bottom: DesignConstants.spacingS + 2,
                 ),
-              ],
-            ),
-          ],
+                child: SectionCard(
+                  padding: const EdgeInsets.all(DesignConstants.spacingS + 4),
+                  borderColor: retenu ? theme.colorScheme.primary : null,
+                  onTap: indisponible
+                      ? null
+                      : () => setState(() => _selectedPayment = mode),
+                  child: Row(
+                    children: [
+                      Icon(
+                        retenu
+                            ? Icons.radio_button_checked_rounded
+                            : Icons.radio_button_unchecked_rounded,
+                        color: indisponible
+                            ? theme.colorScheme.onSurfaceVariant
+                                .withValues(alpha: 0.35)
+                            : retenu
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.outline,
+                      ),
+                      const SizedBox(width: DesignConstants.spacingM),
+                      Container(
+                        width: 40,
+                        height: 40,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHigh,
+                          borderRadius: DesignConstants.borderRadiusMedium,
+                        ),
+                        child: Text(
+                          mode.emoji,
+                          style: const TextStyle(fontSize: 20),
+                        ),
+                      ),
+                      const SizedBox(width: DesignConstants.spacingM),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              mode.displayName,
+                              style: AppTypography.titleLg(
+                                color: indisponible
+                                    ? theme.colorScheme.onSurfaceVariant
+                                    : theme.colorScheme.onSurface,
+                              ),
+                            ),
+                            Text(
+                              mode.description,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTypography.bodyMd(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (indisponible) ...[
+                        const SizedBox(width: DesignConstants.spacingS),
+                        const StatusChip(label: 'Bientôt', dense: true),
+                      ],
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildNotesSection(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SectionCard(
+      child: TextField(
+        controller: _notesController,
+        maxLines: 3,
+        style: AppTypography.bodyLg(color: theme.colorScheme.onSurface),
+        decoration: InputDecoration(
+          hintText: 'Ex. : sonner à la porte, laisser à l’accueil…',
+          fillColor: theme.colorScheme.surfaceContainerLow,
         ),
       ),
     );
   }
 
-  Widget _buildOrderItem(BuildContext context, CartItem item) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+  /// Accès au code promotionnel, depuis le règlement.
+  ///
+  /// C'est ici, et pas seulement au panier, parce que l'adresse est désormais
+  /// connue : le devis que le serveur renvoie tient alors compte des frais de
+  /// livraison réels, dont certains codes dépendent. Le panier garde sa saisie
+  /// rapide pour les codes qui ne portent que sur le sous-total.
+  Widget _buildPromoSection(BuildContext context, CartService cartService) {
+    final theme = Theme.of(context);
+    final code = cartService.promoCode;
+    final applique = code != null && code.isNotEmpty;
+
+    return SectionCard(
+      onTap: () => context.navigateToPromoCodes(
+        _selectedAddress?.id,
+        (_, __) async {
+          // Le code est déjà posé sur le panier par l'écran de saisie ; il
+          // reste à refaire chiffrer la commande pour que les frais et le
+          // total affichés ici tiennent compte de la remise.
+          await _calculateDeliveryFeeForAddress(_selectedAddress);
+        },
+      ),
       child: Row(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: Container(
-              width: 40,
-              height: 40,
-              color: Colors.grey[200],
-              child: item.imageUrl?.isNotEmpty == true
-                  ? Image.network(
-                      item.imageUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Icon(
-                          Icons.fastfood,
-                          color: Colors.grey[400],
-                          size: 20,
-                        );
-                      },
-                    )
-                  : Icon(Icons.fastfood, color: Colors.grey[400], size: 20),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
+              borderRadius: DesignConstants.borderRadiusMedium,
+            ),
+            child: Icon(
+              applique
+                  ? Icons.local_activity_rounded
+                  : Icons.local_activity_outlined,
+              color: theme.colorScheme.primary,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: DesignConstants.spacingM),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  item.name,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+                  applique ? code : 'Ajouter un code promo',
+                  style: AppTypography.titleLg(
+                    color: theme.colorScheme.onSurface,
+                  ),
                 ),
                 Text(
-                  'Quantité: ${item.quantity}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.onSurface.withValues(alpha: 0.7),
-                      ),
-                ),
-                Text(
-                  PriceFormatter.format(item.totalPrice),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
+                  applique
+                      ? 'Remise de ${PriceFormatter.format(cartService.discount)}'
+                      : 'Si vous en avez un',
+                  style: AppTypography.bodyMd(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDeliverySection(BuildContext context) {
-    return AuthStyleCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.location_on,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Adresse de livraison',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: _selectAddress,
-                icon: const Icon(Icons.edit_location_alt),
-                label: const Text('Changer'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          AuthStyleTextField(
-            controller: _addressController,
-            label: 'Adresse sélectionnée',
-            hintText: 'Sélectionnez une adresse',
-            icon: Icons.location_on,
-            maxLines: 3,
-            enabled: false,
-            validator: (_) =>
-                _selectedAddress == null ? 'Veuillez sélectionner une adresse' : null,
-          ),
-          if (_isCalculatingDeliveryFee) ...[
-            const SizedBox(height: 16),
-            const Center(child: CircularProgressIndicator()),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(
-                'Calcul des frais de livraison...',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-              ),
-            ),
-          ],
-          // Afficher le breakdown détaillé si disponible
-          if (_deliveryBreakdown != null && !_isCalculatingDeliveryFee) ...[
-            const SizedBox(height: 16),
-            DeliveryFeeBreakdownCard(
-              breakdown: _deliveryBreakdown!,
-              showTitle: false,
-              padding: EdgeInsets.zero,
-              margin: EdgeInsets.zero,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPaymentSection(BuildContext context) {
-    return AuthStyleCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.payment,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Méthode de paiement',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: PaymentMethod.values
-                .where(
-              (method) => method != PaymentMethod.wallet,
-            ) // Portefeuille désactivé temporairement
-                .map((method) {
-              final selected = _selectedPayment == method;
-              // Désactiver mobile money, credit card et debit card
-              final isDisabled = method == PaymentMethod.mobileMoney ||
-                  method == PaymentMethod.creditCard ||
-                  method == PaymentMethod.debitCard;
-              return Opacity(
-                opacity: isDisabled ? 0.5 : 1.0,
-                child: ChoiceChip(
-                  label: Text('${method.emoji} ${method.displayName}'),
-                  selected: selected && !isDisabled,
-                  onSelected: isDisabled
-                      ? null
-                      : (_) => setState(() => _selectedPayment = method),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _selectedPayment.description,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurface
-                      .withValues(alpha: 0.7),
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNotesSection(BuildContext context) {
-    return AuthStyleCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.note, color: Theme.of(context).colorScheme.primary),
-              const SizedBox(width: 8),
-              Text(
-                'Instructions spéciales',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          AuthStyleTextField(
-            controller: _notesController,
-            label: 'Instructions pour le livreur (optionnel)',
-            hintText: 'Ex: Sonner à la porte, laisser devant la porte...',
-            icon: Icons.note,
-            maxLines: 3,
+          Icon(
+            Icons.chevron_right_rounded,
+            color: theme.colorScheme.onSurfaceVariant,
           ),
         ],
       ),
@@ -641,51 +722,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     CartService cartService,
     double total,
   ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Total à payer',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                Text(
-                  PriceFormatter.format(total),
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            AuthStyleButton(
-              text: _isLoading ? 'Traitement...' : 'Confirmer la commande',
-              onPressed: _isLoading
-                  ? null
-                  : () => _placeOrder(context, appService, cartService, total),
-              isLoading: _isLoading,
-              width: double.infinity,
-              icon: Icons.check_circle_outline,
-            ),
-          ],
+    return GlassBottomBar(
+      child: StickySummaryBar(
+        label: 'Total à payer',
+        amount: PriceFormatter.format(total),
+        action: ActionButton(
+          label: 'Commander',
+          emphasis: ActionEmphasis.gradient,
+          trailingIcon: Icons.arrow_forward_rounded,
+          isLoading: _isLoading,
+          onPressed: _isLoading
+              ? null
+              : () => _placeOrder(context, appService, cartService, total),
         ),
       ),
     );
@@ -698,6 +746,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     double total,
   ) async {
     if (!_formKey.currentState!.validate()) {
+      setState(() => _adresseReclamee = _selectedAddress == null);
       return;
     }
 

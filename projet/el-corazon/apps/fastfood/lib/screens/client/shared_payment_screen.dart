@@ -5,7 +5,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+// `ErrorWidget` existe aussi dans Flutter — c'est le carré rouge des
+// exceptions de rendu. Le préfixe lève l'ambiguïté.
+import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
 import 'package:elcora_fast/presentation/paiement_partage.dart';
 
 /// Paiement partagé d'une commande — `/payments/{order}/split/` (Phase 6).
@@ -174,16 +179,18 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Paiement partagé'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Partager l’addition',
         actions: [
-          IconButton(
-            onPressed: _isLoading ? null : _loadSession,
-            icon: const Icon(Icons.refresh),
+          GlassIconButton(
+            icon: Icons.refresh_rounded,
             tooltip: 'Actualiser',
+            filled: false,
+            onPressed: _isLoading ? () {} : _loadSession,
           ),
         ],
       ),
@@ -198,146 +205,244 @@ class _SharedPaymentScreenState extends State<SharedPaymentScreen> {
 
     final session = _session;
     if (session == null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 56, color: AppColors.error),
-              const SizedBox(height: 12),
-              Text(
-                _loadError ?? 'Partage indisponible',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _loadSession,
-                child: const Text('Réessayer'),
-              ),
-            ],
-          ),
-        ),
+      return etats.ErrorWidget(
+        message: _loadError ?? 'Partage indisponible',
+        onRetry: _loadSession,
       );
     }
 
-    return Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        DesignConstants.edgeMargin,
+        DesignConstants.spacingL,
+        DesignConstants.edgeMargin,
+        DesignConstants.spacingL,
+      ),
       children: [
         _buildSummary(session),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: session.shares.length,
-            itemBuilder: (context, index) =>
-                _buildParticipantCard(session.shares[index]),
+        const SizedBox(height: DesignConstants.spacingL),
+        const SectionHeader(
+          title: 'Les parts',
+          subtitle: 'Chacun règle la sienne, de son côté',
+        ),
+        const SizedBox(height: DesignConstants.spacingM),
+        for (final part in session.shares) _buildParticipantCard(part),
+      ],
+    );
+  }
+
+  /// Le total, ce qui est réglé, ce qui reste — et une barre pour le voir.
+  ///
+  /// La maquette pose ce bloc en verre teinté au-dessus de tout le reste. Le
+  /// bandeau rose pâle qu'il remplace empilait trois phrases dont deux
+  /// contenaient chacune deux montants séparés par une puce : il fallait les
+  /// lire pour comprendre où en était la collecte, alors que c'est la
+  /// première chose qu'on veut savoir.
+  Widget _buildSummary(eccore.SplitPayment session) {
+    final total = session.totalAmount.toMajorUnits();
+    final regle = session.paidAmount.toMajorUnits();
+    final reste = total - regle;
+    final reglees = session.shares.where((p) => p.isPaid).length;
+
+    final avancement = session.totalAmount.amountMinor > 0
+        ? session.paidAmount.amountMinor / session.totalAmount.amountMinor
+        : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(DesignConstants.spacingL),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: AppColors.actionGradient,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: DesignConstants.borderRadiusLarge,
+        boxShadow: DesignConstants.shadowLow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Total de l’addition',
+            style: AppTypography.bodyMd(
+              color: Colors.white.withValues(alpha: 0.85),
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              PriceFormatter.format(total),
+              maxLines: 1,
+              style: AppTypography.displayLg(color: Colors.white),
+            ),
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: avancement.clamp(0.0, 1.0),
+              minHeight: 8,
+              backgroundColor: Colors.white.withValues(alpha: 0.25),
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          Row(
+            children: [
+              Expanded(
+                child: _chiffre(
+                  'Déjà réglé',
+                  PriceFormatter.format(regle),
+                ),
+              ),
+              Expanded(
+                child: _chiffre('Reste dû', PriceFormatter.format(reste)),
+              ),
+              Expanded(
+                child: _chiffre(
+                  'Parts',
+                  '$reglees/${session.shares.length}',
+                ),
+              ),
+            ],
+          ),
+          if (reste <= 0) ...[
+            const SizedBox(height: DesignConstants.spacingM),
+            Row(
+              children: [
+                const Icon(
+                  Icons.check_circle_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                const SizedBox(width: DesignConstants.spacingS),
+                Expanded(
+                  child: Text(
+                    'L’addition est entièrement réglée.',
+                    style: AppTypography.bodyMd(color: Colors.white),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _chiffre(String libelle, String valeur) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          libelle,
+          style: AppTypography.labelLg(
+            color: Colors.white.withValues(alpha: 0.85),
+          ),
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            valeur,
+            maxLines: 1,
+            style: AppTypography.titleLg(color: Colors.white),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSummary(eccore.SplitPayment session) {
-    final reste =
-        session.totalAmount.toMajorUnits() - session.paidAmount.toMajorUnits();
-    final reglees = session.shares
-        .where((p) => p.isPaid)
-        .length;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      color: AppColors.primary.withValues(alpha: 0.06),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Total : ${PriceFormatter.format(session.totalAmount.toMajorUnits())}',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Déjà réglé : ${PriceFormatter.format(session.paidAmount.toMajorUnits())} • '
-            'Reste : ${PriceFormatter.format(reste)}',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '$reglees part(s) réglée(s) sur ${session.shares.length}',
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: AppColors.textSecondary),
-          ),
-        ],
-      ),
-    );
-  }
-
+  /// Une part : qui, combien, et les deux gestes possibles.
+  ///
+  /// « Copier le lien » et « Payer » ne s'affichent que sur une part non
+  /// réglée — payer deux fois la même part n'a pas de sens, et le serveur le
+  /// refuserait de toute façon.
   Widget _buildParticipantCard(eccore.SplitShare participant) {
-    final paid = participant.isPaid;
+    final theme = Theme.of(context);
+    final regle = participant.isPaid;
+    final teinte = regle ? AppColors.success : theme.colorScheme.primary;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DesignConstants.spacingM),
+      child: SectionCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: paid ? AppColors.success : AppColors.primary,
+                  radius: 22,
+                  backgroundColor: teinte.withValues(alpha: 0.15),
                   child: Icon(
-                    paid ? Icons.check : Icons.person,
-                    color: Colors.white,
-                    size: 20,
+                    regle ? Icons.check_rounded : Icons.person_rounded,
+                    color: teinte,
+                    size: 22,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: DesignConstants.spacingM),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         participant.displayName,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.titleLg(
+                          color: theme.colorScheme.onSurface,
+                        ),
                       ),
                       Text(
-                        PriceFormatter.format(participant.amount.toMajorUnits()),
-                        style: const TextStyle(color: AppColors.textSecondary),
+                        PriceFormatter.format(
+                          participant.amount.toMajorUnits(),
+                        ),
+                        style: AppTypography.priceDisplay(
+                          color: theme.colorScheme.primary,
+                        ).copyWith(fontSize: 16),
                       ),
                     ],
                   ),
                 ),
-                Chip(
-                  label: Text(paid ? 'Réglée' : 'En attente'),
-                  backgroundColor:
-                      (paid ? AppColors.success : AppColors.primary)
-                          .withValues(alpha: 0.12),
+                const SizedBox(width: DesignConstants.spacingS),
+                StatusChip(
+                  label: regle ? 'Réglée' : 'En attente',
+                  icon: regle
+                      ? Icons.check_circle_rounded
+                      : Icons.schedule_rounded,
+                  background: teinte.withValues(alpha: 0.12),
+                  foreground: teinte,
                 ),
               ],
             ),
-            if (!paid) ...[
-              const SizedBox(height: 8),
+            if (!regle) ...[
+              const SizedBox(height: DesignConstants.spacingM),
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: ActionButton(
+                      label: 'Copier le lien',
+                      icon: Icons.link_rounded,
+                      emphasis: ActionEmphasis.outlined,
+                      height: 44,
                       onPressed: () => _copyShareLink(participant),
-                      icon: const Icon(Icons.link, size: 18),
-                      label: const Text('Copier le lien'),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: DesignConstants.spacingS + 4),
                   Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed:
-                          _isProcessing ? null : () => _payShare(participant),
-                      icon: const Icon(Icons.payment, size: 18),
-                      label: const Text('Payer'),
+                    child: ActionButton(
+                      label: 'Payer',
+                      icon: Icons.payment_rounded,
+                      height: 44,
+                      onPressed: _isProcessing
+                          ? null
+                          : () => _payShare(participant),
                     ),
                   ),
                 ],

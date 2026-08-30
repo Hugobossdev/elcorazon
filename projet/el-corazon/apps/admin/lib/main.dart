@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -71,12 +73,99 @@ void main() async {
 
   final adminAuthService = AdminAuthService(container);
   await adminAuthService.initialize();
+  await _devBypassAuth(adminAuthService);
 
   runApp(
     UncontrolledProviderScope(
       container: container,
       child: AdminApp(container: container),
     ),
+  );
+}
+
+/// Ouvre l'application sans passer par l'écran de connexion.
+///
+/// **Contournement de développement, à retirer.** Deux chemins, dans cet
+/// ordre :
+///
+/// 1. Si le `.env` porte des identifiants, une vraie session est ouverte
+///    contre le serveur : vrai jeton, vraies données, permissions réelles.
+/// 2. Sinon — ou si cette connexion échoue — une session est fabriquée
+///    localement. L'interface s'ouvre en entier, mais **les écrans resteront
+///    vides** : faute de jeton, chaque appel à `/api/v1/` reçoit un 401. C'est
+///    la limite du procédé et non un défaut de réglage. L'authentification
+///    n'est retirée que du côté de l'application ; le serveur, lui, continue
+///    de l'exiger, et c'est très bien ainsi.
+///
+/// `kDebugMode` garde l'ensemble : une compilation `--release` ignore ces deux
+/// chemins et retrouve l'écran de connexion, même si le `.env` embarqué dans
+/// le binaire porte encore des identifiants.
+Future<void> _devBypassAuth(AdminAuthService adminAuthService) async {
+  if (!kDebugMode) return;
+  if (adminAuthService.isAuthenticated) return;
+
+  final email = dotenv.env['DEV_AUTO_LOGIN_EMAIL'] ?? '';
+  final password = dotenv.env['DEV_AUTO_LOGIN_PASSWORD'] ?? '';
+  if (email.isNotEmpty && password.isNotEmpty) {
+    if (await _devAutoLogin(adminAuthService, email, password)) return;
+  }
+
+  Journal.trace(
+    'Authentification contournée : session fabriquée localement, sans jeton. '
+    "Les appels à l'API répondront 401.",
+  );
+  adminAuthService.installDevSession(_devStaffFactice());
+}
+
+/// Vraie ouverture de session à partir des identifiants du `.env`.
+///
+/// Rend `false` sur refus ou sur silence du serveur — l'appelant se rabat
+/// alors sur la session fabriquée, pour que le contournement tienne sa
+/// promesse même backend éteint.
+Future<bool> _devAutoLogin(
+  AdminAuthService adminAuthService,
+  String email,
+  String password,
+) async {
+  Journal.trace('Auto-connexion de développement : $email');
+  try {
+    // Borne dure sur l'attente. `ApiClient` limite l'établissement de la
+    // connexion à 15 s mais pas la réponse : sans cette borne, un serveur qui
+    // accepte la connexion puis se tait laisserait l'application sur son écran
+    // de démarrage, sans fin et sans rien afficher qui l'explique.
+    final ouverte = await adminAuthService
+        .loginAdmin(email, password)
+        .timeout(const Duration(seconds: 20));
+    if (!ouverte) {
+      Journal.trace(
+        "Auto-connexion refusée — identifiants invalides, ou compte qui n'est "
+        'pas du personnel.',
+      );
+    }
+    return ouverte;
+  } on TimeoutException {
+    Journal.trace('Auto-connexion abandonnée : pas de réponse en 20 s.');
+    return false;
+  }
+}
+
+/// Le compte que voit l'interface quand l'authentification est contournée.
+///
+/// Nommé pour ne pas être pris pour une vraie session sur une capture d'écran.
+/// Sa liste de permissions est vide, et cela ne retire rien : aucun écran du
+/// back-office n'appelle `can()`, les permissions ne s'appliquant que côté
+/// serveur (ADR-005) — lequel ne verra jamais ce compte.
+User _devStaffFactice() {
+  final maintenant = DateTime.now();
+  return User(
+    id: '00000000-0000-0000-0000-000000000000',
+    email: 'dev@local',
+    fullName: 'Développement — sans authentification',
+    userType: UserAccountType.staff,
+    isActive: true,
+    permissions: const [],
+    createdAt: maintenant,
+    updatedAt: maintenant,
   );
 }
 

@@ -11,7 +11,9 @@ import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/presentation/paiement_partage.dart';
 
 class GroupOrderScreen extends StatefulWidget {
@@ -102,20 +104,18 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Commandes Groupées'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Commande groupée',
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
           tabs: const [
-            Tab(icon: Icon(Icons.group), text: 'Mon Groupe'),
-            Tab(icon: Icon(Icons.restaurant_menu), text: 'Menu'),
-            Tab(icon: Icon(Icons.shopping_cart), text: 'Panier'),
+            Tab(icon: Icon(Icons.groups_rounded), text: 'Groupe'),
+            Tab(icon: Icon(Icons.restaurant_menu_rounded), text: 'Menu'),
+            Tab(icon: Icon(Icons.shopping_basket_rounded), text: 'Panier'),
           ],
         ),
       ),
@@ -138,256 +138,357 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
     return _buildCurrentGroup();
   }
 
+  /// Deux gestes possibles quand on n'appartient à aucun groupe : en ouvrir
+  /// un, ou en rejoindre un avec son code.
+  ///
+  /// L'ordre compte : créer d'abord, parce que c'est ce que fait celui qui
+  /// arrive sans code — et celui qui en a un le sait déjà, il descendra.
   Widget _buildCreateJoinGroup() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          // Créer un groupe
-          Card(
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    final theme = Theme.of(context);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        DesignConstants.edgeMargin,
+        DesignConstants.spacingL,
+        DesignConstants.edgeMargin,
+        DesignConstants.spacingL,
+      ),
+      children: [
+        SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.group_add, color: AppColors.primary),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Créer un groupe',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                    ],
+                  Icon(
+                    Icons.group_add_rounded,
+                    color: theme.colorScheme.primary,
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _groupNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nom du groupe',
-                      hintText: 'Ex: Famille Dupont',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isCreatingGroup ? null : _createGroup,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
+                  const SizedBox(width: DesignConstants.spacingS + 4),
+                  Expanded(
+                    child: Text(
+                      'Ouvrir un groupe',
+                      style: AppTypography.titleLg(
+                        color: theme.colorScheme.onSurface,
                       ),
-                      child: _isCreatingGroup
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text('Créer le groupe'),
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: DesignConstants.spacingS),
+              Text(
+                'Chacun ajoute ses plats, vous réglez ensemble.',
+                style: AppTypography.bodyMd(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              TextField(
+                controller: _groupNameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nom du groupe',
+                  hintText: 'Ex. : Déjeuner du bureau',
+                ),
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              ActionButton(
+                label: 'Créer le groupe',
+                emphasis: ActionEmphasis.gradient,
+                icon: Icons.add_rounded,
+                isLoading: _isCreatingGroup,
+                onPressed: _createGroup,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: DesignConstants.spacingL),
+        SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.key_rounded,
+                    color: theme.colorScheme.tertiary,
+                  ),
+                  const SizedBox(width: DesignConstants.spacingS + 4),
+                  Expanded(
+                    child: Text(
+                      'Rejoindre un groupe',
+                      style: AppTypography.titleLg(
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: DesignConstants.spacingS),
+              Text(
+                'On vous a envoyé un code ? Saisissez-le ici.',
+                style: AppTypography.bodyMd(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              TextField(
+                controller: _inviteCodeController,
+                textCapitalization: TextCapitalization.characters,
+                style: AppTypography.headlineSm(
+                  color: theme.colorScheme.onSurface,
+                ).copyWith(letterSpacing: 3),
+                textAlign: TextAlign.center,
+                decoration: const InputDecoration(
+                  hintText: 'CODE',
+                ),
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              ActionButton(
+                label: 'Rejoindre',
+                emphasis: ActionEmphasis.outlined,
+                icon: Icons.login_rounded,
+                onPressed: _joinGroup,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Le groupe en cours : son code, ses convives, et de quoi le partager.
+  ///
+  /// Le **code** passe en tête, en grand, sur le dégradé de marque. C'est ce
+  /// que la maquette appelle la « Hero Code Card », et c'est justifié : la
+  /// seule raison d'ouvrir cet onglet quand on vient de créer un groupe est de
+  /// lire le code pour le transmettre. Il était jusqu'ici relégué dans une
+  /// pastille verte de douze pixels, à droite d'un titre.
+  Widget _buildCurrentGroup() {
+    final theme = Theme.of(context);
+    final panier = _cart!;
+
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingL,
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingM,
+            ),
+            children: [
+              _carteDuCode(panier),
+              const SizedBox(height: DesignConstants.spacingL),
+              SectionHeader(
+                title: 'Convives',
+                subtitle: '${panier.members.length} '
+                    'participant${panier.members.length > 1 ? 's' : ''}',
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              for (final membre in panier.members)
+                _carteDeConvive(membre, panier),
+            ],
+          ),
+        ),
+        GlassBottomBar(
+          child: Row(
+            children: [
+              Expanded(
+                child: ActionButton(
+                  label: 'Partager',
+                  icon: Icons.share_rounded,
+                  emphasis: ActionEmphasis.outlined,
+                  onPressed: _shareGroupCode,
+                ),
+              ),
+              const SizedBox(width: DesignConstants.spacingM),
+              Expanded(
+                child: ActionButton(
+                  label: 'Quitter',
+                  icon: Icons.exit_to_app_rounded,
+                  backgroundColor: theme.colorScheme.errorContainer,
+                  foregroundColor: theme.colorScheme.onErrorContainer,
+                  onPressed: _leaveGroup,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Carte du code d'invitation.
+  ///
+  /// La tache floutée en coin est celle de la maquette (« Decorative blur
+  /// blob ») : elle casse l'aplat du dégradé et donne de la profondeur sans
+  /// ajouter de contenu à lire.
+  Widget _carteDuCode(eccore.GroupCart panier) {
+    return Container(
+      padding: const EdgeInsets.all(DesignConstants.spacingL),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: AppColors.heroGradient,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: DesignConstants.borderRadiusLarge,
+        boxShadow: DesignConstants.shadowLow,
+      ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            right: -40,
+            top: -60,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    Colors.white.withValues(alpha: 0.22),
+                    Colors.white.withValues(alpha: 0),
+                  ],
+                ),
               ),
             ),
           ),
-
-          const SizedBox(height: 24),
-
-          // Rejoindre un groupe
-          Card(
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                panier.title.isEmpty ? 'Commande de groupe' : panier.title,
+                style: AppTypography.titleLg(color: Colors.white),
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              Text(
+                'CODE D’INVITATION',
+                style: AppTypography.labelLg(
+                  color: Colors.white.withValues(alpha: 0.85),
+                ),
+              ),
+              const SizedBox(height: 2),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  panier.code,
+                  maxLines: 1,
+                  style: AppTypography.displayLg(color: Colors.white)
+                      .copyWith(letterSpacing: 6),
+                ),
+              ),
+              const SizedBox(height: DesignConstants.spacingM),
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.group, color: AppColors.secondary),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Rejoindre un groupe',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                    ],
+                  const Icon(
+                    Icons.groups_rounded,
+                    color: Colors.white,
+                    size: 18,
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _inviteCodeController,
-                    decoration: const InputDecoration(
-                      labelText: 'Code d\'invitation',
-                      hintText: 'Entrez le code du groupe',
-                      border: OutlineInputBorder(),
-                    ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${panier.members.length} '
+                    'convive${panier.members.length > 1 ? 's' : ''}',
+                    style: AppTypography.bodyMd(color: Colors.white),
                   ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _joinGroup,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.secondary,
-                        foregroundColor: Colors.black,
-                      ),
-                      child: const Text('Rejoindre'),
+                  const SizedBox(width: DesignConstants.spacingM),
+                  const Icon(
+                    Icons.receipt_long_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      PriceFormatter.format(_calculateGroupTotal()),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.bodyMd(color: Colors.white),
                     ),
                   ),
                 ],
               ),
-            ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCurrentGroup() {
+  /// Un convive et ce qu'il doit.
+  ///
+  /// Le contrat ne porte pas l'adresse e-mail des autres participants :
+  /// suivre son livreur est un service, lire le carnet d'adresses du groupe
+  /// n'en est pas un.
+  Widget _carteDeConvive(
+    eccore.GroupCartMember membre,
+    eccore.GroupCart panier,
+  ) {
+    final theme = Theme.of(context);
+    final organisateur = membre.id == panier.hostId;
+    final initiale =
+        membre.fullName.isNotEmpty ? membre.fullName[0].toUpperCase() : '?';
+
     return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Informations du groupe
-          Card(
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.only(bottom: DesignConstants.spacingS + 4),
+      child: SectionCard(
+        padding: const EdgeInsets.all(DesignConstants.spacingS + 4),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor:
+                  theme.colorScheme.primary.withValues(alpha: 0.12),
+              child: Text(
+                initiale,
+                style: AppTypography.titleLg(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ),
+            const SizedBox(width: DesignConstants.spacingM),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.group, color: AppColors.primary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _cart!.title.isEmpty
-                              ? 'Commande de groupe'
-                              : _cart!.title,
-                          style:
-                              Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppColors.success,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          'Code: ${_cart!.code}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
                   Text(
-                    '${_cart!.members.length} membre(s) • Total: ${PriceFormatter.format(_calculateGroupTotal())}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
+                    membre.fullName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTypography.titleLg(
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  Text(
+                    PriceFormatter.format(
+                      panier.totalFor(membre.id).toMajorUnits(),
+                    ),
+                    style: AppTypography.bodyMd(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
             ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Membres du groupe
-          Text(
-            'Membres du groupe',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 8),
-
-          Expanded(
-            child: ListView.builder(
-              itemCount: _cart!.members.length,
-              itemBuilder: (context, index) {
-                final member = _cart!.members[index];
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: AppColors.primary,
-                      child: Text(
-                        member.fullName.isNotEmpty
-                            ? member.fullName[0].toUpperCase()
-                            : '?',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-                    title: Text(member.fullName),
-                    // Le contrat ne porte pas l'adresse e-mail des autres
-                    // participants : suivre son livreur est un service, lire le
-                    // carnet d'adresses du groupe n'en est pas un.
-                    subtitle: Text('Ce que ce convive doit : '
-                        '${PriceFormatter.format(_cart!.totalFor(member.id).toMajorUnits())}'),
-                    trailing: member.id == _cart!.hostId
-                        ? Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Text(
-                              'Organisateur',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                              ),
-                            ),
-                          )
-                        : null,
-                  ),
-                );
-              },
-            ),
-          ),
-
-          // Actions du groupe
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _shareGroupCode,
-                  icon: const Icon(Icons.share),
-                  label: const Text('Partager'),
-                ),
+            if (organisateur)
+              StatusChip(
+                label: 'Organisateur',
+                icon: Icons.star_rounded,
+                dense: true,
+                background:
+                    theme.colorScheme.primary.withValues(alpha: 0.12),
+                foreground: theme.colorScheme.primary,
               ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _leaveGroup,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.error,
-                    foregroundColor: Colors.white,
-                  ),
-                  icon: const Icon(Icons.exit_to_app),
-                  label: const Text('Quitter'),
-                ),
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -1,6 +1,10 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcora_fast/services/cart_service.dart';
+import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 // import 'package:elcora_fast/widgets/offline_indicator.dart';
@@ -152,145 +156,272 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 
+  /// Barre de navigation translucide, avec le panier flottant en son centre.
+  ///
+  /// ## Ce que la maquette impose, et ce que l'application impose
+  ///
+  /// La maquette place cinq destinations autour d'un bouton panier surélevé.
+  /// L'application n'en a que quatre — et trois pour un visiteur non connecté,
+  /// qui n'a ni commandes ni profil. Les onglets **ne changent donc pas** :
+  /// c'est la barre qui s'adapte, en répartissant ce qui existe de part et
+  /// d'autre du panier.
+  ///
+  /// ## Pourquoi le panier n'est pas un onglet
+  ///
+  /// Parce qu'il n'en est pas un : il ouvre un écran par-dessus la pile, dont
+  /// on revient là d'où l'on vient. En faire une destination l'aurait rendu
+  /// impossible à quitter sans en choisir une autre — ce qui est précisément
+  /// le piège que les écrans de règlement doivent éviter.
   Widget _buildBottomNavigationBar(AppService appService) {
+    final theme = Theme.of(context);
     final bool isLoggedIn = appService.isLoggedIn;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        boxShadow: DesignConstants.shadowHigh,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
-        border: Border(
-          top: BorderSide(
-            color: AppColors.textTertiary.withValues(alpha: 0.1),
-          ),
-        ),
+    const aGauche = [
+      _Destination(
+        icone: Icons.home_outlined,
+        iconeActive: Icons.home_rounded,
+        libelle: 'Accueil',
+        index: 0,
       ),
-      child: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(
-                icon: Icons.home_outlined,
-                activeIcon: Icons.home_rounded,
-                label: 'Accueil',
-                index: 0,
-                isActive: _currentIndex == 0,
+      _Destination(
+        icone: Icons.restaurant_menu_outlined,
+        iconeActive: Icons.restaurant_menu_rounded,
+        libelle: 'Menu',
+        index: 1,
+      ),
+    ];
+
+    final aDroite = isLoggedIn
+        ? const [
+            _Destination(
+              icone: Icons.receipt_long_outlined,
+              iconeActive: Icons.receipt_long_rounded,
+              libelle: 'Commandes',
+              index: 2,
+            ),
+            _Destination(
+              icone: Icons.person_outline_rounded,
+              iconeActive: Icons.person_rounded,
+              libelle: 'Profil',
+              index: 3,
+            ),
+          ]
+        : const [
+            _Destination(
+              icone: Icons.contact_support_outlined,
+              iconeActive: Icons.contact_support_rounded,
+              libelle: 'Contact',
+              index: 2,
+            ),
+          ];
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(
+          sigmaX: AppColors.glassBlur,
+          sigmaY: AppColors.glassBlur,
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface.withValues(alpha: 0.92),
+            border: Border(
+              top: BorderSide(
+                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
               ),
-              _buildNavItem(
-                icon: Icons.restaurant_menu_outlined,
-                activeIcon: Icons.restaurant_menu_rounded,
-                label: 'Menu',
-                index: 1,
-                isActive: _currentIndex == 1,
+            ),
+            boxShadow: DesignConstants.shadowBottomBar,
+          ),
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              // Assez haut pour l'icône, son libellé et la pastille active,
+              // sans dépendre de la taille de l'appareil.
+              height: 64,
+              child: Row(
+                children: [
+                  for (final destination in aGauche)
+                    Expanded(child: _construireDestination(destination)),
+                  _PanierFlottant(onTap: () => context.navigateToCart()),
+                  for (final destination in aDroite)
+                    Expanded(child: _construireDestination(destination)),
+                ],
               ),
-              if (isLoggedIn) ...[
-                _buildNavItem(
-                  icon: Icons.receipt_long_outlined,
-                  activeIcon: Icons.receipt_long_rounded,
-                  label: 'Commandes',
-                  index: 2,
-                  isActive: _currentIndex == 2,
-                ),
-                _buildNavItem(
-                  icon: Icons.person_outline,
-                  activeIcon: Icons.person_rounded,
-                  label: 'Profil',
-                  index: 3,
-                  isActive: _currentIndex == 3,
-                ),
-              ] else ...[
-                _buildNavItem(
-                  icon: Icons.contact_support_outlined,
-                  activeIcon: Icons.contact_support_rounded,
-                  label: 'Contact',
-                  index: 2,
-                  isActive: _currentIndex == 2,
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildNavItem({
-    required IconData icon,
-    required IconData activeIcon,
-    required String label,
-    required int index,
-    required bool isActive,
-  }) {
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _currentIndex = index;
-        });
-        _pageController.animateToPage(
-          index,
-          duration: DesignConstants.animationNormal,
-          curve: DesignConstants.curveStandard,
-        );
-      },
-      child: Container(
-        color: Colors.transparent, // Zone de touche étendue
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  Widget _construireDestination(_Destination destination) {
+    final theme = Theme.of(context);
+    final actif = _currentIndex == destination.index;
+
+    return Semantics(
+      button: true,
+      selected: actif,
+      label: destination.libelle,
+      child: InkWell(
+        onTap: () {
+          setState(() => _currentIndex = destination.index);
+          _pageController.animateToPage(
+            destination.index,
+            duration: DesignConstants.animationNormal,
+            curve: DesignConstants.curveStandard,
+          );
+        },
+        borderRadius: BorderRadius.circular(20),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // La pastille colorée derrière l'icône active est le marqueur de
+            // sélection de Material 3, et le seul que retienne la maquette.
+            // Le dégradé plein d'avant faisait de chaque onglet un bouton
+            // d'action, alors qu'une destination n'en est pas une.
             AnimatedContainer(
               duration: DesignConstants.animationFast,
               curve: DesignConstants.curveStandard,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 3),
               decoration: BoxDecoration(
-                gradient: isActive
-                    ? const LinearGradient(
-                        colors: AppColors.primaryGradient,
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : null,
-                color: isActive ? null : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: isActive ? DesignConstants.shadowPrimary : null,
+                color: actif
+                    ? theme.colorScheme.primary.withValues(alpha: 0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
               ),
-              child: AnimatedSwitcher(
-                duration: DesignConstants.animationFast,
-                transitionBuilder: (child, animation) {
-                  return ScaleTransition(
-                    scale: animation,
-                    child: child,
-                  );
-                },
-                child: Icon(
-                  isActive ? activeIcon : icon,
-                  key: ValueKey(isActive),
-                  color:
-                      isActive ? AppColors.textLight : AppColors.textSecondary,
-                  size: 24,
-                ),
+              child: Icon(
+                actif ? destination.iconeActive : destination.icone,
+                size: 22,
+                color: actif
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 4),
-            AnimatedDefaultTextStyle(
-              duration: DesignConstants.animationFast,
-              style: TextStyle(
-                color: isActive ? AppColors.primary : AppColors.textSecondary,
-                fontSize: 12,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
-                letterSpacing: 0.3,
+            const SizedBox(height: 2),
+            Flexible(
+              child: Text(
+                destination.libelle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTypography.labelLg(
+                  color: actif
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurfaceVariant,
+                ).copyWith(letterSpacing: 0.2),
               ),
-              child: Text(label),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Une destination de la barre. Simple porteur de données : la barre en
+/// construit deux listes, et la logique de rendu reste au même endroit.
+class _Destination {
+  const _Destination({
+    required this.icone,
+    required this.iconeActive,
+    required this.libelle,
+    required this.index,
+  });
+
+  final IconData icone;
+  final IconData iconeActive;
+  final String libelle;
+  final int index;
+}
+
+/// Le bouton panier, surélevé au centre de la barre.
+///
+/// Il déborde vers le haut (`Transform.translate`) au lieu d'agrandir la
+/// barre : la maquette le veut posé **sur** la barre, à cheval sur le contenu
+/// qui défile. L'ombre de 8 dp fait le reste du travail de séparation — c'est
+/// le seul endroit où le design system en demande une aussi marquée.
+class _PanierFlottant extends StatelessWidget {
+  const _PanierFlottant({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Consumer<CartService>(
+      builder: (context, cartService, child) {
+        final nombre = cartService.itemCount;
+
+        return SizedBox(
+          width: 72,
+          child: Center(
+            child: Transform.translate(
+              offset: const Offset(0, -14),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Semantics(
+                    button: true,
+                    label: nombre == 0
+                        ? 'Panier, vide'
+                        : 'Panier, $nombre article${nombre > 1 ? 's' : ''}',
+                    child: Material(
+                      color: theme.colorScheme.primary,
+                      shape: const CircleBorder(),
+                      elevation: 8,
+                      shadowColor:
+                          theme.colorScheme.primary.withValues(alpha: 0.4),
+                      child: InkWell(
+                        onTap: onTap,
+                        customBorder: const CircleBorder(),
+                        child: SizedBox(
+                          width: 56,
+                          height: 56,
+                          child: Icon(
+                            Icons.shopping_cart_rounded,
+                            color: theme.colorScheme.onPrimary,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (nombre > 0)
+                    Positioned(
+                      top: -2,
+                      right: -2,
+                      child: Container(
+                        constraints:
+                            const BoxConstraints(minWidth: 22, minHeight: 22),
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        decoration: BoxDecoration(
+                          color: AppColors.secondary,
+                          borderRadius: BorderRadius.circular(11),
+                          border: Border.all(
+                            color: theme.colorScheme.surface,
+                            width: 2,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            nombre > 99 ? '99+' : '$nombre',
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 11,
+                              height: 1.1,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

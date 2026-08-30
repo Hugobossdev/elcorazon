@@ -3,12 +3,14 @@ import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
-import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
 import 'package:elcora_fast/services/subscription_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/widgets/enhanced_app_bar_actions.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart';
 import 'package:elcora_fast/widgets/menu_item_card.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
 import 'package:elcora_fast/services/design_enhancement_service.dart';
@@ -108,8 +110,28 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Le menu',
+        showBack: false,
+        centerTitle: false,
+        actions: [
+          GlassIconButton(
+            icon: _showFilters
+                ? Icons.filter_list_off_rounded
+                : Icons.tune_rounded,
+            tooltip: _showFilters
+                ? 'Masquer les filtres'
+                : 'Afficher les filtres',
+            filled: _showFilters,
+            onPressed: _toggleFilters,
+          ),
+          const EnhancedAppBarActions(),
+        ],
+      ),
       // Une ouverture en fondu et un léger glissement, sans le
       // `ScaleTransition` en `elasticOut` qui faisait tressauter la carte
       // entière à chaque venue sur l'écran : une liste qui rebondit se lit mal
@@ -120,11 +142,16 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
           position: _slideAnimation,
           child: CustomScrollView(
             slivers: [
-              _buildEnhancedAppBar(),
+              const SliverToBoxAdapter(
+                child: SizedBox(height: DesignConstants.spacingM),
+              ),
               _buildSearchSection(),
               _buildCategoryFilters(),
               if (_showFilters) _buildFiltersSection(),
               _buildMenuItems(),
+              const SliverToBoxAdapter(
+                child: SizedBox(height: DesignConstants.spacingXL),
+              ),
             ],
           ),
         ),
@@ -132,292 +159,102 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildEnhancedAppBar() {
-    return SliverAppBar(
-      expandedHeight: 140,
-      pinned: true,
-      backgroundColor: AppColors.primary,
-      elevation: 0,
-      flexibleSpace: FlexibleSpaceBar(
-        titlePadding: const EdgeInsets.only(left: 16, bottom: 16),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Hero(
-              tag: 'menu_logo',
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Image.asset(
-                  'assets/logo/logo.png',
-                  height: 24,
-                  width: 24,
-                  errorBuilder: (context, error, stackTrace) {
-                    return const Icon(
-                      Icons.restaurant_menu,
-                      size: 20,
-                      color: AppColors.primary,
-                    );
-                  },
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Text(
-              'Menu',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 18,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
-        ),
-        background: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                AppColors.primary,
-                AppColors.primaryDark,
-              ],
-            ),
-          ),
-          child: Stack(
-            children: [
-              // Éléments décoratifs améliorés
-              Positioned(
-                top: -30,
-                right: -30,
-                child: Container(
-                  width: 150,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-              Positioned(
-                bottom: -20,
-                left: -20,
-                child: Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.06),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-              // Message contextuel
-              Positioned(
-                bottom: 50,
-                left: 16,
-                right: 16,
-                child: Consumer<AppService>(
-                  builder: (context, appService, child) {
-                    final itemCount = appService.menuItems.length;
-                    return Text(
-                      '$itemCount plats disponibles',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.9),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        IconButton(
-          icon: Icon(
-            _showFilters ? Icons.filter_list_off : Icons.filter_list,
-            color: Colors.white,
-          ),
-          onPressed: _toggleFilters,
-          tooltip:
-              _showFilters ? 'Masquer les filtres' : 'Afficher les filtres',
-        ),
-        const EnhancedAppBarActions(),
-      ],
-    );
-  }
-
+  /// Champ de recherche du menu.
+  ///
+  /// Modifiable, contrairement à celui de l'accueil : ici il y a bien quelque
+  /// chose à filtrer sous les doigts — toute la carte est à l'écran.
+  ///
+  /// Le compte de plats disponibles, que la barre rouge d'avant affichait dans
+  /// son grand entête, est passé sous le champ : il tient en une ligne, se lit
+  /// aussi bien, et rend les 140 px de bandeau décoratif à la carte elle-même.
   Widget _buildSearchSection() {
+    final theme = Theme.of(context);
+
     return SliverToBoxAdapter(
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceElevated,
-          borderRadius: BorderRadius.circular(28),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.15),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          DesignConstants.edgeMargin,
+          0,
+          DesignConstants.edgeMargin,
+          DesignConstants.spacingS,
         ),
-        child: TextField(
-          onChanged: (value) {
-            setState(() {
-              _searchQuery = value;
-              _isSearching = value.isNotEmpty;
-            });
-            if (_isSearching) {
-              _searchController.forward();
-            } else {
-              _searchController.reverse();
-            }
-          },
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-          ),
-          decoration: InputDecoration(
-            hintText: 'Rechercher un plat, une catégorie...',
-            hintStyle: const TextStyle(
-              color: AppColors.textTertiary,
-              fontSize: 15,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AppSearchField(
+              hintText: 'Rechercher un plat, une catégorie…',
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                  _isSearching = value.isNotEmpty;
+                });
+                if (_isSearching) {
+                  _searchController.forward();
+                } else {
+                  _searchController.reverse();
+                }
+              },
+              trailing: _searchQuery.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      color: theme.colorScheme.primary,
+                      tooltip: 'Effacer la recherche',
+                      onPressed: () {
+                        setState(() {
+                          _searchQuery = '';
+                          _isSearching = false;
+                        });
+                        _searchController.reverse();
+                      },
+                    ),
             ),
-            prefixIcon: AnimatedBuilder(
-              animation: _searchController,
-              builder: (context, child) {
-                return Container(
-                  padding: const EdgeInsets.all(12),
-                  child: Transform.rotate(
-                    angle: _searchController.value * 0.1,
-                    child: const Icon(
-                      Icons.search_rounded,
-                      color: AppColors.primary,
-                      size: 24,
+            const SizedBox(height: DesignConstants.spacingS),
+            Consumer<AppService>(
+              builder: (context, appService, child) {
+                final nombre = appService.menuItems.length;
+                if (nombre == 0) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Text(
+                    '$nombre plat${nombre > 1 ? 's' : ''} à la carte',
+                    style: AppTypography.bodyMd(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 );
               },
             ),
-            suffixIcon: _searchQuery.isNotEmpty
-                ? IconButton(
-                    icon: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.clear_rounded,
-                        size: 18,
-                        color: AppColors.primary,
-                      ),
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _searchQuery = '';
-                        _isSearching = false;
-                      });
-                      _searchController.reverse();
-                    },
-                  )
-                : null,
-            // Même rayon que le conteneur qui le porte. À 25 contre 28, le
-            // fond du champ rentrait dans les angles arrondis de la carte et
-            // y laissait quatre encoches claires.
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(28),
-              borderSide: BorderSide.none,
-            ),
-            // Le champ ne repeint plus son fond : il laisse voir celui du
-            // conteneur. Les deux surfaces se superposaient dans deux teintes
-            // différentes, et c'est la seconde qu'on voyait.
-            filled: false,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategoryFilters() {
-    final filters = _getCategoryFilters();
-
-    return SliverToBoxAdapter(
-      // Hauteur laissée aux pastilles plutôt qu'arrêtée à 50 px : un
-      // `FilterChip` grandit avec l'échelle de police du système, et une bande
-      // fixe lui coupait le bas dès le premier cran d'agrandissement.
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          spacing: 8,
-          children: [
-            _pastilleCategorie(
-              libelle: 'Tous',
-              selectionnee: _selectedCategory == null,
-              onSelection: () => setState(() => _selectedCategory = null),
-            ),
-            for (final filtre in filters)
-              _pastilleCategorie(
-                libelle: filtre,
-                selectionnee: _selectedCategory?.name == filtre,
-                onSelection: () => _selectionnerCategorie(filtre),
-              ),
           ],
         ),
       ),
     );
   }
 
-  /// Pastille d'une catégorie.
+  /// Rail de catégories, en puces.
   ///
-  /// Elle porte sa sélection dans sa couleur de fond et son texte, sans coche :
-  /// la coche du `FilterChip` élargissait la pastille au moment du choix, ce
-  /// qui décalait toutes les suivantes sous le doigt.
-  Widget _pastilleCategorie({
-    required String libelle,
-    required bool selectionnee,
-    required VoidCallback onSelection,
-  }) {
-    final theme = Theme.of(context);
+  /// Il remplace la rangée maison de `_pastilleCategorie` : même rendu, même
+  /// comportement — pas de coche qui élargisse la puce au moment du choix et
+  /// décale les suivantes sous le doigt — mais partagé avec l'accueil, où le
+  /// même rail existait en double.
+  Widget _buildCategoryFilters() {
+    final filtres = _getCategoryFilters();
+    final libelles = ['Tous', ...filtres];
+    final retenue = _selectedCategory == null
+        ? 0
+        : filtres.indexWhere((f) => f == _selectedCategory!.name) + 1;
 
-    return Material(
-      color: selectionnee ? AppColors.primary : theme.colorScheme.surface,
-      shape: StadiumBorder(
-        side: BorderSide(
-          color: selectionnee
-              ? AppColors.primary
-              : theme.colorScheme.outlineVariant,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onSelection,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Text(
-            libelle,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: selectionnee ? FontWeight.w600 : FontWeight.w500,
-              color: selectionnee ? Colors.white : AppColors.textSecondary,
-            ),
-          ),
-        ),
+    return SliverToBoxAdapter(
+      child: CategoryChipBar(
+        labels: libelles,
+        selectedIndex: retenue,
+        onSelected: (index) {
+          if (index == 0) {
+            setState(() => _selectedCategory = null);
+          } else {
+            _selectionnerCategorie(libelles[index]);
+          }
+        },
       ),
     );
   }
@@ -548,12 +385,13 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
     return Consumer<AppService>(
       builder: (context, appService, child) {
         if (!appService.isInitialized) {
-          return SliverToBoxAdapter(
-            child: Container(
-              padding: const EdgeInsets.all(32),
-              child: DesignEnhancementService.createEnhancedLoadingIndicator(
-                message: 'Chargement du menu...',
-              ),
+          // Des silhouettes aux proportions des cartes, plutôt qu'un anneau
+          // au centre d'un écran vide : la mise en page ne saute plus au
+          // moment où le menu arrive.
+          return const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(top: DesignConstants.spacingM),
+              child: FoodCardSkeletonList(),
             ),
           );
         }
@@ -563,44 +401,17 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
         if (filteredItems.isEmpty) {
           return SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: DesignEnhancementService.createEnhancedCard(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.search_off,
-                      size: 80,
-                      color: AppColors.textSecondary.withValues(alpha: 0.5),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'Aucun plat trouvé',
-                      style: TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Essayez de modifier vos filtres',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 14,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 20),
-                    DesignEnhancementService.createEnhancedButton(
-                      text: 'Réinitialiser les filtres',
-                      onPressed: _clearFilters,
-                      backgroundColor: AppColors.primary,
-                      textColor: Colors.white,
-                    ),
-                  ],
-                ),
+              padding: const EdgeInsets.symmetric(
+                vertical: DesignConstants.spacingXL,
+              ),
+              child: EmptyStateWidget(
+                title: 'Aucun plat trouvé',
+                message: _searchQuery.isEmpty
+                    ? 'Aucun plat ne correspond à ces filtres.'
+                    : 'Aucun plat ne correspond à « $_searchQuery ».',
+                icon: Icons.search_off_rounded,
+                actionText: 'Réinitialiser les filtres',
+                onAction: _clearFilters,
               ),
             ),
           );
@@ -665,10 +476,8 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                             // compteur hors de la ligne.
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary,
+                            style: AppTypography.headlineSm(
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -699,9 +508,8 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                       padding: EdgeInsets.fromLTRB(marge, 0, marge, 16),
                       child: Text(
                         category.description,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          color: AppColors.textSecondary,
+                        style: AppTypography.bodyMd(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -732,13 +540,8 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                               item: item,
                               onTap: () =>
                                   context.navigateToItemCustomization(item),
-                              onAddToCart: () {
-                                Provider.of<CartService>(context, listen: false)
-                                    .addItem(item);
-                                context.showSuccessMessage(
-                                  '${item.name} ajouté au panier !',
-                                );
-                              },
+                              onAddToCart: () =>
+                                  context.addToCartOrCustomize(item),
                               onFavoriteTap: () {
                                 favoritesService.toggleFavorite(item);
                                 if (isFavorite) {

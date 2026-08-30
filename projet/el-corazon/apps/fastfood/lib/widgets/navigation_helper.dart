@@ -5,7 +5,11 @@ import 'package:elcora_fast/widgets/navigation_error_handler.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/paiement_partage.dart';
+import 'package:elcora_fast/services/cart_service.dart';
+import 'package:elcora_fast/services/design_enhancement_service.dart';
+import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:provider/provider.dart';
 
 /// Helper pour faciliter la navigation entre les écrans
 class NavigationHelper {
@@ -115,6 +119,45 @@ class NavigationHelper {
         null,
       );
     }
+  }
+
+  /// Ajoute l'article au panier — ou ouvre sa personnalisation si le catalogue
+  /// impose un choix.
+  ///
+  /// Le « + » d'une carte ajoutait l'article tel quel. Or presque toute la
+  /// carte porte un groupe obligatoire — une cuisson, une taille, un
+  /// accompagnement — et une ligne sans ces options est refusée en 409 par
+  /// `POST /carts/{slug}/lines/`. L'article restait alors dans le panier local
+  /// sans jamais atteindre le serveur : l'écran en montrait trois quand la
+  /// commande n'en aurait porté qu'un.
+  ///
+  /// Le raccourci demeure pour ce qui n'attend aucun choix — un dessert, une
+  /// boisson sans format —, ce qui est le cas où il rendait service.
+  static Future<void> addToCartOrCustomize(
+    BuildContext context,
+    eccore.MenuItem item,
+  ) async {
+    final customization =
+        Provider.of<CustomizationService>(context, listen: false);
+    final cart = Provider.of<CartService>(context, listen: false);
+
+    final choixRequis = await customization.exigeUnChoix(
+      item.id,
+      fallbackName: item.name,
+    );
+
+    if (!context.mounted) return;
+
+    if (choixRequis) {
+      await navigateToItemCustomization(context, item);
+      return;
+    }
+
+    cart.addItem(item);
+    // La confirmation est annoncée ici, et pas par l'appelant : lui la posait
+    // dans tous les cas, y compris quand l'article n'était pas ajouté mais
+    // ouvert en personnalisation.
+    context.showSuccessMessage('${item.name} ajouté au panier !');
   }
 
   /// Naviguer vers le suivi de livraison
@@ -466,6 +509,10 @@ extension NavigationHelperExtension on BuildContext {
         item,
         onAddToCart: onAddToCart,
       );
+
+  /// Ajouter au panier, ou personnaliser si un choix est requis.
+  Future<void> addToCartOrCustomize(eccore.MenuItem item) =>
+      NavigationHelper.addToCartOrCustomize(this, item);
 
   /// Naviguer vers le suivi de livraison
   Future<void> navigateToDeliveryTracking(String orderId) =>

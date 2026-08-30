@@ -6,6 +6,9 @@ import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:elcora_fast/services/review_rating_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart';
 // import '../../widgets/enhanced_animations.dart'; // Supprimé
 
 /// Initiale affichée dans l'avatar — `full_name` peut être vide côté serveur.
@@ -24,23 +27,17 @@ class ProductReviewsScreen extends StatefulWidget {
   State<ProductReviewsScreen> createState() => _ProductReviewsScreenState();
 }
 
-class _ProductReviewsScreenState extends State<ProductReviewsScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _ProductReviewsScreenState extends State<ProductReviewsScreen> {
+  /// `recent` ou `rating`.
   String _sortBy = 'recent';
+
+  /// `all`, ou le nombre d'étoiles sous forme de chaîne.
   String _filterBy = 'all';
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     _loadReviews();
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadReviews() async {
@@ -49,236 +46,271 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
     await service.loadRating(widget.menuItem.id);
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Avis et Notes'),
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor,
-        foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Theme.of(context).colorScheme.onPrimary,
-          labelColor: Theme.of(context).colorScheme.onPrimary,
-          unselectedLabelColor: Theme.of(context).colorScheme.onPrimary.withValues(alpha: 0.7),
-          tabs: const [
-            Tab(text: 'Avis', icon: Icon(Icons.rate_review)),
-            Tab(text: 'Noter', icon: Icon(Icons.star_outline)),
-          ],
+  /// Ouvre le formulaire d'avis en feuille.
+  ///
+  /// La version précédente en faisait un **onglet**, à côté de « Avis ». Un
+  /// onglet est une destination : on y va, on en revient, il reste là. Or
+  /// écrire un avis est un geste ponctuel, qu'on accomplit une fois et qui se
+  /// referme. L'onglet occupait donc en permanence la moitié de la barre pour
+  /// une action que la plupart des visiteurs ne feront jamais — et il masquait
+  /// la liste, qui est ce qu'on est venu lire.
+  Future<void> _ecrireUnAvis() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          left: DesignConstants.edgeMargin,
+          right: DesignConstants.edgeMargin,
+          top: DesignConstants.spacingS,
+          // Laisse la place au clavier : sans ce décalage, le champ de
+          // commentaire se retrouve dessous dès qu'on le touche.
+          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom +
+              DesignConstants.spacingL,
+        ),
+        child: SingleChildScrollView(
+          child: _ReviewFormDialog(
+            menuItem: widget.menuItem,
+            onSubmit: () async {
+              Navigator.of(sheetContext).pop();
+              await _loadReviews();
+            },
+          ),
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(title: widget.menuItem.name),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _ecrireUnAvis,
+        icon: const Icon(Icons.rate_review_rounded),
+        label: const Text('Donner mon avis'),
+      ),
+      body: Consumer<ReviewRatingService>(
+        builder: (context, service, child) {
+          if (service.isLoading && service.reviews.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final avis = _trierEtFiltrer(service.reviews);
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingM,
+              DesignConstants.edgeMargin,
+              // De quoi passer sous le bouton flottant sans que la dernière
+              // carte disparaisse dessous.
+              96,
+            ),
+            children: [
+              _syntheseDesNotes(service),
+              const SizedBox(height: DesignConstants.spacingL),
+              _filtres(),
+              const SizedBox(height: DesignConstants.spacingM),
+              if (avis.isEmpty)
+                EmptyStateWidget(
+                  title: _filterBy == 'all'
+                      ? 'Aucun avis pour l’instant'
+                      : 'Aucun avis à $_filterBy étoile${_filterBy == '1' ? '' : 's'}',
+                  message: _filterBy == 'all'
+                      ? 'Soyez le premier à donner le vôtre.'
+                      : 'Essayez un autre filtre.',
+                  icon: Icons.rate_review_outlined,
+                )
+              else
+                for (final review in avis) _buildReviewCard(review),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  List<Review> _trierEtFiltrer(List<Review> source) {
+    // Copie modifiable : `service.reviews` ne l'est pas.
+    var avis = List<Review>.from(source);
+
+    if (_filterBy != 'all') {
+      final note = int.parse(_filterBy);
+      avis = avis.where((r) => r.rating == note).toList();
+    }
+
+    switch (_sortBy) {
+      case 'rating':
+        avis.sort((a, b) => b.rating.compareTo(a.rating));
+      default:
+        avis.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
+
+    return avis;
+  }
+
+  /// Note moyenne à gauche, répartition à droite.
+  ///
+  /// C'est le bloc « Rating Overview » de la maquette. La répartition compte
+  /// autant que la moyenne : 4,2 obtenu avec des 4 et des 5 ne dit pas la même
+  /// chose que 4,2 obtenu avec des 5 et des 1.
+  Widget _syntheseDesNotes(ReviewRatingService service) {
+    final theme = Theme.of(context);
+    final note = service.ratings[widget.menuItem.id];
+
+    if (note == null || note.totalReviews == 0) {
+      return SectionCard(
+        child: Row(
+          children: [
+            Icon(
+              Icons.star_outline_rounded,
+              size: 32,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: DesignConstants.spacingM),
+            Expanded(
+              child: Text(
+                'Ce plat n’a pas encore été noté.',
+                style: AppTypography.bodyLg(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SectionCard(
+      child: Row(
         children: [
-          _buildReviewsTab(),
-          _buildReviewFormTab(),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                note.averageRating.toStringAsFixed(1),
+                style: AppTypography.displayLg(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              RatingBarIndicator(
+                rating: note.averageRating,
+                itemBuilder: (context, index) => Icon(
+                  Icons.star_rounded,
+                  color: theme.colorScheme.secondary,
+                ),
+                itemSize: 16,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${note.totalReviews} avis',
+                style: AppTypography.bodyMd(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: DesignConstants.spacingL),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final etoiles in [5, 4, 3, 2, 1])
+                  _ligneDeRepartition(
+                    etoiles,
+                    note.ratingDistribution[etoiles] ?? 0,
+                    note.totalReviews,
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildReviewsTab() {
+  Widget _ligneDeRepartition(int etoiles, int nombre, int total) {
+    final theme = Theme.of(context);
+    final part = total > 0 ? nombre / total : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 12,
+            child: Text(
+              '$etoiles',
+              textAlign: TextAlign.end,
+              style: AppTypography.labelLg(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: part,
+                minHeight: 6,
+                backgroundColor: theme.colorScheme.surfaceContainerHigh,
+                valueColor:
+                    AlwaysStoppedAnimation<Color>(theme.colorScheme.secondary),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          SizedBox(
+            width: 24,
+            child: Text(
+              '$nombre',
+              style: AppTypography.labelLg(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Filtres et tri, en puces.
+  ///
+  /// Les deux menus déroulants d'avant demandaient trois gestes pour un
+  /// filtre — ouvrir, faire défiler, choisir — et ne montraient pas les
+  /// options disponibles tant qu'on ne les avait pas ouverts.
+  ///
+  /// « Plus utiles » reste absent du tri : le contrat expose `helpful_count`
+  /// mais aucune route pour voter. Trier sur un compteur que personne ne peut
+  /// incrémenter n'afficherait qu'un ordre figé.
+  Widget _filtres() {
+    const filtres = ['all', '5', '4', '3', '2', '1'];
+    const libelles = ['Tous', '5 ★', '4 ★', '3 ★', '2 ★', '1 ★'];
+
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Rating overview
-        Consumer<ReviewRatingService>(
-          builder: (context, service, child) {
-            final rating = service.ratings[widget.menuItem.id];
-
-            if (rating == null || rating.totalReviews == 0) {
-              return Container(
-                padding: const EdgeInsets.all(24),
-                child: const Center(
-                  child: Text('Aucun avis pour ce produit'),
-                ),
-              );
-            }
-
-            return Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      // Rating display
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            rating.averageRating.toStringAsFixed(1),
-                            style: const TextStyle(
-                              fontSize: 48,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                          RatingBarIndicator(
-                            rating: rating.averageRating,
-                            itemBuilder: (context, index) => const Icon(
-                              Icons.star,
-                              color: Colors.amber,
-                            ),
-                            itemSize: 20,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            '${rating.totalReviews} avis',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 24),
-                      // Rating distribution
-                      Expanded(
-                        child: Column(
-                          children: [5, 4, 3, 2, 1].map((stars) {
-                            final count = rating.ratingDistribution[stars] ?? 0;
-                            final percentage = rating.totalReviews > 0
-                                ? count / rating.totalReviews
-                                : 0.0;
-
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                children: [
-                                  Text(
-                                    '$stars',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: LinearProgressIndicator(
-                                      value: percentage,
-                                      backgroundColor: Colors.grey[200],
-                                      valueColor:
-                                          const AlwaysStoppedAnimation<Color>(
-                                              Colors.amber,),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '$count',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          },
+        CategoryChipBar(
+          labels: libelles,
+          selectedIndex: filtres.indexOf(_filterBy),
+          padding: EdgeInsets.zero,
+          onSelected: (index) => setState(() => _filterBy = filtres[index]),
         ),
-
-        // Filter and sort
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: DropdownButton<String>(
-                  value: _filterBy,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'all', child: Text('Tous les avis'),),
-                    DropdownMenuItem(value: '5', child: Text('5 étoiles')),
-                    DropdownMenuItem(value: '4', child: Text('4 étoiles')),
-                    DropdownMenuItem(value: '3', child: Text('3 étoiles')),
-                    DropdownMenuItem(value: '2', child: Text('2 étoiles')),
-                    DropdownMenuItem(value: '1', child: Text('1 étoile')),
-                  ],
-                  onChanged: (value) {
-                    setState(() => _filterBy = value ?? 'all');
-                  },
-                ),
-              ),
-              const SizedBox(width: 16),
-              DropdownButton<String>(
-                value: _sortBy,
-                underline: const SizedBox(),
-                // « Plus utiles » retiré : le contrat expose `helpful_count`
-                // mais aucun endpoint pour voter — trier sur un compteur que
-                // personne ne peut incrémenter n'afficherait qu'un tri figé.
-                items: const [
-                  DropdownMenuItem(value: 'recent', child: Text('Plus récent')),
-                  DropdownMenuItem(value: 'rating', child: Text('Mieux notés')),
-                ],
-                onChanged: (value) {
-                  setState(() => _sortBy = value ?? 'recent');
-                },
-              ),
-            ],
-          ),
-        ),
-
-        // Reviews list
-        Expanded(
-          child: Consumer<ReviewRatingService>(
-            builder: (context, service, child) {
-              if (service.isLoading) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              // Créer une copie modifiable de la liste (service.reviews est non modifiable)
-              var reviews = List<Review>.from(service.reviews);
-
-              // Apply filter
-              if (_filterBy != 'all') {
-                final rating = int.parse(_filterBy);
-                reviews = reviews.where((r) => r.rating == rating).toList();
-              }
-
-              // Apply sort
-              switch (_sortBy) {
-                case 'rating':
-                  reviews.sort((a, b) => b.rating.compareTo(a.rating));
-                  break;
-                default:
-                  reviews.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-              }
-
-              if (reviews.isEmpty) {
-                return const Center(
-                  child: Text('Aucun avis correspondant aux filtres'),
-                );
-              }
-
-              return ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: reviews.length,
-                itemBuilder: (context, index) {
-                  return _buildReviewCard(reviews[index]);
-                },
-              );
-            },
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton.icon(
+            onPressed: () => setState(
+              () => _sortBy = _sortBy == 'recent' ? 'rating' : 'recent',
+            ),
+            icon: const Icon(Icons.swap_vert_rounded, size: 18),
+            label: Text(
+              _sortBy == 'recent' ? 'Les plus récents' : 'Les mieux notés',
+            ),
           ),
         ),
       ],
@@ -286,115 +318,91 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
   }
 
   Widget _buildReviewCard(Review review) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DesignConstants.spacingM),
+      child: SectionCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CircleAvatar(
-                  backgroundColor: AppColors.primary,
+                  radius: 20,
+                  backgroundColor:
+                      theme.colorScheme.primary.withValues(alpha: 0.12),
                   child: Text(
                     _initial(review.author.fullName),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
+                    style: AppTypography.titleLg(
+                      color: theme.colorScheme.primary,
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: DesignConstants.spacingM),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              review.author.fullName,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                          if (review.isVerifiedPurchase)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.success,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.verified,
-                                      size: 12, color: Colors.white,),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'Achat vérifié',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
+                      Text(
+                        review.author.fullName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.titleLg(
+                          color: theme.colorScheme.onSurface,
+                        ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 2),
                       RatingBarIndicator(
                         rating: review.rating.toDouble(),
-                        itemBuilder: (context, index) => const Icon(
-                          Icons.star,
-                          color: Colors.amber,
+                        itemBuilder: (context, index) => Icon(
+                          Icons.star_rounded,
+                          color: theme.colorScheme.secondary,
                         ),
-                        itemSize: 16,
+                        itemSize: 14,
                       ),
                     ],
                   ),
                 ),
+                if (review.isVerifiedPurchase)
+                  StatusChip(
+                    label: 'Vérifié',
+                    icon: Icons.verified_rounded,
+                    dense: true,
+                    background: AppColors.success.withValues(alpha: 0.12),
+                    foreground: AppColors.success,
+                  ),
               ],
             ),
             if (review.title.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: DesignConstants.spacingM),
               Text(
                 review.title,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
+                style: AppTypography.titleLg(
+                  color: theme.colorScheme.onSurface,
                 ),
               ),
             ],
-            const SizedBox(height: 8),
-            Text(
-              review.comment,
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                height: 1.4,
+            if (review.comment.isNotEmpty) ...[
+              const SizedBox(height: DesignConstants.spacingS),
+              Text(
+                review.comment,
+                style: AppTypography.bodyLg(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
-            // Photos d'avis et bouton « Utile » retirés : ni les unes ni
-            // l'autre n'existent dans le contrat (`ReviewSerializer` n'a pas
-            // de champ photo, et rien n'incrémente `helpful_count`).
-            const SizedBox(height: 12),
+            ],
+            // Photos d'avis et bouton « Utile » restent absents : ni les unes
+            // ni l'autre n'existent dans le contrat (`ReviewSerializer` n'a
+            // pas de champ photo, et rien n'incrémente `helpful_count`).
+            const SizedBox(height: DesignConstants.spacingM),
             Text(
-              'Il y a ${DateTime.now().difference(review.createdAt).inDays} jours',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 12,
+              _depuis(review.createdAt),
+              style: AppTypography.labelLg(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -402,19 +410,34 @@ class _ProductReviewsScreenState extends State<ProductReviewsScreen>
       ),
     );
   }
+}
 
-  Widget _buildReviewFormTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: _ReviewFormDialog(
-        menuItem: widget.menuItem,
-        onSubmit: () async {
-          await _loadReviews();
-          _tabController.animateTo(0);
-        },
-      ),
-    );
+/// Ancienneté d'un avis, en clair.
+///
+/// La version précédente écrivait toujours « Il y a N jours », ce qui donnait
+/// « Il y a 0 jours » pour un avis déposé le matin même — la formule la plus
+/// sûre pour faire douter de la fraîcheur de la page.
+String _depuis(DateTime date) {
+  final ecart = DateTime.now().difference(date);
+
+  if (ecart.inMinutes < 1) return "À l'instant";
+  if (ecart.inHours < 1) return 'Il y a ${ecart.inMinutes} min';
+  if (ecart.inDays < 1) {
+    final h = ecart.inHours;
+    return 'Il y a $h heure${h > 1 ? 's' : ''}';
   }
+  if (ecart.inDays < 7) {
+    final j = ecart.inDays;
+    return 'Il y a $j jour${j > 1 ? 's' : ''}';
+  }
+  if (ecart.inDays < 31) {
+    final semaines = ecart.inDays ~/ 7;
+    return 'Il y a $semaines semaine${semaines > 1 ? 's' : ''}';
+  }
+  final mois = ecart.inDays ~/ 30;
+  if (mois < 12) return 'Il y a $mois mois';
+  final ans = mois ~/ 12;
+  return 'Il y a $ans an${ans > 1 ? 's' : ''}';
 }
 
 /// Dialog de formulaire de review (utilisé aussi dans le TabView)

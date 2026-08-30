@@ -1,7 +1,25 @@
-import 'package:flutter/material.dart';
-import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
+import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+/// Écran d'accueil des visiteurs non connectés.
+///
+/// ## L'image de fond vient du catalogue, pas d'un asset
+///
+/// La maquette pose une photographie de plat en pleine page. Elle n'est pas
+/// embarquée dans l'application : ce serait figer une image de démonstration
+/// dans le binaire, et la première chose qu'un nouveau visiteur verrait ne
+/// serait pas ce que la cuisine sert aujourd'hui.
+///
+/// C'est donc le **catalogue** qui la fournit — le premier article populaire
+/// pourvu d'une photo, tel que `AppService` l'a chargé depuis `/api/v1/`. Si
+/// le catalogue n'est pas encore là, ou qu'aucun article n'a de photo, le
+/// dégradé de marque tient la place seul : il est conçu pour ça, et l'écran
+/// reste lisible sans jamais afficher de cadre vide.
 class GuestWelcomeScreen extends StatefulWidget {
   final Function(int)? onNavigateToTab;
 
@@ -45,187 +63,128 @@ class _GuestWelcomeScreenState extends State<GuestWelcomeScreen>
     super.dispose();
   }
 
+  /// Photo du premier article populaire qui en possède une.
+  ///
+  /// L'ordre de `menuItems` est celui du serveur (`sort_order`), donc stable
+  /// d'un lancement à l'autre : l'écran ne change pas d'illustration à chaque
+  /// ouverture, ce qui donnerait l'impression d'un défaut.
+  String? _photoDAccueil(AppService appService) {
+    for (final article in appService.menuItems) {
+      final image = article.image;
+      if (article.isPopular && image != null && image.isNotEmpty) return image;
+    }
+    for (final article in appService.menuItems) {
+      final image = article.image;
+      if (image != null && image.isNotEmpty) return image;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
-      body: Stack(
-        children: [
-          // Background decorative elements
-          Positioned(
-            top: -100,
-            right: -100,
-            child: Container(
-              width: 300,
-              height: 300,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          Positioned(
-            bottom: -50,
-            left: -50,
-            child: Container(
-              width: 200,
-              height: 200,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
+      backgroundColor: AppColors.surfaceDark,
+      body: Consumer<AppService>(
+        builder: (context, appService, child) {
+          final photo = _photoDAccueil(appService);
 
-          // Main content
-          SafeArea(
-            child: FadeTransition(
-              opacity: _fadeAnimation,
-              child: SlideTransition(
-                position: _slideAnimation,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Spacer(),
-
-                      // Logo
-                      Container(
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.15),
-                              blurRadius: 30,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
-                        ),
-                        child: Image.asset(
-                          'assets/logo/logo.png',
-                          width: 120,
-                          height: 120,
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) {
-                            return const Icon(
-                              Icons.restaurant,
-                              size: 80,
-                              color: AppColors.primary,
-                            );
-                          },
-                        ),
-                      ),
-
-                      const SizedBox(height: 48),
-
-                      // Title
-                      const Text(
-                        'El Corazón',
-                        style: TextStyle(
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          letterSpacing: 1.0,
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // Subtitle / Description
-                      Text(
-                        'L\'amour, notre ingrédient secret.\nCommandez vos plats préférés en quelques clics.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.white.withValues(alpha: 0.9),
-                          height: 1.5,
-                        ),
-                      ),
-
-                      const Spacer(),
-
-                      // Actions
-                      Column(
-                        children: [
-                          _buildActionButton(
-                            text: 'Explorer le Menu',
-                            icon: Icons.restaurant_menu,
-                            onPressed: () {
-                              widget.onNavigateToTab
-                                  ?.call(1); // Navigate to Menu tab
-                            },
-                            backgroundColor: Colors.white,
-                            textColor: AppColors.primary,
-                          ),
-                          const SizedBox(height: 16),
-                          _buildActionButton(
-                            text: 'Se Connecter / S\'inscrire',
-                            icon: Icons.login,
-                            onPressed: () {
-                              NavigationService.navigateToAuth(context);
-                            },
-                            backgroundColor:
-                                Colors.white.withValues(alpha: 0.2),
-                            textColor: Colors.white,
-                            isOutlined: true,
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 48),
-                    ],
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              // Fond de repli : il reste visible dans les marges d'une photo
+              // qui ne remplit pas exactement l'écran, et tient seul tant que
+              // le catalogue n'est pas chargé.
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: AppColors.actionGradient,
                   ),
                 ),
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+              if (photo != null) FoodImage(url: photo, iconSize: 96),
 
-  Widget _buildActionButton({
-    required String text,
-    required IconData icon,
-    required VoidCallback onPressed,
-    required Color backgroundColor,
-    required Color textColor,
-    bool isOutlined = false,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: backgroundColor,
-          foregroundColor: textColor,
-          elevation: isOutlined ? 0 : 4,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: isOutlined
-                ? const BorderSide(color: Colors.white, width: 2)
-                : BorderSide.none,
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: textColor),
-            const SizedBox(width: 12),
-            Text(
-              text,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: textColor,
+              // Voile : du transparent en haut au presque noir en bas, pour
+              // que le texte blanc tienne quelle que soit la photo servie.
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0x33000000),
+                      Color(0x99000000),
+                      Color(0xF21A1A1A),
+                    ],
+                    stops: [0, 0.45, 1],
+                  ),
+                ),
               ),
-            ),
-          ],
-        ),
+
+              SafeArea(
+                child: FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: SlideTransition(
+                    position: _slideAnimation,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: DesignConstants.edgeMargin,
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            'El Corazón',
+                            textAlign: TextAlign.center,
+                            style: AppTypography.displayLg(color: Colors.white)
+                                .copyWith(fontStyle: FontStyle.italic),
+                          ),
+                          const SizedBox(height: DesignConstants.spacingS),
+                          Text(
+                            "Le cœur de la cuisine d'Abidjan.",
+                            textAlign: TextAlign.center,
+                            style:
+                                AppTypography.headlineMd(color: Colors.white),
+                          ),
+                          const SizedBox(height: DesignConstants.spacingS),
+                          Text(
+                            'Grillé au feu de bois, livré chez vous.',
+                            textAlign: TextAlign.center,
+                            style: AppTypography.bodyLg(
+                              color: Colors.white.withValues(alpha: 0.85),
+                            ),
+                          ),
+                          const SizedBox(height: DesignConstants.spacingXL),
+                          ActionButton(
+                            label: 'Explorer le menu',
+                            icon: Icons.restaurant_menu_rounded,
+                            onPressed: () => widget.onNavigateToTab?.call(1),
+                          ),
+                          const SizedBox(height: DesignConstants.spacingM),
+                          // Contour clair plutôt que rouge : sur une photo
+                          // sombre, le rouge de marque est le seul repère
+                          // qu'on ne peut pas se permettre de rendre discret,
+                          // et il est déjà pris par le bouton du dessus.
+                          ActionButton(
+                            label: "Se connecter / S'inscrire",
+                            icon: Icons.login_rounded,
+                            emphasis: ActionEmphasis.outlined,
+                            backgroundColor: Colors.white.withValues(alpha: 0.12),
+                            foregroundColor: Colors.white,
+                            onPressed: () =>
+                                NavigationService.navigateToAuth(context),
+                          ),
+                          const SizedBox(height: DesignConstants.spacingXL),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

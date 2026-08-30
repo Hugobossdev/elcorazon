@@ -49,6 +49,13 @@ class AdminAuthService extends ChangeNotifier {
   late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
 
   eccore.User? _staff;
+
+  /// Session fabriquée localement — **contournement de développement, à
+  /// retirer** (voir `_devBypassAuth` dans `main.dart`). Tenue à part de
+  /// [_staff] pour que le retrait se limite aux lignes qui la nomment : le
+  /// chemin normal continue de ne dépendre que du serveur.
+  eccore.User? _devStaff;
+
   bool _isLoading = false;
 
   // Déconnexion après inactivité — réglage local, sans rapport avec la
@@ -58,8 +65,8 @@ class AdminAuthService extends ChangeNotifier {
   Duration _inactivityTimeout = const Duration(minutes: 30);
   bool _autoLogoutEnabled = true;
 
-  eccore.User? get currentAdmin => _staff;
-  bool get isAuthenticated => _staff != null;
+  eccore.User? get currentAdmin => _devStaff ?? _staff;
+  bool get isAuthenticated => currentAdmin != null;
   bool get isLoading => _isLoading;
   Duration get inactivityTimeout => _inactivityTimeout;
   bool get autoLogoutEnabled => _autoLogoutEnabled;
@@ -68,7 +75,7 @@ class AdminAuthService extends ChangeNotifier {
   eccore.ApiClient get apiClient => _container.read(eccore.apiClientProvider);
 
   /// Permissions accordées par le serveur — la seule source qui vaille.
-  List<String> get permissions => _staff?.permissions ?? const [];
+  List<String> get permissions => currentAdmin?.permissions ?? const [];
 
   /// Libellé affiché sous le nom du compte.
   ///
@@ -78,7 +85,7 @@ class AdminAuthService extends ChangeNotifier {
   /// à circuler avec le jeton. Les rôles eux-mêmes se gèrent sur leur écran
   /// dédié (`/administration/roles/`).
   String get roleLabel {
-    if (_staff == null) return '';
+    if (currentAdmin == null) return '';
     final total = permissions.length;
     return total == 0 ? 'Personnel' : 'Personnel · $total permission(s)';
   }
@@ -134,6 +141,18 @@ class AdminAuthService extends ChangeNotifier {
     _stopInactivityTimer();
     await _container.read(eccore.sessionProvider.notifier).logout();
     _staff = null;
+    _devStaff = null;
+    notifyListeners();
+  }
+
+  /// Installe une session sans passer par le serveur — **contournement de
+  /// développement, à retirer**.
+  ///
+  /// Ne fabrique aucun jeton, et ne prétend pas le faire : `ApiClient` n'a
+  /// rien à joindre aux requêtes, donc l'API répondra 401. Ce que cela ouvre,
+  /// c'est l'interface ; ce que cela ne peut pas ouvrir, ce sont les données.
+  void installDevSession(eccore.User staff) {
+    _devStaff = staff;
     notifyListeners();
   }
 

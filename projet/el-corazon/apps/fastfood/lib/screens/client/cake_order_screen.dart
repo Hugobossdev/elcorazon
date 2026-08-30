@@ -8,11 +8,11 @@ import 'package:elcora_fast/repositories/django_menu_repository.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
-import 'package:elcora_fast/widgets/custom_button.dart';
 import 'package:elcora_fast/presentation/preselection_gateau.dart';
 import 'package:elcora_fast/presentation/recapitulatif_gateau.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
@@ -358,19 +358,25 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Commander un gâteau'),
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Commander un gâteau',
         actions: [
-          IconButton(
-            icon: const Icon(Icons.shopping_cart_outlined),
-            onPressed: () => context.navigateToCart(),
+          Consumer<CartService>(
+            builder: (context, cartService, child) => GlassIconButton(
+              icon: Icons.shopping_cart_outlined,
+              tooltip: 'Voir le panier',
+              filled: false,
+              badge: cartService.itemCount,
+              onPressed: () => context.navigateToCart(),
+            ),
           ),
         ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
             Tab(icon: Icon(Icons.cake_outlined), text: 'Catalogue'),
-            Tab(icon: Icon(Icons.build), text: 'Personnaliser'),
+            Tab(icon: Icon(Icons.tune_rounded), text: 'Personnaliser'),
           ],
         ),
       ),
@@ -993,13 +999,17 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
                 _buildUnpublishedNotice(theme),
                 const SizedBox(height: 16),
               ],
-              CustomButton(
-                text: 'Ajouter au panier',
+              // Dégradé : c'est l'action qui engage la commande, et le design
+              // system lui réserve cette emphase — au même titre que
+              // « Commander » au panier et au règlement.
+              ActionButton(
+                label: 'Ajouter au panier',
+                emphasis: ActionEmphasis.gradient,
                 icon: Icons.check_circle_outline,
+                isLoading: _isSubmitting,
                 onPressed: _isSubmitting || !isOrderable
                     ? null
                     : () => _confirmCustomCakeOrder(service),
-                isLoading: _isSubmitting,
               ),
             ],
           ),
