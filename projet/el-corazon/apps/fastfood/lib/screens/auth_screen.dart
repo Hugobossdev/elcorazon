@@ -1,19 +1,38 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcorazon_core/elcorazon_core.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/widgets/navigation_error_handler.dart';
-import 'package:elcora_fast/widgets/auth_style_text_field.dart';
-import 'package:elcora_fast/widgets/auth_style_button.dart';
-import 'package:elcora_fast/widgets/auth_style_card.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/input_sanitizer.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
+/// Connexion et inscription.
+///
+/// ## Ce que la maquette change
+///
+/// `onboarding_create_account` pose l'écran sur le **fond clair** du design
+/// system, avec le logo en tête et des champs posés à plat. La version
+/// précédente peignait tout l'écran d'un dégradé rouge et posait dessus une
+/// carte blanche : le rouge de marque, que `DESIGN.md` réserve aux actions et
+/// aux bannières, occupait ici la totalité de la première impression.
+///
+/// ## Un lien plutôt que deux onglets
+///
+/// La bascule connexion / inscription était une paire d'onglets en tête de
+/// carte. La maquette la met en **bas**, en une phrase — « Already have an
+/// account? Log In ». C'est mieux placé : on choisit ce qu'on vient faire une
+/// fois, au début, et le reste du temps l'onglet inutile occupe le haut de
+/// l'écran, juste au-dessus du champ qu'on veut atteindre.
+///
+/// ## Ce qui n'est pas dessiné
+///
+/// Ni Google, ni Apple, ni « mot de passe oublié » : aucun des trois n'a
+/// d'équivalent côté Django (Phase 6). Voir BR-001 de
+/// `docs/STITCH_BACKEND_REQUIREMENTS.md`.
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
 
@@ -21,11 +40,13 @@ class AuthScreen extends StatefulWidget {
   State<AuthScreen> createState() => _AuthScreenState();
 }
 
-class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
+class _AuthScreenState extends State<AuthScreen> {
   bool _isLogin = true;
   bool _isLoading = false;
+  bool _motDePasseVisible = false;
+  bool _confirmationVisible = false;
 
-  // Stocke le numéro de téléphone complet (avec indicatif pays) lors de l'inscription
+  /// Numéro complet, indicatif compris, tel qu'`IntlPhoneField` le compose.
   String _fullPhoneNumber = '';
 
   final _formKey = GlobalKey<FormState>();
@@ -35,76 +56,14 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
 
-  final String _initialCountryCode = 'TG';
-
-  late AnimationController _animationController;
-  late AnimationController _logoAnimationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _logoScaleAnimation;
-  late Animation<double> _logoRotationAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _animationController = AnimationController(
-      duration: DesignConstants.animationExtraSlow,
-      vsync: this,
-    );
-
-    _logoAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    );
-
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeOut,
-      ),
-    );
-
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.2),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeOutCubic,
-      ),
-    );
-
-    _logoScaleAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(
-      CurvedAnimation(
-        parent: _logoAnimationController,
-        curve: Curves.elasticOut,
-      ),
-    );
-
-    _logoRotationAnimation = Tween<double>(
-      begin: -0.1,
-      end: 0.0,
-    ).animate(
-      CurvedAnimation(
-        parent: _logoAnimationController,
-        curve: Curves.easeOut,
-      ),
-    );
-
-    _logoAnimationController.forward();
-    _animationController.forward();
-  }
+  /// Côte d'Ivoire, et non le Togo comme auparavant : l'établissement est à
+  /// Abidjan, et `EditProfileDialog` proposait déjà `CI`. Deux indicatifs par
+  /// défaut différents dans la même application faisaient saisir un numéro
+  /// togolais à l'inscription, ivoirien à la modification.
+  static const String _indicatifParDefaut = 'CI';
 
   @override
   void dispose() {
-    _animationController.dispose();
-    _logoAnimationController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
@@ -113,64 +72,46 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  void _basculer() {
+    setState(() {
+      _isLogin = !_isLogin;
+      // Les messages de validation du mode précédent n'ont plus de sens :
+      // « Confirmez votre mot de passe » n'a rien à reprocher à une connexion.
+      _formKey.currentState?.reset();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final isMobile = DesignConstants.isMobile(context);
+    final theme = Theme.of(context);
 
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: AppColors.primaryGradient,
-          ),
-        ),
-        child: SafeArea(
+      backgroundColor: theme.colorScheme.surface,
+      body: SafeArea(
+        child: Center(
           child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: EdgeInsets.symmetric(
-              horizontal: isMobile
-                  ? DesignConstants.spacingL
-                  : DesignConstants.spacingXL,
-              vertical: isMobile
-                  ? DesignConstants.spacingM
-                  : DesignConstants.spacingL,
+            padding: const EdgeInsets.fromLTRB(
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingL,
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingXL,
             ),
             child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: screenHeight -
-                    MediaQuery.of(context).padding.top -
-                    MediaQuery.of(context).padding.bottom,
-              ),
-              child: FadeTransition(
-                opacity: _fadeAnimation,
-                child: SlideTransition(
-                  position: _slideAnimation,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        height: isMobile
-                            ? DesignConstants.spacingL
-                            : DesignConstants.spacingXL,
-                      ),
-                      _buildLogo(),
-                      SizedBox(
-                        height: isMobile
-                            ? DesignConstants.spacingL
-                            : DesignConstants.spacingXL,
-                      ),
-                      _buildAuthCard(),
-                      SizedBox(
-                        height: isMobile
-                            ? DesignConstants.spacingM
-                            : DesignConstants.spacingL,
-                      ),
-                    ],
-                  ),
-                ),
+              // Sur tablette et navigateur, un formulaire étiré sur 1 200 px
+              // devient illisible : l'œil perd la ligne entre le libellé et le
+              // champ.
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _enTete(theme),
+                  const SizedBox(height: DesignConstants.spacingXL),
+                  _formulaire(theme),
+                  const SizedBox(height: DesignConstants.spacingL),
+                  _bascule(theme),
+                  const SizedBox(height: DesignConstants.spacingM),
+                  _mentionsLegales(theme),
+                ],
               ),
             ),
           ),
@@ -179,415 +120,267 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildLogo() {
-    return ScaleTransition(
-      scale: _logoScaleAnimation,
-      child: RotationTransition(
-        turns: _logoRotationAnimation,
-        child: Column(
-          children: [
-            Container(
-              width: 140,
-              height: 140,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 30,
-                    spreadRadius: 3,
-                    offset: const Offset(0, 10),
-                  ),
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.25),
-                    blurRadius: 20,
-                    spreadRadius: -5,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
+  Widget _enTete(ThemeData theme) {
+    return Column(
+      children: [
+        Image.asset(
+          'assets/logo/logo.png',
+          height: 88,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => Icon(
+            Icons.restaurant_rounded,
+            size: 72,
+            color: theme.colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: DesignConstants.spacingM),
+        Text(
+          'El Corazón',
+          textAlign: TextAlign.center,
+          style: AppTypography.headlineMd(color: theme.colorScheme.primary)
+              .copyWith(fontStyle: FontStyle.italic),
+        ),
+        const SizedBox(height: DesignConstants.spacingL),
+        Text(
+          _isLogin ? 'Content de vous revoir.' : 'Rejoignez la table.',
+          textAlign: TextAlign.center,
+          style: AppTypography.headlineSm(color: theme.colorScheme.onSurface),
+        ),
+        const SizedBox(height: DesignConstants.spacingS),
+        Text(
+          _isLogin
+              ? 'Connectez-vous pour retrouver vos commandes et vos adresses.'
+              : 'Créez votre compte pour commander les saveurs grillées '
+                  'd’Abidjan.',
+          textAlign: TextAlign.center,
+          style: AppTypography.bodyMd(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+
+  Widget _formulaire(ThemeData theme) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!_isLogin) ...[
+            TextFormField(
+              controller: _nameController,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.next,
+              decoration: const InputDecoration(
+                labelText: 'Nom complet',
+                prefixIcon: Icon(Icons.person_outline_rounded),
               ),
-              child: ClipOval(
-                child: Image.asset(
-                  'assets/logo/logo.png',
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: AppColors.primaryGradient,
-                        ),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.5),
-                          width: 4,
-                        ),
-                      ),
-                      child: const Icon(
-                        Icons.restaurant_rounded,
-                        size: 70,
-                        color: Colors.white,
-                      ),
-                    );
-                  },
-                ),
-              ),
+              validator: _validerNom,
             ),
             const SizedBox(height: DesignConstants.spacingM),
-            Text(
-              'El Corazón',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                shadows: [
-                  Shadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+            _champTelephone(theme),
+            const SizedBox(height: DesignConstants.spacingM),
+          ],
+          TextFormField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            autofillHints: const [AutofillHints.email],
+            decoration: const InputDecoration(
+              labelText: 'Adresse e-mail',
+              prefixIcon: Icon(Icons.mail_outline_rounded),
+            ),
+            validator: _validerEmail,
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          TextFormField(
+            controller: _passwordController,
+            obscureText: !_motDePasseVisible,
+            textInputAction:
+                _isLogin ? TextInputAction.done : TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: 'Mot de passe',
+              prefixIcon: const Icon(Icons.lock_outline_rounded),
+              // La maquette montre l'œil barré : sans lui, un mot de passe
+              // fort — majuscule, chiffre, caractère spécial — se saisit à
+              // l'aveugle sur un clavier de téléphone.
+              suffixIcon: _oeil(
+                visible: _motDePasseVisible,
+                onTap: () => setState(
+                  () => _motDePasseVisible = !_motDePasseVisible,
+                ),
               ),
             ),
-            const SizedBox(height: DesignConstants.spacingXS),
-            Text(
-              'Authentification',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Colors.white.withValues(alpha: 0.9),
-                fontWeight: FontWeight.w500,
-                shadows: [
-                  Shadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 6,
-                    offset: const Offset(0, 1),
+            validator: _validerMotDePasse,
+            onFieldSubmitted: _isLogin ? (_) => _handleAuth() : null,
+          ),
+          if (!_isLogin) ...[
+            const SizedBox(height: DesignConstants.spacingM),
+            TextFormField(
+              controller: _confirmPasswordController,
+              obscureText: !_confirmationVisible,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: 'Confirmer le mot de passe',
+                prefixIcon: const Icon(Icons.lock_outline_rounded),
+                suffixIcon: _oeil(
+                  visible: _confirmationVisible,
+                  onTap: () => setState(
+                    () => _confirmationVisible = !_confirmationVisible,
                   ),
-                ],
+                ),
               ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Veuillez confirmer votre mot de passe';
+                }
+                if (value != _passwordController.text) {
+                  return 'Les mots de passe ne correspondent pas';
+                }
+                return null;
+              },
+              onFieldSubmitted: (_) => _handleAuth(),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAuthCard() {
-    return AnimatedSwitcher(
-      duration: DesignConstants.animationNormal,
-      transitionBuilder: (child, animation) {
-        return FadeTransition(
-          opacity: animation,
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 0.1),
-              end: Offset.zero,
-            ).animate(animation),
-            child: child,
-          ),
-        );
-      },
-      child: AuthStyleCard(
-        key: ValueKey(_isLogin),
-        padding:
-            EdgeInsets.all(DesignConstants.isMobile(context) ? 20.0 : 28.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildTabSelector(),
-              SizedBox(height: DesignConstants.isMobile(context) ? 24 : 32),
-              AnimatedSize(
-                duration: DesignConstants.animationNormal,
-                curve: Curves.easeInOut,
-                child: Column(
-                  children: [
-                    if (!_isLogin) ...[
-                      AuthStyleTextField(
-                        controller: _nameController,
-                        label: 'Nom complet',
-                        icon: Icons.person_outline,
-                        validator: (value) {
-                          if (value == null || value.trim().isEmpty) {
-                            return 'Veuillez entrer votre nom';
-                          }
-                          if (value.trim().length < 2) {
-                            return 'Le nom doit contenir au moins 2 caractères';
-                          }
-                          // 🛡️ Protection contre les injections SQL et XSS
-                          final sanitizeResult =
-                              InputSanitizer.validateAndSanitize(
-                            value,
-                            fieldName: 'Nom',
-                          );
-                          if (!sanitizeResult.isValid) {
-                            return sanitizeResult.errorMessage;
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: DesignConstants.spacingM),
-                      _buildPhoneField(),
-                      const SizedBox(height: DesignConstants.spacingM),
-                    ],
-                  ],
-                ),
-              ),
-              AuthStyleTextField(
-                controller: _emailController,
-                label: 'Email',
-                icon: Icons.email_outlined,
-                keyboardType: TextInputType.emailAddress,
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Veuillez entrer votre email';
-                  }
-                  // 🛡️ Protection contre les injections SQL et XSS
-                  final sanitizeResult = InputSanitizer.validateAndSanitize(
-                    value,
-                    fieldName: 'Email',
-                  );
-                  if (!sanitizeResult.isValid) {
-                    return sanitizeResult.errorMessage;
-                  }
-                  // Valider le format email
-                  if (!InputSanitizer.isValidEmailSafe(value.trim())) {
-                    return 'Veuillez entrer un email valide';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: DesignConstants.spacingM),
-              AuthStyleTextField(
-                controller: _passwordController,
-                label: 'Mot de passe',
-                icon: Icons.lock_outline,
-                obscureText: true,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Veuillez entrer votre mot de passe';
-                  }
-                  // En connexion : vérification légère (le serveur valide le reste)
-                  if (_isLogin) {
-                    if (value.length < 6) {
-                      return 'Le mot de passe doit contenir au moins 6 caractères';
-                    }
-                    return null;
-                  }
-                  // En inscription : robustesse renforcée basée sur les contraintes DB
-                  if (value.length < 8) {
-                    return 'Le mot de passe doit contenir au moins 8 caractères';
-                  }
-                  if (!RegExp(r'[A-Z]').hasMatch(value)) {
-                    return 'Le mot de passe doit contenir au moins une majuscule';
-                  }
-                  if (!RegExp(r'[0-9]').hasMatch(value)) {
-                    return 'Le mot de passe doit contenir au moins un chiffre';
-                  }
-                  if (!RegExp(r'[!@#%^&*()\-_=+\[\]{};:,.<>?/|~`]')
-                      .hasMatch(value)) {
-                    return 'Le mot de passe doit contenir au moins un caractère spécial (!@#%...)';
-                  }
-                  return null;
-                },
-              ),
-              AnimatedSize(
-                duration: DesignConstants.animationNormal,
-                curve: Curves.easeInOut,
-                child: Column(
-                  children: [
-                    if (!_isLogin) ...[
-                      const SizedBox(height: DesignConstants.spacingM),
-                      AuthStyleTextField(
-                        controller: _confirmPasswordController,
-                        label: 'Confirmer le mot de passe',
-                        icon: Icons.lock_outline,
-                        obscureText: true,
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Veuillez confirmer votre mot de passe';
-                          }
-                          if (value != _passwordController.text) {
-                            return 'Les mots de passe ne correspondent pas';
-                          }
-                          return null;
-                        },
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              SizedBox(height: DesignConstants.isMobile(context) ? 24 : 32),
-              AuthStyleButton(
-                text: _isLogin ? 'Se connecter' : 'Créer un compte',
-                onPressed: _isLoading ? null : _handleAuth,
-                isLoading: _isLoading,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPhoneField() {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(DesignConstants.radiusLarge),
-        boxShadow: DesignConstants.shadowSoft,
-      ),
-      child: IntlPhoneField(
-        controller: _phoneController,
-        decoration: InputDecoration(
-          labelText: 'Téléphone',
-          labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(DesignConstants.radiusLarge),
-            borderSide: BorderSide(
-              color: AppColors.textTertiary.withValues(alpha: 0.3),
-              width: 1.5,
-            ),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(DesignConstants.radiusLarge),
-            borderSide: BorderSide(
-              color: Theme.of(context).dividerColor.withValues(alpha: 0.3),
-              width: 1.5,
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(DesignConstants.radiusLarge),
-            borderSide: BorderSide(
-              color: Theme.of(context).primaryColor,
-              width: 2,
-            ),
-          ),
-          filled: true,
-          fillColor: Theme.of(context).brightness == Brightness.dark
-              ? Theme.of(context).colorScheme.surfaceContainerHighest
-              : AppColors.surfaceElevated,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: DesignConstants.spacingL + DesignConstants.spacingXS,
-            vertical: DesignConstants.spacingM + DesignConstants.spacingXS,
-          ),
-        ),
-        initialCountryCode: _initialCountryCode,
-        languageCode: 'fr',
-        // Stocker le numéro complet avec indicatif pays
-        onChanged: (phone) {
-          _fullPhoneNumber = phone.completeNumber;
-        },
-        validator: (phone) {
-          if (phone == null || phone.number.trim().isEmpty) {
-            return 'Veuillez entrer votre numéro de téléphone';
-          }
-          return null; // IntlPhoneField valide le format automatiquement
-        },
-        onCountryChanged: (country) {
-          _fullPhoneNumber = '+${country.dialCode}${_phoneController.text}';
-        },
-      ),
-    );
-  }
-
-  // La connexion/inscription téléphone+OTP, Google et « mot de passe oublié »
-  // n'ont pas d'équivalent côté backend Django (Phase 6) — voir
-  // `docs/architecture/04-migration-flutter.md`. Les méthodes correspondantes
-  // de `DatabaseService` restent en place (inertes), seuls leurs déclencheurs
-  // dans cet écran ont été retirés.
-
-  Widget _buildTabSelector() {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: isDark
-            ? theme.colorScheme.surfaceContainerHighest
-            : AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(DesignConstants.radiusLarge),
-        border: Border.all(
-          color: theme.dividerColor.withValues(alpha: 0.2),
-        ),
-        boxShadow: DesignConstants.shadowSoft,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                if (!_isLogin) {
-                  setState(() => _isLogin = true);
-                }
-              },
-              child: AnimatedContainer(
-                duration: DesignConstants.animationNormal,
-                curve: DesignConstants.curveStandard,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  gradient: _isLogin
-                      ? const LinearGradient(
-                          colors: AppColors.primaryGradient,
-                        )
-                      : null,
-                  color: _isLogin ? null : Colors.transparent,
-                  borderRadius: DesignConstants.borderRadiusMedium,
-                  boxShadow: _isLogin ? DesignConstants.shadowPrimary : null,
-                ),
-                child: Text(
-                  'Connexion',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: _isLogin
-                        ? AppColors.textLight
-                        : theme.colorScheme.onSurface,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.3,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                if (_isLogin) {
-                  setState(() => _isLogin = false);
-                }
-              },
-              child: AnimatedContainer(
-                duration: DesignConstants.animationNormal,
-                curve: DesignConstants.curveStandard,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  gradient: !_isLogin
-                      ? const LinearGradient(
-                          colors: AppColors.primaryGradient,
-                        )
-                      : null,
-                  color: !_isLogin ? null : Colors.transparent,
-                  borderRadius: DesignConstants.borderRadiusMedium,
-                  boxShadow: !_isLogin ? DesignConstants.shadowPrimary : null,
-                ),
-                child: Text(
-                  'Inscription',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: !_isLogin
-                        ? AppColors.textLight
-                        : theme.colorScheme.onSurface,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.3,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
+          const SizedBox(height: DesignConstants.spacingL),
+          ActionButton(
+            label: _isLogin ? 'Se connecter' : 'Créer mon compte',
+            emphasis: ActionEmphasis.gradient,
+            trailingIcon: Icons.arrow_forward_rounded,
+            isLoading: _isLoading,
+            onPressed: _isLoading ? null : _handleAuth,
           ),
         ],
       ),
     );
   }
+
+  Widget _oeil({required bool visible, required VoidCallback onTap}) {
+    return IconButton(
+      icon: Icon(
+        visible ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+      ),
+      tooltip: visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe',
+      onPressed: onTap,
+    );
+  }
+
+  Widget _champTelephone(ThemeData theme) {
+    return IntlPhoneField(
+      controller: _phoneController,
+      decoration: const InputDecoration(labelText: 'Téléphone'),
+      initialCountryCode: _indicatifParDefaut,
+      languageCode: 'fr',
+      onChanged: (phone) => _fullPhoneNumber = phone.completeNumber,
+      onCountryChanged: (country) {
+        _fullPhoneNumber = '+${country.dialCode}${_phoneController.text}';
+      },
+      validator: (phone) {
+        if (phone == null || phone.number.trim().isEmpty) {
+          return 'Veuillez entrer votre numéro de téléphone';
+        }
+        return null; // `IntlPhoneField` valide le format lui-même.
+      },
+    );
+  }
+
+  Widget _bascule(ThemeData theme) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Flexible(
+          child: Text(
+            _isLogin ? 'Pas encore de compte ?' : 'Vous avez déjà un compte ?',
+            style: AppTypography.bodyMd(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: _isLoading ? null : _basculer,
+          child: Text(
+            _isLogin ? 'S’inscrire' : 'Se connecter',
+            style: AppTypography.labelLg(color: theme.colorScheme.primary),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _mentionsLegales(ThemeData theme) {
+    // Les liens de la maquette ne sont pas cliquables : aucun document n'est
+    // publié à une adresse stable (BR-013). Un lien qui n'ouvre rien est pire
+    // qu'une phrase — celle-ci dit au moins la vérité.
+    return Text(
+      'En continuant, vous acceptez nos conditions d’utilisation et notre '
+      'politique de confidentialité.',
+      textAlign: TextAlign.center,
+      style: AppTypography.bodyMd(color: theme.colorScheme.onSurfaceVariant),
+    );
+  }
+
+  // ------------------------------------------------------------ validateurs
+
+  String? _validerNom(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Veuillez entrer votre nom';
+    }
+    if (value.trim().length < 2) {
+      return 'Le nom doit contenir au moins 2 caractères';
+    }
+    final sanitizeResult =
+        InputSanitizer.validateAndSanitize(value, fieldName: 'Nom');
+    if (!sanitizeResult.isValid) return sanitizeResult.errorMessage;
+    return null;
+  }
+
+  String? _validerEmail(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Veuillez entrer votre email';
+    }
+    final sanitizeResult =
+        InputSanitizer.validateAndSanitize(value, fieldName: 'Email');
+    if (!sanitizeResult.isValid) return sanitizeResult.errorMessage;
+    if (!InputSanitizer.isValidEmailSafe(value.trim())) {
+      return 'Veuillez entrer un email valide';
+    }
+    return null;
+  }
+
+  /// Exigences de mot de passe.
+  ///
+  /// **En connexion, la vérification reste légère** : le mot de passe a été
+  /// choisi sous des règles peut-être antérieures, et refuser localement une
+  /// saisie que le serveur accepterait enfermerait dehors un client existant.
+  /// À l'inscription, les règles sont celles du serveur.
+  String? _validerMotDePasse(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Veuillez entrer votre mot de passe';
+    }
+
+    if (_isLogin) {
+      if (value.length < 6) {
+        return 'Le mot de passe doit contenir au moins 6 caractères';
+      }
+      return null;
+    }
+
+    if (value.length < 8) {
+      return 'Le mot de passe doit contenir au moins 8 caractères';
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(value)) {
+      return 'Le mot de passe doit contenir au moins une majuscule';
+    }
+    if (!RegExp(r'[0-9]').hasMatch(value)) {
+      return 'Le mot de passe doit contenir au moins un chiffre';
+    }
+    if (!RegExp(r'[!@#%^&*()\-_=+\[\]{};:,.<>?/|~`]').hasMatch(value)) {
+      return 'Le mot de passe doit contenir au moins un caractère spécial '
+          '(!@#%…)';
+    }
+    return null;
+  }
+
+  // --------------------------------------------------------------- soumission
 
   Future<void> _handleAuth() async {
     if (!_formKey.currentState!.validate()) return;
@@ -603,7 +396,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           _passwordController.text,
         );
       } else {
-        // Utiliser le numéro complet avec indicatif pays
+        // Le numéro complet, indicatif compris.
         final phoneToRegister = _fullPhoneNumber.isNotEmpty
             ? _fullPhoneNumber
             : _phoneController.text.trim();
