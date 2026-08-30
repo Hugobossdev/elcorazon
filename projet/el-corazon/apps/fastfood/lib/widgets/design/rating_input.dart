@@ -34,32 +34,57 @@ class RatingStars extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var etoile = 1; etoile <= 5; etoile++)
-          Semantics(
-            label: '$etoile étoile${etoile > 1 ? 's' : ''} sur 5',
-            selected: note == etoile,
-            button: true,
-            child: InkResponse(
-              onTap: () => onChanged(etoile),
-              radius: taille * 0.7,
-              child: Padding(
-                padding: const EdgeInsets.all(DesignConstants.spacingXS),
-                child: Icon(
-                  etoile <= note
-                      ? Icons.star_rounded
-                      : Icons.star_outline_rounded,
-                  size: taille,
-                  color: etoile <= note
-                      ? AppColors.secondary
-                      : theme.colorScheme.outlineVariant,
+    return LayoutBuilder(
+      builder: (context, contraintes) {
+        // ## Pourquoi la taille se calcule
+        //
+        // Une icône Material suit l'échelle de texte du système. Cinq étoiles
+        // de 40 px, chacune avec ses 4 px de marge, tiennent sur 240 px — mais
+        // au réglage « grand » (×1,3) elles en réclament 312, pour 256
+        // disponibles sur un téléphone de 320 px. La rangée débordait de 51 px,
+        // c'est-à-dire que la cinquième étoile était **hors de l'écran** : on
+        // ne pouvait pas mettre 5/5.
+        //
+        // Plutôt que de refuser l'agrandissement — ce que ferait
+        // `applyTextScaling: false`, au détriment de qui a besoin de voir — la
+        // rangée mesure ce dont elle dispose et rend la plus grande étoile qui
+        // tienne.
+        final echelle = MediaQuery.textScalerOf(context).scale(1);
+        final disponible = contraintes.maxWidth.isFinite
+            ? contraintes.maxWidth
+            : taille * 5 + 40;
+        final parEtoile = disponible / 5 - DesignConstants.spacingS;
+        final cote = (parEtoile / (echelle <= 0 ? 1 : echelle))
+            .clamp(16.0, taille);
+
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var etoile = 1; etoile <= 5; etoile++)
+              Semantics(
+                label: '$etoile étoile${etoile > 1 ? 's' : ''} sur 5',
+                selected: note == etoile,
+                button: true,
+                child: InkResponse(
+                  onTap: () => onChanged(etoile),
+                  radius: cote * 0.7,
+                  child: Padding(
+                    padding: const EdgeInsets.all(DesignConstants.spacingXS),
+                    child: Icon(
+                      etoile <= note
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
+                      size: cote,
+                      color: etoile <= note
+                          ? AppColors.secondary
+                          : theme.colorScheme.outlineVariant,
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
@@ -153,12 +178,21 @@ class _Puce extends StatelessWidget {
                 ),
                 const SizedBox(width: DesignConstants.spacingXS + 2),
               ],
-              Text(
-                libelle,
-                style: AppTypography.labelLg(
-                  color: retenue
-                      ? theme.colorScheme.onPrimary
-                      : theme.colorScheme.onSurfaceVariant,
+              // `Wrap` donne à ses enfants une largeur **non bornée** : une
+              // puce plus large que la ligne ne passe pas à la suivante, elle
+              // déborde. « Portion généreuse » avec sa coche y suffisait au
+              // réglage « grand ». Le `Flexible` la laisse se rogner plutôt
+              // que sortir de l'écran.
+              Flexible(
+                child: Text(
+                  libelle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTypography.labelLg(
+                    color: retenue
+                        ? theme.colorScheme.onPrimary
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ],

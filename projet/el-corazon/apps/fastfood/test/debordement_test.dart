@@ -422,6 +422,137 @@ void main() {
     }
   });
 
+  group('Fidelite et notation', () {
+    // Ces montages viennent des ecrans du second lot Stitch. Ils n'ont besoin
+    // d'aucun service : ce qui se casse ici est une contrainte de mise en
+    // page, pas un etat applicatif.
+
+    /// La carte de palier des recompenses : un grand nombre, une barre, une
+    /// phrase. Le nombre est ce qui deborde — un solde a cinq chiffres avec la
+    /// police grossie occupe la moitie de la largeur.
+    Widget cartePalier() {
+      return Builder(
+        builder: (context) {
+          final theme = Theme.of(context);
+          final encre = theme.colorScheme.onSecondaryContainer;
+          return Container(
+            padding: const EdgeInsets.all(DesignConstants.spacingL),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: AppColors.secondaryGradient,
+              ),
+              borderRadius: DesignConstants.borderRadiusLarge,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.workspace_premium_rounded, color: encre),
+                    const SizedBox(width: DesignConstants.spacingS),
+                    Expanded(
+                      child: Text(
+                        'Palier Standard',
+                        style: AppTypography.titleLg(color: encre),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: DesignConstants.spacingM),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        '128450',
+                        style: AppTypography.displayLg(color: encre),
+                      ),
+                    ),
+                    const SizedBox(width: DesignConstants.spacingS),
+                    Text('pts', style: AppTypography.titleLg(color: encre)),
+                  ],
+                ),
+                const SizedBox(height: DesignConstants.spacingM),
+                Text(
+                  '550 points jusqu’au palier Fidele',
+                  style: AppTypography.bodyMd(color: encre),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
+    /// Le bloc de notation d'un plat : cinq etoiles, des puces, un champ.
+    Widget blocDeNotation() {
+      return SectionCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Builder(
+              builder: (context) => Text(
+                'Demi-poulet yassa braise au feu de bois',
+                style: AppTypography.titleLg(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ),
+            const SizedBox(height: DesignConstants.spacingM),
+            RatingStars(note: 4, onChanged: (_) {}),
+            const SizedBox(height: DesignConstants.spacingM),
+            AppreciationChips(
+              options: const [
+                'Tres bon',
+                'Bien assaisonne',
+                'Servi chaud',
+                'Portion genereuse',
+                'Bien emballe',
+              ],
+              retenues: const {'Servi chaud'},
+              onChanged: (_) {},
+            ),
+          ],
+        ),
+      );
+    }
+
+    for (final ecran in ecrans.entries) {
+      for (final echelle in echelles) {
+        testWidgets(
+          'la carte de palier tient — ${ecran.key}, texte x$echelle',
+          (tester) async {
+            await poser(
+              tester,
+              ListView(
+                padding: const EdgeInsets.all(DesignConstants.edgeMargin),
+                children: [cartePalier()],
+              ),
+              ecran: ecran.value,
+              echelle: echelle,
+            );
+          },
+        );
+
+        testWidgets(
+          'le bloc de notation tient — ${ecran.key}, texte x$echelle',
+          (tester) async {
+            await poser(
+              tester,
+              ListView(
+                padding: const EdgeInsets.all(DesignConstants.edgeMargin),
+                children: [blocDeNotation()],
+              ),
+              ecran: ecran.value,
+              echelle: echelle,
+            );
+          },
+        );
+      }
+    }
+  });
+
   group('Actions rapides de l\'accueil', () {
     for (final ecran in ecrans.entries) {
       for (final echelle in echelles) {

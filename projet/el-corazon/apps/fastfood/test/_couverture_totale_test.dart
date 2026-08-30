@@ -135,6 +135,7 @@ import 'package:elcora_fast/widgets/design/glass_surface.dart';
 import 'package:elcora_fast/widgets/design/option_tile.dart';
 import 'package:elcora_fast/widgets/design/promo_banner.dart';
 import 'package:elcora_fast/widgets/design/quantity_stepper.dart';
+import 'package:elcora_fast/widgets/design/rating_input.dart';
 import 'package:elcora_fast/widgets/design/search_field.dart';
 import 'package:elcora_fast/widgets/design/section_card.dart';
 import 'package:elcora_fast/widgets/design/segmented_tabs.dart';
