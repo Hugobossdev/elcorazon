@@ -174,39 +174,7 @@ class OptionRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 4),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        label,
-                        style: AppTypography.bodyLg(
-                          color: actif
-                              ? theme.colorScheme.onSurface
-                              : theme.colorScheme.onSurfaceVariant
-                                  .withValues(alpha: 0.5),
-                        ),
-                      ),
-                      if (subtitle != null)
-                        Text(
-                          subtitle!,
-                          style: AppTypography.bodyMd(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                if (priceDelta != null && priceDelta!.isNotEmpty) ...[
-                  const SizedBox(width: DesignConstants.spacingS),
-                  Text(
-                    priceDelta!,
-                    style: AppTypography.bodyMd(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ).copyWith(fontWeight: FontWeight.w600),
-                  ),
-                ],
+                Expanded(child: _intituleEtPrix(context, theme, actif)),
               ],
             ),
           ),
@@ -219,6 +187,95 @@ class OptionRow extends StatelessWidget {
       ],
     );
   }
+
+  /// L'intitule, son sous-titre, et le prix — cote a cote ou l'un sous l'autre.
+  ///
+  /// ## Pourquoi ce n'est pas une simple `Row`
+  ///
+  /// Ca l'etait : `Expanded(intitule)` puis le prix, a sa largeur naturelle.
+  /// Un `Row` sert les enfants sans flex **avant** l'`Expanded`, si bien qu'un
+  /// prix long prenait tout et laissait zero pixel a l'intitule. Sur un
+  /// telephone de 320 px avec la police grossie, « +25 000 F CFA » mesure
+  /// 240 px pour 256 disponibles : l'intitule tombait a une largeur nulle et
+  /// se rendait en colonne d'une lettre par ligne, sur 961 px de haut, tandis
+  /// que la ligne debordait de 34 px.
+  ///
+  /// Le prix passe donc **sous** l'intitule des qu'il reclamerait plus de la
+  /// moitie de la largeur. C'est la seule disposition qui garde les deux
+  /// lisibles : rogner le prix cacherait un montant, rogner l'intitule
+  /// cacherait ce qu'on achete.
+  Widget _intituleEtPrix(BuildContext context, ThemeData theme, bool actif) {
+    final styleIntitule = AppTypography.bodyLg(
+      color: actif
+          ? theme.colorScheme.onSurface
+          : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+    );
+    final stylePrix = AppTypography.bodyMd(
+      color: theme.colorScheme.onSurfaceVariant,
+    ).copyWith(fontWeight: FontWeight.w600);
+
+    final intitule = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: styleIntitule),
+        if (subtitle != null)
+          Text(
+            subtitle!,
+            style: AppTypography.bodyMd(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+
+    if (priceDelta == null || priceDelta!.isEmpty) return intitule;
+
+    final prix = Text(priceDelta!, style: stylePrix);
+
+    return LayoutBuilder(
+      builder: (context, contraintes) {
+        final largeurPrix = _largeurRendue(context, priceDelta!, stylePrix);
+
+        if (largeurPrix > contraintes.maxWidth / 2) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              intitule,
+              const SizedBox(height: 2),
+              prix,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: intitule),
+            const SizedBox(width: DesignConstants.spacingS),
+            prix,
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Largeur qu'un texte occupera reellement, echelle d'accessibilite comprise.
+///
+/// Mesurer plutot que deviner : le meme libelle passe du simple au double
+/// entre une police normale et le reglage « tres grand » d'Android, et c'est
+/// precisement la que les mises en page cedent.
+double _largeurRendue(BuildContext context, String texte, TextStyle style) {
+  final peintre = TextPainter(
+    text: TextSpan(text: texte, style: style),
+    maxLines: 1,
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout();
+  final largeur = peintre.width;
+  peintre.dispose();
+  return largeur;
 }
 
 /// Puce de choix à deux étages : un intitulé, un prix dessous.

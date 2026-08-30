@@ -1,5 +1,6 @@
 import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:elcora_fast/services/cart_service.dart';
+import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
 import 'package:elcora_fast/theme.dart';
@@ -9,6 +10,7 @@ import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 /// Fiche d'un plat et sa personnalisation.
@@ -197,10 +199,10 @@ class _EnhancedItemCustomizationScreenState
         title: 'Personnaliser',
         actions: [
           GlassIconButton(
-            icon: Icons.rate_review_outlined,
-            tooltip: 'Avis des clients',
+            icon: Icons.ios_share_rounded,
+            tooltip: 'Partager ce plat',
             filled: false,
-            onPressed: () => context.navigateToProductReviews(widget.item),
+            onPressed: _partager,
           ),
           Consumer<FavoritesService>(
             builder: (context, favoritesService, child) {
@@ -256,28 +258,16 @@ class _EnhancedItemCustomizationScreenState
           borderRadius: DesignConstants.borderRadiusLarge,
           child: AspectRatio(
             aspectRatio: 16 / 9,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                FoodImage(
-                  url: widget.item.image,
-                  heroTag: 'plat_${widget.item.id.isEmpty ? widget.item.slug : widget.item.id}',
-                  iconSize: 64,
-                ),
-                if (widget.item.ratingAverage > 0)
-                  Positioned(
-                    top: 12,
-                    right: 12,
-                    child: RatingBadge(
-                      rating: widget.item.ratingAverage,
-                      count: widget.item.ratingCount,
-                    ),
-                  ),
-              ],
+            child: FoodImage(
+              url: widget.item.image,
+              heroTag:
+                  'plat_${widget.item.id.isEmpty ? widget.item.slug : widget.item.id}',
+              iconSize: 64,
             ),
           ),
         ),
         const SizedBox(height: DesignConstants.spacingM),
+        _noteEtRenom(theme),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -307,8 +297,129 @@ class _EnhancedItemCustomizationScreenState
             ),
           ),
         ],
+        if (!widget.item.isAvailable) ...[
+          const SizedBox(height: DesignConstants.spacingM),
+          _avisIndisponible(theme),
+        ],
       ],
     );
+  }
+
+  /// La note et la puce « Populaire », juste sous la photo.
+  ///
+  /// La maquette `product_detail` les pose côte à côte à cet endroit précis, et
+  /// rend la note **cliquable** : c'est de là qu'on va lire les avis. La
+  /// version précédente épinglait une pastille de note dans un coin de la
+  /// photo, où elle ne se laissait pas toucher, et cachait l'accès aux avis
+  /// derrière une icône de la barre supérieure.
+  Widget _noteEtRenom(ThemeData theme) {
+    final puces = <Widget>[
+      if (widget.item.ratingAverage > 0)
+        InkWell(
+          onTap: () => context.navigateToProductReviews(widget.item),
+          borderRadius: BorderRadius.circular(DesignConstants.radiusSmall),
+          child: Padding(
+            padding: const EdgeInsets.all(2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RatingBadge(
+                  rating: widget.item.ratingAverage,
+                  count: widget.item.ratingCount,
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: DesignConstants.iconSizeSmall,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      if (widget.item.isPopular)
+        const StatusChip(
+          label: 'Populaire',
+          icon: Icons.local_fire_department_rounded,
+        ),
+    ];
+
+    if (puces.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DesignConstants.spacingS),
+      child: Wrap(
+        spacing: DesignConstants.spacingS,
+        runSpacing: DesignConstants.spacingS,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: puces,
+      ),
+    );
+  }
+
+  /// L'article n'est plus servi : le dire au-dessus des options, et non au
+  /// moment de l'ajout.
+  ///
+  /// L'accueil et la carte écartent déjà les articles indisponibles de leurs
+  /// listes, mais on arrive aussi ici depuis les favoris — où l'article a été
+  /// mis en réserve quand il était encore servi. On composait alors un plat
+  /// entier avant de se voir refuser au panier.
+  Widget _avisIndisponible(ThemeData theme) {
+    return SectionCard(
+      color: theme.colorScheme.errorContainer,
+      shadow: false,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.no_meals_rounded,
+            size: DesignConstants.iconSizeMedium,
+            color: theme.colorScheme.onErrorContainer,
+          ),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Plat indisponible',
+                  style: AppTypography.titleLg(
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+                const SizedBox(height: DesignConstants.spacingXS),
+                Text(
+                  'La cuisine ne sert plus ce plat pour l’instant. '
+                  'Vous pouvez consulter ses options, mais pas le commander.',
+                  style: AppTypography.bodyMd(
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Partage le plat sous forme de texte, copié dans le presse-papiers.
+  ///
+  /// Pas de feuille de partage système : elle demanderait une dépendance de
+  /// plus, et surtout un lien vers le plat — or l'application n'expose aucune
+  /// adresse publique ni schéma de lien profond. Copier un texte exact vaut
+  /// mieux qu'ouvrir un partage sur une URL inventée. Voir
+  /// `docs/UI_REDESIGN_ISSUES.md`, ISSUE-005.
+  Future<void> _partager() async {
+    final prix = widget.item.price.format();
+    final texte = [
+      '${widget.item.name} — $prix',
+      if (widget.item.description.isNotEmpty) widget.item.description,
+      'El Corazón',
+    ].join('\n');
+
+    await Clipboard.setData(ClipboardData(text: texte));
+    if (!mounted) return;
+    context.showSuccessMessage('Plat copié — collez-le où vous voulez');
   }
 
   /// Repères du plat, en puces : durée, calories, régimes, allergènes.
@@ -536,14 +647,23 @@ class _EnhancedItemCustomizationScreenState
           ),
           const SizedBox(height: DesignConstants.spacingM),
           ActionButton(
-            label: 'Ajouter au panier',
+            label: widget.item.isAvailable
+                ? 'Ajouter au panier'
+                : 'Plat indisponible',
             emphasis: ActionEmphasis.gradient,
-            icon: Icons.shopping_cart_rounded,
+            icon: widget.item.isAvailable
+                ? Icons.shopping_cart_rounded
+                : Icons.no_meals_rounded,
             // Le bouton reste **actif** même quand un choix manque : c'est en
             // appuyant qu'on apprend ce qui manque, et les groupes concernés
             // se signalent alors en rouge. Un bouton grisé ne dit jamais
             // pourquoi.
-            onPressed: () => _addToCart(service),
+            //
+            // L'indisponibilité, elle, le grise : aucune manipulation de
+            // l'écran n'y remédie, et l'encart en tête de page a déjà dit
+            // pourquoi.
+            onPressed:
+                widget.item.isAvailable ? () => _addToCart(service) : null,
           ),
         ],
       ),

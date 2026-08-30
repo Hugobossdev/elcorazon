@@ -1,7 +1,9 @@
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/screens/client/widgets/quick_actions_widget.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/cart_item_card.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/widgets/menu_item_card.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
@@ -260,6 +262,139 @@ void main() {
           echelle: echelle,
         );
       });
+    }
+  });
+
+  group('Commande de gateau', () {
+    // La maquette `cake_order` empile des etapes numerotees et ancre un
+    // bandeau « total estime + action » en bas. Ces deux montages sont ceux
+    // que `cake_order_screen.dart` construit, rejoues sans service : ce qui se
+    // casse ici est une contrainte de mise en page, pas un etat applicatif.
+
+    /// Le couple date / heure de l’etape « Retrait ou livraison ».
+    ///
+    /// Ce montage a **deja casse** : les deux boutons vivaient dans un `Wrap`
+    /// et se declaraient `Expanded`, or `Expanded` exige un parent `Flex`.
+    /// L’etape levait donc des son ouverture. Le cas la tient fermee.
+    Widget couplageDateHeure() {
+      return Row(
+        children: [
+          Expanded(
+            child: ActionButton(
+              label: 'Choisir une date',
+              emphasis: ActionEmphasis.outlined,
+              icon: Icons.calendar_month_rounded,
+              height: 48,
+              onPressed: () {},
+            ),
+          ),
+          const SizedBox(width: DesignConstants.gutter),
+          Expanded(
+            child: ActionButton(
+              label: 'Choisir une heure',
+              emphasis: ActionEmphasis.outlined,
+              icon: Icons.schedule_rounded,
+              height: 48,
+              onPressed: () {},
+            ),
+          ),
+        ],
+      );
+    }
+
+    /// Une etape numerotee, avec le plus long libelle d’option realiste.
+    Widget etapeNumerotee() {
+      return OptionGroupCard(
+        title: '3. Taille et nombre de parts',
+        isRequired: true,
+        constraintLabel: 'Un seul choix',
+        children: [
+          Column(
+            children: [
+              OptionRow(
+                label: 'Deux etages sur mesure (16 a 20 parts)',
+                subtitle: 'Genoise vanille de Madagascar, ganache montee',
+                selected: true,
+                priceDelta: '+25 000 F CFA',
+                onChanged: (_) {},
+              ),
+              OptionRow(
+                label: '20 cm (10 a 12 parts)',
+                selected: false,
+                priceDelta: '+8 000 F CFA',
+                showDivider: false,
+                onChanged: (_) {},
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    /// Le bandeau ancre : le montant le plus large que la carte puisse porter,
+    /// a cote d’une action qui ne doit pas se faire ecraser.
+    Widget bandeau() {
+      return GlassBottomBar(
+        child: StickySummaryBar(
+          label: 'Total estime',
+          amount: '125 000 F CFA',
+          action: ActionButton(
+            label: 'Commander',
+            emphasis: ActionEmphasis.gradient,
+            icon: Icons.cake_rounded,
+            onPressed: () {},
+          ),
+        ),
+      );
+    }
+
+    for (final ecran in ecrans.entries) {
+      for (final echelle in echelles) {
+        testWidgets(
+          'l’etape date/heure tient — ${ecran.key}, texte x$echelle',
+          (tester) async {
+            await poser(
+              tester,
+              Padding(
+                padding: const EdgeInsets.all(DesignConstants.edgeMargin),
+                child: couplageDateHeure(),
+              ),
+              ecran: ecran.value,
+              echelle: echelle,
+            );
+          },
+        );
+
+        testWidgets(
+          'une etape numerotee tient — ${ecran.key}, texte x$echelle',
+          (tester) async {
+            await poser(
+              tester,
+              ListView(
+                padding: const EdgeInsets.all(DesignConstants.edgeMargin),
+                children: [etapeNumerotee()],
+              ),
+              ecran: ecran.value,
+              echelle: echelle,
+            );
+          },
+        );
+
+        testWidgets(
+          'le bandeau total + action tient — ${ecran.key}, texte x$echelle',
+          (tester) async {
+            await poser(
+              tester,
+              Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [bandeau()],
+              ),
+              ecran: ecran.value,
+              echelle: echelle,
+            );
+          },
+        );
+      }
     }
   });
 

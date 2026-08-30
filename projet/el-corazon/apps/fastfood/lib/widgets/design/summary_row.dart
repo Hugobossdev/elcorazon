@@ -146,38 +146,108 @@ class StickySummaryBar extends StatelessWidget {
 
   final Widget action;
 
+  /// Largeur en deca de laquelle l'action cesse d'etre un bouton lisible.
+  ///
+  /// Sous ce seuil, son icone et son libelle ne tiennent plus cote a cote : le
+  /// bouton deborde de lui-meme au lieu de se rogner.
+  static const double _largeurMinimaleDeLAction = 148;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Row(
-      children: [
-        if (leading != null)
-          leading!
-        else if (amount != null) ...[
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (label != null)
-                Text(
-                  label!,
-                  style: AppTypography.bodyMd(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
+    if (leading == null && amount == null) return action;
+
+    final bloc = leading ??
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (label != null)
               Text(
-                amount!,
-                style: AppTypography.priceDisplay(
-                  color: theme.colorScheme.onSurface,
+                label!,
+                style: AppTypography.bodyMd(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
+            Text(
+              amount!,
+              style: AppTypography.priceDisplay(
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
+          ],
+        );
+
+    // ## Pourquoi la barre se plie
+    //
+    // Elle etait une `Row` fixe : le bloc du montant a sa largeur naturelle,
+    // puis `Expanded(action)`. Un `Row` sert les enfants sans flex **avant**
+    // l'`Expanded` — « Total estime / 125 000 F CFA » prenait donc toute la
+    // largeur d'un telephone de 360 px, l'action se retrouvait a quelques
+    // pixels, et debordait de 27 px avec son icone.
+    //
+    // Sous le seuil, le montant passe donc au-dessus et l'action prend toute
+    // la largeur. C'est la disposition que les maquettes montrent deja sur les
+    // ecrans etroits, et la seule qui garde le montant **et** l'action
+    // entiers.
+    return LayoutBuilder(
+      builder: (context, contraintes) {
+        final largeurBloc = leading == null
+            ? _largeurDuBloc(context, theme)
+            : 0.0;
+        final tientSurUneLigne = leading != null ||
+            largeurBloc + DesignConstants.spacingM + _largeurMinimaleDeLAction <=
+                contraintes.maxWidth;
+
+        if (tientSurUneLigne) {
+          return Row(
+            children: [
+              bloc,
+              const SizedBox(width: DesignConstants.spacingM),
+              Expanded(child: action),
             ],
-          ),
-          const SizedBox(width: DesignConstants.spacingM),
-        ],
-        Expanded(child: action),
-      ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Align(alignment: Alignment.centerLeft, child: bloc),
+            const SizedBox(height: DesignConstants.spacingS),
+            action,
+          ],
+        );
+      },
     );
+  }
+
+  /// Largeur naturelle du bloc libelle / montant, echelle du systeme comprise.
+  double _largeurDuBloc(BuildContext context, ThemeData theme) {
+    double mesurer(String texte, TextStyle style) {
+      final peintre = TextPainter(
+        text: TextSpan(text: texte, style: style),
+        maxLines: 1,
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      final largeur = peintre.width;
+      peintre.dispose();
+      return largeur;
+    }
+
+    final largeurMontant = mesurer(
+      amount!,
+      AppTypography.priceDisplay(color: theme.colorScheme.onSurface),
+    );
+    final largeurLibelle = label == null
+        ? 0.0
+        : mesurer(
+            label!,
+            AppTypography.bodyMd(color: theme.colorScheme.onSurfaceVariant),
+          );
+
+    return largeurMontant > largeurLibelle ? largeurMontant : largeurLibelle;
   }
 }
