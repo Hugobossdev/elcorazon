@@ -91,3 +91,67 @@ List<eccore.AppNotification> notificationsAAfficher(
   retenues.sort((a, b) => b.createdAt.compareTo(a.createdAt));
   return retenues;
 }
+
+
+/// Un paquet de notifications d'une même journée, avec son intitulé.
+class JourneeDeNotifications {
+  const JourneeDeNotifications({required this.libelle, required this.notifications});
+
+  /// « Aujourd'hui », « Hier », ou la date.
+  final String libelle;
+
+  final List<eccore.AppNotification> notifications;
+}
+
+/// Regroupe [notifications] par journée, de la plus récente à la plus ancienne.
+///
+/// Pourquoi cette fonction existe
+/// ------------------------------
+///
+/// La maquette `notifications` sépare « Today » et « Yesterday » : sans ces
+/// intertitres, une liste de trente alertes n'a plus de repère temporel, et
+/// « il y a 3 h » se confond avec « il y a 3 jours » dès qu'on fait défiler.
+///
+/// Le regroupement se fait sur la **journée civile**, pas sur un écart de
+/// 24 heures : à 1 h du matin, une notification de 23 h la veille appartient à
+/// « Hier », même si elle date de deux heures. C'est ainsi qu'on lit un
+/// journal.
+///
+/// [maintenant] est injectable pour que le test ne dépende pas de l'heure à
+/// laquelle il tourne.
+List<JourneeDeNotifications> grouperParJour(
+  List<eccore.AppNotification> notifications, {
+  DateTime? maintenant,
+}) {
+  if (notifications.isEmpty) return const [];
+
+  final reference = maintenant ?? DateTime.now();
+  final aujourdhui = DateTime(reference.year, reference.month, reference.day);
+
+  final paquets = <DateTime, List<eccore.AppNotification>>{};
+  for (final notification in notifications) {
+    final creee = notification.createdAt;
+    final jour = DateTime(creee.year, creee.month, creee.day);
+    paquets.putIfAbsent(jour, () => []).add(notification);
+  }
+
+  final jours = paquets.keys.toList()..sort((a, b) => b.compareTo(a));
+
+  return [
+    for (final jour in jours)
+      JourneeDeNotifications(
+        libelle: _libelleDuJour(jour, aujourdhui),
+        notifications: paquets[jour]!,
+      ),
+  ];
+}
+
+String _libelleDuJour(DateTime jour, DateTime aujourdhui) {
+  final ecart = aujourdhui.difference(jour).inDays;
+  if (ecart <= 0) return 'Aujourd’hui';
+  if (ecart == 1) return 'Hier';
+
+  final j = jour.day.toString().padLeft(2, '0');
+  final m = jour.month.toString().padLeft(2, '0');
+  return ecart < 365 ? '$j/$m' : '$j/$m/${jour.year}';
+}

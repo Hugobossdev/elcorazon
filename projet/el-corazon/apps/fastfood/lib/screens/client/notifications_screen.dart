@@ -203,18 +203,37 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           );
         }
 
+        // Groupées par journée, comme la maquette : sans intertitre, « il y a
+        // 3 h » se confond avec « il y a 3 jours » dès qu'on fait défiler.
+        final journees = grouperParJour(notifications);
+
         return RefreshIndicator(
           onRefresh: _loadNotifications,
-          child: ListView.builder(
+          child: ListView(
             padding: const EdgeInsets.fromLTRB(
               DesignConstants.edgeMargin,
               0,
               DesignConstants.edgeMargin,
               DesignConstants.spacingXL,
             ),
-            itemCount: notifications.length,
-            itemBuilder: (context, index) =>
-                _carte(notifications[index], service),
+            children: [
+              for (final journee in journees) ...[
+                Padding(
+                  padding: const EdgeInsets.only(
+                    top: DesignConstants.spacingS,
+                    bottom: DesignConstants.spacingS,
+                  ),
+                  child: Text(
+                    journee.libelle,
+                    style: AppTypography.labelLg(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                for (final notification in journee.notifications)
+                  _carte(notification, service),
+              ],
+            ],
           ),
         );
       },

@@ -167,4 +167,89 @@ void main() {
       expect(affichees.map((n) => n.id), ['inconnue']);
     });
   });
+
+  group('Le regroupement par journee', () {
+    // La maquette separe « Today » et « Yesterday ». Sans ces intertitres, une
+    // liste de trente alertes n'a plus de repere : « il y a 3 h » se confond
+    // avec « il y a 3 jours » des qu'on fait defiler.
+
+    eccore.AppNotification a(DateTime creee, {String titre = 'Alerte'}) {
+      return eccore.AppNotification(
+        id: creee.toIso8601String(),
+        kind: 'order_status',
+        title: titre,
+        body: '',
+        data: const {},
+        isRead: false,
+        createdAt: creee,
+      );
+    }
+
+    final maintenant = DateTime(2026, 8, 30, 10, 0);
+
+    test('une liste vide ne produit aucun paquet', () {
+      expect(grouperParJour(const [], maintenant: maintenant), isEmpty);
+    });
+
+    test('les notifications du jour tombent sous « Aujourd’hui »', () {
+      final paquets = grouperParJour(
+        [a(DateTime(2026, 8, 30, 9)), a(DateTime(2026, 8, 30, 2))],
+        maintenant: maintenant,
+      );
+
+      expect(paquets.length, 1);
+      expect(paquets.first.libelle, 'Aujourd’hui');
+      expect(paquets.first.notifications.length, 2);
+    });
+
+    test('le regroupement suit la journee civile, pas 24 heures', () {
+      // A 1 h du matin, une notification de 23 h la veille appartient a
+      // « Hier » — meme si elle date de deux heures. C'est ainsi qu'on lit un
+      // journal.
+      final paquets = grouperParJour(
+        [a(DateTime(2026, 8, 29, 23))],
+        maintenant: DateTime(2026, 8, 30, 1),
+      );
+
+      expect(paquets.single.libelle, 'Hier');
+    });
+
+    test('les journees sont rangees de la plus recente a la plus ancienne', () {
+      final paquets = grouperParJour(
+        [
+          a(DateTime(2026, 8, 28, 12)),
+          a(DateTime(2026, 8, 30, 8)),
+          a(DateTime(2026, 8, 29, 15)),
+        ],
+        maintenant: maintenant,
+      );
+
+      expect(
+        paquets.map((p) => p.libelle).toList(),
+        ['Aujourd’hui', 'Hier', '28/08'],
+      );
+    });
+
+    test('aucune notification ne se perd au passage', () {
+      final source = [
+        a(DateTime(2026, 8, 30, 8)),
+        a(DateTime(2026, 8, 29, 15)),
+        a(DateTime(2026, 8, 29, 9)),
+        a(DateTime(2026, 7, 2, 9)),
+      ];
+      final paquets = grouperParJour(source, maintenant: maintenant);
+      final total = paquets.fold<int>(0, (n, p) => n + p.notifications.length);
+
+      expect(total, source.length);
+    });
+
+    test('au-dela de l’annee la date porte son millesime', () {
+      final paquets = grouperParJour(
+        [a(DateTime(2025, 3, 4, 9))],
+        maintenant: maintenant,
+      );
+
+      expect(paquets.single.libelle, '04/03/2025');
+    });
+  });
 }
