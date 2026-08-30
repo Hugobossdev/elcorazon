@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/call_service.dart';
 import 'package:elcora_fast/services/agora_service.dart';
 import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 
 /// Écran d'appel vocal entre client et livreur
 class CallScreen extends StatefulWidget {
@@ -147,20 +149,18 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     if (_currentCall == null) {
-      return Scaffold(
+      return const Scaffold(
+        backgroundColor: AppColors.surfaceDark,
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
+              CircularProgressIndicator(color: AppColors.textLight),
+              SizedBox(height: DesignConstants.spacingM),
               Text(
-                'Initialisation de l\'appel...',
-                style: theme.textTheme.bodyLarge,
+                'Établissement de l’appel…',
+                style: TextStyle(color: AppColors.textLight),
               ),
             ],
           ),
@@ -173,178 +173,80 @@ class _CallScreenState extends State<CallScreen> {
     final isConnected = callState == CallState.connected;
     final isRinging =
         callState == CallState.ringing || callState == CallState.calling;
+    final nom = (isIncoming ? widget.callerName : widget.receiverName) ??
+        'Votre livreur';
 
     return PopScope(
+      // Un appel en cours ne se quitte pas par le bouton retour : on
+      // raccroche. Sortir de l'écran laisserait la communication ouverte,
+      // audible, et sans moyen d'y revenir.
       canPop: !isConnected,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) {
-          // La navigation a eu lieu (appel pas connecté), nettoyer l'appel
-          await _endCall();
-        }
-        // Si didPop est false, c'est qu'on a empêché la navigation (appel connecté)
-        // On ne fait rien, l'appel continue
+        if (didPop) await _endCall();
       },
       child: Scaffold(
-        backgroundColor: isDark ? Colors.black : Colors.grey[900],
+        backgroundColor: AppColors.surfaceDark,
         body: SafeArea(
           child: Column(
             children: [
-              // En-tête avec bouton retour (si pas connecté)
-              if (!isConnected)
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.of(context).pop(),
+              SizedBox(
+                height: 56,
+                child: isConnected
+                    ? null
+                    : Align(
+                        alignment: Alignment.centerLeft,
+                        child: IconButton(
+                          icon: const Icon(Icons.arrow_back_rounded),
+                          color: AppColors.textLight,
+                          tooltip: 'Retour',
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
                       ),
-                    ],
-                  ),
-                ),
-
-              // Contenu principal
+              ),
               Expanded(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Avatar/Photo
-                    Container(
-                      width: 150,
-                      height: 150,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: 0.1),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.3),
-                          width: 2,
+                    _avatar(nom, isRinging),
+                    const SizedBox(height: DesignConstants.spacingXL),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: DesignConstants.spacingXL,
+                      ),
+                      child: Text(
+                        nom,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.headlineMd(
+                          color: AppColors.textLight,
                         ),
                       ),
-                      child: Icon(
-                        Icons.person,
-                        size: 80,
-                        color: Colors.white.withValues(alpha: 0.8),
-                      ),
                     ),
-
-                    const SizedBox(height: 32),
-
-                    // Nom
-                    Text(
-                      isIncoming
-                          ? (widget.callerName ?? 'Livreur')
-                          : (widget.receiverName ?? 'Livreur'),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    // Statut de l'appel
+                    const SizedBox(height: DesignConstants.spacingS),
                     Text(
                       _getCallStatusText(callState, isIncoming),
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        fontSize: 16,
+                      style: AppTypography.bodyLg(
+                        color: AppColors.textLight.withValues(alpha: 0.7),
                       ),
                     ),
-
-                    // Durée de l'appel (si connecté)
                     if (isConnected) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        _formatDuration(_callDuration),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w300,
-                          fontFeatures: [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ],
-
-                    const SizedBox(height: 64),
-
-                    // Contrôles d'appel
-                    if (isIncoming && isRinging) ...[
-                      // Boutons pour appel entrant
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // Bouton Rejeter
-                          _buildCallButton(
-                            icon: Icons.call_end,
-                            color: Colors.red,
-                            onPressed: _rejectCall,
-                            size: 64,
-                          ),
-                          const SizedBox(width: 48),
-                          // Bouton Accepter
-                          _buildCallButton(
-                            icon: Icons.call,
-                            color: Colors.green,
-                            onPressed: _acceptCall,
-                            size: 64,
-                          ),
-                        ],
-                      ),
-                    ] else if (isConnected) ...[
-                      // Contrôles pendant l'appel
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          // Mute
-                          _buildCallButton(
-                            icon: _agoraService.isMuted
-                                ? Icons.mic_off
-                                : Icons.mic,
-                            color: _agoraService.isMuted
-                                ? Colors.red
-                                : Colors.white.withValues(alpha: 0.2),
-                            onPressed: () async {
-                              await _agoraService.toggleMute();
-                              setState(() {});
-                            },
-                          ),
-                          const SizedBox(width: 24),
-                          // Speaker
-                          _buildCallButton(
-                            icon: _agoraService.isSpeakerOn
-                                ? Icons.volume_up
-                                : Icons.volume_off,
-                            color: _agoraService.isSpeakerOn
-                                ? Colors.blue
-                                : Colors.white.withValues(alpha: 0.2),
-                            onPressed: () async {
-                              await _agoraService.toggleSpeaker();
-                              setState(() {});
-                            },
-                          ),
-                          const SizedBox(width: 24),
-                          // Raccrocher
-                          _buildCallButton(
-                            icon: Icons.call_end,
-                            color: Colors.red,
-                            onPressed: _endCall,
-                            size: 64,
-                          ),
-                        ],
-                      ),
-                    ] else if (isRinging) ...[
-                      // Appel sortant en cours
-                      const CircularProgressIndicator(color: Colors.white),
-                      const SizedBox(height: 24),
-                      _buildCallButton(
-                        icon: Icons.call_end,
-                        color: Colors.red,
-                        onPressed: _endCall,
-                        size: 64,
-                      ),
+                      const SizedBox(height: DesignConstants.spacingM),
+                      _minuteur(),
                     ],
                   ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(
+                  bottom: DesignConstants.spacingXL,
+                  left: DesignConstants.edgeMargin,
+                  right: DesignConstants.edgeMargin,
+                ),
+                child: _controles(
+                  isIncoming: isIncoming,
+                  isConnected: isConnected,
+                  isRinging: isRinging,
                 ),
               ),
             ],
@@ -354,49 +256,222 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  Widget _buildCallButton({
-    required IconData icon,
-    required Color color,
-    required VoidCallback onPressed,
-    double size = 56,
-  }) {
+  /// L'avatar, entouré d'un halo qui bat tant que ça sonne.
+  ///
+  /// Le halo n'est pas décoratif : c'est le seul signe, sur un écran par
+  /// ailleurs figé, que l'appel est encore en cours d'établissement.
+  Widget _avatar(String nom, bool sonne) {
+    final initiale = nom.trim().isEmpty ? '?' : nom.trim()[0].toUpperCase();
+
     return Container(
-      width: size,
-      height: size,
+      width: 150,
+      height: 150,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: color,
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.3),
-            blurRadius: 20,
-            spreadRadius: 5,
+        color: AppColors.textLight.withValues(alpha: 0.1),
+        border: Border.all(
+          color: AppColors.textLight.withValues(alpha: sonne ? 0.4 : 0.2),
+          width: 2,
+        ),
+      ),
+      child: Center(
+        child: Text(
+          initiale,
+          style: AppTypography.displayLg(color: AppColors.textLight)
+              .copyWith(fontSize: 56),
+        ),
+      ),
+    );
+  }
+
+  /// La durée écoulée depuis la **connexion réelle**.
+  ///
+  /// La maquette démarre son minuteur à 45 secondes par un simple
+  /// `setInterval` : ici il part de `_callStartTime`, posé quand l'appel passe
+  /// à `connected`. Une durée d'appel est une information qu'on relit sur sa
+  /// facture — elle ne s'invente pas.
+  Widget _minuteur() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.timer_outlined,
+          size: DesignConstants.iconSizeSmall,
+          color: AppColors.textLight.withValues(alpha: 0.7),
+        ),
+        const SizedBox(width: DesignConstants.spacingS),
+        Text(
+          _formatDuration(_callDuration),
+          style: AppTypography.headlineSm(color: AppColors.textLight).copyWith(
+            fontWeight: FontWeight.w400,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _controles({
+    required bool isIncoming,
+    required bool isConnected,
+    required bool isRinging,
+  }) {
+    if (isIncoming && isRinging) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _bouton(
+            icone: Icons.call_end_rounded,
+            libelle: 'Refuser',
+            fond: AppColors.error,
+            onPressed: _rejectCall,
+            grand: true,
+          ),
+          _bouton(
+            icone: Icons.call_rounded,
+            libelle: 'Répondre',
+            fond: AppColors.success,
+            onPressed: _acceptCall,
+            grand: true,
           ),
         ],
-      ),
-      child: IconButton(
-        icon: Icon(icon, color: Colors.white),
-        onPressed: onPressed,
-      ),
+      );
+    }
+
+    if (isConnected) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _bouton(
+            icone: _agoraService.isMuted
+                ? Icons.mic_off_rounded
+                : Icons.mic_rounded,
+            libelle: _agoraService.isMuted ? 'Muet' : 'Micro',
+            // Le rouge signale l'état **actif** de la coupure, pas une erreur :
+            // c'est la convention de tous les écrans d'appel.
+            fond: _agoraService.isMuted
+                ? AppColors.errorLight
+                : AppColors.textLight.withValues(alpha: 0.15),
+            encre: _agoraService.isMuted
+                ? AppColors.error
+                : AppColors.textLight,
+            onPressed: () async {
+              await _agoraService.toggleMute();
+              if (mounted) setState(() {});
+            },
+          ),
+          _bouton(
+            icone: Icons.call_end_rounded,
+            libelle: 'Raccrocher',
+            fond: AppColors.error,
+            onPressed: _endCall,
+            grand: true,
+          ),
+          _bouton(
+            icone: _agoraService.isSpeakerOn
+                ? Icons.volume_up_rounded
+                : Icons.volume_down_rounded,
+            libelle: 'Haut-parleur',
+            fond: _agoraService.isSpeakerOn
+                ? AppColors.secondaryContainer
+                : AppColors.textLight.withValues(alpha: 0.15),
+            encre: _agoraService.isSpeakerOn
+                ? AppColors.textPrimary
+                : AppColors.textLight,
+            onPressed: () async {
+              await _agoraService.toggleSpeaker();
+              if (mounted) setState(() {});
+            },
+          ),
+        ],
+      );
+    }
+
+    if (isRinging) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: AppColors.textLight,
+            ),
+          ),
+          const SizedBox(height: DesignConstants.spacingL),
+          _bouton(
+            icone: Icons.call_end_rounded,
+            libelle: 'Annuler',
+            fond: AppColors.error,
+            onPressed: _endCall,
+            grand: true,
+          ),
+        ],
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+
+  /// Un bouton d'appel, **avec son libellé**.
+  ///
+  /// La maquette les nomme tous — « Mute », « End », « Speaker ». Une rondelle
+  /// d'icône seule laisse deviner ce qu'elle coupe, et on ne devine pas
+  /// pendant une conversation.
+  Widget _bouton({
+    required IconData icone,
+    required String libelle,
+    required Color fond,
+    required VoidCallback onPressed,
+    Color encre = AppColors.textLight,
+    bool grand = false,
+  }) {
+    final cote = grand ? 68.0 : 56.0;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: cote,
+          height: cote,
+          child: Material(
+            color: fond,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onPressed,
+              child: Icon(icone, color: encre, size: grand ? 30 : 26),
+            ),
+          ),
+        ),
+        const SizedBox(height: DesignConstants.spacingS),
+        Text(
+          libelle,
+          style: AppTypography.labelLg(
+            color: AppColors.textLight.withValues(alpha: 0.8),
+          ),
+        ),
+      ],
     );
   }
 
   String _getCallStatusText(CallState state, bool isIncoming) {
     switch (state) {
       case CallState.calling:
-        return isIncoming ? 'Appel entrant...' : 'Appel en cours...';
+        return isIncoming ? 'Appel entrant…' : 'Appel en cours…';
       case CallState.ringing:
-        return isIncoming ? 'Sonnerie...' : 'En attente...';
+        return isIncoming ? 'Sonnerie…' : 'Ça sonne…';
       case CallState.connected:
         return 'En communication';
       case CallState.ended:
         return 'Appel terminé';
       case CallState.rejected:
-        return 'Appel rejeté';
+        return 'Appel refusé';
       case CallState.missed:
         return 'Appel manqué';
       case CallState.failed:
-        return 'Échec de l\'appel';
+        return 'L’appel n’a pas abouti';
       default:
         return '';
     }
