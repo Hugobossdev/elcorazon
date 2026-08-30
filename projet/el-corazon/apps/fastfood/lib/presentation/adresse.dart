@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/theme.dart';
 
 /// Vocabulaire d'affichage du carnet d'adresses.
 ///
@@ -14,18 +15,71 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 ///
 /// Il vient de `models/address.dart`, retiré au lot 3.
 enum TypeAdresse {
-  maison('home', 'Maison', '🏠', Colors.green),
-  travail('work', 'Travail', '💼', Colors.blue),
-  autre('other', 'Autre', '📍', Colors.orange);
+  maison(
+    'home',
+    'Maison',
+    '🏠',
+    Icons.home_rounded,
+    AppColors.secondaryContainer,
+    AppColors.secondaryDeep,
+  ),
+  travail(
+    'work',
+    'Travail',
+    '💼',
+    Icons.work_outline_rounded,
+    AppColors.tertiaryLight,
+    AppColors.tertiary,
+  ),
+  autre(
+    'other',
+    'Autre',
+    '📍',
+    Icons.place_outlined,
+    AppColors.surfaceContainerHigh,
+    AppColors.textSecondary,
+  );
 
-  const TypeAdresse(this.versServeur, this.libelle, this.pastille, this.couleur);
+  const TypeAdresse(
+    this.versServeur,
+    this.libelle,
+    this.pastille,
+    this.icone,
+    this.fond,
+    this.encre,
+  );
 
   /// La valeur que le serveur attend et rend (`AddressKind`).
   final String versServeur;
 
   final String libelle;
   final String pastille;
-  final Color couleur;
+
+  /// L'icône du type, que la maquette `address_management` place en tête de
+  /// chaque carte. Elle vivait auparavant dans un `switch` de
+  /// `widgets/address_card.dart` — c'est-à-dire à côté du reste du vocabulaire
+  /// du type, mais pas avec lui.
+  final IconData icone;
+
+  /// Fond et encre de la pastille du type.
+  ///
+  /// ## Pourquoi ce ne sont plus `Colors.green`, `blue` et `orange`
+  ///
+  /// Ces trois couleurs de Material n'appartiennent à aucun jeton du design
+  /// system, et ce fichier est lu par les **quatre** écrans d'adresse : une
+  /// couleur fausse ici se répandait partout. Elles suivent maintenant la
+  /// palette — doré pour la maison, orange de la tertiaire pour le travail,
+  /// neutre pour le reste.
+  ///
+  /// Ce sont des constantes d'`AppColors` plutôt que des rôles de thème :
+  /// un constructeur d'énumération doit être `const`, et n'a donc pas de
+  /// `BuildContext` sous la main. Les deux jeux se correspondent — les rôles
+  /// du thème clair **sont** ces valeurs.
+  final Color fond;
+  final Color encre;
+
+  /// Compatibilité : l'ancienne couleur unique, désormais celle de l'encre.
+  Color get couleur => encre;
 
   /// Depuis la valeur rendue par le serveur.
   ///

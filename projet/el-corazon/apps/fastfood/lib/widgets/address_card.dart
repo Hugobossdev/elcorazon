@@ -1,10 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/adresse.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/delivery_fee_preview.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
 
-/// Card moderne pour afficher une adresse avec expansion et actions
-class AddressCard extends StatefulWidget {
+/// Une adresse du carnet, telle que la maquette `address_management` la pose.
+///
+/// ## Ce que la maquette montre
+///
+/// Une tuile d'icône teintée par le **type** (maison, travail, autre), le
+/// libellé avec sa puce « Par défaut », l'adresse sur deux lignes, puis le
+/// téléphone du destinataire et les consignes de livraison quand ils
+/// existent — tous deux portés par `eccore.Address` et jusqu'ici jamais
+/// montrés sur la carte. Un menu à droite pour les actions.
+///
+/// ## Ce qui a changé, et pourquoi
+///
+/// La version précédente était une carte **dépliante** : un `AnimationController`,
+/// une `SizeTransition`, et derrière le pli les coordonnées GPS à cinq
+/// décimales, la ville, le « code postal » — qui était en réalité `line2` — et
+/// trois puces d'action. Cela faisait 591 lignes pour montrer, en deux gestes,
+/// des informations qu'on ne relit jamais : personne ne vérifie une latitude
+/// avant de se faire livrer.
+///
+/// Les actions passent dans un menu, comme la maquette le dessine. Le contenu
+/// dépliant disparaît, à l'exception de l'aperçu des frais, qui lui répond à
+/// une vraie question — « combien pour cette adresse ? ».
+///
+/// **L'API publique est inchangée** : les deux écrans qui l'utilisent
+/// (`address_management_screen`, `address_selector_screen`) n'ont pas eu à
+/// bouger.
+class AddressCard extends StatelessWidget {
   final eccore.Address address;
 
   /// Le favori est une préférence d'appareil, tenue par `AddressService`.
@@ -33,559 +61,282 @@ class AddressCard extends StatefulWidget {
   });
 
   @override
-  State<AddressCard> createState() => _AddressCardState();
-}
-
-class _AddressCardState extends State<AddressCard>
-    with SingleTickerProviderStateMixin {
-  bool _isExpanded = false;
-  late AnimationController _animationController;
-  late Animation<double> _expandAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _animationController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-    _expandAnimation = CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeInOut,
-    );
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
-  }
-
-  void _toggleExpand() {
-    setState(() {
-      _isExpanded = !_isExpanded;
-      if (_isExpanded) {
-        _animationController.forward();
-      } else {
-        _animationController.reverse();
-      }
-    });
-  }
-
-  Color _getAddressTypeColor(TypeAdresse type) {
-    switch (type) {
-      case TypeAdresse.maison:
-        return Colors.green;
-      case TypeAdresse.travail:
-        return Colors.blue;
-      case TypeAdresse.autre:
-        return Colors.orange;
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final type = address.type;
 
-    return Dismissible(
-      key: ValueKey(widget.address.id),
-      direction: DismissDirection.endToStart,
-      confirmDismiss: (direction) => _confirmDelete(context),
-      onDismissed: (direction) => widget.onDelete?.call(),
-      background: _buildDismissBackground(),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: widget.isSelected
-                ? theme.colorScheme.primary
-                : Colors.grey.shade300,
-            width: widget.isSelected ? 2 : 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black
-                  .withValues(alpha: widget.isSelected ? 0.15 : 0.08),
-              blurRadius: widget.isSelected ? 8 : 4,
-              offset: Offset(0, widget.isSelected ? 4 : 2),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: widget.onTap ?? _toggleExpand,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(theme),
-                  _buildAddressInfo(theme),
-                  _buildStatusBadges(theme),
-                  _buildExpandedContent(theme),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader(ThemeData theme) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          // Icône du type
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: _getAddressTypeColor(widget.address.type)
-                  .withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Center(
-              child: Text(
-                widget.address.type.pastille,
-                style: const TextStyle(fontSize: 24),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-
-          // Nom de l'adresse
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        widget.address.label,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (widget.isFavorite) ...[
-                      const SizedBox(width: 6),
-                      Icon(
-                        Icons.star,
-                        color: Colors.amber.shade600,
-                        size: 18,
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  widget.address.type.libelle,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: _getAddressTypeColor(widget.address.type),
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Badges
-          if (widget.address.isDefault)
-            _buildBadge(
-              'Défaut',
-              Colors.green,
-              theme,
-            ),
-          if (widget.isSelected)
-            _buildBadge(
-              'Sélectionnée',
-              theme.colorScheme.primary,
-              theme,
-            ),
-
-          // Menu
-          PopupMenuButton<String>(
-            onSelected: _handleMenuAction,
-            icon: Icon(Icons.more_vert, color: Colors.grey.shade600),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit, size: 20),
-                    SizedBox(width: 12),
-                    Text('Modifier'),
-                  ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'favorite',
-                child: Row(
-                  children: [
-                    Icon(
-                      widget.isFavorite
-                          ? Icons.star
-                          : Icons.star_border,
-                      size: 20,
-                      color: Colors.amber.shade600,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      widget.isFavorite
-                          ? 'Retirer des favoris'
-                          : 'Ajouter aux favoris',
-                    ),
-                  ],
-                ),
-              ),
-              if (!widget.address.isDefault)
-                const PopupMenuItem(
-                  value: 'default',
-                  child: Row(
-                    children: [
-                      Icon(Icons.check_circle, size: 20),
-                      SizedBox(width: 12),
-                      Text('Définir par défaut'),
-                    ],
-                  ),
-                ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete, size: 20, color: Colors.red),
-                    SizedBox(width: 12),
-                    Text('Supprimer', style: TextStyle(color: Colors.red)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAddressInfo(ThemeData theme) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+    final carte = SectionCard(
+      margin: const EdgeInsets.only(bottom: DesignConstants.spacingM),
+      onTap: onTap,
+      // La sélection se lit au liseré, pas à un fond teinté : sur une liste,
+      // un fond coloré fait ressortir la carte au point qu'on ne lit plus les
+      // autres.
+      borderColor: isSelected ? theme.colorScheme.primary : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.location_on, size: 16, color: Colors.grey.shade600),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  widget.address.uneLigne,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey.shade700,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
+              _tuileDeType(type),
+              const SizedBox(width: DesignConstants.spacingM),
+              Expanded(child: _intitule(theme, type)),
+              if (_aDesActions) _menu(context),
             ],
           ),
-          // Le repère, sous l'adresse : c'est lui que le client reconnaît, et
-          // lui que le livreur suit. Le collecter sans jamais le montrer
-          // laisserait croire qu'il s'est perdu.
-          if (widget.address.landmark.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Icon(
-                  Icons.push_pin_outlined,
-                  size: 16,
-                  color: Colors.grey.shade600,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    widget.address.landmark,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.grey.shade600,
-                      fontStyle: FontStyle.italic,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
+          const SizedBox(height: DesignConstants.spacingS),
+          _lignesDAdresse(theme),
+          if (_complements(theme).isNotEmpty) ...[
+            const SizedBox(height: DesignConstants.spacingS),
+            ..._complements(theme),
+          ],
+          if (showDeliveryInfo) ...[
+            const SizedBox(height: DesignConstants.spacingM),
+            DeliveryFeePreview(address: address, compact: true),
           ],
         ],
       ),
     );
+
+    if (onDelete == null) return carte;
+
+    return Dismissible(
+      key: ValueKey(address.id),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => _confirmerSuppression(context),
+      onDismissed: (_) => onDelete?.call(),
+      background: _fondDeSuppression(theme),
+      child: carte,
+    );
   }
 
-  Widget _buildStatusBadges(ThemeData theme) {
-    if (!widget.showDeliveryInfo) return const SizedBox.shrink();
+  bool get _aDesActions =>
+      onEdit != null || onDelete != null || onSetDefault != null ||
+      onToggleFavorite != null;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      child: DeliveryFeePreview(
-        address: widget.address,
-        compact: !_isExpanded,
+  Widget _tuileDeType(TypeAdresse type) {
+    return Container(
+      width: DesignConstants.avatarSizeMedium,
+      height: DesignConstants.avatarSizeMedium,
+      decoration: BoxDecoration(
+        color: type.fond,
+        borderRadius: DesignConstants.borderRadiusMedium,
+      ),
+      child: Icon(
+        type.icone,
+        color: type.encre,
+        size: DesignConstants.iconSizeMedium,
       ),
     );
   }
 
-  Widget _buildExpandedContent(ThemeData theme) {
-    return SizeTransition(
-      sizeFactor: _expandAnimation,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _intitule(ThemeData theme, TypeAdresse type) {
+    final libelle = address.label.isEmpty ? type.libelle : address.label;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Divider(color: Colors.grey.shade300),
-            const SizedBox(height: 12),
-
-            // Informations détaillées
-            _buildDetailRow(
-              icon: Icons.gps_fixed,
-              label: 'Coordonnées',
-              value:
-                  '${widget.address.latitude.toStringAsFixed(5)}, ${widget.address.longitude.toStringAsFixed(5)}',
-              theme: theme,
+            Flexible(
+              child: Text(
+                libelle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTypography.titleLg(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
             ),
-
-            const SizedBox(height: 8),
-            _buildDetailRow(
-              icon: Icons.location_city,
-              label: 'Ville',
-              value: widget.address.city,
-              theme: theme,
-            ),
-
-            if (widget.address.line2.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _buildDetailRow(
-                icon: Icons.markunread_mailbox,
-                label: 'Code postal',
-                value: widget.address.line2,
-                theme: theme,
+            if (isFavorite) ...[
+              const SizedBox(width: DesignConstants.spacingXS),
+              const Icon(
+                Icons.star_rounded,
+                size: DesignConstants.iconSizeSmall,
+                color: AppColors.secondary,
               ),
             ],
-
-            const SizedBox(height: 16),
-
-            // Preview détaillé des frais
-            if (widget.showDeliveryInfo)
-              DeliveryFeePreview(
-                address: widget.address,
-              ),
-
-            const SizedBox(height: 16),
-
-            // Actions rapides
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _buildActionChip(
-                  label: 'Modifier',
-                  icon: Icons.edit,
-                  onTap: widget.onEdit,
-                  theme: theme,
-                ),
-                if (!widget.address.isDefault)
-                  _buildActionChip(
-                    label: 'Par défaut',
-                    icon: Icons.check_circle,
-                    onTap: widget.onSetDefault,
-                    theme: theme,
-                  ),
-                _buildActionChip(
-                  label: widget.isFavorite ? 'Favori ★' : 'Favori ☆',
-                  icon: widget.isFavorite
-                      ? Icons.star
-                      : Icons.star_border,
-                  onTap: widget.onToggleFavorite,
-                  theme: theme,
-                  color: Colors.amber.shade600,
-                ),
-              ],
-            ),
           ],
         ),
-      ),
+        if (address.isDefault) ...[
+          const SizedBox(height: DesignConstants.spacingXS),
+          const StatusChip(label: 'Par défaut', icon: Icons.check_rounded),
+        ],
+      ],
     );
   }
 
-  Widget _buildBadge(String label, Color color, ThemeData theme) {
-    return Container(
-      margin: const EdgeInsets.only(left: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDetailRow({
-    required IconData icon,
-    required String label,
-    required String value,
-    required ThemeData theme,
-  }) {
-    return Row(
+  Widget _lignesDAdresse(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 16, color: theme.colorScheme.primary),
-        const SizedBox(width: 8),
         Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            color: Colors.grey.shade600,
-            fontWeight: FontWeight.w500,
-          ),
+          address.uneLigne,
+          style: AppTypography.bodyMd(color: theme.colorScheme.onSurface),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.black87,
-              fontWeight: FontWeight.w600,
-            ),
-            textAlign: TextAlign.right,
-            overflow: TextOverflow.ellipsis,
+        const SizedBox(height: 2),
+        Text(
+          address.villeOu('—'),
+          style: AppTypography.bodyMd(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildActionChip({
-    required String label,
-    required IconData icon,
-    required VoidCallback? onTap,
-    required ThemeData theme,
-    Color? color,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: (color ?? theme.colorScheme.primary).withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: (color ?? theme.colorScheme.primary).withValues(alpha: 0.3),
-          ),
-        ),
+  /// Téléphone et consignes : deux champs que `Address` porte depuis toujours
+  /// et que la carte ne montrait pas. La maquette les place ici, et c'est le
+  /// bon endroit — ce sont les deux choses qu'on relit avant de valider une
+  /// livraison.
+  List<Widget> _complements(ThemeData theme) {
+    Widget ligne(IconData icone, String texte) {
+      return Padding(
+        padding: const EdgeInsets.only(top: DesignConstants.spacingXS),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              icon,
-              size: 16,
-              color: color ?? theme.colorScheme.primary,
+              icone,
+              size: DesignConstants.iconSizeSmall,
+              color: theme.colorScheme.onSurfaceVariant,
             ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: color ?? theme.colorScheme.primary,
+            const SizedBox(width: DesignConstants.spacingS),
+            Expanded(
+              child: Text(
+                texte,
+                style: AppTypography.bodyMd(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ],
         ),
-      ),
-    );
+      );
+    }
+
+    return [
+      if (address.recipientPhone.isNotEmpty)
+        ligne(Icons.call_outlined, address.recipientPhone),
+      if (address.deliveryInstructions.isNotEmpty)
+        ligne(
+          Icons.integration_instructions_outlined,
+          address.deliveryInstructions,
+        ),
+    ];
   }
 
-  Widget _buildDismissBackground() {
-    return Container(
-      alignment: Alignment.centerRight,
-      padding: const EdgeInsets.only(right: 20),
-      decoration: BoxDecoration(
-        color: Colors.red,
-        borderRadius: BorderRadius.circular(16),
+  Widget _menu(BuildContext context) {
+    return PopupMenuButton<String>(
+      icon: Icon(
+        Icons.more_vert_rounded,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
-      child: const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.delete, color: Colors.white, size: 32),
-          SizedBox(height: 4),
-          Text(
-            'Supprimer',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
+      tooltip: 'Actions sur cette adresse',
+      onSelected: (valeur) {
+        switch (valeur) {
+          case 'edit':
+            onEdit?.call();
+          case 'default':
+            onSetDefault?.call();
+          case 'favorite':
+            onToggleFavorite?.call();
+          case 'delete':
+            _confirmerSuppression(context).then((confirme) {
+              if (confirme ?? false) onDelete?.call();
+            });
+        }
+      },
+      itemBuilder: (context) => [
+        if (onEdit != null)
+          const PopupMenuItem(
+            value: 'edit',
+            child: ListTile(
+              leading: Icon(Icons.edit_outlined),
+              title: Text('Modifier'),
+              contentPadding: EdgeInsets.zero,
             ),
           ),
-        ],
+        // Une adresse déjà par défaut n'a pas à proposer de le devenir.
+        if (onSetDefault != null && !address.isDefault)
+          const PopupMenuItem(
+            value: 'default',
+            child: ListTile(
+              leading: Icon(Icons.check_circle_outline),
+              title: Text('Définir par défaut'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (onToggleFavorite != null)
+          PopupMenuItem(
+            value: 'favorite',
+            child: ListTile(
+              leading: Icon(
+                isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
+              ),
+              title: Text(isFavorite ? 'Retirer des favoris' : 'Mettre en favori'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (onDelete != null)
+          const PopupMenuItem(
+            value: 'delete',
+            child: ListTile(
+              leading: Icon(Icons.delete_outline),
+              title: Text('Supprimer'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _fondDeSuppression(ThemeData theme) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: DesignConstants.spacingM),
+      padding: const EdgeInsets.symmetric(
+        horizontal: DesignConstants.spacingL,
+      ),
+      alignment: Alignment.centerRight,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: DesignConstants.borderRadiusLarge,
+      ),
+      child: Icon(
+        Icons.delete_outline_rounded,
+        color: theme.colorScheme.onErrorContainer,
       ),
     );
   }
 
-  Future<bool?> _confirmDelete(BuildContext context) {
+  /// Une suppression se confirme, et le message nomme l'adresse.
+  ///
+  /// « Voulez-vous supprimer cette adresse ? » sur une liste de cinq laisse
+  /// douter de laquelle il s'agit — surtout après un balayage, geste qu'on
+  /// déclenche parfois sans le vouloir.
+  Future<bool?> _confirmerSuppression(BuildContext context) {
+    final libelle =
+        address.label.isEmpty ? address.type.libelle : address.label;
+
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Supprimer l\'adresse'),
-        content: Text(
-          'Êtes-vous sûr de vouloir supprimer "${widget.address.label}" ?',
-        ),
+        title: const Text('Supprimer l’adresse'),
+        content: Text('« $libelle » sera retirée de votre carnet.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Annuler'),
           ),
-          FilledButton(
+          TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
             child: const Text('Supprimer'),
           ),
         ],
       ),
     );
-  }
-
-  void _handleMenuAction(String action) {
-    switch (action) {
-      case 'edit':
-        widget.onEdit?.call();
-        break;
-      case 'favorite':
-        widget.onToggleFavorite?.call();
-        break;
-      case 'default':
-        widget.onSetDefault?.call();
-        break;
-      case 'delete':
-        widget.onDelete?.call();
-        break;
-    }
   }
 }
