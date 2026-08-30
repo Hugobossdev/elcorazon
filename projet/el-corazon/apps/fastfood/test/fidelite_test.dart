@@ -1,4 +1,5 @@
 import 'package:elcora_fast/presentation/fidelite.dart';
+import 'package:elcora_fast/presentation/profil_utilisateur.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -109,6 +110,62 @@ void main() {
     test('passe en unité majeure pour l’affichage', () {
       // Le franc CFA n'a pas de décimales : l'unité mineure vaut la majeure.
       expect(_recompense(remiseCfa: 1000).remiseAffichee, 1000);
+    });
+  });
+
+  group('Les paliers de fidelite', () {
+    // Les seuils vivent cote client faute de route serveur (BR-006). Tant
+    // qu'ils y vivent, ils doivent au moins etre coherents entre le profil et
+    // l'ecran des recompenses — c'est ce que ces cas tiennent.
+
+    test('un compte neuf part au palier de base', () {
+      expect(PalierFidelite.pour(0), PalierFidelite.standard);
+    });
+
+    test('le seuil est atteint des qu’il est egale', () {
+      expect(PalierFidelite.pour(200), PalierFidelite.fidele);
+      expect(PalierFidelite.pour(500), PalierFidelite.vip);
+    });
+
+    test('un point de moins ne suffit pas', () {
+      expect(PalierFidelite.pour(199), PalierFidelite.standard);
+      expect(PalierFidelite.pour(499), PalierFidelite.fidele);
+    });
+
+    test('le sommet n’a pas de suivant', () {
+      expect(PalierFidelite.vip.suivant, isNull);
+      expect(PalierFidelite.standard.suivant, PalierFidelite.fidele);
+    });
+
+    test('l’avancement compte ce qui manque, pas ce qui est acquis', () {
+      final avancement = avancementDeFidelite(150);
+      expect(avancement.palier, PalierFidelite.standard);
+      expect(avancement.suivant, PalierFidelite.fidele);
+      expect(avancement.pointsManquants, 50);
+      expect(avancement.progression, closeTo(0.75, 0.001));
+    });
+
+    test('la progression se mesure entre deux seuils, pas depuis zero', () {
+      // 350 points : a mi-chemin entre 200 (Fidele) et 500 (VIP). Mesuree
+      // depuis zero, la barre afficherait 70 % — et un client a 30 points du
+      // palier verrait une barre presque pleine bien trop tot.
+      final avancement = avancementDeFidelite(350);
+      expect(avancement.palier, PalierFidelite.fidele);
+      expect(avancement.progression, closeTo(0.5, 0.001));
+    });
+
+    test('au sommet la barre est pleine et rien ne manque', () {
+      final avancement = avancementDeFidelite(900);
+      expect(avancement.palier, PalierFidelite.vip);
+      expect(avancement.suivant, isNull);
+      expect(avancement.pointsManquants, 0);
+      expect(avancement.progression, 1);
+    });
+
+    test('le libelle du profil est celui du palier', () {
+      expect(palierDeFidelite(0), PalierFidelite.standard.libelle);
+      expect(palierDeFidelite(250), PalierFidelite.fidele.libelle);
+      expect(palierDeFidelite(800), PalierFidelite.vip.libelle);
     });
   });
 }

@@ -3,11 +3,39 @@ import 'package:provider/provider.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/fidelite.dart';
 import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
-import 'package:elcora_fast/widgets/custom_button.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
-/// Écran des récompenses et points de fidélité
+/// Programme de fidélité — solde, palier, récompenses, relevé de points.
+///
+/// ## Ce que la maquette demande, et ce que le serveur sert
+///
+/// `rewards` montre une carte de palier avec la progression vers le suivant,
+/// une liste de récompenses avec un bouton « Redeem » ou une mention
+/// « Locked », et un relevé de points. **Tout cela existe réellement** :
+///
+/// * `GET /loyalty/account/` → solde ;
+/// * `GET /loyalty/rewards/` → catalogue, avec son coût en points ;
+/// * `POST /loyalty/rewards/{id}/redeem/` → échange ;
+/// * `GET /loyalty/entries/` → le relevé, avec `delta`, `description`,
+///   `orderId` et l'horodatage — c'est exactement le « +120 pts /
+///   Order #ELC-492 » de la maquette.
+///
+/// Seuls les **paliers** sont calculés côté client (BR-006). Les noms de la
+/// maquette — « Gold », « Platinum (3000 pts) » — ne sont pas repris : ils ne
+/// correspondent à aucun seuil en place, et les inventer ferait une promesse
+/// commerciale que le serveur ne connaît pas.
+///
+/// ## Ce qui est conservé de l'ancien écran
+///
+/// Les badges et le niveau ne figurent dans aucune maquette, mais ils existent
+/// et viennent du serveur. Ils restent, rangés après ce que la maquette met en
+/// avant.
 class RewardsScreen extends StatefulWidget {
   const RewardsScreen({super.key});
 
@@ -19,47 +47,59 @@ class _RewardsScreenState extends State<RewardsScreen> {
   @override
   void initState() {
     super.initState();
-    // Initialiser le service de gamification
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        final gamificationService =
-            Provider.of<GamificationService>(context, listen: false);
-        final appService = Provider.of<AppService>(context, listen: false);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _charger());
+  }
 
-        await gamificationService.initialize(
-          userId: appService.currentUser?.id,
-          forceRefresh: true,
-        );
-      } catch (e) {
-        Journal.trace('Error initializing Gamification service: $e');
-      }
-    });
+  Future<void> _charger() async {
+    if (!mounted) return;
+    try {
+      final gamification =
+          Provider.of<GamificationService>(context, listen: false);
+      final appService = Provider.of<AppService>(context, listen: false);
+      await gamification.initialize(
+        userId: appService.currentUser?.id,
+        forceRefresh: true,
+      );
+    } catch (e) {
+      Journal.trace('Error initializing Gamification service: $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mes Récompenses'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-      ),
+      backgroundColor: theme.colorScheme.surface,
+      appBar: const GlassAppBar(title: 'Récompenses'),
       body: Consumer<GamificationService>(
-        builder: (context, gamificationService, child) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        builder: (context, gamification, child) {
+          return RefreshIndicator(
+            onRefresh: _charger,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                DesignConstants.edgeMargin,
+                DesignConstants.spacingM,
+                DesignConstants.edgeMargin,
+                DesignConstants.spacingXL,
+              ),
               children: [
-                _buildPointsCard(context, gamificationService),
-                const SizedBox(height: 24),
-                _buildBadgesSection(context, gamificationService),
-                const SizedBox(height: 24),
-                _buildRewardsSection(context, gamificationService),
-                const SizedBox(height: 24),
-                _buildTransactionsSection(context, gamificationService),
-                const SizedBox(height: 24),
-                _buildLevelProgress(context, gamificationService),
+                Text(
+                  'Votre fidélité, généreusement rendue.',
+                  style: AppTypography.bodyLg(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: DesignConstants.spacingM),
+                _carteDePalier(theme, gamification),
+                const SizedBox(height: DesignConstants.spacingL),
+                _sectionRecompenses(theme, gamification),
+                const SizedBox(height: DesignConstants.spacingL),
+                _sectionReleve(theme, gamification),
+                if (gamification.badges.isNotEmpty) ...[
+                  const SizedBox(height: DesignConstants.spacingL),
+                  _sectionBadges(theme, gamification),
+                ],
               ],
             ),
           );
@@ -68,589 +108,375 @@ class _RewardsScreenState extends State<RewardsScreen> {
     );
   }
 
-  Widget _buildPointsCard(
-      BuildContext context, GamificationService gamificationService,) {
-    return Card(
-      elevation: 4,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: LinearGradient(
-            colors: [
-              Theme.of(context).colorScheme.secondary,
-              Theme.of(context).colorScheme.secondary.withValues(alpha: 0.8),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+  // ------------------------------------------------------------- le palier
+
+  Widget _carteDePalier(ThemeData theme, GamificationService gamification) {
+    final points = gamification.currentPoints;
+    final avancement = avancementDeFidelite(points);
+
+    // Le dégradé doré porte une encre sombre : `onSecondaryContainer` tient le
+    // contraste dessus, du blanc non.
+    final encre = theme.colorScheme.onSecondaryContainer;
+
+    return Container(
+      padding: const EdgeInsets.all(DesignConstants.spacingL),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: AppColors.secondaryGradient,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(
-                  Icons.stars,
-                  color: Colors.white,
-                  size: 32,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Points de fidélité',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w500,
-                      ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '${gamificationService.currentPoints}',
-              style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Niveau ${gamificationService.currentLevel}',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontWeight: FontWeight.w500,
-                  ),
-            ),
-          ],
-        ),
+        borderRadius: DesignConstants.borderRadiusLarge,
+        boxShadow: DesignConstants.shadowLow,
       ),
-    );
-  }
-
-  Widget _buildBadgesSection(
-      BuildContext context, GamificationService gamificationService,) {
-    final List<dynamic> badges = gamificationService.badges;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Mes Badges',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-        ),
-        const SizedBox(height: 16),
-        if (badges.isEmpty)
-          _buildEmptyBadges(context)
-        else
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemCount: badges.length,
-            itemBuilder: (context, index) {
-              final badge = badges[index];
-              return _buildBadgeCard(context, badge);
-            },
-          ),
-      ],
-    );
-  }
-
-  Widget _buildEmptyBadges(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Icon(
-              Icons.emoji_events_outlined,
-              size: 64,
-              color: Theme.of(context)
-                  .colorScheme
-                  .onSurface
-                  .withValues(alpha: 0.3),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Aucun badge',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.6),
-                  ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Commandez pour débloquer vos premiers badges !',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.5),
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBadgeCard(BuildContext context, dynamic badge) {
-    late final String name;
-    late final bool isUnlocked;
-
-    if (badge is Map<String, dynamic>) {
-      name = (badge['title'] ?? badge['name'] ?? '').toString();
-      isUnlocked = (badge['isUnlocked'] ?? badge['is_unlocked'] ?? false) == true;
-    } else {
-      try {
-        // Cast badge to Map<String, dynamic> to access its properties safely
-        final badgeMap = badge as Map<String, dynamic>;
-        name = (badgeMap['name'] as String?) ?? (badgeMap['title'] as String?) ?? '';
-        isUnlocked = (badgeMap['isUnlocked'] as bool?) ?? (badgeMap['is_unlocked'] as bool?) ?? false;
-      } catch (_) {
-        name = badge?.toString() ?? '';
-        isUnlocked = false;
-      }
-    }
-
-    return Card(
-      elevation: 2,
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.emoji_events,
-            size: 32,
-            color: isUnlocked ? Colors.amber : Colors.grey,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            name,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: isUnlocked ? null : Colors.grey,
+          Row(
+            children: [
+              Icon(Icons.workspace_premium_rounded, color: encre),
+              const SizedBox(width: DesignConstants.spacingS),
+              Expanded(
+                child: Text(
+                  'Palier ${avancement.palier.libelle}',
+                  style: AppTypography.titleLg(color: encre),
                 ),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: Text(
+                  '$points',
+                  style: AppTypography.displayLg(color: encre),
+                ),
+              ),
+              const SizedBox(width: DesignConstants.spacingS),
+              Text('pts', style: AppTypography.titleLg(color: encre)),
+            ],
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(DesignConstants.radiusSmall),
+            child: LinearProgressIndicator(
+              value: avancement.progression,
+              minHeight: 8,
+              backgroundColor: encre.withValues(alpha: 0.2),
+              valueColor: AlwaysStoppedAnimation<Color>(encre),
+            ),
+          ),
+          const SizedBox(height: DesignConstants.spacingS),
+          Text(
+            avancement.suivant == null
+                ? 'Vous êtes au palier le plus élevé.'
+                : '${avancement.pointsManquants} points jusqu’au palier '
+                    '${avancement.suivant!.libelle}',
+            style: AppTypography.bodyMd(color: encre),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildRewardsSection(
-      BuildContext context, GamificationService gamificationService,) {
-    final theme = Theme.of(context);
-    final rewards = [...gamificationService.rewards]
-      ..sort((a, b) => a.pointsCost.compareTo(b.pointsCost));
+  // -------------------------------------------------------- les récompenses
+
+  Widget _sectionRecompenses(
+    ThemeData theme,
+    GamificationService gamification,
+  ) {
+    final recompenses = gamification.rewards;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Récompenses disponibles',
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (rewards.isEmpty)
-          _buildEmptyRewards(context)
-        else
-          ...rewards.map((reward) {
-            final canRedeem =
-                reward.estAccessibleAvec(gamificationService.currentPoints);
-            final isProcessing =
-                gamificationService.isRewardBeingProcessed(reward.id);
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _buildRewardCard(
-                context,
-                reward: reward,
-                canRedeem: canRedeem,
-                isProcessing: isProcessing,
-                onRedeem: canRedeem && !isProcessing
-                    ? () => _confirmRedeem(context, reward)
-                    : null,
+        const SectionHeader(title: 'Récompenses'),
+        const SizedBox(height: DesignConstants.spacingS),
+        if (recompenses.isEmpty)
+          SectionCard(
+            child: Text(
+              'Aucune récompense proposée pour le moment.',
+              style: AppTypography.bodyMd(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-            );
-          }),
+            ),
+          )
+        else
+          for (final recompense in recompenses)
+            Padding(
+              padding: const EdgeInsets.only(bottom: DesignConstants.spacingM),
+              child: _carteDeRecompense(theme, gamification, recompense),
+            ),
       ],
     );
   }
 
-  Widget _buildRewardCard(
-    BuildContext context, {
-    required eccore.Reward reward,
-    required bool canRedeem,
-    required bool isProcessing,
-    required VoidCallback? onRedeem,
-  }) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final icon = _iconForReward(reward.genre);
-    final accentColor = canRedeem
-        ? colorScheme.primary
-        : colorScheme.onSurface.withValues(alpha: 0.3);
+  Widget _carteDeRecompense(
+    ThemeData theme,
+    GamificationService gamification,
+    eccore.Reward recompense,
+  ) {
+    final accessible = recompense.estAccessibleAvec(gamification.currentPoints);
+    final enCours = gamification.isRewardBeingProcessed(recompense.id);
+    final manquants = recompense.pointsCost - gamification.currentPoints;
 
-    return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  icon,
-                  size: 32,
-                  color: accentColor,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        reward.name,
-                        style:
-                            theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        reward.description,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurface.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+    return SectionCard(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: DesignConstants.avatarSizeMedium,
+            height: DesignConstants.avatarSizeMedium,
+            decoration: BoxDecoration(
+              color: accessible
+                  ? theme.colorScheme.secondaryContainer
+                  : theme.colorScheme.surfaceContainerHigh,
+              borderRadius: DesignConstants.borderRadiusMedium,
             ),
-            const SizedBox(height: 12),
-            Row(
+            child: Icon(
+              recompense.genre == GenreRecompense.livraisonOfferte
+                  ? Icons.two_wheeler_rounded
+                  : Icons.local_offer_rounded,
+              color: accessible
+                  ? theme.colorScheme.onSecondaryContainer
+                  : theme.colorScheme.onSurfaceVariant,
+              size: DesignConstants.iconSizeMedium,
+            ),
+          ),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.stars,
-                  size: 18,
-                  color: colorScheme.secondary,
-                ),
-                const SizedBox(width: 6),
                 Text(
-                  '${reward.pointsCost} points',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: colorScheme.secondary,
-                    fontWeight: FontWeight.w600,
+                  recompense.name,
+                  style: AppTypography.titleLg(
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
-                const Spacer(),
+                if (recompense.description.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    recompense.description,
+                    style: AppTypography.bodyMd(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: DesignConstants.spacingS),
+                Wrap(
+                  spacing: DesignConstants.spacingS,
+                  runSpacing: DesignConstants.spacingS,
+                  children: [
+                    StatusChip(
+                      label: '${recompense.pointsCost} pts',
+                      icon: Icons.stars_rounded,
+                      background: theme.colorScheme.surfaceContainerHigh,
+                      foreground: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    if (recompense.remiseAffichee > 0)
+                      StatusChip(
+                        label: PriceFormatter.format(recompense.remiseAffichee),
+                        icon: Icons.savings_outlined,
+                        background: theme.colorScheme.surfaceContainerHigh,
+                        foreground: theme.colorScheme.onSurfaceVariant,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: DesignConstants.spacingM),
+                // « Locked » de la maquette, mais en disant **ce qui manque** :
+                // un cadenas seul laisse chercher combien il faut de points.
+                if (accessible)
+                  ActionButton(
+                    label: 'Échanger',
+                    height: 44,
+                    isLoading: enCours,
+                    onPressed: enCours
+                        ? null
+                        : () => _confirmerEchange(gamification, recompense),
+                  )
+                else
+                  Text(
+                    'Encore $manquants point${manquants > 1 ? 's' : ''} '
+                    'pour y accéder',
+                    style: AppTypography.labelLg(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
               ],
             ),
-            const SizedBox(height: 12),
-            CustomButton(
-              text: canRedeem ? 'Échanger' : 'Indisponible',
-              onPressed: onRedeem,
-              isLoading: isProcessing,
-              backgroundColor: canRedeem ? null : Colors.grey[400],
-              icon: canRedeem ? Icons.redeem : Icons.lock,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmerEchange(
+    GamificationService gamification,
+    eccore.Reward recompense,
+  ) {
+    context.showEnhancedDialog(
+      title: 'Échanger cette récompense ?',
+      content: '« ${recompense.name} » vous coûtera '
+          '${recompense.pointsCost} points. '
+          'Il vous en restera '
+          '${gamification.currentPoints - recompense.pointsCost}.',
+      confirmText: 'Échanger',
+      cancelText: 'Annuler',
+      onConfirm: () async {
+        final reussi = await gamification.redeemReward(recompense);
+        if (!mounted) return;
+        // Le message suit le **résultat du serveur**, jamais l'intention : un
+        // solde devenu insuffisant entre l'affichage et l'appel, ou une
+        // récompense retirée du catalogue, sortent en échec.
+        if (reussi) {
+          context.showSuccessMessage('« ${recompense.name} » vous est acquise');
+        } else {
+          context.showErrorMessage(
+            'Échange refusé. Vérifiez votre solde et réessayez.',
+          );
+        }
+      },
+      onCancel: () {},
+    );
+  }
+
+  // -------------------------------------------------------------- le relevé
+
+  Widget _sectionReleve(ThemeData theme, GamificationService gamification) {
+    final mouvements = gamification.transactions;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Relevé de points'),
+        const SizedBox(height: DesignConstants.spacingS),
+        if (mouvements.isEmpty)
+          SectionCard(
+            child: Text(
+              'Aucun mouvement pour l’instant. Vos points apparaîtront ici '
+              'après votre première commande livrée.',
+              style: AppTypography.bodyMd(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
-          ],
+          )
+        else
+          SectionCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                for (var i = 0; i < mouvements.length; i++) ...[
+                  _ligneDeMouvement(theme, mouvements[i]),
+                  if (i < mouvements.length - 1)
+                    Divider(
+                      height: 1,
+                      indent: DesignConstants.spacingXL +
+                          DesignConstants.spacingL,
+                      color: theme.colorScheme.outlineVariant
+                          .withValues(alpha: 0.5),
+                    ),
+                ],
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _ligneDeMouvement(ThemeData theme, eccore.PointsEntry mouvement) {
+    final credite = mouvement.genre.crediteLeCompte;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: DesignConstants.spacingM,
+        vertical: DesignConstants.spacingXS,
+      ),
+      leading: Container(
+        width: DesignConstants.avatarSizeSmall + 8,
+        height: DesignConstants.avatarSizeSmall + 8,
+        decoration: BoxDecoration(
+          color: credite
+              ? AppColors.successLight
+              : theme.colorScheme.surfaceContainerHigh,
+          borderRadius: DesignConstants.borderRadiusSmall,
+        ),
+        child: Icon(
+          credite ? Icons.add_rounded : Icons.redeem_rounded,
+          size: DesignConstants.iconSizeSmall + 4,
+          color: credite ? AppColors.success : theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      title: Text(
+        mouvement.description.isEmpty
+            ? mouvement.genre.libelle
+            : mouvement.description,
+        style: AppTypography.titleLg(color: theme.colorScheme.onSurface),
+      ),
+      subtitle: Text(
+        _dateCourte(mouvement.createdAt),
+        style: AppTypography.bodyMd(color: theme.colorScheme.onSurfaceVariant),
+      ),
+      trailing: Text(
+        mouvement.deltaAffiche,
+        style: AppTypography.priceDisplay(
+          color: credite ? AppColors.success : theme.colorScheme.onSurfaceVariant,
         ),
       ),
     );
   }
 
-  Widget _buildEmptyRewards(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Icon(
-              Icons.card_giftcard,
-              size: 48,
-              color:
-                  theme.colorScheme.onSurface.withValues(alpha: 0.2),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Aucune récompense disponible pour le moment',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Continuez à cumuler des points de fidélité pour débloquer des avantages exclusifs.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
+  // -------------------------------------------------------------- les badges
+
+  Widget _sectionBadges(ThemeData theme, GamificationService gamification) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(
+          title: 'Badges',
+          subtitle: 'Débloqués par le serveur à la livraison de vos commandes',
         ),
-      ),
-    );
-  }
-
-  IconData _iconForReward(GenreRecompense type) {
-    switch (type) {
-      case GenreRecompense.livraisonOfferte:
-        return Icons.delivery_dining;
-      case GenreRecompense.remise:
-        return Icons.percent;
-    }
-  }
-
-  Future<void> _confirmRedeem(
-      BuildContext context, eccore.Reward reward,) async {
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Échanger la récompense'),
-            content: Text(
-                'Voulez-vous échanger ${reward.pointsCost} points pour "${reward.name}" ?',),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Annuler'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('Confirmer'),
-              ),
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          child: Wrap(
+            spacing: DesignConstants.spacingS,
+            runSpacing: DesignConstants.spacingS,
+            children: [
+              for (final badge in gamification.badges)
+                StatusChip(
+                  label: badge['title']?.toString() ?? '',
+                  icon: badge['isUnlocked'] == true
+                      ? Icons.military_tech_rounded
+                      : Icons.lock_outline_rounded,
+                  background: badge['isUnlocked'] == true
+                      ? theme.colorScheme.secondaryContainer
+                      : theme.colorScheme.surfaceContainerHigh,
+                  foreground: badge['isUnlocked'] == true
+                      ? theme.colorScheme.onSecondaryContainer
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
             ],
           ),
-        ) ??
-        false;
-
-    if (!confirmed || !mounted || !context.mounted) return;
-
-    final gamificationService =
-        Provider.of<GamificationService>(context, listen: false);
-    final success = await gamificationService.redeemReward(reward);
-
-    if (!mounted || !context.mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          success
-              ? 'Récompense "${reward.name}" échangée avec succès !'
-              : 'Impossible d\'échanger la récompense pour le moment.',
         ),
-        backgroundColor: success ? Colors.green : Colors.red,
-      ),
-    );
-  }
-
-  Widget _buildLevelProgress(
-      BuildContext context, GamificationService gamificationService,) {
-    final currentLevel = gamificationService.currentLevel;
-    final currentPoints = gamificationService.currentPoints;
-    final pointsForNextLevel =
-        (currentLevel + 1) * 100; // Exemple: 100 points par niveau
-    final progress = currentPoints / pointsForNextLevel;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Progression du niveau',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Niveau $currentLevel',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
-                ),
-                Text(
-                  'Niveau ${currentLevel + 1}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(
-              value: progress,
-              backgroundColor: Colors.grey[300],
-              valueColor: AlwaysStoppedAnimation<Color>(
-                Theme.of(context).colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '$currentPoints / $pointsForNextLevel points',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.7),
-                  ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTransactionsSection(
-      BuildContext context, GamificationService gamificationService,) {
-    final transactions = gamificationService.transactions;
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Historique des points',
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (transactions.isEmpty)
-          _buildEmptyTransactions(context)
-        else
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: transactions.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, index) => _buildTransactionTile(
-              context,
-              transactions[index],
-            ),
-          ),
       ],
     );
   }
 
-  Widget _buildTransactionTile(
-      BuildContext context, eccore.PointsEntry transaction,) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final icon = _iconForTransaction(transaction.genre);
-    final color = _colorForTransaction(transaction.genre, colorScheme);
+  /// « 12/03 » ou « Aujourd'hui », selon l'ancienneté.
+  String _dateCourte(DateTime date) {
+    final maintenant = DateTime.now();
+    final jour = DateTime(date.year, date.month, date.day);
+    final aujourdhui = DateTime(maintenant.year, maintenant.month, maintenant.day);
+    final ecart = aujourdhui.difference(jour).inDays;
 
-    final dateLabel =
-        MaterialLocalizations.of(context).formatShortDate(transaction.createdAt);
-    final timeLabel =
-        TimeOfDay.fromDateTime(transaction.createdAt).format(context);
+    if (ecart == 0) return 'Aujourd’hui';
+    if (ecart == 1) return 'Hier';
 
-    final pointsLabel = transaction.delta >= 0
-        ? '+${transaction.delta}'
-        : '${transaction.delta}';
-
-    return Card(
-      elevation: 1,
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: color.withValues(alpha: 0.15),
-          child: Icon(
-            icon,
-            color: color,
-          ),
-        ),
-        title: Text(transaction.description),
-        subtitle: Text('$dateLabel • $timeLabel'),
-        trailing: Text(
-          pointsLabel,
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: transaction.delta >= 0 ? Colors.green : Colors.red,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyTransactions(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Icon(
-              Icons.history,
-              size: 48,
-              color:
-                  theme.colorScheme.onSurface.withValues(alpha: 0.2),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Aucune activité récente',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Passez votre prochaine commande ou participez aux défis pour gagner des points.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _iconForTransaction(GenreMouvementPoints type) {
-    switch (type) {
-      case GenreMouvementPoints.gagnes:
-        return Icons.trending_up;
-      case GenreMouvementPoints.depenses:
-        return Icons.redeem;
-      case GenreMouvementPoints.expires:
-        return Icons.timer_off;
-      case GenreMouvementPoints.ajustes:
-        return Icons.tune;
-    }
-  }
-
-  Color _colorForTransaction(
-      GenreMouvementPoints type, ColorScheme colorScheme,) {
-    switch (type) {
-      case GenreMouvementPoints.gagnes:
-        return Colors.green;
-      case GenreMouvementPoints.depenses:
-        return colorScheme.primary;
-      case GenreMouvementPoints.expires:
-        return Colors.grey;
-      case GenreMouvementPoints.ajustes:
-        return colorScheme.secondary;
-    }
+    final j = date.day.toString().padLeft(2, '0');
+    final m = date.month.toString().padLeft(2, '0');
+    return ecart < 365 ? '$j/$m' : '$j/$m/${date.year}';
   }
 }

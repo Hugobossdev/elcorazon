@@ -1,4 +1,5 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/fidelite.dart';
 
 /// Vocabulaire d'affichage du compte connecté.
 ///
@@ -62,8 +63,9 @@ extension ProfilAffiche on eccore.User {
 /// `description`, `icon`, `target`, `isUnlocked` — et le test ne pouvait donc
 /// jamais être vrai. Restent les seuils, qui eux fonctionnent dès que les
 /// points viennent de la bonne source.
-String palierDeFidelite(int points) {
-  if (points >= 500) return 'VIP';
-  if (points >= 200) return 'Fidèle';
-  return 'Standard';
-}
+///
+/// Les seuils eux-mêmes ont déménagé dans `presentation/fidelite.dart`, avec
+/// le reste du vocabulaire du programme : le profil et l'écran des
+/// récompenses les lisaient chacun de leur côté, et rien ne garantissait
+/// qu'ils restent d'accord.
+String palierDeFidelite(int points) => PalierFidelite.pour(points).libelle;

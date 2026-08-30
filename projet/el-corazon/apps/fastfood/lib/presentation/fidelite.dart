@@ -71,3 +71,74 @@ extension MouvementAffiche on eccore.PointsEntry {
   /// pour les crédits, qu'un `+` distingue d'un solde.
   String get deltaAffiche => delta > 0 ? '+$delta' : '$delta';
 }
+
+/// Les paliers du programme de fidélité, et ce qui sépare du suivant.
+///
+/// ## Où vivent ces seuils, et où ils devraient vivre
+///
+/// **Ici, c'est-à-dire côté client.** Le serveur ne publie pas de paliers :
+/// `GET /loyalty/account/` rend un solde, un cumul gagné et un cumul dépensé,
+/// rien de plus. C'est une faiblesse connue et consignée — BR-006 de
+/// `docs/STITCH_BACKEND_REQUIREMENTS.md` : deux versions de l'application en
+/// circulation annonceront deux paliers différents pour le même solde, et
+/// aucune ne fera foi au moment d'accorder l'avantage.
+///
+/// Les seuils sont donc rassemblés en **un seul endroit**, pour qu'il n'y ait
+/// qu'une ligne à changer le jour où la route existe. Ils étaient auparavant
+/// écrits dans `profil_utilisateur.dart`, qui les gardait pour lui.
+///
+/// Les noms sont ceux du produit — « Standard », « Fidèle », « VIP » — et non
+/// ceux de la maquette Stitch (« Gold », « Platinum »), dont les seuils ne
+/// correspondent à rien de ce qui est en place.
+enum PalierFidelite {
+  standard('Standard', 0),
+  fidele('Fidèle', 200),
+  vip('VIP', 500);
+
+  const PalierFidelite(this.libelle, this.seuil);
+
+  final String libelle;
+
+  /// Solde à partir duquel le palier est atteint.
+  final int seuil;
+
+  /// Le palier correspondant à [points].
+  static PalierFidelite pour(int points) {
+    PalierFidelite atteint = standard;
+    for (final palier in values) {
+      if (points >= palier.seuil) atteint = palier;
+    }
+    return atteint;
+  }
+
+  /// Le palier au-dessus, ou `null` au sommet.
+  PalierFidelite? get suivant {
+    final rang = index + 1;
+    return rang < values.length ? values[rang] : null;
+  }
+}
+
+/// Où en est un solde entre son palier et le suivant.
+///
+/// [progression] vaut 1 au sommet : la barre est pleine, et il n'y a plus rien
+/// à atteindre. Elle ne vaut jamais `NaN` — deux paliers ne partagent jamais
+/// le même seuil, mais le garde-fou reste, un seuil se change par erreur.
+({PalierFidelite palier, PalierFidelite? suivant, int pointsManquants, double progression})
+    avancementDeFidelite(int points) {
+  final palier = PalierFidelite.pour(points);
+  final suivant = palier.suivant;
+
+  if (suivant == null) {
+    return (palier: palier, suivant: null, pointsManquants: 0, progression: 1);
+  }
+
+  final etendue = suivant.seuil - palier.seuil;
+  final parcouru = points - palier.seuil;
+
+  return (
+    palier: palier,
+    suivant: suivant,
+    pointsManquants: (suivant.seuil - points).clamp(0, suivant.seuil),
+    progression: etendue <= 0 ? 1.0 : (parcouru / etendue).clamp(0.0, 1.0),
+  );
+}
