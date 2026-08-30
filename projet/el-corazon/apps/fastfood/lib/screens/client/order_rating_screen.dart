@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/driver_rating_service.dart';
 import 'package:elcora_fast/services/review_rating_service.dart';
-import 'package:elcora_fast/widgets/custom_button.dart';
+import 'package:elcora_fast/services/design_enhancement_service.dart';
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class OrderRatingScreen extends StatefulWidget {
@@ -21,15 +23,34 @@ class OrderRatingScreen extends StatefulWidget {
 }
 
 class _OrderRatingScreenState extends State<OrderRatingScreen> {
-  // Driver Rating State
-  double _driverRating = 0;
+  // Notation du livreur
+  int _driverRating = 0;
+  Set<String> _driverAppreciations = <String>{};
   final _driverCommentController = TextEditingController();
 
-  // Items Rating State
-  final Map<String, double> _itemRatings = {};
+  // Notation par plat
+  final Map<String, int> _itemRatings = {};
+  final Map<String, Set<String>> _itemAppreciations = {};
   final Map<String, TextEditingController> _itemComments = {};
 
   bool _isLoading = false;
+
+  /// Les puces de la maquette `rate_your_meal`, traduites.
+  static const _appreciationsDuPlat = [
+    'Très bon',
+    'Bien assaisonné',
+    'Servi chaud',
+    'Portion généreuse',
+    'Bien emballé',
+  ];
+
+  /// Celles de `rate_delivery`.
+  static const _appreciationsDeLivraison = [
+    'Ponctuel',
+    'Professionnel',
+    'Aimable',
+    'Consignes respectées',
+  ];
 
   @override
   void initState() {
@@ -38,6 +59,7 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
     for (final item in widget.order.items) {
       _itemComments[item.menuItemId] = TextEditingController();
       _itemRatings[item.menuItemId] = 0;
+      _itemAppreciations[item.menuItemId] = <String>{};
     }
   }
 
@@ -62,9 +84,7 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
 
       if (currentUser == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Erreur: Utilisateur non connecté')),
-          );
+          context.showErrorMessage('Connectez-vous pour déposer un avis.');
         }
         return;
       }
@@ -77,8 +97,11 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
         totalActions++;
         final success = await driverRatingService.submitRating(
           orderId: widget.order.id,
-          rating: _driverRating.toInt(),
-          comment: _driverCommentController.text.trim(),
+          rating: _driverRating,
+          comment: _joindre(
+            _driverAppreciations,
+            _driverCommentController.text.trim(),
+          ),
         );
         if (success) successCount++;
       }
@@ -93,7 +116,11 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
           // déduit de l'historique d'achat au moment du dépôt (S1).
           final success = await reviewRatingService.addReview(
             menuItemId: item.menuItemId,
-            rating: rating.round(),
+            rating: rating,
+            // Le `title` existait au contrat et partait vide à chaque avis :
+            // les puces d'appréciation lui donnent enfin un contenu.
+            title: (_itemAppreciations[item.menuItemId] ?? const <String>{})
+                .join(', '),
             comment: _itemComments[item.menuItemId]?.text.trim() ?? '',
           );
           if (success) successCount++;
@@ -102,14 +129,18 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
 
       if (mounted) {
         if (totalActions == 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Veuillez noter au moins un élément')),
-          );
+          context.showErrorMessage('Donnez au moins une note avant d’envoyer.');
         } else if (successCount > 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Merci pour vos avis !')),
+          // Le compte des réussites est annoncé tel quel : sur trois avis
+          // dont un refusé (un plat déjà noté), « Merci pour vos avis » seul
+          // laisserait croire que les trois sont partis.
+          context.showSuccessMessage(
+            successCount == totalActions
+                ? 'Merci, vos avis sont enregistrés.'
+                : '$successCount avis sur $totalActions enregistré'
+                    '${successCount > 1 ? 's' : ''}.',
           );
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(true);
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Erreur lors de l\'envoi des avis')),
@@ -119,9 +150,7 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
     } catch (e) {
       Journal.trace('Error submitting ratings: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Une erreur est survenue')),
-        );
+        context.showErrorMessage('Envoi impossible pour le moment.');
       }
     } finally {
       if (mounted) {
@@ -130,227 +159,198 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
     }
   }
 
+  /// Les puces retenues, puis le texte libre.
+  ///
+  /// Le contrat n'a pas de champ d'étiquettes côté livraison : les joindre au
+  /// commentaire est le seul moyen de les transmettre. Les collecter sans les
+  /// envoyer aurait été pire que de ne pas les proposer.
+  String _joindre(Set<String> puces, String libre) {
+    if (puces.isEmpty) return libre;
+    final jointes = puces.join(', ');
+    return libre.isEmpty ? jointes : '$jointes — $libre';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Noter la commande'),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (widget.order.deliveryPersonId != null) ...[
-              _buildDriverRatingSection(),
-              const SizedBox(height: 24),
-              const Divider(),
-              const SizedBox(height: 24),
-            ],
-            _buildItemsRatingSection(),
-            const SizedBox(height: 32),
-            CustomButton(
-              text: 'Envoyer les avis',
-              onPressed: _submitRatings,
-              isLoading: _isLoading,
-            ),
-            const SizedBox(height: 32),
-          ],
+      backgroundColor: theme.colorScheme.surface,
+      appBar: const GlassAppBar(title: 'Noter ma commande'),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(
+          DesignConstants.edgeMargin,
+          DesignConstants.spacingM,
+          DesignConstants.edgeMargin,
+          DesignConstants.spacingXL,
         ),
-      ),
-    );
-  }
-
-  Widget _buildDriverRatingSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Le Livreur',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            CircleAvatar(
-              radius: 30,
-              backgroundColor: Colors.grey[200],
-              child: const Icon(Icons.person, size: 30, color: Colors.grey),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Livreur', // We might want to pass driver name in Order object if available
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Comment s\'est passée la livraison ?',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Center(
-          child: RatingBar.builder(
-            initialRating: _driverRating,
-            minRating: 1,
-            itemPadding: const EdgeInsets.symmetric(horizontal: 4.0),
-            itemBuilder: (context, _) => const Icon(
-              Icons.star,
-              color: Colors.amber,
-            ),
-            onRatingUpdate: (rating) {
-              setState(() {
-                _driverRating = rating;
-              });
-            },
+        children: [
+          Text(
+            'Comment était votre repas ?',
+            style: AppTypography.headlineSm(color: theme.colorScheme.onSurface),
           ),
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _driverCommentController,
-          decoration: InputDecoration(
-            hintText: 'Commentaire sur la livraison (optionnel)',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+          const SizedBox(height: DesignConstants.spacingXS),
+          Text(
+            'Notez ce que vous voulez — rien n’est obligatoire.',
+            style: AppTypography.bodyMd(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
-            filled: true,
-            fillColor: Colors.grey[50],
           ),
-          maxLines: 2,
-        ),
-      ],
+          const SizedBox(height: DesignConstants.spacingL),
+          for (final article in widget.order.items) ...[
+            _carteDArticle(theme, article),
+            const SizedBox(height: DesignConstants.spacingM),
+          ],
+          if (widget.order.deliveryPersonId != null) ...[
+            const SizedBox(height: DesignConstants.spacingS),
+            _sectionLivreur(theme),
+          ],
+          const SizedBox(height: DesignConstants.spacingL),
+          ActionButton(
+            label: 'Envoyer mes avis',
+            emphasis: ActionEmphasis.gradient,
+            icon: Icons.send_rounded,
+            isLoading: _isLoading,
+            onPressed: _isLoading ? null : _submitRatings,
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildItemsRatingSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Les Plats',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-        ),
-        const SizedBox(height: 16),
-        ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: widget.order.items.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 24),
-          itemBuilder: (context, index) {
-            final item = widget.order.items[index];
-            return _buildItemRatingCard(item);
-          },
-        ),
-      ],
-    );
-  }
+  /// Un plat, sa note et ses appréciations.
+  ///
+  /// Les puces alimentent le `title` de l'avis — un champ qui existe au
+  /// contrat et que l'écran laissait systématiquement vide.
+  Widget _carteDArticle(ThemeData theme, OrderItem article) {
+    final note = _itemRatings[article.menuItemId] ?? 0;
+    final retenues = _itemAppreciations[article.menuItemId] ?? <String>{};
 
-  Widget _buildItemRatingCard(OrderItem item) {
-    return Card(
-      elevation: 0,
-      color: Colors.grey[50],
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: item.menuItemImage.isNotEmpty
-                      ? Image.network(
-                          item.menuItemImage,
-                          width: 60,
-                          height: 60,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              Container(
-                            width: 60,
-                            height: 60,
-                            color: Colors.grey[300],
-                            child: const Icon(
-                              Icons.restaurant,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        )
-                      : Container(
-                          width: 60,
-                          height: 60,
-                          color: Colors.grey[300],
-                          child:
-                              const Icon(Icons.restaurant, color: Colors.grey),
-                        ),
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: DesignConstants.borderRadiusMedium,
+                child: SizedBox(
+                  width: DesignConstants.avatarSizeMedium,
+                  height: DesignConstants.avatarSizeMedium,
+                  child: FoodImage(
+                    url: article.menuItemImage.isEmpty
+                        ? null
+                        : article.menuItemImage,
+                    iconSize: 24,
+                  ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.menuItemName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+              ),
+              const SizedBox(width: DesignConstants.spacingM),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      article.name,
+                      style: AppTypography.titleLg(
+                        color: theme.colorScheme.onSurface,
                       ),
-                      const SizedBox(height: 4),
-                      RatingBar.builder(
-                        initialRating: _itemRatings[item.menuItemId] ?? 0,
-                        minRating: 1,
-                        itemSize: 24,
-                        itemPadding:
-                            const EdgeInsets.symmetric(horizontal: 2.0),
-                        itemBuilder: (context, _) => const Icon(
-                          Icons.star,
-                          color: Colors.amber,
+                    ),
+                    if (article.customizations.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        article.customizations.values.join(' · '),
+                        style: AppTypography.bodyMd(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                        onRatingUpdate: (rating) {
-                          setState(() {
-                            _itemRatings[item.menuItemId] = rating;
-                          });
-                        },
                       ),
                     ],
-                  ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _itemComments[item.menuItemId],
-              decoration: InputDecoration(
-                hintText: 'Votre avis sur ce plat (optionnel)',
-                isDense: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
-                ),
-                filled: true,
-                fillColor: Colors.white,
               ),
-              maxLines: 2,
-              style: const TextStyle(fontSize: 13),
+            ],
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          RatingStars(
+            note: note,
+            taille: 34,
+            onChanged: (valeur) => setState(
+              () => _itemRatings[article.menuItemId] = valeur,
+            ),
+          ),
+          if (note > 0) ...[
+            const SizedBox(height: DesignConstants.spacingM),
+            AppreciationChips(
+              options: _appreciationsDuPlat,
+              retenues: retenues,
+              onChanged: (suite) => setState(
+                () => _itemAppreciations[article.menuItemId] = suite,
+              ),
+            ),
+            const SizedBox(height: DesignConstants.spacingM),
+            TextField(
+              controller: _itemComments[article.menuItemId],
+              maxLines: 3,
+              style: AppTypography.bodyLg(color: theme.colorScheme.onSurface),
+              decoration: const InputDecoration(
+                hintText: 'Un mot sur ce plat (facultatif)',
+              ),
             ),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionLivreur(ThemeData theme) {
+    return SectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.two_wheeler_rounded,
+                color: theme.colorScheme.primary,
+                size: DesignConstants.iconSizeMedium,
+              ),
+              const SizedBox(width: DesignConstants.spacingS),
+              Expanded(
+                child: Text(
+                  'Et la livraison ?',
+                  style: AppTypography.titleLg(
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          RatingStars(
+            note: _driverRating,
+            taille: 34,
+            onChanged: (valeur) => setState(() => _driverRating = valeur),
+          ),
+          if (_driverRating > 0) ...[
+            const SizedBox(height: DesignConstants.spacingM),
+            AppreciationChips(
+              options: _appreciationsDeLivraison,
+              retenues: _driverAppreciations,
+              onChanged: (suite) =>
+                  setState(() => _driverAppreciations = suite),
+            ),
+            const SizedBox(height: DesignConstants.spacingM),
+            TextField(
+              controller: _driverCommentController,
+              maxLines: 3,
+              style: AppTypography.bodyLg(color: theme.colorScheme.onSurface),
+              decoration: const InputDecoration(
+                hintText: 'Un mot sur la livraison (facultatif)',
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

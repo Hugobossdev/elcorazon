@@ -25,6 +25,7 @@ export 'food_image.dart';
 export 'glass_surface.dart';
 export 'option_tile.dart';
 export 'promo_banner.dart';
+export 'rating_input.dart';
 export 'search_field.dart';
 export 'segmented_tabs.dart';
 export 'section_card.dart';
