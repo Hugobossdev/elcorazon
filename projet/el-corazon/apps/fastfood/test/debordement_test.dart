@@ -1,4 +1,5 @@
 import 'package:elcora_fast/models/cart_item.dart';
+import 'package:elcora_fast/screens/onboarding_screen.dart';
 import 'package:elcora_fast/screens/client/widgets/quick_actions_widget.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
@@ -262,6 +263,29 @@ void main() {
           echelle: echelle,
         );
       });
+    }
+  });
+
+  group('Presentation d’ouverture', () {
+    // Les trois pages sont bâties sur des dégradés et des icônes, sans
+    // photographie : leur hauteur suit donc entièrement le texte, et c'est ce
+    // que ce cas surveille. L'illustration prend une **part** de la hauteur
+    // disponible plutôt qu'un nombre de pixels, précisément pour qu'un
+    // téléphone court avec la police grossie garde de la place pour le titre.
+    for (final ecran in ecrans.entries) {
+      for (final echelle in echelles) {
+        testWidgets(
+          'la page courante tient — ${ecran.key}, texte x$echelle',
+          (tester) async {
+            await poser(
+              tester,
+              const OnboardingScreen(),
+              ecran: ecran.value,
+              echelle: echelle,
+            );
+          },
+        );
+      }
     }
   });
 

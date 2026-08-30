@@ -4,6 +4,8 @@ import 'package:elcora_fast/main.dart' show sessionReadyFuture;
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/error_handler_service.dart';
 import 'package:elcora_fast/services/performance_service.dart';
+import 'package:elcora_fast/services/onboarding_service.dart';
+import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/screens/client/main_navigation_screen.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/theme.dart';
@@ -97,11 +99,16 @@ class _SplashScreenState extends State<SplashScreen>
     // Initialize app services with performance monitoring
     await _initializeAppWithPerformance();
 
+    // Lu **pendant** que l'animation se joue, et non après : la lecture d'un
+    // drapeau dans `SharedPreferences` prend quelques millisecondes, mais les
+    // enchaîner derrière l'attente les ajouterait au démarrage.
+    final presentationDejaVue = await OnboardingService.dejaVue();
+
     // Ensure animation has enough time to be seen
     await Future.delayed(const Duration(milliseconds: 2500));
 
     if (mounted) {
-      _navigateToNextScreen();
+      _navigateToNextScreen(presentationDejaVue: presentationDejaVue);
     }
   }
 
@@ -127,10 +134,22 @@ class _SplashScreenState extends State<SplashScreen>
     }
   }
 
-  void _navigateToNextScreen() {
+  /// Route de sortie de l'écran d'ouverture.
+  ///
+  /// La présentation ne s'interpose que devant un **visiteur** : quelqu'un
+  /// dont la session est restaurée a déjà fait ce chemin, et lui remontrer
+  /// trois écrans de découverte à chaque réinstallation d'une mise à jour
+  /// serait un péage, pas un accueil.
+  void _navigateToNextScreen({required bool presentationDejaVue}) {
     final appService = context.read<AppService>();
 
     try {
+      if (!presentationDejaVue &&
+          !(appService.currentUser != null && appService.isLoggedIn)) {
+        Navigator.of(context).pushReplacementNamed(AppRouter.onboarding);
+        return;
+      }
+
       if (appService.currentUser != null && appService.isLoggedIn) {
         // Utiliser le service de navigation pour naviguer vers l'écran approprié selon le rôle
         NavigationService.navigateBasedOnRole(context, appService.currentUser!);

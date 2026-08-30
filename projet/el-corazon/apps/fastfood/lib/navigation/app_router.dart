@@ -4,6 +4,7 @@ import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/screens/splash_screen.dart';
+import 'package:elcora_fast/screens/onboarding_screen.dart';
 import 'package:elcora_fast/screens/auth_screen.dart';
 import 'package:elcora_fast/screens/home_screen.dart';
 import 'package:elcora_fast/screens/client/main_navigation_screen.dart';
@@ -36,6 +37,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 /// Routeur principal de l'application
 class AppRouter {
   static const String splash = '/';
+  static const String onboarding = '/onboarding';
   static const String auth = '/auth';
   static const String home = '/home';
   static const String clientHome = '/client/home';
@@ -72,6 +74,12 @@ class AppRouter {
       case splash:
         return MaterialPageRoute(
           builder: (_) => const SplashScreen(),
+          settings: settings,
+        );
+
+      case onboarding:
+        return MaterialPageRoute(
+          builder: (_) => const OnboardingScreen(),
           settings: settings,
         );
 
