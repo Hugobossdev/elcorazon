@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
+import 'package:elcora_fast/theme.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/config/app_constants.dart';
@@ -123,11 +124,11 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
           decoration: BoxDecoration(
             color: Theme.of(context).scaffoldBackgroundColor,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-            boxShadow: [
+            boxShadow: const [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.2),
+                color: Color(0x331A1A1A),
                 blurRadius: 10,
-                offset: const Offset(0, -2),
+                offset: Offset(0, -2),
               ),
             ],
           ),
@@ -160,7 +161,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       width: 40,
       height: 4,
       decoration: BoxDecoration(
-        color: Colors.grey.shade300,
+        color: Theme.of(context).colorScheme.outlineVariant,
         borderRadius: BorderRadius.circular(2),
       ),
     );
@@ -197,7 +198,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       child: TabBar(
         controller: _tabController,
         labelColor: Theme.of(context).colorScheme.primary,
-        unselectedLabelColor: Colors.grey.shade600,
+        unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
         indicatorColor: Theme.of(context).colorScheme.primary,
         tabs: const [
           Tab(icon: Icon(Icons.edit), text: 'Formulaire'),
@@ -271,24 +272,26 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: AppColors.successLight,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade200),
+                  border: Border.all(
+                    color: AppColors.success.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Row(
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.check_circle,
-                      color: Colors.green.shade700,
+                      color: AppColors.success,
                       size: 20,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Position GPS: ${_pickedLatLng!.latitude.toStringAsFixed(5)}, ${_pickedLatLng!.longitude.toStringAsFixed(5)}',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 12,
-                          color: Colors.green.shade900,
+                          color: AppColors.success,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -375,7 +378,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
           Text(
             'Placez le marqueur sur la carte',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.grey.shade600,
+                  color: AppColors.textSecondary,
                 ),
           ),
           const SizedBox(height: 24),
@@ -390,18 +393,20 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
               padding: const EdgeInsets.all(12),
               margin: const EdgeInsets.symmetric(horizontal: 32),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: AppColors.successLight,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green.shade200),
+                border: Border.all(
+                  color: AppColors.success.withValues(alpha: 0.3),
+                ),
               ),
-              child: Column(
+              child: const Column(
                 children: [
-                  Icon(Icons.check_circle, color: Colors.green.shade700),
-                  const SizedBox(height: 8),
+                  Icon(Icons.check_circle, color: AppColors.success),
+                  SizedBox(height: 8),
                   Text(
                     'Position sélectionnée',
                     style: TextStyle(
-                      color: Colors.green.shade900,
+                      color: AppColors.success,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -451,7 +456,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                 borderRadius: BorderRadius.circular(12),
               ),
               filled: true,
-              fillColor: Colors.grey.shade100,
+              fillColor: Theme.of(context).colorScheme.surfaceContainer,
             ),
             onChanged: _onSearchChanged,
           ),
@@ -482,13 +487,17 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.search, size: 64, color: Colors.grey.shade400),
+          Icon(
+            Icons.search,
+            size: 64,
+            color: AppColors.textTertiary.withValues(alpha: 0.6),
+          ),
           const SizedBox(height: 16),
-          Text(
+          const Text(
             'Recherchez une adresse',
             style: TextStyle(
               fontSize: 16,
-              color: Colors.grey.shade600,
+              color: AppColors.textSecondary,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -513,7 +522,11 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
           runSpacing: 8,
           children: TypeAdresse.values.map((type) {
             final isSelected = _selectedType == type;
-            final color = type.couleur;
+            // Les teintes viennent du vocabulaire (`TypeAdresse`), les mêmes
+            // que la carte d'adresse : un « Travail » orange dans la liste ne
+            // peut pas être bleu dans le formulaire qui le crée.
+            final fond = type.fond;
+            final encre = type.encre;
             return InkWell(
               onTap: () => setState(() => _selectedType = type),
               borderRadius: BorderRadius.circular(24),
@@ -522,11 +535,13 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? color.withValues(alpha: 0.15)
-                      : Colors.grey.shade100,
+                      ? fond
+                      : Theme.of(context).colorScheme.surfaceContainerHigh,
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
-                    color: isSelected ? color : Colors.grey.shade300,
+                    color: isSelected
+                        ? encre
+                        : Theme.of(context).colorScheme.outlineVariant,
                     width: isSelected ? 2 : 1,
                   ),
                 ),
@@ -538,7 +553,9 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                     Text(
                       type.libelle,
                       style: TextStyle(
-                        color: isSelected ? color : Colors.grey.shade700,
+                        color: isSelected
+                            ? encre
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
                         fontWeight:
                             isSelected ? FontWeight.bold : FontWeight.w500,
                       ),
@@ -568,7 +585,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
           onChanged: (value) => setState(() => _isFavorite = value),
           title: const Text('Ajouter aux favoris'),
           subtitle: const Text('Accès rapide à cette adresse'),
-          secondary: Icon(Icons.star, color: Colors.amber.shade600),
+          secondary: const Icon(Icons.star, color: AppColors.secondary),
         ),
       ],
     );
@@ -579,11 +596,11 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
-        boxShadow: [
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
+            color: Color(0x1A1A1A1A),
             blurRadius: 8,
-            offset: const Offset(0, -2),
+            offset: Offset(0, -2),
           ),
         ],
       ),
@@ -699,7 +716,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: Colors.red,
+        backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -892,7 +909,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        icon: const Icon(Icons.location_off, color: Colors.orange),
+        icon: const Icon(Icons.location_off, color: AppColors.warning),
         title: const Text('Adresse hors zone'),
         content: const Text(
           'Aucune de nos zones de livraison ne couvre ce point. '
