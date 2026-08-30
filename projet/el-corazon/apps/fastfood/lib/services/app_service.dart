@@ -317,6 +317,27 @@ class AppService extends ChangeNotifier {
     return true;
   }
 
+  /// Met à jour le nom et le téléphone du compte connecté.
+  ///
+  /// ## Pourquoi cette méthode manquait
+  ///
+  /// La boîte « Modifier le profil » du profil fermait sur un message de
+  /// succès — « Profil mis à jour avec succès ! » — **sans rien envoyer**.
+  /// Le champ retrouvait son ancienne valeur à la réouverture, et personne ne
+  /// pouvait savoir si le serveur avait refusé ou si l'app n'avait rien
+  /// demandé. `AuthRepository.updateProfile` existait depuis le début.
+  ///
+  /// La session est relue ensuite plutôt que `_currentUser` corrigé sur place :
+  /// l'identité vit dans `sessionProvider`, et deux écritures pour un même
+  /// fait finissent toujours par diverger.
+  Future<void> updateProfile({String? fullName, String? phone}) async {
+    await _container.read(eccore.authRepositoryProvider).updateProfile(
+          fullName: fullName,
+          phone: phone,
+        );
+    await _container.read(eccore.sessionProvider.notifier).restoreSession();
+  }
+
   Future<void> logout() async {
     try {
       // Avant la révocation : `/auth/devices/` exige la session qu'on est en

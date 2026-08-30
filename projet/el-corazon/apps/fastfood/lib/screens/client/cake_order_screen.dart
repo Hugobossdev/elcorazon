@@ -380,7 +380,11 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
             ),
           ),
         ],
-        bottom: _Bascule(controller: _tabController),
+        bottom: SegmentedTabs(
+          controller: _tabController,
+          labels: const ['Catalogue', 'Sur mesure'],
+          icons: const [Icons.cake_outlined, Icons.tune_rounded],
+        ),
       ),
       body: TabBarView(
         controller: _tabController,
@@ -1540,60 +1544,6 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 }
 
 // --------------------------------------------------------------- composants
-
-/// La bascule « Catalogue / Sur mesure », posée sous la barre translucide.
-///
-/// Un `TabBar` plutôt qu'un `SegmentedButton` : le `TabBarView` qu'il pilote
-/// veut un `TabController`, et le second n'en fournit pas. L'indicateur est
-/// une pilule pleine — celui de Material, un trait de 2 px sous l'onglet, se
-/// perd sur le fond chaud du design system.
-class _Bascule extends StatelessWidget implements PreferredSizeWidget {
-  const _Bascule({required this.controller});
-
-  final TabController controller;
-
-  @override
-  Size get preferredSize => const Size.fromHeight(56);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        DesignConstants.edgeMargin,
-        0,
-        DesignConstants.edgeMargin,
-        DesignConstants.spacingS,
-      ),
-      child: Container(
-        height: 44,
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHigh,
-          borderRadius: DesignConstants.borderRadiusMedium,
-        ),
-        child: TabBar(
-          controller: controller,
-          dividerColor: Colors.transparent,
-          indicatorSize: TabBarIndicatorSize.tab,
-          padding: const EdgeInsets.all(4),
-          indicator: BoxDecoration(
-            color: theme.colorScheme.primary,
-            borderRadius: BorderRadius.circular(DesignConstants.radiusSmall),
-          ),
-          labelColor: theme.colorScheme.onPrimary,
-          unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
-          labelStyle: AppTypography.labelLg(),
-          unselectedLabelStyle: AppTypography.labelLg(),
-          tabs: const [
-            Tab(text: 'Catalogue'),
-            Tab(text: 'Sur mesure'),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// Une couleur de glaçage, montrée telle quelle.
 class _Pastille extends StatelessWidget {

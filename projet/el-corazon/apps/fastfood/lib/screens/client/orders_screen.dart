@@ -2,12 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/models/order.dart';
-import 'package:elcora_fast/widgets/delivery_status_card.dart';
-import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
-import 'package:elcora_fast/services/design_enhancement_service.dart';
-import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/delivery_status_card.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
+import 'package:elcora_fast/widgets/navigation_helper.dart';
 
+/// Onglet « Mes commandes » de la barre inférieure.
+///
+/// ## Pourquoi il change d'habillage
+///
+/// Le design Stitch ne livre pas de maquette pour cet écran, mais il en livre
+/// une pour la **barre inférieure** qui l'atteint. L'écran gardait donc une
+/// barre supérieure en aplat rouge dégradé et des onglets blancs translucides,
+/// juste au-dessus d'une navigation redessinée : le passage d'un onglet à
+/// l'autre changeait d'application à vue d'œil.
+///
+/// Il prend ici la barre translucide et la bascule en pilule des autres
+/// écrans, et confie ses trois états — vide, chargement, contenu — aux mêmes
+/// composants que le reste de l'application.
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
 
@@ -31,154 +45,66 @@ class _OrdersScreenState extends State<OrdersScreen>
     super.dispose();
   }
 
-  Future<void> _navigateToDeliveryTracking(Order order) async {
-    await context.navigateToDeliveryTracking(order.id);
-  }
-
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Consumer<AppService>(
       builder: (context, appService, child) {
         if (!appService.isLoggedIn) {
           return Scaffold(
-            backgroundColor: AppColors.background,
-            appBar: AppBar(
-              title: const Text('Mes Commandes'),
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-            ),
-            body: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.receipt_long_outlined,
-                      size: 80,
-                      color: AppColors.textSecondary.withValues(alpha: 0.3),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'Connectez-vous pour voir vos commandes',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.textPrimary,
-                          ),
-                    ),
-                    const SizedBox(height: 32),
-                    DesignEnhancementService.createEnhancedButton(
-                      text: 'Se connecter',
-                      icon: Icons.login,
-                      onPressed: () {
-                        NavigationService.navigateToAuth(context);
-                      },
-                      backgroundColor: AppColors.primary,
-                      isFullWidth: true,
-                    ),
-                  ],
-                ),
-              ),
+            backgroundColor: theme.colorScheme.surface,
+            appBar: const GlassAppBar(title: 'Mes commandes', showBack: false),
+            body: etats.EmptyStateWidget(
+              title: 'Connectez-vous pour voir vos commandes',
+              message:
+                  'Vos commandes en cours et votre historique vous attendent.',
+              icon: Icons.receipt_long_outlined,
+              actionText: 'Se connecter',
+              onAction: () => NavigationService.navigateToAuth(context),
             ),
           );
         }
 
         return Scaffold(
-          backgroundColor: AppColors.background,
-          appBar: AppBar(
-            title: const Row(
-              children: [
-                Icon(Icons.receipt_long_rounded, size: 24),
-                SizedBox(width: 8),
-                Text(
-                  'Mes Commandes',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            flexibleSpace: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppColors.primary,
-                    AppColors.primaryDark,
-                  ],
-                ),
-              ),
-            ),
+          backgroundColor: theme.colorScheme.surface,
+          appBar: GlassAppBar(
+            title: 'Mes commandes',
+            showBack: false,
             actions: [
-              Tooltip(
-                message: 'Vue améliorée',
-                child: IconButton(
-                  icon: const Icon(Icons.filter_list_rounded),
-                  onPressed: () => context.navigateToEnhancedOrders(),
-                ),
+              GlassIconButton(
+                icon: Icons.tune_rounded,
+                tooltip: 'Filtrer et rechercher',
+                filled: false,
+                onPressed: () => context.navigateToEnhancedOrders(),
               ),
             ],
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(50),
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(16),
-                    topRight: Radius.circular(16),
-                  ),
-                ),
-                child: TabBar(
-                  controller: _tabController,
-                  indicator: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.white.withValues(alpha: 0.3),
-                        Colors.white.withValues(alpha: 0.2),
-                      ],
-                    ),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(16),
-                      topRight: Radius.circular(16),
-                    ),
-                  ),
-                  indicatorColor: Colors.transparent,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: Colors.white.withValues(alpha: 0.7),
-                  labelStyle: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                  unselectedLabelStyle: const TextStyle(
-                    fontWeight: FontWeight.w500,
-                    fontSize: 14,
-                  ),
-                  tabs: const [
-                    Tab(
-                      text: 'En cours',
-                      icon: Icon(Icons.access_time_rounded, size: 20),
-                    ),
-                    Tab(
-                      text: 'Historique',
-                      icon: Icon(Icons.history_rounded, size: 20),
-                    ),
-                  ],
-                ),
-              ),
+            bottom: SegmentedTabs(
+              controller: _tabController,
+              labels: const ['En cours', 'Historique'],
+              icons: const [Icons.schedule_rounded, Icons.history_rounded],
             ),
           ),
           body: TabBarView(
             controller: _tabController,
             children: [
-              _buildActiveOrders(),
-              _buildOrderHistory(),
+              _liste(
+                commandes: appService.orders.where(_estEnCours).toList(),
+                vide: const etats.EmptyStateWidget(
+                  title: 'Aucune commande en cours',
+                  message: 'Vos commandes actives apparaîtront ici.',
+                  icon: Icons.shopping_bag_outlined,
+                ),
+              ),
+              _liste(
+                commandes:
+                    appService.orders.where((o) => !_estEnCours(o)).toList(),
+                vide: const etats.EmptyStateWidget(
+                  title: 'Aucune commande passée',
+                  message: 'Votre historique apparaîtra ici.',
+                  icon: Icons.receipt_long_outlined,
+                ),
+              ),
             ],
           ),
         );
@@ -186,126 +112,75 @@ class _OrdersScreenState extends State<OrdersScreen>
     );
   }
 
-  Widget _buildActiveOrders() {
-    return Consumer<AppService>(
-      builder: (context, appService, child) {
-        final activeOrders = appService.orders
-            .where(
-              (order) =>
-                  order.status != OrderStatus.delivered &&
-                  order.status != OrderStatus.cancelled,
-            )
-            .toList();
-
-        if (activeOrders.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.shopping_bag_outlined,
-            title: 'Aucune commande en cours',
-            subtitle: 'Vos commandes actives apparaîtront ici',
-            actionLabel: 'Explorer le menu',
-            onAction: () {
-              context.navigateToMenu();
-            },
-          );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: activeOrders.length,
-          itemBuilder: (context, index) {
-            final order = activeOrders[index];
-            return DeliveryStatusCard(
-              order: order,
-              onTap: () => _navigateToDeliveryTracking(order),
-            );
-          },
-        );
-      },
-    );
+  /// Une commande est « en cours » tant qu'elle n'est ni livrée ni close.
+  ///
+  /// `refunded` et `failed` rejoignent l'historique : ce sont des issues, pas
+  /// des étapes. Les ranger parmi les commandes actives laissait une commande
+  /// échouée en tête de liste, indéfiniment.
+  bool _estEnCours(Order commande) {
+    switch (commande.status) {
+      case OrderStatus.delivered:
+      case OrderStatus.cancelled:
+      case OrderStatus.refunded:
+      case OrderStatus.failed:
+        return false;
+      case OrderStatus.pending:
+      case OrderStatus.confirmed:
+      case OrderStatus.preparing:
+      case OrderStatus.ready:
+      case OrderStatus.pickedUp:
+      case OrderStatus.onTheWay:
+        return true;
+    }
   }
 
-  Widget _buildOrderHistory() {
-    return Consumer<AppService>(
-      builder: (context, appService, child) {
-        final completedOrders = appService.orders
-            .where(
-              (order) =>
-                  order.status == OrderStatus.delivered ||
-                  order.status == OrderStatus.cancelled,
-            )
-            .toList();
-
-        if (completedOrders.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.receipt_long_outlined,
-            title: 'Aucune commande passée',
-            subtitle: 'Votre historique de commandes apparaîtra ici',
-            actionLabel: 'Passer ma première commande',
-            onAction: () async {
-              // Navigate to menu
-              await context.navigateToMenu();
-            },
-          );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: completedOrders.length,
-          itemBuilder: (context, index) {
-            final order = completedOrders[index];
-            return DeliveryStatusCard(
-              order: order,
-              onTap: () => _navigateToDeliveryTracking(order),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required String actionLabel,
-    required VoidCallback onAction,
-  }) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 80,
-              color: Colors.grey[400],
+  Widget _liste({required List<Order> commandes, required Widget vide}) {
+    if (commandes.isEmpty) {
+      // Le geste de rafraîchissement doit rester possible quand la liste est
+      // vide : c'est précisément là qu'on cherche à la remplir. Un `Center`
+      // seul ne défile pas, et `RefreshIndicator` n'a alors rien à écouter.
+      return RefreshIndicator(
+        onRefresh: _rafraichir,
+        child: LayoutBuilder(
+          builder: (context, contraintes) => SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: contraintes.maxHeight),
+              child: vide,
             ),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[700],
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey[600],
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: onAction,
-              child: Text(actionLabel),
-            ),
-          ],
+          ),
         ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _rafraichir,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(
+          DesignConstants.edgeMargin,
+          DesignConstants.spacingM,
+          DesignConstants.edgeMargin,
+          DesignConstants.spacingXL,
+        ),
+        itemCount: commandes.length,
+        itemBuilder: (context, index) {
+          final commande = commandes[index];
+          return DeliveryStatusCard(
+            order: commande,
+            onTap: () => context.navigateToDeliveryTracking(commande.id),
+          );
+        },
       ),
     );
+  }
+
+  /// Relit les commandes auprès du serveur.
+  ///
+  /// `AppService.initialize()` recharge la session, le menu **et** les
+  /// commandes. C'est plus large que nécessaire, mais c'est le seul point
+  /// d'entrée public : élargir la surface d'`AppService` pour un tirage vers
+  /// le bas n'en vaut pas le prix.
+  Future<void> _rafraichir() async {
+    await Provider.of<AppService>(context, listen: false).initialize();
   }
 }

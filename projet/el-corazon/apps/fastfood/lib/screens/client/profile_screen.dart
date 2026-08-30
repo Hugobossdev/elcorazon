@@ -9,55 +9,41 @@ import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
+/// Onglet « Profil » de la barre inférieure.
+///
+/// ## Ce que la reprise Stitch change
+///
+/// L'écran gardait une barre supérieure en aplat rouge, six `Card` d'élévation
+/// 2 ou 4, et des gris de Material (`Colors.grey[600]`, `grey[700]`) là où le
+/// design system porte `onSurfaceVariant`. Il passe aux briques communes —
+/// barre translucide, [SectionCard], [SectionHeader], [StatusChip],
+/// [ActionButton] — et la carte de fidélité prend le dégradé doré que
+/// `DESIGN.md` réserve précisément à ce genre de bloc.
+///
+/// La maquette Stitch ne couvre pas cet écran, mais elle couvre la **barre
+/// inférieure** qui l'atteint : le laisser à l'ancienne charte faisait changer
+/// d'application au quatrième onglet.
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
 
-  void _showSimpleInfoDialog(
-    BuildContext context, {
-    required String title,
-    required String message,
-  }) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text(
-          'Mon Profil',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
-          ),
-        ),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        centerTitle: true,
-      ),
+      backgroundColor: theme.colorScheme.surface,
+      appBar: const GlassAppBar(title: 'Mon profil', showBack: false),
       body: Consumer2<AppService, GamificationService>(
         builder: (context, appService, gamification, child) {
           if (!appService.isLoggedIn || appService.currentUser == null) {
-            return _buildGuestProfile(context);
+            return _profilInvite(context);
           }
 
           final user = appService.currentUser!;
@@ -67,722 +53,386 @@ class ProfileScreen extends StatelessWidget {
           final points = gamification.currentPoints;
           final badges = gamification.badges;
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildProfileHeader(
-                  context,
-                  user,
-                  ordersCount: ordersCount,
-                  points: points,
-                ),
-                const SizedBox(height: 12),
-                _buildQuickActions(context),
-                const SizedBox(height: 24),
-                if (user.estClient) ...[
-                  _buildLoyaltyCard(context, points, badges),
-                  const SizedBox(height: 24),
-                ],
-                _buildAppearanceSection(context),
-                const SizedBox(height: 24),
-                _buildMenuSection(context, 'Paramètres', [
-                  _MenuItem(
-                    icon: Icons.person,
-                    title: 'Informations personnelles',
-                    subtitle: 'Modifier mon profil',
-                    onTap: () => _showEditProfileDialog(context),
-                  ),
-                  _MenuItem(
-                    icon: Icons.location_on,
-                    title: 'Adresses',
-                    subtitle: 'Gérer mes adresses de livraison',
-                    onTap: () => Navigator.of(context)
-                        .pushNamed(AppRouter.addressManagement),
-                  ),
-                  _MenuItem(
-                    icon: Icons.receipt_long,
-                    title: 'Mes commandes',
-                    subtitle: 'Historique et détails',
-                    onTap: () => Navigator.of(context).pushNamed(
-                      AppRouter.enhancedOrders,
-                    ),
-                  ),
-                  _MenuItem(
-                    icon: Icons.notifications,
-                    title: 'Notifications',
-                    subtitle: 'Paramètres de notifications',
-                    onTap: () => context.navigateToNotifications(),
-                  ),
-                ]),
-                const SizedBox(height: 24),
-                _buildMenuSection(context, 'Plus', [
-                  _MenuItem(
-                    icon: Icons.group,
-                    title: 'Commandes groupées',
-                    subtitle: 'Commander avec des amis',
-                    onTap: () =>
-                        Navigator.of(context).pushNamed(AppRouter.groupOrder),
-                  ),
-                  _MenuItem(
-                    icon: Icons.people,
-                    title: 'Mes groupes',
-                    subtitle: 'Partager avec vos proches',
-                    onTap: () =>
-                        Navigator.of(context).pushNamed(AppRouter.socialGroups),
-                  ),
-                  _MenuItem(
-                    icon: Icons.help,
-                    title: 'Centre d\'aide',
-                    subtitle: 'FAQ et guides',
-                    onTap: () =>
-                        Navigator.of(context).pushNamed(AppRouter.support),
-                  ),
-                  _MenuItem(
-                    icon: Icons.chat,
-                    title: 'Contacter le support',
-                    subtitle: 'Chat en direct',
-                    onTap: () =>
-                        Navigator.of(context).pushNamed(AppRouter.support),
-                  ),
-                  _MenuItem(
-                    icon: Icons.star_rate,
-                    title: 'Évaluer l\'app',
-                    subtitle: 'Donnez votre avis',
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Évaluation: à brancher (Play Store / App Store)',
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  _MenuItem(
-                    icon: Icons.info,
-                    title: 'À propos d\'El Corazón',
-                    subtitle: 'Version 1.0.0',
-                    onTap: () {
-                      showAboutDialog(
-                        context: context,
-                        applicationName: 'El Corazón',
-                        applicationVersion: '1.0.0',
-                        applicationLegalese: '© El Corazón',
-                      );
-                    },
-                  ),
-                  _MenuItem(
-                    icon: Icons.privacy_tip,
-                    title: 'Politique de confidentialité',
-                    subtitle: 'Vos données personnelles',
-                    onTap: () => _showSimpleInfoDialog(
-                      context,
-                      title: 'Politique de confidentialité',
-                      message:
-                          'À connecter: afficher le document (webview / markdown) ou lien externe.',
-                    ),
-                  ),
-                  _MenuItem(
-                    icon: Icons.gavel,
-                    title: 'Conditions d\'utilisation',
-                    subtitle: 'Termes et conditions',
-                    onTap: () => _showSimpleInfoDialog(
-                      context,
-                      title: 'Conditions d\'utilisation',
-                      message:
-                          'À connecter: afficher le document (webview / markdown) ou lien externe.',
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 24),
-                _buildLogoutButton(context),
-                const SizedBox(height: 24),
-              ],
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingM,
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingXL,
             ),
+            children: [
+              _enTete(context, user, ordersCount: ordersCount, points: points),
+              const SizedBox(height: DesignConstants.spacingM),
+              _raccourcis(context),
+              if (user.estClient) ...[
+                const SizedBox(height: DesignConstants.spacingL),
+                _carteDeFidelite(context, points, badges),
+              ],
+              const SizedBox(height: DesignConstants.spacingL),
+              _apparence(context),
+              const SizedBox(height: DesignConstants.spacingL),
+              _section(context, 'Paramètres', _entreesDesReglages(context)),
+              const SizedBox(height: DesignConstants.spacingL),
+              _section(context, 'Plus', _entreesComplementaires(context)),
+              const SizedBox(height: DesignConstants.spacingL),
+              ActionButton(
+                label: 'Se déconnecter',
+                emphasis: ActionEmphasis.outlined,
+                icon: Icons.logout_rounded,
+                foregroundColor: theme.colorScheme.error,
+                onPressed: () => _confirmerDeconnexion(context),
+              ),
+            ],
           );
         },
       ),
     );
   }
 
-  Widget _buildQuickActions(BuildContext context) {
-    Widget action({
-      required IconData icon,
-      required String label,
+  // ------------------------------------------------------------------ invité
+
+  Widget _profilInvite(BuildContext context) {
+    return etats.EmptyStateWidget(
+      title: 'Connectez-vous',
+      message: 'Votre profil, vos commandes et vos favoris vous attendent.',
+      icon: Icons.account_circle_outlined,
+      actionText: 'Se connecter ou s’inscrire',
+      onAction: () => NavigationService.navigateToAuth(context),
+    );
+  }
+
+  // ------------------------------------------------------------------ entête
+
+  Widget _enTete(
+    BuildContext context,
+    eccore.User user, {
+    required int ordersCount,
+    required int points,
+  }) {
+    final theme = Theme.of(context);
+    final palier = palierDeFidelite(points);
+
+    return SectionCard(
+      onTap: () => _ouvrirLaModification(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _avatar(context, user),
+              const SizedBox(width: DesignConstants.spacingM),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user.fullName,
+                      style: AppTypography.titleLg(
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      user.email,
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${user.pastilleDuType} ${user.libelleDuType}',
+                      style: AppTypography.labelLg(
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.edit_outlined,
+                color: theme.colorScheme.primary,
+                size: DesignConstants.iconSizeMedium,
+              ),
+            ],
+          ),
+          const SizedBox(height: DesignConstants.spacingM),
+          Wrap(
+            spacing: DesignConstants.spacingS,
+            runSpacing: DesignConstants.spacingS,
+            children: [
+              StatusChip(
+                label: palier,
+                icon: Icons.workspace_premium_rounded,
+                background: _fondDuPalier(theme, palier),
+                foreground: _encreDuPalier(theme, palier),
+              ),
+              if (user.estClient)
+                StatusChip(
+                  label: '$points pts',
+                  icon: Icons.loyalty_rounded,
+                  background: theme.colorScheme.secondaryContainer,
+                  foreground: theme.colorScheme.onSecondaryContainer,
+                ),
+              StatusChip(
+                label: ordersCount <= 1
+                    ? '$ordersCount commande'
+                    : '$ordersCount commandes',
+                icon: Icons.receipt_long_rounded,
+                background: theme.colorScheme.surfaceContainerHigh,
+                foreground: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _avatar(BuildContext context, eccore.User user) {
+    final theme = Theme.of(context);
+    const cote = DesignConstants.avatarSizeLarge;
+
+    return ClipOval(
+      child: SizedBox(
+        width: cote,
+        height: cote,
+        child: user.avatar == null
+            ? ColoredBox(
+                color: theme.colorScheme.primary,
+                child: Center(
+                  child: Text(
+                    user.initiales,
+                    style: AppTypography.headlineSm(
+                      color: theme.colorScheme.onPrimary,
+                    ),
+                  ),
+                ),
+              )
+            : FoodImage(
+                url: user.avatar,
+                icon: Icons.person_rounded,
+                iconSize: 32,
+              ),
+      ),
+    );
+  }
+
+  /// Le palier ne prend pas une couleur inventée : le VIP porte le doré de la
+  /// secondaire, « Fidèle » l'orange de la tertiaire, « Standard » la surface.
+  /// L'ambre `#FFB300` qu'il portait n'appartenait à aucun jeton.
+  Color _fondDuPalier(ThemeData theme, String palier) {
+    switch (palier) {
+      case 'VIP':
+        return theme.colorScheme.secondaryContainer;
+      case 'Fidèle':
+        return theme.colorScheme.tertiaryContainer;
+      default:
+        return theme.colorScheme.surfaceContainerHigh;
+    }
+  }
+
+  Color _encreDuPalier(ThemeData theme, String palier) {
+    switch (palier) {
+      case 'VIP':
+        return theme.colorScheme.onSecondaryContainer;
+      case 'Fidèle':
+        return theme.colorScheme.onTertiaryContainer;
+      default:
+        return theme.colorScheme.onSurfaceVariant;
+    }
+  }
+
+  // -------------------------------------------------------------- raccourcis
+
+  Widget _raccourcis(BuildContext context) {
+    final theme = Theme.of(context);
+
+    Widget tuile({
+      required IconData icone,
+      required String libelle,
       required VoidCallback onTap,
     }) {
-      final color = Theme.of(context).colorScheme.primary;
       return Expanded(
-        child: InkWell(
+        child: SectionCard(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Theme.of(context).dividerColor.withValues(alpha: 0.6),
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: color),
-                const SizedBox(height: 6),
-                Text(
-                  label,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                  textAlign: TextAlign.center,
+          padding: const EdgeInsets.symmetric(
+            vertical: DesignConstants.spacingM,
+            horizontal: DesignConstants.spacingS,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icone, color: theme.colorScheme.primary),
+              const SizedBox(height: DesignConstants.spacingXS + 2),
+              Text(
+                libelle,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTypography.labelLg(
+                  color: theme.colorScheme.onSurface,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
     }
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        action(
-          icon: Icons.receipt_long,
-          label: 'Commandes',
+        tuile(
+          icone: Icons.receipt_long_rounded,
+          libelle: 'Commandes',
           onTap: () => Navigator.of(context).pushNamed(AppRouter.enhancedOrders),
         ),
-        const SizedBox(width: 8),
-        action(
-          icon: Icons.location_on,
-          label: 'Adresses',
+        const SizedBox(width: DesignConstants.gutter),
+        tuile(
+          icone: Icons.location_on_outlined,
+          libelle: 'Adresses',
           onTap: () =>
               Navigator.of(context).pushNamed(AppRouter.addressManagement),
         ),
-        const SizedBox(width: 8),
-        action(
-          icon: Icons.notifications,
-          label: 'Notifs',
+        const SizedBox(width: DesignConstants.gutter),
+        tuile(
+          icone: Icons.notifications_none_rounded,
+          libelle: 'Alertes',
           onTap: () => context.navigateToNotifications(),
         ),
       ],
     );
   }
 
-  Widget _buildGuestProfile(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.account_circle_outlined,
-              size: 100,
-              color: AppColors.textSecondary.withValues(alpha: 0.3),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Connectez-vous',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
-                  ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Pour accéder à votre profil, vos commandes et vos favoris, veuillez vous connecter ou créer un compte.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-            ),
-            const SizedBox(height: 32),
-            DesignEnhancementService.createEnhancedButton(
-              text: 'Se connecter / S\'inscrire',
-              icon: Icons.login,
-              onPressed: () {
-                NavigationService.navigateToAuth(context);
-              },
-              backgroundColor: AppColors.primary,
-              isFullWidth: true,
-            ),
-            const SizedBox(height: 16),
-            TextButton(
-              onPressed: () {
-                // Actions supplémentaires si nécessaire (ex: aide)
-              },
-              child: const Text('Besoin d\'aide ?'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // ---------------------------------------------------------------- fidélité
 
-  Widget _buildProfileHeader(
-    BuildContext context,
-    eccore.User user, {
-    required int ordersCount,
-    required int points,
-  }) {
-    final tier = palierDeFidelite(points);
-    final tierColor = _couleurDuPalier(context, tier);
-
-    return InkWell(
-      onTap: () => _showEditProfileDialog(context),
-      borderRadius: BorderRadius.circular(16),
-      child: Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 40,
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              child: user.avatar != null
-                  ? ClipOval(
-                      child: Image.network(
-                        user.avatar!,
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
-                      ),
-                    )
-                  : Text(
-                      user.fullName.substring(0, 2).toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.onPrimary,
-                      ),
-                    ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    user.fullName,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    user.email,
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        user.pastilleDuType,
-                        style: const TextStyle(fontSize: 16),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        user.libelleDuType,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _buildInfoChip(
-                        context,
-                        icon: Icons.verified,
-                        label: tier,
-                        color: tierColor,
-                      ),
-                      if (user.estClient)
-                        _buildInfoChip(
-                          context,
-                          icon: Icons.loyalty,
-                          label: '$points pts',
-                          color: Theme.of(context).colorScheme.secondary,
-                        ),
-                      _buildInfoChip(
-                        context,
-                        icon: Icons.receipt_long,
-                        label: '$ordersCount commandes',
-                        color: Theme.of(context).colorScheme.primary,
-                        onTap: () => Navigator.of(context)
-                            .pushNamed(AppRouter.enhancedOrders),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.edit,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-          ],
-        ),
-      ),
-      ),
-    );
-  }
-
-  Widget _buildInfoChip(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required Color color,
-    VoidCallback? onTap,
-  }) {
-    final chip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (onTap == null) return chip;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: chip,
-    );
-  }
-
-  Color _couleurDuPalier(BuildContext context, String tier) {
-    switch (tier) {
-      case 'VIP':
-        return const Color(0xFFFFB300); // amber
-      case 'Fidèle':
-        return Theme.of(context).colorScheme.tertiary;
-      default:
-        return Theme.of(context).colorScheme.outline;
-    }
-  }
-
-  Widget _buildLoyaltyCard(
+  Widget _carteDeFidelite(
     BuildContext context,
     int points,
     List<Map<String, dynamic>> badges,
   ) {
-    final progress = (points % 100) / 100;
+    final theme = Theme.of(context);
+    final versLaProchaine = 100 - (points % 100);
+    final progression = (points % 100) / 100;
 
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            colors: [
-              Theme.of(context).colorScheme.secondary,
-              Theme.of(context).colorScheme.tertiary,
+    // Le dégradé doré, sur lequel l'encre sombre de `onSecondaryContainer`
+    // tient le contraste — du blanc sur ce fond ne le tenait pas.
+    const degrade = LinearGradient(
+      colors: AppColors.secondaryGradient,
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+    final encre = theme.colorScheme.onSecondaryContainer;
+
+    return Container(
+      padding: const EdgeInsets.all(DesignConstants.spacingL),
+      decoration: BoxDecoration(
+        gradient: degrade,
+        borderRadius: DesignConstants.borderRadiusLarge,
+        boxShadow: DesignConstants.shadowLow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.loyalty_rounded, color: encre),
+              const SizedBox(width: DesignConstants.spacingS),
+              Expanded(
+                child: Text(
+                  'Programme de fidélité',
+                  style: AppTypography.titleLg(color: encre),
+                ),
+              ),
+              TextButton(
+                onPressed: () => context.navigateToRewards(),
+                style: TextButton.styleFrom(
+                  foregroundColor: encre,
+                  minimumSize: const Size(0, 36),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text('Voir', style: AppTypography.labelLg(color: encre)),
+              ),
             ],
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+          const SizedBox(height: DesignConstants.spacingM),
+          Text('$points points', style: AppTypography.displayLg(color: encre)),
+          const SizedBox(height: DesignConstants.spacingS),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(DesignConstants.radiusSmall),
+            child: LinearProgressIndicator(
+              value: progression,
+              minHeight: 8,
+              backgroundColor: encre.withValues(alpha: 0.2),
+              valueColor: AlwaysStoppedAnimation<Color>(encre),
+            ),
+          ),
+          const SizedBox(height: DesignConstants.spacingS),
+          Text(
+            '$versLaProchaine points jusqu’à votre prochaine récompense',
+            style: AppTypography.bodyMd(color: encre),
+          ),
+          if (badges.isNotEmpty) ...[
+            const SizedBox(height: DesignConstants.spacingM),
+            Wrap(
+              spacing: DesignConstants.spacingS,
+              runSpacing: DesignConstants.spacingS,
               children: [
-                Icon(
-                  Icons.loyalty,
-                  color: Theme.of(context).colorScheme.onSecondary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Programme de fidélité',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSecondary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18,
+                for (final badge in badges)
+                  StatusChip(
+                    label: badge['title']?.toString() ?? '',
+                    icon: Icons.military_tech_rounded,
+                    background: theme.colorScheme.surfaceContainerLowest
+                        .withValues(alpha: 0.7),
+                    foreground: encre,
                   ),
-                ),
               ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              '$points points',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSecondary,
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 12),
-            LinearProgressIndicator(
-              value: progress,
-              backgroundColor: Colors.white.withValues(alpha: 0.3),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                Theme.of(context).colorScheme.onSecondary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '${100 - (points % 100)} points jusqu\'à votre prochaine récompense',
-              style: TextStyle(
-                color: Theme.of(context)
-                    .colorScheme
-                    .onSecondary
-                    .withValues(alpha: 0.9),
-                fontSize: 14,
-              ),
-            ),
-            if (badges.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Text(
-                'Badges obtenus:',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSecondary,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: badges
-                    .map(
-                      (badge) => Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          badge['title']?.toString() ?? '',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSecondary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ],
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMenuSection(
-    BuildContext context,
-    String title,
-    List<_MenuItem> items,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[700],
-              ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          elevation: 2,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: Column(
-            children: items.asMap().entries.map((entry) {
-              final index = entry.key;
-              final item = entry.value;
-              return Column(
-                children: [
-                  ListTile(
-                    leading: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(
-                        item.icon,
-                        color: Theme.of(context).colorScheme.primary,
-                        size: 20,
-                      ),
-                    ),
-                    title: Text(
-                      item.title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    subtitle: item.subtitle != null
-                        ? Text(
-                            item.subtitle!,
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          )
-                        : null,
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: item.onTap,
-                  ),
-                  if (index < items.length - 1) const Divider(height: 1),
-                ],
-              );
-            }).toList(),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLogoutButton(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: () => _showLogoutDialog(context),
-        icon: const Icon(Icons.logout),
-        label: const Text('Se déconnecter'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Theme.of(context).colorScheme.error,
-          foregroundColor: Theme.of(context).colorScheme.onError,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      ),
-    );
-  }
-
-  void _showEditProfileDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => const EditProfileDialog(),
-    );
-  }
-
-  void _showLogoutDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Se déconnecter'),
-        content: const Text('Êtes-vous sûr de vouloir vous déconnecter?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Annuler'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (!context.mounted) return;
-              final appService =
-                  Provider.of<AppService>(context, listen: false);
-              await appService.logout();
-              if (context.mounted) {
-                context.goBack(); // Close dialog
-                NavigationService.navigateToAuth(context);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            child: const Text('Se déconnecter'),
-          ),
         ],
       ),
     );
   }
 
+  // ---------------------------------------------------------------- sections
 
+  Widget _apparence(BuildContext context) {
+    final theme = Theme.of(context);
 
-
-
-  Widget _buildAppearanceSection(BuildContext context) {
     return Consumer<ThemeService>(
       builder: (context, themeService, child) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Apparence',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[700],
-                  ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+            const SectionHeader(title: 'Apparence'),
+            const SizedBox(height: DesignConstants.spacingS),
+            SectionCard(
+              padding: EdgeInsets.zero,
               child: SwitchListTile(
-                secondary: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    themeService.isDarkMode
-                        ? Icons.dark_mode
-                        : Icons.light_mode,
-                    color: Theme.of(context).colorScheme.primary,
-                    size: 20,
-                  ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: DesignConstants.spacingM,
+                  vertical: DesignConstants.spacingXS,
                 ),
-                title: const Text(
+                secondary: _pastilleDIcone(
+                  context,
+                  themeService.isDarkMode
+                      ? Icons.dark_mode_rounded
+                      : Icons.light_mode_rounded,
+                ),
+                title: Text(
                   'Mode sombre',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+                  style: AppTypography.titleLg(
+                    color: theme.colorScheme.onSurface,
                   ),
                 ),
                 subtitle: Text(
                   themeService.isDarkMode ? 'Activé' : 'Désactivé',
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 14,
+                  style: AppTypography.bodyMd(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 value: themeService.isDarkMode,
                 onChanged: (value) => themeService.toggleTheme(),
-                activeThumbColor: Theme.of(context).colorScheme.primary,
               ),
             ),
           ],
@@ -790,22 +440,193 @@ class ProfileScreen extends StatelessWidget {
       },
     );
   }
+
+  Widget _section(BuildContext context, String titre, List<_Entree> entrees) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(title: titre),
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            children: [
+              for (var i = 0; i < entrees.length; i++) ...[
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: DesignConstants.spacingM,
+                    vertical: DesignConstants.spacingXS,
+                  ),
+                  leading: _pastilleDIcone(context, entrees[i].icone),
+                  title: Text(
+                    entrees[i].titre,
+                    style: AppTypography.titleLg(
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: entrees[i].sousTitre == null
+                      ? null
+                      : Text(
+                          entrees[i].sousTitre!,
+                          style: AppTypography.bodyMd(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                  trailing: Icon(
+                    Icons.chevron_right_rounded,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  onTap: entrees[i].onTap,
+                ),
+                if (i < entrees.length - 1)
+                  Divider(
+                    height: 1,
+                    indent: DesignConstants.spacingXL + DesignConstants.spacingL,
+                    color:
+                        theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _pastilleDIcone(BuildContext context, IconData icone) {
+    final theme = Theme.of(context);
+    return Container(
+      width: DesignConstants.avatarSizeSmall + 8,
+      height: DesignConstants.avatarSizeSmall + 8,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: DesignConstants.borderRadiusSmall,
+      ),
+      child: Icon(
+        icone,
+        color: theme.colorScheme.primary,
+        size: DesignConstants.iconSizeSmall + 4,
+      ),
+    );
+  }
+
+  List<_Entree> _entreesDesReglages(BuildContext context) => [
+        _Entree(
+          icone: Icons.person_outline_rounded,
+          titre: 'Informations personnelles',
+          sousTitre: 'Nom et téléphone',
+          onTap: () => _ouvrirLaModification(context),
+        ),
+        _Entree(
+          icone: Icons.location_on_outlined,
+          titre: 'Adresses',
+          sousTitre: 'Gérer mes adresses de livraison',
+          onTap: () =>
+              Navigator.of(context).pushNamed(AppRouter.addressManagement),
+        ),
+        _Entree(
+          icone: Icons.receipt_long_outlined,
+          titre: 'Mes commandes',
+          sousTitre: 'Historique et détails',
+          onTap: () => Navigator.of(context).pushNamed(AppRouter.enhancedOrders),
+        ),
+        _Entree(
+          icone: Icons.notifications_none_rounded,
+          titre: 'Notifications',
+          sousTitre: 'Alertes de commande et promotions',
+          onTap: () => context.navigateToNotifications(),
+        ),
+      ];
+
+  List<_Entree> _entreesComplementaires(BuildContext context) => [
+        _Entree(
+          icone: Icons.groups_outlined,
+          titre: 'Commandes groupées',
+          sousTitre: 'Commander avec des amis',
+          onTap: () => Navigator.of(context).pushNamed(AppRouter.groupOrder),
+        ),
+        _Entree(
+          icone: Icons.people_outline_rounded,
+          titre: 'Mes groupes',
+          sousTitre: 'Partager avec vos proches',
+          onTap: () => Navigator.of(context).pushNamed(AppRouter.socialGroups),
+        ),
+        _Entree(
+          icone: Icons.help_outline_rounded,
+          titre: 'Aide et support',
+          sousTitre: 'FAQ, guides et contact',
+          onTap: () => Navigator.of(context).pushNamed(AppRouter.support),
+        ),
+        _Entree(
+          icone: Icons.info_outline_rounded,
+          titre: 'À propos d’El Corazón',
+          sousTitre: 'Version 1.0.0',
+          onTap: () => showAboutDialog(
+            context: context,
+            applicationName: 'El Corazón',
+            applicationVersion: '1.0.0',
+            applicationLegalese: '© El Corazón',
+          ),
+        ),
+      ];
+
+  // ------------------------------------------------------------------ actions
+
+  void _ouvrirLaModification(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => const EditProfileDialog(),
+    );
+  }
+
+  void _confirmerDeconnexion(BuildContext context) {
+    context.showEnhancedDialog(
+      title: 'Se déconnecter',
+      content: 'Votre panier et vos adresses resteront liés à votre compte.',
+      confirmText: 'Se déconnecter',
+      cancelText: 'Annuler',
+      isDestructive: true,
+      onConfirm: () async {
+        final appService = Provider.of<AppService>(context, listen: false);
+        await appService.logout();
+        if (context.mounted) {
+          NavigationService.navigateToAuth(context);
+        }
+      },
+      onCancel: () {},
+    );
+  }
 }
 
-class _MenuItem {
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final VoidCallback onTap;
-
-  _MenuItem({
-    required this.icon,
-    required this.title,
+/// Une ligne d'une section de réglages.
+class _Entree {
+  const _Entree({
+    required this.icone,
+    required this.titre,
     required this.onTap,
-    this.subtitle,
+    this.sousTitre,
   });
+
+  final IconData icone;
+  final String titre;
+  final String? sousTitre;
+  final VoidCallback onTap;
 }
 
+/// Modification du nom et du téléphone.
+///
+/// ## Ce que cette boîte faisait avant
+///
+/// Elle se fermait sur « Profil mis à jour avec succès ! » **sans rien
+/// envoyer** : un commentaire « In a real app, would update the user profile »
+/// tenait lieu d'appel. Le champ retrouvait son ancienne valeur à la
+/// réouverture, et l'utilisateur n'avait aucun moyen de comprendre pourquoi.
+///
+/// `AuthRepository.updateProfile` existait pourtant depuis le début. La boîte
+/// l'appelle désormais par `AppService.updateProfile`, montre l'attente, et ne
+/// se ferme qu'en cas de succès — un échec reste affiché, avec son motif.
 class EditProfileDialog extends StatefulWidget {
   const EditProfileDialog({super.key});
 
@@ -816,6 +637,8 @@ class EditProfileDialog extends StatefulWidget {
 class _EditProfileDialogState extends State<EditProfileDialog> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
+  bool _enCours = false;
+  String? _erreur;
 
   @override
   void initState() {
@@ -832,60 +655,96 @@ class _EditProfileDialogState extends State<EditProfileDialog> {
     super.dispose();
   }
 
+  Future<void> _enregistrer() async {
+    final nom = _nameController.text.trim();
+    if (nom.isEmpty) {
+      setState(() => _erreur = 'Le nom ne peut pas être vide.');
+      return;
+    }
+
+    setState(() {
+      _enCours = true;
+      _erreur = null;
+    });
+
+    try {
+      await Provider.of<AppService>(context, listen: false).updateProfile(
+        fullName: nom,
+        phone: _phoneController.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      context.showSuccessMessage('Profil mis à jour');
+    } on eccore.ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _enCours = false;
+        _erreur = e.detail;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _enCours = false;
+        _erreur = 'Mise à jour impossible pour le moment.';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return AlertDialog(
       title: const Text('Modifier le profil'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TextField(
             controller: _nameController,
-            decoration: const InputDecoration(
-              labelText: 'Nom complet',
-              border: OutlineInputBorder(),
-            ),
+            enabled: !_enCours,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(labelText: 'Nom complet'),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: DesignConstants.spacingM),
           if (kIsWeb)
             TextField(
               controller: _phoneController,
+              enabled: !_enCours,
               keyboardType: TextInputType.phone,
               decoration: const InputDecoration(
                 labelText: 'Téléphone',
                 hintText: '+225 01 02 03 04 05',
-                border: OutlineInputBorder(),
               ),
             )
           else
             IntlPhoneField(
               controller: _phoneController,
-              decoration: const InputDecoration(
-                labelText: 'Téléphone',
-                border: OutlineInputBorder(),
-              ),
+              enabled: !_enCours,
+              decoration: const InputDecoration(labelText: 'Téléphone'),
               initialCountryCode: 'CI',
               languageCode: 'fr',
-              onChanged: (phone) {
-                // print(phone.completeNumber);
-              },
             ),
+          if (_erreur != null) ...[
+            const SizedBox(height: DesignConstants.spacingM),
+            Text(
+              _erreur!,
+              style: AppTypography.bodyMd(color: theme.colorScheme.error),
+            ),
+          ],
         ],
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _enCours ? null : () => Navigator.of(context).pop(),
           child: const Text('Annuler'),
         ),
-        ElevatedButton(
-          onPressed: () {
-            // In a real app, would update the user profile
-            Navigator.of(context).pop();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Profil mis à jour avec succès!')),
-            );
-          },
-          child: const Text('Enregistrer'),
+        ActionButton(
+          label: 'Enregistrer',
+          expand: false,
+          height: 44,
+          isLoading: _enCours,
+          onPressed: _enCours ? null : _enregistrer,
         ),
       ],
     );
