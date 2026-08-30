@@ -26,6 +26,7 @@ import 'package:elcora_fast/presentation/paiement_partage.dart';
 import 'package:elcora_fast/presentation/preselection_gateau.dart';
 import 'package:elcora_fast/presentation/profil_utilisateur.dart';
 import 'package:elcora_fast/presentation/recapitulatif_gateau.dart';
+import 'package:elcora_fast/presentation/reprise_de_commande.dart';
 import 'package:elcora_fast/presentation/suivi_commande.dart';
 import 'package:elcora_fast/presentation/trajet_livreur.dart';
 import 'package:elcora_fast/repositories/django_address_repository.dart';

@@ -8,6 +8,7 @@ import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/widgets/delivery_status_card.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
+import 'package:elcora_fast/presentation/reprise_de_commande.dart';
 import 'package:elcora_fast/presentation/suivi_commande.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
@@ -15,7 +16,6 @@ import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran amélioré de l'historique des commandes avec filtres et tri
 class EnhancedOrdersScreen extends StatefulWidget {
@@ -463,92 +463,30 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
 
 
   /// Réorganise les items d'une commande dans le panier
+  /// Repose les articles de [order] au panier.
+  ///
+  /// La logique vit dans `CartService.reprendreLaCommande`, partagée avec
+  /// l'onglet « Commandes » de la barre inférieure. Cet écran ne fait plus
+  /// qu'annoncer le résultat.
   Future<void> _reorderItems(Order order) async {
-    try {
-      final cartService = Provider.of<CartService>(context, listen: false);
-      final appService = Provider.of<AppService>(context, listen: false);
+    final cartService = Provider.of<CartService>(context, listen: false);
+    final appService = Provider.of<AppService>(context, listen: false);
 
-      var addedCount = 0;
-      final indisponibles = <String>[];
-
-      // Ajouter chaque item de la commande au panier
-      for (final orderItem in order.items) {
-        // L'article doit exister **au catalogue d'aujourd'hui**. Un article
-        // retiré de la carte était jusqu'ici recréé de toutes pièces, avec un
-        // identifiant `temp-` et une catégorie `temp-category` : le panier
-        // l'acceptait, mais `/carts/` le refuse — il ne connaît que des
-        // articles du catalogue. La ligne disparaissait à la synchronisation
-        // suivante, sans que personne ne le dise.
-        final menuItem = appService.menuItems
-            .where((item) => item.id == orderItem.menuItemId)
-            .firstOrNull;
-
-        if (menuItem == null) {
-          indisponibles.add(orderItem.name);
-          continue;
-        }
-
-        cartService.addItem(
-          menuItem,
-          quantity: orderItem.quantity,
-          customizations: orderItem.customizations,
-        );
-        addedCount += orderItem.quantity;
-      }
-
-      if (addedCount > 0 && mounted && context.mounted) {
-        // Afficher un message de succès
-        // NOTE — comportement conservé tel quel, sans être approuvé.
-        //
-        // Ce message propose « Voir le panier », et l'écran pousse **quand
-        // même** le panier une seconde plus tard (juste en dessous). Le
-        // bouton n'a donc jamais l'occasion de servir, et le client est
-        // emmené sans l'avoir demandé. C'est signalé au rapport plutôt que
-        // corrigé ici : changer une navigation est un changement de
-        // comportement, et la consigne de ce lot est de n'en faire aucun.
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$addedCount article(s) ajouté(s) au panier'),
-            backgroundColor: AppColors.primary,
-            action: SnackBarAction(
-              label: 'Voir le panier',
-              textColor: AppColors.onPrimary,
-              onPressed: () {
-                Navigator.of(context).pushNamed(AppRouter.cart);
-              },
-            ),
+    final resultat = cartService.reprendreLaCommande(
+      [
+        for (final item in order.items)
+          (
+            menuItemId: item.menuItemId,
+            nom: item.name,
+            quantite: item.quantity,
+            options: item.customizations,
           ),
-        );
+      ],
+      appService.menuItems,
+    );
 
-        // Naviguer vers le panier après un court délai
-        Future.delayed(const Duration(seconds: 1), () {
-          if (mounted && context.mounted) {
-            Navigator.of(context).pushNamed(AppRouter.cart);
-          }
-        });
-      } else if (mounted && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Aucun article n\'a pu être ajouté au panier'),
-            backgroundColor: AppColors.warning,
-          ),
-        );
-      }
-    } catch (e) {
-      Journal.trace('Erreur lors de la réorganisation: $e');
-      if (mounted && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            // Le détail technique ne regarde pas le client : il part au
-            // journal, l'écran dit ce qui s'est passé.
-            content: Text(
-              'La commande n’a pas pu être remise au panier',
-            ),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    }
+    if (!mounted) return;
+    annoncerLaReprise(context, resultat);
   }
 }
 

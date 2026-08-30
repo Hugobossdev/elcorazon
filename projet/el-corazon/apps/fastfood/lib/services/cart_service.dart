@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:elcora_fast/presentation/catalogue.dart';
+import 'package:elcora_fast/presentation/reprise_de_commande.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -172,6 +173,31 @@ class CartService extends ChangeNotifier {
   /// (invariant C1), et le devis du panier qui fait foi. Deux lignes du même
   /// article aux options différentes restent deux lignes — la même règle que
   /// `CartService._identical_line` côté serveur.
+  /// Repose au panier les articles d'une commande passée.
+  ///
+  /// La **décision** — quels articles sont encore à la carte — vit dans
+  /// `presentation/reprise_de_commande.dart`, où elle s'éprouve sans panier.
+  /// Cette méthode n'en applique que l'effet, et rend ce qui a été écarté pour
+  /// que l'écran puisse le dire.
+  ({int ajoutes, List<String> indisponibles}) reprendreLaCommande(
+    List<LigneAReprendre> lignes,
+    List<eccore.MenuItem> catalogue,
+  ) {
+    final tri = trierLaReprise(lignes, catalogue);
+    var ajoutes = 0;
+
+    for (final retenue in tri.retenues) {
+      addItem(
+        retenue.article,
+        quantity: retenue.ligne.quantite,
+        customizations: retenue.ligne.options,
+      );
+      ajoutes += retenue.ligne.quantite;
+    }
+
+    return (ajoutes: ajoutes, indisponibles: tri.indisponibles);
+  }
+
   void addItem(
     eccore.MenuItem menuItem, {
     int quantity = 1,

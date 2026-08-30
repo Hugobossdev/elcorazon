@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:elcora_fast/presentation/reprise_de_commande.dart';
 import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
@@ -165,13 +167,60 @@ class _OrdersScreenState extends State<OrdersScreen>
         itemCount: commandes.length,
         itemBuilder: (context, index) {
           final commande = commandes[index];
-          return DeliveryStatusCard(
-            order: commande,
-            onTap: () => context.navigateToDeliveryTracking(commande.id),
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DeliveryStatusCard(
+                order: commande,
+                onTap: () => context.navigateToDeliveryTracking(commande.id),
+              ),
+              // « Reorder » de la maquette `my_orders`, sur les commandes
+              // closes seulement — recommander une commande en cours de
+              // livraison n'a pas de sens.
+              if (!_estEnCours(commande))
+                Padding(
+                  padding: const EdgeInsets.only(
+                    bottom: DesignConstants.spacingM,
+                  ),
+                  child: ActionButton(
+                    label: 'Recommander',
+                    emphasis: ActionEmphasis.outlined,
+                    icon: Icons.refresh_rounded,
+                    height: 44,
+                    onPressed: () => _recommander(commande),
+                  ),
+                ),
+            ],
           );
         },
       ),
     );
+  }
+
+  /// Repose les articles d'une commande passée au panier.
+  ///
+  /// La logique vit dans `CartService.reprendreLaCommande`, partagée avec
+  /// l'écran d'historique : deux implémentations de la même opération auraient
+  /// fini par diverger, et celle-ci touche au panier.
+  void _recommander(Order commande) {
+    final cartService = Provider.of<CartService>(context, listen: false);
+    final appService = Provider.of<AppService>(context, listen: false);
+
+    final resultat = cartService.reprendreLaCommande(
+      [
+        for (final item in commande.items)
+          (
+            menuItemId: item.menuItemId,
+            nom: item.name,
+            quantite: item.quantity,
+            options: item.customizations,
+          ),
+      ],
+      appService.menuItems,
+    );
+
+    if (!mounted) return;
+    annoncerLaReprise(context, resultat);
   }
 
   /// Relit les commandes auprès du serveur.
