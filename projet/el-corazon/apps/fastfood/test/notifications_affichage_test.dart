@@ -185,7 +185,7 @@ void main() {
       );
     }
 
-    final maintenant = DateTime(2026, 8, 30, 10, 0);
+    final maintenant = DateTime(2026, 8, 30, 10);
 
     test('une liste vide ne produit aucun paquet', () {
       expect(grouperParJour(const [], maintenant: maintenant), isEmpty);
