@@ -6,6 +6,7 @@ import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/widgets/navigation_error_handler.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/input_sanitizer.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
@@ -56,11 +57,6 @@ class _AuthScreenState extends State<AuthScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
 
-  /// Côte d'Ivoire, et non le Togo comme auparavant : l'établissement est à
-  /// Abidjan, et `EditProfileDialog` proposait déjà `CI`. Deux indicatifs par
-  /// défaut différents dans la même application faisaient saisir un numéro
-  /// togolais à l'inscription, ivoirien à la modification.
-  static const String _indicatifParDefaut = 'CI';
 
   @override
   void dispose() {
@@ -151,7 +147,7 @@ class _AuthScreenState extends State<AuthScreen> {
           _isLogin
               ? 'Connectez-vous pour retrouver vos commandes et vos adresses.'
               : 'Créez votre compte pour commander les saveurs grillées '
-                  'd’Abidjan.',
+                  'de ${AppConstants.defaultCityName}.',
           textAlign: TextAlign.center,
           style: AppTypography.bodyMd(color: theme.colorScheme.onSurfaceVariant),
         ),
@@ -267,8 +263,11 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget _champTelephone(ThemeData theme) {
     return IntlPhoneField(
       controller: _phoneController,
-      decoration: const InputDecoration(labelText: 'Téléphone'),
-      initialCountryCode: _indicatifParDefaut,
+      decoration: const InputDecoration(
+        labelText: 'Téléphone',
+        hintText: AppConstants.phoneHint,
+      ),
+      initialCountryCode: AppConstants.phoneCountryCode,
       languageCode: 'fr',
       onChanged: (phone) => _fullPhoneNumber = phone.completeNumber,
       onCountryChanged: (country) {

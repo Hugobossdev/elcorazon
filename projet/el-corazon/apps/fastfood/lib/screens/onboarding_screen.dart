@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/screens/client/main_navigation_screen.dart';
 import 'package:elcora_fast/services/onboarding_service.dart';
@@ -238,8 +239,8 @@ class _PageAccueil extends StatelessWidget {
         ),
       ),
       titre: 'Le goût du soin,\nla vitesse en prime.',
-      texte: 'La cuisine d’Abidjan grillée au feu de bois, livrée chaude '
-          'jusque chez vous.',
+      texte: 'La cuisine de ${AppConstants.defaultCityName} grillée au feu '
+          'de bois, livrée chaude jusque chez vous.',
     );
   }
 }

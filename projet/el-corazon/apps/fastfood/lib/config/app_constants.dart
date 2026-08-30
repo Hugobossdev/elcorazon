@@ -32,6 +32,28 @@ class AppConstants {
   /// biaise seulement, pour qu'une rue homonyme de Lomé passe devant.
   static const int placesBiasRadiusMeters = 25000;
 
+  /// Indicatif téléphonique par défaut des champs de saisie, au format
+  /// attendu par `IntlPhoneField` (ISO 3166-1 alpha-2, en **majuscules**).
+  ///
+  /// Dérivé de [countryCode] plutôt qu'écrit à côté : l'inscription proposait
+  /// le Togo, la modification du profil la Côte d'Ivoire, et un même client
+  /// enregistrait donc deux numéros de pays différents selon l'écran par
+  /// lequel il passait.
+  static String get phoneCountryCode => countryCode.toUpperCase();
+
+  /// Exemple montré en filigrane d'un champ téléphone. Suit le pays ci-dessus.
+  static const String phoneHint = '+228 90 00 00 00';
+
+  /// Numéro du service client.
+  ///
+  /// **À renseigner avant mise en production.** Il était jusqu'ici écrit en
+  /// dur à deux endroits, avec deux valeurs différentes et toutes deux
+  /// ivoiriennes (`+22507070707`, `+2250700000000`) alors que l'établissement
+  /// est à Lomé — c'est-à-dire deux numéros inventés, dont l'un au moins
+  /// aboutissait chez un inconnu. Vide, les écrans proposent le support écrit
+  /// plutôt qu'un appel qui ne mènerait nulle part.
+  static const String supportPhone = '';
+
   // App Info
   static const String appName = 'Elcora Fast';
   static const String currency = 'FCFA';

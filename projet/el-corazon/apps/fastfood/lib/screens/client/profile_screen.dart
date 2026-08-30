@@ -9,6 +9,7 @@ import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
+import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
@@ -714,7 +715,7 @@ class _EditProfileDialogState extends State<EditProfileDialog> {
               keyboardType: TextInputType.phone,
               decoration: const InputDecoration(
                 labelText: 'Téléphone',
-                hintText: '+225 01 02 03 04 05',
+                hintText: AppConstants.phoneHint,
               ),
             )
           else
@@ -722,7 +723,7 @@ class _EditProfileDialogState extends State<EditProfileDialog> {
               controller: _phoneController,
               enabled: !_enCours,
               decoration: const InputDecoration(labelText: 'Téléphone'),
-              initialCountryCode: 'CI',
+              initialCountryCode: AppConstants.phoneCountryCode,
               languageCode: 'fr',
             ),
           if (_erreur != null) ...[

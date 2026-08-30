@@ -1,4 +1,5 @@
 import 'package:elcora_fast/navigation/navigation_service.dart';
+import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
@@ -142,7 +143,7 @@ class _GuestWelcomeScreenState extends State<GuestWelcomeScreen>
                           ),
                           const SizedBox(height: DesignConstants.spacingS),
                           Text(
-                            "Le cœur de la cuisine d'Abidjan.",
+                            'Le cœur de la cuisine de ${AppConstants.defaultCityName}.',
                             textAlign: TextAlign.center,
                             style:
                                 AppTypography.headlineMd(color: Colors.white),

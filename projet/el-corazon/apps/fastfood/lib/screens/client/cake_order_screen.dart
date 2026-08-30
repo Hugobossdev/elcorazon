@@ -917,7 +917,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
               style: AppTypography.bodyLg(color: theme.colorScheme.onSurface),
               decoration: const InputDecoration(
                 labelText: 'Contact pour la livraison',
-                hintText: 'Ex. : +225 07 07 07 07 07',
+                hintText: 'Ex. : ${AppConstants.phoneHint}',
                 prefixIcon: Icon(Icons.phone_rounded),
               ),
             ),
