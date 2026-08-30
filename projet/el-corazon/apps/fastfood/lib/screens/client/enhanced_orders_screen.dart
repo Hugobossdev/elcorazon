@@ -7,10 +7,14 @@ import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/widgets/delivery_status_card.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
+import 'package:elcora_fast/navigation/app_router.dart';
+import 'package:elcora_fast/presentation/suivi_commande.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
-import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Écran amélioré de l'historique des commandes avec filtres et tri
@@ -56,151 +60,187 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text(
-          'Mes Commandes',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
-          ),
-        ),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: AppColors.primaryGradient,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-        ),
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Mes commandes',
         actions: [
-          IconButton(
-            icon: const Icon(Icons.filter_list),
-            tooltip: 'Filtres',
-            onPressed: () => _showFilterDialog(),
+          GlassIconButton(
+            icon: Icons.filter_list_rounded,
+            tooltip: 'Filtrer et trier',
+            filled: false,
+            onPressed: _showFilterDialog,
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(50),
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
-              ),
-            ),
-            child: TabBar(
-              controller: _tabController,
-              indicator: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.white.withValues(alpha: 0.3),
-                    Colors.white.withValues(alpha: 0.2),
-                  ],
-                ),
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                ),
-              ),
-              indicatorColor: Colors.transparent,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white.withValues(alpha: 0.7),
-              tabs: const [
-                Tab(
-                  text: 'En cours',
-                  icon: Icon(Icons.access_time_rounded, size: 20),
-                ),
-                Tab(
-                  text: 'Historique',
-                  icon: Icon(Icons.history_rounded, size: 20),
-                ),
-              ],
-            ),
-          ),
+        bottom: SegmentedTabs(
+          controller: _tabController,
+          labels: const ['En cours', 'Historique'],
+          icons: const [Icons.schedule_rounded, Icons.history_rounded],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildActiveOrders(),
-          _buildOrderHistory(),
+          _enCours(theme),
+          _historique(theme),
         ],
       ),
     );
   }
 
-  Widget _buildActiveOrders() {
+  // ------------------------------------------------------------- en cours
+
+  Widget _enCours(ThemeData theme) {
     return Consumer<AppService>(
       builder: (context, appService, child) {
-        final activeOrders = appService.orders
-            .where(
-              (order) =>
-                  order.status != OrderStatus.delivered &&
-                  order.status != OrderStatus.cancelled,
-            )
-            .toList();
+        final actives = appService.orders.where(_estEnCours).toList();
 
-        if (activeOrders.isEmpty) {
-          return _buildEmptyState(
-            icon: Icons.shopping_bag_outlined,
+        if (actives.isEmpty) {
+          return etats.EmptyStateWidget(
             title: 'Aucune commande en cours',
-            subtitle: 'Vos commandes actives apparaîtront ici',
-            actionLabel: 'Explorer le menu',
+            message: 'Vos commandes actives apparaîtront ici.',
+            icon: Icons.shopping_bag_outlined,
+            actionText: 'Explorer la carte',
             onAction: () => context.navigateToMenu(),
           );
         }
 
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: activeOrders.length,
-          itemBuilder: (context, index) {
-            final order = activeOrders[index];
-            return DeliveryStatusCard(
-              order: order,
-              onTap: () => context.navigateToDeliveryTracking(order.id),
-            );
-          },
+        return RefreshIndicator(
+          onRefresh: _loadOrders,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingM,
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingXL,
+            ),
+            children: [
+              for (final order in actives) ...[
+                DeliveryStatusCard(
+                  order: order,
+                  onTap: () => context.navigateToDeliveryTracking(order.id),
+                ),
+                // La mini-chronologie de la maquette `order_history`. Elle
+                // partage sa règle avec le détail de commande et le suivi
+                // (`presentation/suivi_commande.dart`) : trois vues du même
+                // cycle qui divergeraient sinon.
+                Padding(
+                  padding: const EdgeInsets.only(
+                    bottom: DesignConstants.spacingL,
+                  ),
+                  child: _chronologieCompacte(theme, order),
+                ),
+              ],
+            ],
+          ),
         );
       },
     );
   }
 
-  Widget _buildOrderHistory() {
+  /// Une commande est « en cours » tant qu'elle n'est ni livrée ni close.
+  ///
+  /// `refunded` et `failed` rejoignent l'historique : ce sont des issues, pas
+  /// des étapes. Le `switch` est exhaustif, comme dans `orders_screen` — un
+  /// statut ajouté au serveur fera échouer la compilation plutôt que de
+  /// retomber silencieusement dans « en cours ».
+  bool _estEnCours(Order commande) {
+    switch (commande.status) {
+      case OrderStatus.delivered:
+      case OrderStatus.cancelled:
+      case OrderStatus.refunded:
+      case OrderStatus.failed:
+        return false;
+      case OrderStatus.pending:
+      case OrderStatus.confirmed:
+      case OrderStatus.preparing:
+      case OrderStatus.ready:
+      case OrderStatus.pickedUp:
+      case OrderStatus.onTheWay:
+        return true;
+    }
+  }
+
+  /// Les quatre jalons en une ligne, sous la carte de commande active.
+  Widget _chronologieCompacte(ThemeData theme, Order order) {
+    final etapes = etapesDeSuivi(order);
+
+    return Row(
+      children: [
+        for (var i = 0; i < etapes.length; i++) ...[
+          if (i > 0)
+            Expanded(
+              child: Container(
+                height: 2,
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                color: etapes[i].franchie
+                    ? AppColors.success
+                    : theme.colorScheme.outlineVariant,
+              ),
+            ),
+          Tooltip(
+            message: etapes[i].annulation
+                ? libelleDeSortie(order.status)
+                : etapes[i].jalon.libelle,
+            child: Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: etapes[i].annulation
+                    ? theme.colorScheme.error
+                    : etapes[i].franchie
+                        ? AppColors.success
+                        : theme.colorScheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                etapes[i].annulation
+                    ? Icons.close_rounded
+                    : etapes[i].franchie
+                        ? Icons.check_rounded
+                        : Icons.circle_outlined,
+                size: 11,
+                color: etapes[i].franchie || etapes[i].annulation
+                    ? theme.colorScheme.onPrimary
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------ historique
+
+  Widget _historique(ThemeData theme) {
     return ChangeNotifierProvider<OrderHistoryService>.value(
       value: _orderHistoryService,
       child: Consumer<OrderHistoryService>(
         builder: (context, service, child) {
           if (service.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const etats.PageLoadingWidget(
+              message: 'Chargement de votre historique…',
+            );
           }
 
           final orders = service.orders;
 
           if (orders.isEmpty) {
-            return _buildEmptyState(
-              icon: Icons.receipt_long_outlined,
+            return etats.EmptyStateWidget(
               title: 'Aucune commande trouvée',
-              subtitle: 'Aucune commande ne correspond à vos filtres',
-              actionLabel: 'Réinitialiser les filtres',
-              onAction: () {
-                service.resetFilters();
-              },
+              message: 'Aucune commande ne correspond à vos filtres.',
+              icon: Icons.receipt_long_outlined,
+              actionText: 'Réinitialiser les filtres',
+              onAction: service.resetFilters,
             );
           }
 
-          // Grouper par date
-          final groupedOrders = service.getOrdersGroupedByDate();
-          final sortedDates = groupedOrders.keys.toList()
+          final parDate = service.getOrdersGroupedByDate();
+          final dates = parDate.keys.toList()
             ..sort((a, b) {
-              // Trier les dates (Aujourd'hui, Hier, etc. en premier)
               if (a == 'Aujourd\'hui') return -1;
               if (b == 'Aujourd\'hui') return 1;
               if (a == 'Hier') return -1;
@@ -210,40 +250,31 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
 
           return RefreshIndicator(
             onRefresh: _loadOrders,
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: sortedDates.length,
-              itemBuilder: (context, index) {
-                final dateKey = sortedDates[index];
-                final dateOrders = groupedOrders[dateKey]!;
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // En-tête de date
-                    Padding(
-                      padding:
-                          EdgeInsets.only(bottom: 8, top: index > 0 ? 24 : 0),
-                      child: Text(
-                        dateKey,
-                        style:
-                            Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textSecondary,
-                                ),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                DesignConstants.edgeMargin,
+                DesignConstants.spacingM,
+                DesignConstants.edgeMargin,
+                DesignConstants.spacingXL,
+              ),
+              children: [
+                for (var i = 0; i < dates.length; i++) ...[
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: i > 0 ? DesignConstants.spacingL : 0,
+                      bottom: DesignConstants.spacingS,
+                    ),
+                    child: Text(
+                      dates[i],
+                      style: AppTypography.labelLg(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
-
-                    // Commandes du jour
-                    ...dateOrders.map((order) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _buildOrderCard(order),
-                      );
-                    }),
-                  ],
-                );
-              },
+                  ),
+                  for (final order in parDate[dates[i]]!)
+                    _carteDeCommande(theme, order),
+                ],
+              ],
             ),
           );
         },
@@ -251,153 +282,168 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
     );
   }
 
-  Widget _buildOrderCard(Order order) {
-    final dateFormat = DateFormat('dd/MM/yyyy à HH:mm');
+  Widget _carteDeCommande(ThemeData theme, Order order) {
+    final apparence = _apparenceDuStatut(theme, order.status);
+    final heure = DateFormat('HH:mm').format(order.createdAt);
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+    return SectionCard(
+      margin: const EdgeInsets.only(bottom: DesignConstants.spacingM),
+      onTap: () => Navigator.of(context).pushNamed(
+        AppRouter.orderDetails,
+        arguments: {'order': order},
       ),
-      child: InkWell(
-        onTap: () => context.navigateToDeliveryTracking(order.id),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              // En-tête avec statut et date
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Statut
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color:
-                          _getStatusColor(order.status).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: _getStatusColor(order.status),
-                      ),
-                    ),
-                    child: Text(
-                      _getStatusLabel(order.status),
-                      style: TextStyle(
-                        color: _getStatusColor(order.status),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-
-                  // Date
-                  Text(
-                    dateFormat.format(order.createdAt),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
-                  ),
-                ],
+              StatusChip(
+                label: apparence.libelle,
+                background: apparence.fond,
+                foreground: apparence.encre,
               ),
-
-              const SizedBox(height: 12),
-
-              // Items
-              ...order.items.take(3).map((item) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    children: [
-                      Text(
-                        '${item.quantity}x',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          item.menuItemName,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                      Text(
-                        PriceFormatter.format(item.totalPrice),
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w500,
-                            ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-
-              if (order.items.length > 3)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    '+ ${order.items.length - 3} autre(s) article(s)',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppColors.textSecondary,
-                          fontStyle: FontStyle.italic,
-                        ),
-                  ),
+              const Spacer(),
+              Text(
+                heure,
+                style: AppTypography.bodyMd(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
-
-              const Divider(height: 24),
-
-              // Total et actions
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Total',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
-                      ),
-                      Text(
-                        PriceFormatter.format(order.total),
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primaryColor,
-                            ),
-                      ),
-                    ],
-                  ),
-
-                  // Actions
-                  Row(
-                    children: [
-                      if (order.status == OrderStatus.delivered)
-                        OutlinedButton.icon(
-                          icon: const Icon(Icons.reorder),
-                          label: const Text('Commander à nouveau'),
-                          onPressed: () => _reorderItems(order),
-                        ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.chevron_right),
-                        onPressed: () =>
-                            context.navigateToDeliveryTracking(order.id),
-                        tooltip: 'Voir les détails',
-                      ),
-                    ],
-                  ),
-                ],
               ),
             ],
           ),
-        ),
+          const SizedBox(height: DesignConstants.spacingM),
+          for (final item in order.items.take(3))
+            Padding(
+              padding: const EdgeInsets.only(bottom: DesignConstants.spacingXS),
+              child: Row(
+                children: [
+                  Text(
+                    '${item.quantity}×',
+                    style: AppTypography.labelLg(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: DesignConstants.spacingS),
+                  Expanded(
+                    child: Text(
+                      item.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.bodyLg(
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    PriceFormatter.format(item.totalPrice),
+                    style: AppTypography.bodyLg(
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (order.items.length > 3)
+            Text(
+              '+ ${order.items.length - 3} autre'
+              '${order.items.length - 3 > 1 ? 's' : ''}',
+              style: AppTypography.bodyMd(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          const SummaryDivider(),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Total',
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    Text(
+                      PriceFormatter.format(order.total),
+                      style: AppTypography.priceDisplay(
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // « Reorder » de la maquette. La logique existait déjà
+              // (`_reorderItems`) : elle repose les articles au panier depuis
+              // la commande, sans rien recalculer.
+              if (order.status == OrderStatus.delivered)
+                ActionButton(
+                  label: 'Recommander',
+                  emphasis: ActionEmphasis.outlined,
+                  icon: Icons.refresh_rounded,
+                  expand: false,
+                  height: 40,
+                  onPressed: () => _reorderItems(order),
+                ),
+            ],
+          ),
+        ],
       ),
     );
+  }
+
+  /// Le mot et les teintes d'un statut, pris aux rôles du thème.
+  ///
+  /// Remplace `_getStatusColor` et `_getStatusLabel`, qui rendaient les verts,
+  /// bleus, oranges et violets de Material — les mêmes que
+  /// `DeliveryStatusCard` a quittés au premier lot. Deux écrans qui montrent
+  /// le même statut ne peuvent pas le peindre différemment.
+  ({String libelle, Color fond, Color encre}) _apparenceDuStatut(
+    ThemeData theme,
+    OrderStatus statut,
+  ) {
+    switch (statut) {
+      case OrderStatus.delivered:
+        return (
+          libelle: 'Livrée',
+          fond: AppColors.successLight,
+          encre: AppColors.success,
+        );
+      case OrderStatus.cancelled:
+      case OrderStatus.failed:
+        return (
+          libelle: statut == OrderStatus.failed ? 'Échouée' : 'Annulée',
+          fond: theme.colorScheme.errorContainer,
+          encre: theme.colorScheme.onErrorContainer,
+        );
+      case OrderStatus.refunded:
+        return (
+          libelle: 'Remboursée',
+          fond: theme.colorScheme.surfaceContainerHighest,
+          encre: theme.colorScheme.onSurfaceVariant,
+        );
+      case OrderStatus.preparing:
+      case OrderStatus.ready:
+        return (
+          libelle: statut == OrderStatus.ready ? 'Prête' : 'En préparation',
+          fond: theme.colorScheme.tertiaryContainer,
+          encre: theme.colorScheme.onTertiaryContainer,
+        );
+      case OrderStatus.pickedUp:
+      case OrderStatus.onTheWay:
+        return (
+          libelle: statut == OrderStatus.pickedUp ? 'Récupérée' : 'En route',
+          fond: theme.colorScheme.primaryContainer,
+          encre: theme.colorScheme.onPrimaryContainer,
+        );
+      case OrderStatus.pending:
+      case OrderStatus.confirmed:
+        return (
+          libelle: statut == OrderStatus.pending ? 'En attente' : 'Confirmée',
+          fond: theme.colorScheme.secondaryContainer,
+          encre: theme.colorScheme.onSecondaryContainer,
+        );
+    }
   }
 
   void _showFilterDialog() {
@@ -413,106 +459,8 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
     );
   }
 
-  Color _getStatusColor(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.pending:
-        return Colors.orange;
-      case OrderStatus.confirmed:
-        return Colors.blue;
-      case OrderStatus.preparing:
-        return Colors.purple;
-      case OrderStatus.ready:
-        return Colors.green;
-      case OrderStatus.pickedUp:
-        return Colors.teal;
-      case OrderStatus.onTheWay:
-        return Colors.indigo;
-      case OrderStatus.delivered:
-        return Colors.green.shade700;
-      case OrderStatus.cancelled:
-        return Colors.red;
-      case OrderStatus.refunded:
-        return Colors.amber.shade700;
-      case OrderStatus.failed:
-        return Colors.red.shade700;
-    }
-  }
 
-  String _getStatusLabel(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.pending:
-        return 'En attente';
-      case OrderStatus.confirmed:
-        return 'Confirmée';
-      case OrderStatus.preparing:
-        return 'En préparation';
-      case OrderStatus.ready:
-        return 'Prête';
-      case OrderStatus.pickedUp:
-        return 'Récupérée';
-      case OrderStatus.onTheWay:
-        return 'En livraison';
-      case OrderStatus.delivered:
-        return 'Livrée';
-      case OrderStatus.cancelled:
-        return 'Annulée';
-      case OrderStatus.refunded:
-        return 'Remboursée';
-      case OrderStatus.failed:
-        return 'Échouée';
-    }
-  }
 
-  Widget _buildEmptyState({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required String actionLabel,
-    required VoidCallback onAction,
-  }) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              size: 80,
-              color: Colors.grey.shade300,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade700,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey.shade500,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 32),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.explore),
-              label: Text(actionLabel),
-              onPressed: onAction,
-              style: ElevatedButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   /// Réorganise les items d'une commande dans le panier
   Future<void> _reorderItems(Order order) async {
@@ -550,13 +498,21 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
 
       if (addedCount > 0 && mounted && context.mounted) {
         // Afficher un message de succès
+        // NOTE — comportement conservé tel quel, sans être approuvé.
+        //
+        // Ce message propose « Voir le panier », et l'écran pousse **quand
+        // même** le panier une seconde plus tard (juste en dessous). Le
+        // bouton n'a donc jamais l'occasion de servir, et le client est
+        // emmené sans l'avoir demandé. C'est signalé au rapport plutôt que
+        // corrigé ici : changer une navigation est un changement de
+        // comportement, et la consigne de ce lot est de n'en faire aucun.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('$addedCount article(s) ajouté(s) au panier'),
             backgroundColor: AppColors.primary,
             action: SnackBarAction(
               label: 'Voir le panier',
-              textColor: Colors.white,
+              textColor: AppColors.onPrimary,
               onPressed: () {
                 Navigator.of(context).pushNamed(AppRouter.cart);
               },
@@ -574,7 +530,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Aucun article n\'a pu être ajouté au panier'),
-            backgroundColor: Colors.orange,
+            backgroundColor: AppColors.warning,
           ),
         );
       }
@@ -582,9 +538,13 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
       Journal.trace('Erreur lors de la réorganisation: $e');
       if (mounted && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: ${e.toString()}'),
-            backgroundColor: Colors.red,
+          const SnackBar(
+            // Le détail technique ne regarde pas le client : il part au
+            // journal, l'écran dit ce qui s'est passé.
+            content: Text(
+              'La commande n’a pas pu être remise au panier',
+            ),
+            backgroundColor: AppColors.error,
           ),
         );
       }
