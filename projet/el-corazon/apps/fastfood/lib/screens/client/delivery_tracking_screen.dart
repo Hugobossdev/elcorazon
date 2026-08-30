@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 
 import 'package:elcora_fast/presentation/trajet_livreur.dart';
@@ -6,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/main.dart' show apiClient;
@@ -20,6 +23,11 @@ import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/screens/client/chat_screen.dart';
 import 'package:elcora_fast/screens/client/call_screen.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/navigation/app_router.dart';
+import 'package:elcora_fast/presentation/suivi_commande.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
 
 /// Écran de suivi de livraison en temps réel
 class DeliveryTrackingScreen extends StatefulWidget {
@@ -419,7 +427,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
           Polyline(
             polylineId: const PolylineId('history'),
             points: points,
-            color: Colors.blue.withValues(alpha: 0.5),
+            // Le doré de la palette, non le bleu de Material : le tracé se
+            // pose sur une carte routière déjà bleue, où il disparaissait.
+            color: AppColors.secondary.withValues(alpha: 0.7),
             width: 3,
             patterns: [PatternItem.dash(15), PatternItem.gap(10)],
           ),
@@ -445,25 +455,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     if (livreurToutProche(distance) && !_proximityAlertShown) {
       _proximityAlertShown = true;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.local_shipping, color: Colors.white),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '🎉 Le livreur arrive bientôt !',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 5),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        context.showSuccessMessage('Votre livreur arrive — il est tout près.');
       }
     }
   }
@@ -679,13 +671,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         // connexion n'avait été rétablie. Elle ne parle plus que d'un canal
         // réellement rouvert.
         if (rouvert) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Reconnexion réussie'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
-          );
+          context.showSuccessMessage('Suivi temps réel rétabli');
         }
       }
     } catch (e) {
@@ -766,13 +752,8 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
   void _openChat() {
     if (_order?.deliveryPersonId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Le chat sera disponible une fois qu\'un livreur aura accepté votre commande.',
-          ),
-          backgroundColor: Colors.orange,
-        ),
+      context.showErrorMessage(
+        'La conversation s’ouvrira dès qu’un livreur aura pris votre commande.',
       );
       return;
     }
@@ -790,12 +771,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
   Future<void> _startVoiceCall() async {
     if (_order?.deliveryPersonId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Aucun livreur assigné pour le moment'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      context.showErrorMessage('Aucun livreur n’est encore affecté.');
       return;
     }
 
@@ -803,12 +779,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     final currentUser = appService.currentUser;
 
     if (currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Vous devez être connecté pour passer un appel'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      context.showErrorMessage('Connectez-vous pour passer un appel.');
       return;
     }
 
@@ -827,34 +798,25 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
+      return Scaffold(
+        backgroundColor: theme.colorScheme.surface,
+        appBar: const GlassAppBar(title: 'Suivi de livraison'),
+        body: const etats.PageLoadingWidget(
+          message: 'Localisation de votre commande…',
         ),
       );
     }
 
     if (_errorMessage != null) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('Suivi de livraison'),
-          backgroundColor: AppColors.primary,
-        ),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 64, color: Colors.red),
-              const SizedBox(height: 16),
-              Text(_errorMessage!),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _loadOrderDetails,
-                child: const Text('Réessayer'),
-              ),
-            ],
-          ),
+        backgroundColor: theme.colorScheme.surface,
+        appBar: const GlassAppBar(title: 'Suivi de livraison'),
+        body: etats.ErrorWidget(
+          message: _errorMessage!,
+          onRetry: _loadOrderDetails,
         ),
       );
     }
@@ -862,186 +824,610 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // Full screen map
-          Positioned.fill(
-            child: _buildMapWidget(fullScreen: true),
-          ),
+          Positioned.fill(child: _buildMapWidget(fullScreen: true)),
+          _barreFlottante(theme),
+          _feuilleDeSuivi(theme),
+        ],
+      ),
+    );
+  }
 
-          // Back button and title overlay
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 8,
-            right: 8,
-            child: Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: Colors.white,
-                  child: IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.black),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Card(
-                    elevation: 4,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.delivery_dining,
-                            color: AppColors.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _order!.status.displayName,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (_estimatedDeliveryTime != null)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                _estimatedDeliveryTime!,
-                                style: const TextStyle(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+  /// Le bandeau posé sur la carte : retour, statut, arrivée estimée.
+  ///
+  /// `GlassAppBar` ne convient pas ici — elle occupe toute la largeur et
+  /// masquerait la carte que le client vient précisément regarder. C'est le
+  /// même verre dépoli, mais en pastilles flottantes, comme la maquette
+  /// `delivery_tracking` les dessine.
+  Widget _barreFlottante(ThemeData theme) {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + DesignConstants.spacingS,
+      left: DesignConstants.spacingM,
+      right: DesignConstants.spacingM,
+      child: Row(
+        children: [
+          _PastilleDeCarte(
+            child: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              color: theme.colorScheme.onSurface,
+              tooltip: 'Retour',
+              onPressed: () => Navigator.of(context).pop(),
             ),
           ),
-
-          // Draggable Bottom Sheet
-          DraggableScrollableSheet(
-            initialChildSize: 0.4,
-            minChildSize: 0.2,
-            maxChildSize: 0.85,
-            builder: (context, scrollController) {
-              return Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 10,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: CustomScrollView(
-                  controller: scrollController,
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: Center(
-                        child: Container(
-                          margin: const EdgeInsets.only(top: 12, bottom: 8),
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.grey[300],
-                            borderRadius: BorderRadius.circular(2),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: _PastilleDeCarte(
+              padding: const EdgeInsets.symmetric(
+                horizontal: DesignConstants.spacingM,
+                vertical: DesignConstants.spacingS,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.two_wheeler_rounded,
+                    color: theme.colorScheme.primary,
+                    size: DesignConstants.iconSizeMedium,
+                  ),
+                  const SizedBox(width: DesignConstants.spacingS),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _order!.status.displayName,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTypography.titleLg(
+                            color: theme.colorScheme.onSurface,
                           ),
                         ),
-                      ),
-                    ),
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildDriverInfoCompact(),
-                            const SizedBox(height: 16),
-                            if (_order!.status == OrderStatus.onTheWay &&
-                                _totalDistance > 0) ...[
-                              _buildDeliveryStats(),
-                              const SizedBox(height: 16),
-                            ],
-                            _buildActions(),
-                            const SizedBox(height: 24),
-                            const Text(
-                              'Statut de la commande',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
+                        if (_estimatedDeliveryTime != null)
+                          Text(
+                            'Arrivée estimée $_estimatedDeliveryTime',
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTypography.bodyMd(
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
-                            const SizedBox(height: 16),
-                            _buildStatusTimeline(),
-                            const SizedBox(height: 24),
-                            _buildDeliveryInfo(),
-                            const SizedBox(height: 24),
-                            _buildOrderDetails(),
-                            const SizedBox(height: 24),
-                          ],
-                        ),
-                      ),
+                          ),
+                      ],
                     ),
-                  ],
-                ),
-              );
-            },
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDriverInfoCompact() {
-    if (_driverProfile == null) {
-      return Card(
-        color: Colors.grey[50],
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+  Widget _feuilleDeSuivi(ThemeData theme) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.4,
+      minChildSize: 0.2,
+      maxChildSize: 0.85,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(DesignConstants.radiusXLarge),
+            ),
+            boxShadow: DesignConstants.shadowHigh,
+          ),
+          child: ListView(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(
+              DesignConstants.edgeMargin,
+              0,
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingXL,
+            ),
             children: [
-              const CircleAvatar(
-                backgroundColor: Colors.grey,
-                child: Icon(Icons.person, color: Colors.white),
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(
+                    vertical: DesignConstants.spacingM,
+                  ),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
               ),
-              const SizedBox(width: 12),
+              _carteDuLivreur(theme),
+              const SizedBox(height: DesignConstants.spacingM),
+              _actions(theme),
+              if (_order!.status == OrderStatus.onTheWay &&
+                  _totalDistance > 0) ...[
+                const SizedBox(height: DesignConstants.spacingL),
+                _statistiques(theme),
+              ],
+              const SizedBox(height: DesignConstants.spacingL),
+              _chronologie(theme),
+              const SizedBox(height: DesignConstants.spacingL),
+              _adresse(theme),
+              const SizedBox(height: DesignConstants.spacingL),
+              _detailCommande(theme),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // -------------------------------------------------------------- le livreur
+
+  Widget _carteDuLivreur(ThemeData theme) {
+    if (_driverProfile == null) {
+      return SectionCard(
+        color: theme.colorScheme.surfaceContainerLow,
+        child: Row(
+          children: [
+            Container(
+              width: DesignConstants.avatarSizeMedium,
+              height: DesignConstants.avatarSizeMedium,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHigh,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.person_search_rounded,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: DesignConstants.spacingM),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Recherche d’un livreur…',
+                    style: AppTypography.titleLg(
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: DesignConstants.spacingS),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(
+                      DesignConstants.radiusSmall,
+                    ),
+                    child: const LinearProgressIndicator(minHeight: 4),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final vehicule = _driverProfile!['vehicle_type']?.toString();
+    final plaque = _driverProfile!['vehicle_plate']?.toString();
+
+    return SectionCard(
+      child: Row(
+        children: [
+          ClipOval(
+            child: SizedBox(
+              width: DesignConstants.avatarSizeLarge,
+              height: DesignConstants.avatarSizeLarge,
+              child: FoodImage(
+                url: _driverProfile!['profile_image']?.toString(),
+                icon: Icons.person_rounded,
+                iconSize: 32,
+              ),
+            ),
+          ),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _driverProfile!['name']?.toString() ?? 'Votre livreur',
+                  style: AppTypography.titleLg(
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: DesignConstants.spacingXS),
+                Wrap(
+                  spacing: DesignConstants.spacingS,
+                  runSpacing: DesignConstants.spacingXS,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    // Un livreur sans note est **nouveau**, pas mal noté :
+                    // afficher « 0,0 ★ » le condamnerait sur une absence de
+                    // données.
+                    if (_driverRating != null)
+                      RatingBadge(
+                        rating: _driverRating!,
+                        count:
+                            _driverRatingCount > 0 ? _driverRatingCount : null,
+                      )
+                    else
+                      const StatusChip(
+                        label: 'Nouveau',
+                        icon: Icons.auto_awesome_rounded,
+                      ),
+                    // Véhicule et plaque ne sont montrés que si le suivi les
+                    // porte : la maquette dessine « Yamaha NMAX • ABJ-742 »,
+                    // le serveur ne les renseigne pas toujours.
+                    if (vehicule != null && vehicule.isNotEmpty)
+                      StatusChip(
+                        label: plaque != null && plaque.isNotEmpty
+                            ? '$vehicule • $plaque'
+                            : vehicule,
+                        icon: Icons.two_wheeler_rounded,
+                        background: theme.colorScheme.surfaceContainerHigh,
+                        foreground: theme.colorScheme.onSurfaceVariant,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --------------------------------------------------------------- actions
+
+  Widget _actions(ThemeData theme) {
+    final avecLivreur = _order?.deliveryPersonId != null;
+
+    return Row(
+      children: [
+        Expanded(
+          child: ActionButton(
+            label: 'Message',
+            emphasis: ActionEmphasis.outlined,
+            icon: Icons.chat_bubble_outline_rounded,
+            height: 48,
+            // Désactivés tant qu'aucun livreur n'est affecté : il n'y a
+            // personne à joindre, et un bouton actif qui répond « aucun
+            // livreur assigné » fait porter au client l'erreur de l'écran.
+            onPressed: avecLivreur ? _openChat : null,
+          ),
+        ),
+        const SizedBox(width: DesignConstants.gutter),
+        Expanded(
+          child: ActionButton(
+            label: 'Appeler',
+            emphasis: ActionEmphasis.outlined,
+            icon: Icons.phone_outlined,
+            height: 48,
+            onPressed: avecLivreur ? _startVoiceCall : null,
+          ),
+        ),
+        const SizedBox(width: DesignConstants.gutter),
+        Expanded(
+          child: ActionButton(
+            label: 'Aide',
+            emphasis: ActionEmphasis.outlined,
+            icon: Icons.support_agent_rounded,
+            height: 48,
+            // Le support écrit, adossé aux tickets, plutôt qu'un numéro
+            // inventé : les deux qui figuraient ici étaient ivoiriens et
+            // aboutissaient chez un inconnu (voir `AppConstants.supportPhone`).
+            onPressed: _ouvrirLeSupport,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _ouvrirLeSupport() {
+    if (AppConstants.supportPhone.isEmpty) {
+      Navigator.of(context).pushNamed(AppRouter.support);
+      return;
+    }
+    _makePhoneCall(AppConstants.supportPhone);
+  }
+
+  // ----------------------------------------------------------- chronologie
+
+  /// La chronologie, dans le même repliement à quatre jalons que le détail de
+  /// commande — c'est ce que la maquette dessine (Prep · Picked Up · Nearby ·
+  /// Delivered), et cela évite deux vues du même cycle qui divergent.
+  Widget _chronologie(ThemeData theme) {
+    final etapes = etapesDeSuivi(_order!);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Progression'),
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          child: Column(
+            children: [
+              for (var i = 0; i < etapes.length; i++)
+                _jalon(theme, etapes[i], dernier: i == etapes.length - 1),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _jalon(ThemeData theme, EtapeDeSuivi etape, {required bool dernier}) {
+    final teinte = etape.annulation
+        ? theme.colorScheme.error
+        : etape.franchie
+            ? AppColors.success
+            : theme.colorScheme.outlineVariant;
+
+    // L'heure vient du serveur (`status_events`) ; à défaut, de ce que cet
+    // écran a lui-même observé pendant qu'il était ouvert.
+    final horodatage =
+        etape.horodatage ?? _statusTimestamps[_statutDuJalon(etape.jalon)];
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: etape.franchie || etape.annulation
+                      ? teinte
+                      : theme.colorScheme.surfaceContainerHigh,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  etape.annulation
+                      ? Icons.close_rounded
+                      : etape.franchie
+                          ? Icons.check_rounded
+                          : Icons.circle_outlined,
+                  size: 14,
+                  color: etape.franchie || etape.annulation
+                      ? theme.colorScheme.onPrimary
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (!dernier)
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    color: etape.franchie
+                        ? teinte
+                        : theme.colorScheme.outlineVariant,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: dernier ? 0 : DesignConstants.spacingL,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          etape.annulation
+                              ? libelleDeSortie(_order!.status)
+                              : etape.jalon.libelle,
+                          style: AppTypography.titleLg(
+                            color: etape.franchie || etape.annulation
+                                ? theme.colorScheme.onSurface
+                                : theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      if (horodatage != null)
+                        Text(
+                          _formatTime(horodatage),
+                          style: AppTypography.bodyMd(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (etape.courante && !etape.annulation) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      etape.jalon.description,
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Le statut représentatif d'un jalon, pour retrouver une heure observée
+  /// localement quand le serveur n'a pas publié l'événement.
+  OrderStatus _statutDuJalon(JalonDeSuivi jalon) {
+    switch (jalon) {
+      case JalonDeSuivi.confirmee:
+        return OrderStatus.confirmed;
+      case JalonDeSuivi.enPreparation:
+        return OrderStatus.preparing;
+      case JalonDeSuivi.enRoute:
+        return OrderStatus.onTheWay;
+      case JalonDeSuivi.livree:
+        return OrderStatus.delivered;
+    }
+  }
+
+  String _formatTime(DateTime dateTime) {
+    final difference = DateTime.now().difference(dateTime);
+
+    if (difference.inMinutes < 1) return 'À l’instant';
+    if (difference.inMinutes < 60) return 'il y a ${difference.inMinutes} min';
+    if (difference.inHours < 24) return 'il y a ${difference.inHours} h';
+
+    final h = dateTime.hour.toString().padLeft(2, '0');
+    final m = dateTime.minute.toString().padLeft(2, '0');
+    return '${dateTime.day}/${dateTime.month} à $h:$m';
+  }
+
+  // ------------------------------------------------------------- l'adresse
+
+  Widget _adresse(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Adresse de livraison'),
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.location_on_outlined,
+                color: theme.colorScheme.primary,
+                size: DesignConstants.iconSizeMedium,
+              ),
+              const SizedBox(width: DesignConstants.spacingM),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Recherche d\'un livreur...',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[700],
+                      _order!.deliveryAddress,
+                      style: AppTypography.bodyLg(
+                        color: theme.colorScheme.onSurface,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    const LinearProgressIndicator(),
+                    if ((_order!.deliveryNotes ?? '').isNotEmpty) ...[
+                      const SizedBox(height: DesignConstants.spacingXS),
+                      Text(
+                        _order!.deliveryNotes!,
+                        style: AppTypography.bodyMd(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ).copyWith(fontStyle: FontStyle.italic),
+                      ),
+                    ],
                   ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------- détail commande
+
+  Widget _detailCommande(ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(title: 'Votre commande'),
+        const SizedBox(height: DesignConstants.spacingS),
+        SectionCard(
+          child: Column(
+            children: [
+              for (final article in _order!.items)
+                Padding(
+                  padding: const EdgeInsets.only(
+                    bottom: DesignConstants.spacingS,
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        '${article.quantity}×',
+                        style: AppTypography.labelLg(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: DesignConstants.spacingS),
+                      Expanded(
+                        child: Text(
+                          article.name,
+                          style: AppTypography.bodyLg(
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        PriceFormatter.format(article.totalPrice),
+                        style: AppTypography.bodyLg(
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SummaryDivider(),
+              SummaryRow(
+                label: 'Sous-total',
+                value: PriceFormatter.format(_order!.subtotal),
+              ),
+              SummaryRow(
+                label: 'Livraison',
+                value: PriceFormatter.format(_order!.deliveryFee),
+              ),
+              if (_order!.discount > 0)
+                SummaryRow(
+                  label: 'Remise',
+                  value: '-${PriceFormatter.format(_order!.discount)}',
+                  isDiscount: true,
+                ),
+              const SummaryDivider(),
+              SummaryRow(
+                label: 'Total',
+                value: PriceFormatter.format(_order!.total),
+                isTotal: true,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------ statistiques
+
+  Widget _statistiques(ThemeData theme) {
+    Widget mesure(IconData icone, String valeur, String libelle) {
+      return Expanded(
+        child: Container(
+          padding: const EdgeInsets.all(DesignConstants.spacingM),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHigh,
+            borderRadius: DesignConstants.borderRadiusMedium,
+          ),
+          child: Column(
+            children: [
+              Icon(
+                icone,
+                color: theme.colorScheme.primary,
+                size: DesignConstants.iconSizeMedium,
+              ),
+              const SizedBox(height: DesignConstants.spacingS),
+              Text(
+                valeur,
+                style: AppTypography.titleLg(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                libelle,
+                textAlign: TextAlign.center,
+                style: AppTypography.bodyMd(
+                  color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
@@ -1050,391 +1436,47 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       );
     }
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CircleAvatar(
-          radius: 28,
-          backgroundColor: Colors.grey[200],
-          backgroundImage: _driverProfile!['profile_image'] != null
-              ? NetworkImage(_driverProfile!['profile_image'])
-              : null,
-          child: _driverProfile!['profile_image'] == null
-              ? const Icon(Icons.person, size: 28, color: Colors.grey)
-              : null,
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _driverProfile!['name'] ?? 'Livreur',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Row(
-                children: [
-                  const Icon(Icons.star, size: 16, color: Colors.amber),
-                  const SizedBox(width: 4),
-                  Text(
-                    _driverRating != null
-                        ? '${_driverRating!.toStringAsFixed(1)} ${_driverRatingCount > 0 ? '($_driverRatingCount)' : ''}'
-                        : 'Nouveau',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    '•  ${_driverProfile!['vehicle_type'] ?? 'Scooter'}',
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: AppColors.primary.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.phone, color: AppColors.primary),
+        const SectionHeader(title: 'Course en cours'),
+        const SizedBox(height: DesignConstants.spacingS),
+        Row(
+          children: [
+            mesure(
+              Icons.straighten_rounded,
+              '${_totalDistance.toStringAsFixed(1)} km',
+              'Parcourus',
+            ),
+            const SizedBox(width: DesignConstants.gutter),
+            mesure(
+              Icons.speed_rounded,
+              // Un livreur à l'arrêt n'a pas une vitesse de zéro : il n'a pas
+              // de vitesse mesurable. Le tiret le dit, « 0,0 km/h » ment.
+              _averageSpeed > 0
+                  ? '${_averageSpeed.toStringAsFixed(0)} km/h'
+                  : '—',
+              'Vitesse moyenne',
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildActions() {
-    final hasDriver = _order?.deliveryPersonId != null;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            _buildActionItem(
-              icon: Icons.chat_bubble_outline,
-              label: 'Chat',
-              onTap: _openChat,
-              color: hasDriver ? Colors.blue : Colors.grey,
-              isEnabled: hasDriver,
-            ),
-            _buildActionItem(
-              icon: Icons.phone_in_talk,
-              label: 'Appeler',
-              onTap: () {
-                if (hasDriver) {
-                  _startVoiceCall();
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Aucun livreur assigné pour le moment'),
-                      backgroundColor: Colors.orange,
-                    ),
-                  );
-                }
-              },
-              color: hasDriver ? Colors.green : Colors.grey,
-              isEnabled: hasDriver,
-            ),
-            _buildActionItem(
-              icon: Icons.headset_mic,
-              label: 'Support',
-              onTap: () => _makePhoneCall('+22507070707'), // Customer service
-              color: Colors.orange,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionItem({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    required Color color,
-    bool isEnabled = true,
-  }) {
-    return InkWell(
-      onTap: isEnabled ? onTap : null,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: isEnabled ? Colors.grey[700] : Colors.grey[400],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusTimeline() {
-    final statuses = [
-      OrderStatus.pending,
-      OrderStatus.confirmed,
-      OrderStatus.preparing,
-      OrderStatus.ready,
-      OrderStatus.pickedUp,
-      OrderStatus.onTheWay,
-      OrderStatus.delivered,
-    ];
-
-    return Column(
-      children: statuses.asMap().entries.map((entry) {
-        final status = entry.value;
-        final isCompleted = status.index <= _order!.status.index;
-        final isCurrent = status == _order!.status;
-        final timestamp = _statusTimestamps[status];
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Column(
-                children: [
-                  Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: isCompleted ? Colors.green : Colors.grey[300],
-                      shape: BoxShape.circle,
-                      border: isCurrent
-                          ? Border.all(color: Colors.blue, width: 2)
-                          : null,
-                    ),
-                    child: isCompleted
-                        ? const Icon(
-                            Icons.check,
-                            size: 16,
-                            color: Colors.white,
-                          )
-                        : isCurrent
-                            ? const Icon(
-                                Icons.radio_button_checked,
-                                size: 16,
-                                color: Colors.blue,
-                              )
-                            : null,
-                  ),
-                  if (entry.key < statuses.length - 1)
-                    Container(
-                      width: 2,
-                      height: 40,
-                      color: isCompleted ? Colors.green : Colors.grey[300],
-                    ),
-                ],
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      status.displayName,
-                      style: TextStyle(
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.normal,
-                        color: isCompleted ? Colors.green : Colors.grey[600],
-                        fontSize: 14,
-                      ),
-                    ),
-                    if (timestamp != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          _formatTime(timestamp),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ),
-                    if (isCurrent && _estimatedDeliveryTime != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          'Arrivée estimée: $_estimatedDeliveryTime',
-                          style: const TextStyle(
-                            color: Colors.blue,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  String _formatTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-
-    if (difference.inMinutes < 1) {
-      return 'À l\'instant';
-    } else if (difference.inMinutes < 60) {
-      return 'Il y a ${difference.inMinutes} min';
-    } else if (difference.inHours < 24) {
-      return 'Il y a ${difference.inHours}h';
-    } else {
-      return '${dateTime.day}/${dateTime.month} à ${dateTime.hour}:${dateTime.minute.toString().padLeft(2, '0')}';
-    }
-  }
-
-  Widget _buildOrderDetails() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Détails de la commande',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            ..._order!.items.map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Text('${item.quantity}x'),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(item.name)),
-                    Text(PriceFormatter.format(item.totalPrice)),
-                  ],
-                ),
-              ),
-            ),
-            const Divider(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Sous-total'),
-                Text(PriceFormatter.format(_order!.subtotal)),
-              ],
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Livraison'),
-                Text(PriceFormatter.format(_order!.deliveryFee)),
-              ],
-            ),
-            if (_order!.discount > 0)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Remise', style: TextStyle(color: Colors.green)),
-                  Text(
-                    '-${PriceFormatter.format(_order!.discount)}',
-                    style: const TextStyle(color: Colors.green),
-                  ),
-                ],
-              ),
-            const Divider(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Total',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  PriceFormatter.format(_order!.total),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDeliveryInfo() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.location_on,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Adresse de livraison',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(_order!.deliveryAddress),
-            if (_order!.deliveryNotes != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Notes: ${_order!.deliveryNotes}',
-                style: TextStyle(
-                  fontStyle: FontStyle.italic,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+  // ---------------------------------------------------------------- la carte
 
   Widget _buildMapWidget({bool fullScreen = false}) {
-    // Utiliser un Builder pour capturer les erreurs de rendu
+    // Un `Builder` pour capturer les erreurs de rendu de la carte.
     return Builder(
       builder: (context) {
         try {
           return GoogleMap(
             initialCameraPosition: CameraPosition(
-              // Repli sur le restaurant, et non sur Abidjan : les
-              // coordonnées écrites ici pointaient à 600 km de
-              // l'établissement, si bien qu'une commande sans position connue
-              // ouvrait la carte sur une autre ville, dans un autre pays.
+              // Repli sur le restaurant : les coordonnées écrites ici
+              // pointaient à 600 km de l'établissement, si bien qu'une
+              // commande sans position connue ouvrait la carte sur une autre
+              // ville, dans un autre pays.
               target: _deliveryLocation?.point ??
                   _deliveryLatLng ??
                   const LatLng(
@@ -1445,7 +1487,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
             ),
             onMapCreated: (controller) {
               _mapController = controller;
-              _updateMapMarkers(); // Ensure markers are shown
+              _updateMapMarkers();
             },
             markers: _markers,
             circles: _circles,
@@ -1456,30 +1498,30 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
           );
         } catch (e) {
           eccore.Journal.trace('❌ Erreur lors du chargement de Google Maps: $e');
-          return Container(
-            color: Colors.red[50],
+          return ColoredBox(
+            color: Theme.of(context).colorScheme.errorContainer,
             child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    color: Colors.red[700],
-                    size: 48,
-                  ),
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      'Impossible de charger la carte.\nVérifiez votre connexion internet.',
+              child: Padding(
+                padding: const EdgeInsets.all(DesignConstants.spacingL),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.map_outlined,
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                      size: 48,
+                    ),
+                    const SizedBox(height: DesignConstants.spacingM),
+                    Text(
+                      'Carte indisponible. Le suivi textuel ci-dessous reste '
+                      'à jour.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.red[700],
-                        fontSize: 14,
+                      style: AppTypography.bodyMd(
+                        color: Theme.of(context).colorScheme.onErrorContainer,
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           );
@@ -1487,103 +1529,39 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       },
     );
   }
+}
 
-  /// Affiche les statistiques de livraison
-  Widget _buildDeliveryStats() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  Icons.analytics_outlined,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'Statistiques de livraison',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatItem(
-                    icon: Icons.straighten,
-                    label: 'Distance',
-                    value: '${_totalDistance.toStringAsFixed(2)} km',
-                    color: Colors.blue,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatItem(
-                    icon: Icons.speed,
-                    label: 'Vitesse moy.',
-                    value: _averageSpeed > 0
-                        ? '${_averageSpeed.toStringAsFixed(1)} km/h'
-                        : '—',
-                    color: Colors.green,
-                  ),
-                ),
-              ],
-            ),
-            if (_locationHistory.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                'Points de suivi: ${_locationHistory.length}',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-          ],
+/// Une pastille de verre dépoli posée sur la carte.
+///
+/// Reprend le flou et l'opacité de `GlassAppBar`, mais en élément flottant :
+/// une barre pleine largeur masquerait la carte que le client vient regarder.
+class _PastilleDeCarte extends StatelessWidget {
+  const _PastilleDeCarte({required this.child, this.padding = EdgeInsets.zero});
+
+  final Widget child;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final rayon = BorderRadius.circular(DesignConstants.radiusXLarge);
+
+    return ClipRRect(
+      borderRadius: rayon,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(
+          sigmaX: AppColors.glassBlur,
+          sigmaY: AppColors.glassBlur,
         ),
-      ),
-    );
-  }
-
-  Widget _buildStatItem({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 24),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface.withValues(alpha: 0.92),
+            borderRadius: rayon,
+            boxShadow: DesignConstants.shadowMedium,
           ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-            ),
-          ),
-        ],
+          child: child,
+        ),
       ),
     );
   }
