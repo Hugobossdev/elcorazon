@@ -66,8 +66,12 @@ enum StatutCommande {
 /// Delivery », « FastFoodGo Wallet » dans une application française. Les
 /// traduire se voit, et cela ne se décide pas dans un refactoring.
 enum MoyenPaiement {
-  mobileMoney('mobile_money', 'Mobile Money', '📱',
-      'Orange Money, MTN Money, Moov Money'),
+  mobileMoney(
+    'mobile_money',
+    'Mobile Money',
+    '📱',
+    'Orange Money, MTN Money, Moov Money',
+  ),
   especes('cash', 'Cash on Delivery', '💵', 'Paiement à la livraison'),
   portefeuille('wallet', 'FastFoodGo Wallet', '👛', 'Portefeuille FastFoodGo'),
   carte('card', 'Credit Card', '💳', 'Visa, Mastercard, American Express');
