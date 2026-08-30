@@ -162,8 +162,13 @@ La route passe `null` : c'est l'état réel de la connaissance, et l'écran
 d'évaluation garde son repli.
 
 **Backend nécessaire**
-Ajouter le nom du livreur à `OrderSerializer` (ou faire lire la course par
-l'écran d'évaluation, via `GET /delivery/assignments/?order={id}`).
+Ajouter le nom du livreur à `OrderSerializer`.
+
+> **Correction du 2026-08-30.** L'audit du second lot Stitch a montré que le
+> nom **est** disponible : `GET /tracking/orders/{id}/` le rend dans le bloc
+> `courier`, et l'écran de suivi l'affiche déjà. Ce qui reste souhaitable, ce
+> n'est donc pas la donnée mais l'éviter d'un second appel réseau pour
+> afficher un nom sur une carte de liste. Voir BR-012.
 
 ---
 
@@ -369,9 +374,16 @@ La maquette `product_reviews` propose un filtre « With Photos » et un compteur
 « 👍 12 » par avis.
 
 **Cause**
-`Review` porte la note, le texte, l'auteur et la date. Ni photo ni vote. Le
-modèle local `ProductReview` en avait, mais c'étaient des champs que le client
-remplissait lui-même — retirés pour cette raison.
+`Review` porte la note, le texte, l'auteur et la date, mais pas de photo.
+
+> **Correction du 2026-08-30.** Cette entrée était **inexacte** sur le vote :
+> `Review` porte bien `helpfulCount` et `isVerifiedPurchase` — vérifié dans
+> `packages/elcorazon_core/lib/src/catalog/review.dart`. Le compteur est donc
+> affichable dès maintenant. Ce qui manque, c'est la **route pour voter** :
+> aucun `POST /catalog/reviews/{id}/helpful/` n'existe. Voir BR-007.
+>
+> Le modèle local `ProductReview` avait aussi ces champs, mais le client les
+> remplissait lui-même — retirés pour cette raison.
 
 **Impact**
 Les filtres se limitent à ce que le serveur sait distinguer.
@@ -396,6 +408,18 @@ atteint :
 `delivery_tracking` · `driver_rating` · `enhanced_orders` · `order_details` ·
 `order_rating` · `rewards` · `social_feed` · `social_groups` · `support` ·
 `guest_contact` · `auth`
+
+> **Mise à jour du 2026-08-30.** Le **second lot Stitch** en couvrait douze,
+> qui sont désormais repris : `auth`, `chat`, `call`, `delivery_tracking`,
+> `driver_rating`, `order_details`, `order_rating`, `rewards`, `support`, plus
+> `profile` et `notifications` (déjà traités au premier lot) et les quatre
+> écrans d'onboarding, créés de toutes pièces.
+>
+> **Restent à l'ancienne charte** — aucune maquette ne les couvre :
+> `address_management`, `address_selector`, `address_map_picker`,
+> `address_detail_bottom_sheet`, `advanced_search`, `enhanced_orders`,
+> `social_feed`, `social_groups`, `guest_contact`. Le carnet d'adresses
+> d'abord : c'est le seul du lot qui se trouve sur le chemin d'une commande.
 
 **Impact**
 Cohérence visuelle, pas fonctionnalité. Les quinze maquettes livrées et les
