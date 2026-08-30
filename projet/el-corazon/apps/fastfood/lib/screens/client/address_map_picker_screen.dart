@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:elcora_fast/theme.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -348,9 +349,11 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
 
   Color get _pinColor {
     if (_isCameraMoving || _isResolving || _feeBreakdown == null) {
-      return Colors.grey.shade700;
+      return AppColors.textTertiary;
     }
-    return _isServiceable ? Colors.green : Colors.red;
+    // Le repère dit si le point est **desservi**. Vert et rouge de la palette,
+    // non ceux de Material : les mêmes que partout ailleurs dans l'application.
+    return _isServiceable ? AppColors.success : AppColors.error;
   }
 
   @override
@@ -384,10 +387,10 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
                   Icons.location_on,
                   size: 48,
                   color: _pinColor,
-                  shadows: [
+                  shadows: const [
                     Shadow(
                       blurRadius: 4,
-                      color: Colors.black.withValues(alpha: 0.3),
+                      color: Color(0x4D1A1A1A),
                     ),
                   ],
                 ),
@@ -472,11 +475,11 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
+            color: Color(0x261A1A1A),
             blurRadius: 12,
-            offset: const Offset(0, 4),
+            offset: Offset(0, 4),
           ),
         ],
       ),
@@ -524,11 +527,11 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(24),
-          boxShadow: [
+          boxShadow: const [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
+              color: Color(0x261A1A1A),
               blurRadius: 20,
-              offset: const Offset(0, 4),
+              offset: Offset(0, 4),
             ),
           ],
         ),
@@ -555,7 +558,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
                           style: Theme.of(context)
                               .textTheme
                               .labelMedium
-                              ?.copyWith(color: Colors.grey.shade600),
+                              ?.copyWith(color: AppColors.textSecondary),
                         ),
                         const SizedBox(height: 2),
                         _buildAddressLine(),
@@ -566,7 +569,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
               ),
               if (_feeBreakdown != null) ...[
                 const SizedBox(height: 16),
-                Divider(height: 1, color: Colors.grey.shade300),
+                const Divider(height: 1, color: AppColors.outlineVariant),
                 const SizedBox(height: 16),
                 _buildFeeInfo(_feeBreakdown!),
               ],
@@ -596,7 +599,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     if (_isCameraMoving) {
       return Text(
         'Déplacez la carte…',
-        style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+        style: AppTypography.bodyMd(color: AppColors.textSecondary),
       );
     }
     if (_isResolving) {
@@ -625,7 +628,8 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     if (!breakdown.isInServiceableZone) {
       return _buildBanner(
         icon: Icons.cancel,
-        color: Colors.red,
+        color: AppColors.error,
+        background: AppColors.errorLight,
         title: 'Zone non desservie',
         subtitle: 'Aucune de nos zones de livraison ne couvre ce point.',
       );
@@ -634,7 +638,8 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     if (breakdown.isFreeDelivery) {
       return _buildBanner(
         icon: Icons.card_giftcard,
-        color: Colors.green,
+        color: AppColors.success,
+        background: AppColors.successLight,
         title: 'Livraison gratuite ! 🎉',
       );
     }
@@ -686,22 +691,29 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     );
   }
 
+  /// Un bandeau d'état de zone.
+  ///
+  /// Il prenait une `MaterialColor` pour en dériver `shade50` et `shade200` —
+  /// ce qui l'enfermait dans la palette de Material, la seule à publier ces
+  /// nuances. Il prend maintenant un fond et une encre, comme les puces du
+  /// design system.
   Widget _buildBanner({
     required IconData icon,
-    required MaterialColor color,
+    required Color color,
+    required Color background,
     required String title,
     String? subtitle,
   }) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.shade50,
+        color: background,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.shade200),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color.shade700, size: 20),
+          Icon(icon, color: color, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -712,13 +724,13 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: color.shade900,
+                    color: color,
                   ),
                 ),
                 if (subtitle != null)
                   Text(
                     subtitle,
-                    style: TextStyle(fontSize: 12, color: color.shade800),
+                    style: TextStyle(fontSize: 12, color: color),
                   ),
               ],
             ),
@@ -738,7 +750,10 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
       children: [
         Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
         const SizedBox(width: 8),
-        Text(label, style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+        Text(
+          label,
+          style: AppTypography.bodyMd(color: AppColors.textSecondary),
+        ),
         const Spacer(),
         Flexible(
           child: Text(

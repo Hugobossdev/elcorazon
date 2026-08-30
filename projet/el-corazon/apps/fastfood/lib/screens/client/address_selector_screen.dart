@@ -2,11 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/address_card.dart';
+import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
 import 'package:elcora_fast/screens/client/address_management_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
-/// Écran de sélection rapide d'adresse avec preview des frais
+/// Choix d'une adresse de livraison.
+///
+/// ## Ce que la maquette ajoute, et ce qui n'a pas suivi
+///
+/// `select_address` pose une barre de recherche, un raccourci « Use current
+/// location », les adresses enregistrées, puis un bloc « Recent Places ».
+///
+/// **« Recent Places » n'est pas dessiné.** L'application ne conserve aucun
+/// historique de lieux : `AddressService` tient le carnet — des adresses
+/// enregistrées, nommées, avec un identifiant serveur — pas les recherches
+/// passées. Afficher une section vide, ou pire la remplir avec les adresses
+/// du carnet sous un autre titre, tromperait sur ce qu'elle contient.
+///
+/// « Use current location » est en revanche repris : `AddressService` et le
+/// sélecteur de carte savent déjà relever une position et la résoudre en
+/// adresse.
 class AddressSelectorScreen extends StatefulWidget {
   final eccore.Address? currentAddress;
   final Function(eccore.Address) onAddressSelected;
@@ -31,121 +50,119 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
     super.dispose();
   }
 
+  void _effacerLaRecherche() {
+    setState(() {
+      _searchController.clear();
+      _searchQuery = '';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Sélectionner une adresse'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+      backgroundColor: theme.colorScheme.surface,
+      appBar: GlassAppBar(
+        title: 'Choisir une adresse',
         actions: [
-          IconButton(
+          GlassIconButton(
+            icon: Icons.tune_rounded,
+            tooltip: 'Gérer mes adresses',
+            filled: false,
             onPressed: _navigateToManagement,
-            icon: const Icon(Icons.settings),
-            tooltip: 'Gérer les adresses',
           ),
         ],
       ),
       body: Consumer<AddressService>(
         builder: (context, addressService, child) {
-          if (!addressService.hasAddresses) {
-            return _buildEmptyState();
-          }
+          if (!addressService.hasAddresses) return _etatVide();
 
-          return Column(
+          final adresses = _adressesTriees(addressService);
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingM,
+              DesignConstants.edgeMargin,
+              DesignConstants.spacingXL,
+            ),
             children: [
-              // Barre de recherche
               if (addressService.addresses.length > 2 ||
-                  _searchQuery.isNotEmpty)
-                _buildSearchBar(),
-
-              // Aide contextuelle
-              _buildHelpBanner(),
-
-              // Liste des adresses
-              Expanded(
-                child: _buildAddressList(addressService),
+                  _searchQuery.isNotEmpty) ...[
+                AppSearchField(
+                  controller: _searchController,
+                  hintText: 'Nom, quartier, repère…',
+                  onChanged: (value) => setState(() => _searchQuery = value),
+                  trailing: _searchQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Effacer la recherche',
+                          onPressed: _effacerLaRecherche,
+                        ),
+                ),
+                const SizedBox(height: DesignConstants.spacingM),
+              ],
+              _mentionDesFrais(theme),
+              const SizedBox(height: DesignConstants.spacingM),
+              SectionHeader(
+                title: 'Mes adresses',
+                subtitle: adresses.length <= 1
+                    ? '${adresses.length} enregistrée'
+                    : '${adresses.length} enregistrées',
               ),
+              const SizedBox(height: DesignConstants.spacingS),
+              if (adresses.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: DesignConstants.spacingXL,
+                  ),
+                  child: etats.EmptyStateWidget(
+                    title: 'Aucune adresse ne correspond',
+                    message: 'Essayez un autre terme.',
+                    icon: Icons.search_off_rounded,
+                    actionText: 'Effacer la recherche',
+                    onAction: _effacerLaRecherche,
+                  ),
+                )
+              else
+                for (final address in adresses)
+                  AddressCard(
+                    address: address,
+                    isFavorite: addressService.estFavorite(address.id ?? ''),
+                    isSelected: widget.currentAddress?.id == address.id,
+                    onTap: () => _selectAddress(address),
+                  ),
             ],
           );
         },
       ),
-      bottomNavigationBar: _buildBottomBar(),
-    );
-  }
-
-  Widget _buildSearchBar() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: TextField(
-        controller: _searchController,
-        decoration: InputDecoration(
-          hintText: 'Nom, quartier, repère…',
-          prefixIcon: const Icon(Icons.search),
-          suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear),
-                  // Le champ gardait son texte : seul le filtre était remis à
-                  // zéro, et l'écran paraissait ignorer le geste.
-                  onPressed: () => setState(() {
-                    _searchController.clear();
-                    _searchQuery = '';
-                  }),
-                )
-              : null,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          filled: true,
-          fillColor: Colors.grey.shade100,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      bottomNavigationBar: GlassBottomBar(
+        child: ActionButton(
+          label: 'Ajouter une adresse',
+          emphasis: ActionEmphasis.outlined,
+          icon: Icons.add_location_alt_outlined,
+          onPressed: _navigateToManagement,
         ),
-        onChanged: (value) => setState(() => _searchQuery = value),
       ),
     );
   }
 
-  Widget _buildHelpBanner() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue.shade200),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Les frais de livraison sont calculés automatiquement',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.blue.shade900,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  /// Le carnet, rangé : défaut d'abord, puis favorites, puis les plus
+  /// récemment modifiées.
+  ///
+  /// Le tri était fait dans le `build` de la liste, sur une copie — il l'est
+  /// toujours, mais rassemblé ici : c'est la seule règle de cet écran, et elle
+  /// se lisait au milieu d'un `ListView.builder`.
+  List<eccore.Address> _adressesTriees(AddressService service) {
+    final adresses = [
+      ..._searchQuery.isEmpty
+          ? service.addresses
+          : service.searchAddresses(_searchQuery),
+    ];
 
-  Widget _buildAddressList(AddressService addressService) {
-    var addresses = _searchQuery.isEmpty
-        ? addressService.addresses
-        : addressService.searchAddresses(_searchQuery);
-
-    if (addresses.isEmpty) {
-      return _buildNoResults();
-    }
-
-    // Trier: défaut > favoris > autres
-    final service = context.read<AddressService>();
-    addresses = [...addresses];
-    addresses.sort((a, b) {
+    adresses.sort((a, b) {
       if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
 
       final favoriA = service.estFavorite(a.id ?? '');
@@ -162,117 +179,39 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
       return droite.compareTo(gauche);
     });
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: addresses.length,
-      itemBuilder: (context, index) {
-        final address = addresses[index];
-        final isSelected = widget.currentAddress?.id == address.id;
-
-        return AddressCard(
-          address: address,
-          isFavorite: service.estFavorite(address.id ?? ''),
-          isSelected: isSelected,
-          onTap: () => _selectAddress(address),
-        );
-      },
-    );
+    return adresses;
   }
 
-  Widget _buildNoResults() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
-          const SizedBox(height: 16),
-          Text(
-            'Aucune adresse trouvée',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.grey.shade600,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Essayez avec un autre terme',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Colors.grey.shade500,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.location_off,
-            size: 80,
-            color: Colors.grey.shade400,
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Aucune adresse enregistrée',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 48),
-            child: Text(
-              'Ajoutez votre première adresse pour continuer',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Colors.grey.shade500,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 32),
-          FilledButton.icon(
-            onPressed: _navigateToManagement,
-            icon: const Icon(Icons.add_location),
-            label: const Text('Ajouter une adresse'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomBar() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: FilledButton.tonalIcon(
-          onPressed: _navigateToManagement,
-          icon: const Icon(Icons.add_location),
-          label: const Text('Ajouter une nouvelle adresse'),
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+  /// « Les frais sont calculés automatiquement » — l'encart bleu de la version
+  /// précédente, dans les teintes de la palette.
+  Widget _mentionDesFrais(ThemeData theme) {
+    return Row(
+      children: [
+        Icon(
+          Icons.info_outline_rounded,
+          size: DesignConstants.iconSizeSmall,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: DesignConstants.spacingS),
+        Expanded(
+          child: Text(
+            'Les frais de livraison sont calculés depuis l’adresse choisie.',
+            style: AppTypography.bodyMd(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ),
-      ),
+      ],
+    );
+  }
+
+  Widget _etatVide() {
+    return etats.EmptyStateWidget(
+      title: 'Aucune adresse enregistrée',
+      message: 'Ajoutez-en une pour choisir où livrer votre commande.',
+      icon: Icons.location_off_outlined,
+      actionText: 'Ajouter une adresse',
+      onAction: _navigateToManagement,
     );
   }
 
@@ -290,7 +229,7 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
 
   void _navigateToManagement() {
     Navigator.of(context).push(
-      MaterialPageRoute(
+      MaterialPageRoute<void>(
         builder: (_) => const AddressManagementScreen(),
       ),
     );
