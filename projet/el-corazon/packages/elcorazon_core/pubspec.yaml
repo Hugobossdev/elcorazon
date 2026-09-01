@@ -18,7 +18,26 @@ dependencies:
   jwt_decoder: ^2.0.1
   web_socket_channel: ^3.0.0
 
+  # Rendu du pack emojis El Corazon (`assets/emojis/`, `AppEmoji`).
+  flutter_svg: ^2.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+
+flutter:
+  # Le pack emojis El Corazon vit ici, et non dans chaque application : les
+  # trente illustrations n'existent qu'en un exemplaire pour les trois. Un
+  # asset declare par un paquet est embarque d'office par toute application
+  # qui en depend — les `pubspec` des applications n'ont donc rien a declarer.
+  #
+  # Les quatre dossiers sont declares meme tant qu'ils sont vides : deposer un
+  # SVG suffit alors a l'embarquer, sans toucher ni au `pubspec`, ni au code.
+  # `AppEmoji` se replie sur l'icone du design system tant qu'un fichier
+  # manque. Voir `assets/emojis/README.md`.
+  assets:
+    - assets/emojis/food/
+    - assets/emojis/order/
+    - assets/emojis/delivery/
+    - assets/emojis/ux/
