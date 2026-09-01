@@ -29,10 +29,20 @@ extension ArticleAffiche on eccore.MenuItem {
 }
 
 extension CategorieAffichee on eccore.Category {
-  /// La pastille de la catégorie, ou une assiette à défaut.
+  /// L'illustration de la catégorie, ou `null` si le pack n'en a pas.
   ///
-  /// `emoji` est vide dès que l'établissement n'en a pas configuré. Ce repli
-  /// existe parce que `OfflineSyncService` écartait purement et simplement
-  /// toute catégorie sans pastille : elle disparaissait du mode hors-ligne.
-  String get pastille => emoji.isEmpty ? '🍽️' : emoji;
+  /// ## Pourquoi elle ne vient plus de `emoji`
+  ///
+  /// Le champ `emoji` du serveur reste, intact : c'est une donnée métier,
+  /// saisie depuis l'admin Django, persistée et mise en cache. Mais il ne
+  /// pilote plus le dessin. Un emoji Unicode rendu par la police système ne
+  /// s'affiche pas pareil d'un téléphone à l'autre, et pas du tout sur les
+  /// Android anciens. Le client choisit donc son illustration à partir du
+  /// **slug**, qui est stable et ne dépend d'aucune saisie libre.
+  ///
+  /// La version précédente posait une assiette sur toute catégorie sans emoji.
+  /// Le pack n'a rien pour « Salades » ni pour « Spécialités Togolaises », et
+  /// une assiette vide devant un plat togolais dit moins que rien : ces
+  /// catégories montrent leur seul intitulé.
+  eccore.AppEmojiToken? get illustration => eccore.emojiDeCategorie(slug);
 }

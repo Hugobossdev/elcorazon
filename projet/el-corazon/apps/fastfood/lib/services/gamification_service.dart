@@ -80,17 +80,17 @@ class GamificationService extends ChangeNotifier {
   String get currentLevelTitle {
     switch (_currentLevel) {
       case 1:
-        return 'Gourmand Débutant 🍔';
+        return 'Gourmand Débutant';
       case 2:
-        return 'Amateur de Saveurs 🍕';
+        return 'Amateur de Saveurs';
       case 3:
-        return 'Connaisseur Culinaire 🍖';
+        return 'Connaisseur Culinaire';
       case 4:
-        return 'Expert Gastronome 🥘';
+        return 'Expert Gastronome';
       case 5:
-        return 'Maître El Corazón 👑';
+        return 'Maître El Corazón';
       default:
-        return 'Légende Culinaire 🌟';
+        return 'Légende Culinaire';
     }
   }
 

@@ -166,7 +166,7 @@ class DeliveryFeeBreakdownCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Livraison Gratuite ! 🎉',
+                    'Livraison Gratuite !',
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: Colors.green.shade900,

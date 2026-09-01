@@ -214,7 +214,7 @@ class InputSanitizer {
         return SanitizeResult(
           isValid: false,
           errorMessage:
-              '⚠️ Le champ "$fieldName" contient des caractères non autorisés. Veuillez utiliser uniquement des lettres, chiffres et caractères de ponctuation standards.',
+              'Le champ "$fieldName" contient des caractères non autorisés. Veuillez utiliser uniquement des lettres, chiffres et caractères de ponctuation standards.',
         );
       }
     } else {
@@ -222,8 +222,8 @@ class InputSanitizer {
         return SanitizeResult(
           isValid: false,
           errorMessage: fieldName != null
-              ? '⚠️ Le champ "$fieldName" contient des caractères non autorisés. Veuillez utiliser uniquement des lettres, chiffres et caractères de ponctuation standards.'
-              : '⚠️ Caractères non autorisés détectés. Veuillez corriger votre saisie.',
+              ? 'Le champ "$fieldName" contient des caractères non autorisés. Veuillez utiliser uniquement des lettres, chiffres et caractères de ponctuation standards.'
+              : 'Caractères non autorisés détectés. Veuillez corriger votre saisie.',
         );
       }
     }
@@ -233,8 +233,8 @@ class InputSanitizer {
       return SanitizeResult(
         isValid: false,
         errorMessage: fieldName != null
-            ? '⚠️ Le champ "$fieldName" contient du contenu non autorisé. Les balises HTML et scripts ne sont pas autorisés.'
-            : '⚠️ Contenu non autorisé détecté. Les balises HTML et scripts ne sont pas autorisés.',
+            ? 'Le champ "$fieldName" contient du contenu non autorisé. Les balises HTML et scripts ne sont pas autorisés.'
+            : 'Contenu non autorisé détecté. Les balises HTML et scripts ne sont pas autorisés.',
       );
     }
 
@@ -245,7 +245,7 @@ class InputSanitizer {
       return const SanitizeResult(
         isValid: false,
         errorMessage:
-            '⚠️ Impossible de traiter cette valeur. Veuillez corriger votre saisie.',
+            'Impossible de traiter cette valeur. Veuillez corriger votre saisie.',
       );
     }
 

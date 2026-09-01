@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/custom_button.dart';
+import 'package:elcorazon_core/elcorazon_core.dart'
+    show AppEmoji, AppEmojiToken;
 
 /// Widget de chargement amélioré avec animations
 class LoadingWidget extends StatefulWidget {
@@ -247,11 +249,24 @@ class EmptyStateWidget extends StatelessWidget {
   final String? actionText;
   final VoidCallback? onAction;
 
+  /// Une illustration du pack, à la place de [icon].
+  ///
+  /// C'est le seul endroit de l'application où une illustration se prend une
+  /// place entière — un état vide n'a rien d'autre à montrer, et c'est la
+  /// situation que le §30 range en « hero ». Partout ailleurs le pack
+  /// accompagne un texte.
+  ///
+  /// [icon] reste pour les états qu'aucune des trente ne représente : « aucune
+  /// adresse ne correspond », « atelier indisponible ». Renseigner les deux
+  /// donne la priorité à l'illustration.
+  final AppEmojiToken? illustration;
+
   const EmptyStateWidget({
     required this.title,
     super.key,
     this.message,
     this.icon,
+    this.illustration,
     this.actionText,
     this.onAction,
   });
@@ -274,11 +289,24 @@ class EmptyStateWidget extends StatelessWidget {
                     .withValues(alpha: 0.5),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                icon ?? Icons.inbox_outlined,
-                size: 64,
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
-              ),
+              child: illustration != null
+                  // Portante, pas décorative : elle est le seul visuel de
+                  // l'écran. Son libellé s'annonce donc avant le titre.
+                  // La teinte ne vise que le repli en icône, pour qu'il garde
+                  // le gris estompé de cet état ; l'illustration, elle, porte
+                  // ses propres couleurs.
+                  ? AppEmoji(
+                      illustration!,
+                      size: 64,
+                      color:
+                          theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                    )
+                  : Icon(
+                      icon ?? Icons.inbox_outlined,
+                      size: 64,
+                      color:
+                          theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                    ),
             ),
             const SizedBox(height: DesignConstants.spacingL),
             Text(

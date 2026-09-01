@@ -246,9 +246,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
               color: theme.colorScheme.surfaceContainerHigh,
               borderRadius: DesignConstants.borderRadiusMedium,
             ),
-            child: Text(
-              order.paymentMethod.emoji,
-              style: const TextStyle(fontSize: 22),
+            child: Icon(
+              order.paymentMethod.icone,
+              size: 22,
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(width: DesignConstants.spacingM),

@@ -154,7 +154,7 @@ class _DeliveryFeePreviewState extends State<DeliveryFeePreview> {
           Icon(Icons.card_giftcard, size: 16, color: Colors.green.shade700),
           const SizedBox(width: 6),
           Text(
-            'Livraison gratuite 🎉',
+            'Livraison gratuite',
             style: TextStyle(
               fontSize: 12,
               color: Colors.green.shade900,

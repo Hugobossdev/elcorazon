@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/material.dart';
@@ -39,7 +41,17 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
   bool _showFilters = false;
   bool _vegetarianOnly = false;
   bool _veganOnly = false;
-  double _maxPrice = 5000.0;
+
+  /// Plafond de prix retenu, `null` tant que le client n'en a pas posé.
+  ///
+  /// C'était auparavant un `double` à 5 000, comparé à `item.prixAffiche` :
+  /// **tout plat au-dessus de 5 000 F CFA était écarté de la carte dès la
+  /// première ouverture**, sans que le panneau de filtres ait été déplié ni
+  /// qu'aucune trace le dise. Sur un catalogue qui va jusqu'à 6 000, les plats
+  /// les plus chers n'ont jamais été visibles — et « Réinitialiser les
+  /// filtres », qui remettait 5 000, ne les ramenait pas davantage.
+  double? _prixMaximum;
+
   bool _isSearching = false;
 
   @override
@@ -212,7 +224,11 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
             const SizedBox(height: DesignConstants.spacingS),
             Consumer<AppService>(
               builder: (context, appService, child) {
-                final nombre = appService.menuItems.length;
+                // Le compte de ce qui est **affiché**. Il annonçait le
+                // catalogue entier pendant qu'une recherche ou un filtre en
+                // montrait trois : « 50 plats à la carte » au-dessus de trois
+                // cartes se lit comme un écran qui n'a pas fini de charger.
+                final nombre = _getFilteredItems(appService.menuItems).length;
                 if (nombre == 0) return const SizedBox.shrink();
                 return Padding(
                   padding: const EdgeInsets.only(left: 4),
@@ -346,38 +362,84 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                   ],
                 ),
                 const SizedBox(height: 20),
-                Text(
-                  'Prix maximum: ${PriceFormatter.format(_maxPrice / 100)}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    activeTrackColor: AppColors.primary,
-                    inactiveTrackColor:
-                        AppColors.primary.withValues(alpha: 0.2),
-                    thumbColor: AppColors.primary,
-                    overlayColor: AppColors.primary.withValues(alpha: 0.2),
-                  ),
-                  child: Slider(
-                    value: _maxPrice,
-                    min: 500,
-                    max: 10000,
-                    divisions: 19,
-                    onChanged: (value) {
-                      setState(() {
-                        _maxPrice = value;
-                      });
-                    },
-                  ),
+                Consumer<AppService>(
+                  builder: (context, appService, child) =>
+                      _curseurDePrix(appService.menuItems),
                 ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// Curseur du plafond de prix, borné par **le catalogue réel**.
+  ///
+  /// Les bornes étaient écrites en dur — 500 à 10 000 — et l'intitulé divisait
+  /// la valeur par 100 : un plafond de 5 000 F CFA s'affichait « 50 CFA ». Le
+  /// curseur disait donc un montant, en filtrait un autre, et laissait hors
+  /// d'atteinte tout catalogue dépassant 10 000.
+  Widget _curseurDePrix(List<eccore.MenuItem> articles) {
+    final plafond = _plafondDuCatalogue(articles);
+    final valeur = (_prixMaximum ?? plafond).clamp(0.0, plafond);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _prixMaximum == null
+              ? 'Prix maximum : tous les plats'
+              : 'Prix maximum : ${PriceFormatter.format(_prixMaximum!)}',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: AppColors.textPrimary,
+              ),
+        ),
+        const SizedBox(height: 8),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            activeTrackColor: AppColors.primary,
+            inactiveTrackColor: AppColors.primary.withValues(alpha: 0.2),
+            thumbColor: AppColors.primary,
+            overlayColor: AppColors.primary.withValues(alpha: 0.2),
+          ),
+          child: Slider(
+            value: valeur,
+            max: plafond,
+            divisions: math.max(1, (plafond / _pasDuCurseur).round()),
+            label: PriceFormatter.format(valeur),
+            onChanged: (value) {
+              setState(() {
+                // Poussé à fond, le curseur ne plafonne plus rien : c'est ce
+                // que « tous les plats » veut dire, et cela évite qu'un
+                // arrondi du curseur écarte le plat le plus cher de la carte.
+                _prixMaximum = value >= plafond ? null : value;
+              });
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Pas du curseur, en francs CFA.
+  static const double _pasDuCurseur = 500;
+
+  /// Le plat le plus cher de la carte, arrondi au pas supérieur.
+  ///
+  /// Sur un catalogue vide — le temps du chargement — une borne de repli garde
+  /// le curseur constructible ; il n'écarte alors rien, puisque aucun article
+  /// n'est encore là pour être filtré.
+  double _plafondDuCatalogue(List<eccore.MenuItem> articles) {
+    if (articles.isEmpty) return 10000;
+
+    final plusCher = articles
+        .map((article) => article.prixAffiche)
+        .reduce((a, b) => a > b ? a : b);
+
+    return math.max(
+      _pasDuCurseur,
+      (plusCher / _pasDuCurseur).ceil() * _pasDuCurseur,
     );
   }
 
@@ -396,22 +458,57 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
           );
         }
 
-        final filteredItems = _getFilteredItems(appService.menuItems);
-
-        if (filteredItems.isEmpty) {
+        // La carte n'a pas pu être lue : le dire, et proposer de réessayer.
+        //
+        // Cet écran ne connaissait qu'un seul vide et l'imputait aux filtres.
+        // Un backend arrêté, une coupure réseau ou un 500 s'affichaient donc
+        // « Aucun plat ne correspond à ces filtres », avec pour seul recours un
+        // bouton qui n'y pouvait rien.
+        if (appService.erreurCatalogue != null &&
+            appService.menuItems.isEmpty) {
           return SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(
                 vertical: DesignConstants.spacingXL,
               ),
               child: EmptyStateWidget(
-                title: 'Aucun plat trouvé',
-                message: _searchQuery.isEmpty
-                    ? 'Aucun plat ne correspond à ces filtres.'
-                    : 'Aucun plat ne correspond à « $_searchQuery ».',
+                title: 'Carte indisponible',
+                message: '${appService.erreurCatalogue!} '
+                    'Vérifiez votre connexion, puis réessayez.',
+                icon: Icons.cloud_off_rounded,
+                actionText: 'Réessayer',
+                onAction: () => appService.rechargerLeCatalogue(),
+              ),
+            ),
+          );
+        }
+
+        final filteredItems = _getFilteredItems(appService.menuItems);
+
+        if (filteredItems.isEmpty) {
+          final filtre = _searchQuery.isNotEmpty ||
+              _vegetarianOnly ||
+              _veganOnly ||
+              _prixMaximum != null ||
+              _selectedCategory != null;
+
+          return SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: DesignConstants.spacingXL,
+              ),
+              child: EmptyStateWidget(
+                title: filtre ? 'Aucun plat trouvé' : 'Carte vide',
+                message: !filtre
+                    // Le serveur a répondu, mais sans article : ce n'est pas au
+                    // client de chercher ce qu'il aurait mal réglé.
+                    ? 'Aucun plat n’est proposé pour le moment.'
+                    : _searchQuery.isEmpty
+                        ? 'Aucun plat ne correspond à ces filtres.'
+                        : 'Aucun plat ne correspond à « $_searchQuery ».',
                 icon: Icons.search_off_rounded,
-                actionText: 'Réinitialiser les filtres',
-                onAction: _clearFilters,
+                actionText: filtre ? 'Réinitialiser les filtres' : null,
+                onAction: filtre ? _clearFilters : null,
               ),
             ),
           );
@@ -464,11 +561,19 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                     ),
                     child: Row(
                       children: [
-                        Text(
-                          category.pastille,
-                          style: const TextStyle(fontSize: 24),
-                        ),
-                        const SizedBox(width: 12),
+                        // Décorative : le nom de la catégorie la suit
+                        // immédiatement. Une catégorie que le pack ne couvre
+                        // pas — « Salades », « Spécialités Togolaises » —
+                        // n'affiche que son intitulé, plutôt qu'une assiette
+                        // vide qui ne dirait rien d'elle.
+                        if (category.illustration case final illustration?) ...[
+                          AppEmoji(
+                            illustration,
+                            size: AppEmoji.tailleS,
+                            decoratif: true,
+                          ),
+                          const SizedBox(width: 12),
+                        ],
                         Expanded(
                           child: Text(
                             category.name,
@@ -595,7 +700,11 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
             restaurantSlug: '',
             name: 'Autres',
             slug: item.categorySlug,
-            emoji: '🍽️',
+            // Vide, comme le rend le serveur pour une catégorie sans emoji
+            // configuré. Ce fourre-tout n'a pas d'illustration, et lui en
+            // inventer une reviendrait à faire passer pour une catégorie ce
+            // qui n'est qu'un reliquat.
+            emoji: '',
             description: '',
             sortOrder: 999,
           );
@@ -643,8 +752,10 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
       if (_vegetarianOnly && !item.estVegetarien) return false;
       if (_veganOnly && !item.estVegan) return false;
 
-      // Price filter
-      if (item.prixAffiche > _maxPrice) return false;
+      // Plafond de prix, seulement s'il a été posé.
+      if (_prixMaximum != null && item.prixAffiche > _prixMaximum!) {
+        return false;
+      }
 
       return true;
     }).toList();
@@ -665,7 +776,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
     setState(() {
       _vegetarianOnly = false;
       _veganOnly = false;
-      _maxPrice = 5000.0;
+      _prixMaximum = null;
       _searchQuery = '';
       _selectedCategory = null;
       _isSearching = false;

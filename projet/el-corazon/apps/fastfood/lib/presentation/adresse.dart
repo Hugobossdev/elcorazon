@@ -18,7 +18,6 @@ enum TypeAdresse {
   maison(
     'home',
     'Maison',
-    '🏠',
     Icons.home_rounded,
     AppColors.secondaryContainer,
     AppColors.secondaryDeep,
@@ -26,7 +25,6 @@ enum TypeAdresse {
   travail(
     'work',
     'Travail',
-    '💼',
     Icons.work_outline_rounded,
     AppColors.tertiaryLight,
     AppColors.tertiary,
@@ -34,7 +32,6 @@ enum TypeAdresse {
   autre(
     'other',
     'Autre',
-    '📍',
     Icons.place_outlined,
     AppColors.surfaceContainerHigh,
     AppColors.textSecondary,
@@ -43,7 +40,6 @@ enum TypeAdresse {
   const TypeAdresse(
     this.versServeur,
     this.libelle,
-    this.pastille,
     this.icone,
     this.fond,
     this.encre,
@@ -53,12 +49,21 @@ enum TypeAdresse {
   final String versServeur;
 
   final String libelle;
-  final String pastille;
 
   /// L'icône du type, que la maquette `address_management` place en tête de
   /// chaque carte. Elle vivait auparavant dans un `switch` de
   /// `widgets/address_card.dart` — c'est-à-dire à côté du reste du vocabulaire
   /// du type, mais pas avec lui.
+  ///
+  /// ## Elle porte désormais aussi le sélecteur de type
+  ///
+  /// Chaque valeur doublait cette icône d'un emoji Unicode — `'🏠'`, `'💼'`,
+  /// `'📍'` — que seule la feuille de détail affichait, dans une puce où
+  /// l'icône aurait tout aussi bien tenu. Deux représentations du même type,
+  /// dont une que le système dessinait à notre place : le sélecteur montre
+  /// maintenant [icone], comme les cartes du carnet. Une adresse est un choix
+  /// fonctionnel, pas une illustration — c'est le §2.A du cahier des charges,
+  /// et ce que faisaient déjà les trois autres écrans d'adresse.
   final IconData icone;
 
   /// Fond et encre de la pastille du type.

@@ -101,7 +101,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
           return etats.EmptyStateWidget(
             title: 'Aucune commande en cours',
             message: 'Vos commandes actives apparaîtront ici.',
-            icon: Icons.shopping_bag_outlined,
+            illustration: AppEmojis.newOrder,
             actionText: 'Explorer la carte',
             onAction: () => context.navigateToMenu(),
           );

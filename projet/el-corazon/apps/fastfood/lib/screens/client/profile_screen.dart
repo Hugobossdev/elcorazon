@@ -140,11 +140,28 @@ class ProfileScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      '${user.pastilleDuType} ${user.libelleDuType}',
-                      style: AppTypography.labelLg(
-                        color: theme.colorScheme.primary,
-                      ),
+                    // L'illustration accompagne le libellé, elle ne le
+                    // remplace pas : c'est le mot qui dit le type de compte.
+                    // Elle était auparavant collée dans la même chaîne que lui
+                    // — un emoji que le lecteur d'écran annonçait en anglais
+                    // au milieu de la phrase française.
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AppEmoji(
+                          user.illustrationDuType,
+                          size: AppEmoji.tailleXS,
+                          decoratif: true,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: DesignConstants.spacingXS),
+                        Text(
+                          user.libelleDuType,
+                          style: AppTypography.labelLg(
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

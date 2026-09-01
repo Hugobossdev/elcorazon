@@ -1,4 +1,7 @@
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:flutter/material.dart';
+
+import 'package:elcorazon_core/elcorazon_core.dart'
+    show AppEmojiToken, AppEmojis, Journal;
 
 class Order {
   final String id;
@@ -363,28 +366,38 @@ extension OrderStatusExtension on OrderStatus {
     }
   }
 
-  String get emoji {
+  /// L'illustration de l'étape, pour les endroits qui en portent une.
+  ///
+  /// Elle remplace un `emoji` qui rendait des chaînes Unicode — dont deux
+  /// séquences ZWJ (`'👨‍🍳'`, `'🏃‍♂️'`) que les Android d'avant 2019
+  /// décomposent en glyphes séparés. Voir `StatutCommande.illustration`, dont
+  /// c'est le pendant sur le vocabulaire qui remplace ce modèle.
+  ///
+  /// Les listes de commandes n'en font pas usage : `DeliveryStatusCard` porte
+  /// déjà une pastille d'icône et sa `StatusChip`, et une illustration par
+  /// ligne serait du bruit.
+  AppEmojiToken get illustration {
     switch (this) {
       case OrderStatus.pending:
-        return '⏳';
+        return AppEmojis.newOrder;
       case OrderStatus.confirmed:
-        return '✅';
+        return AppEmojis.orderConfirmed;
       case OrderStatus.preparing:
-        return '👨‍🍳';
+        return AppEmojis.preparing;
       case OrderStatus.ready:
-        return '📦';
+        return AppEmojis.orderReady;
       case OrderStatus.pickedUp:
-        return '🏃‍♂️';
+        return AppEmojis.courier;
       case OrderStatus.onTheWay:
-        return '🛵';
+        return AppEmojis.delivery;
       case OrderStatus.delivered:
-        return '🎉';
+        return AppEmojis.delivered;
       case OrderStatus.cancelled:
-        return '❌';
+        return AppEmojis.error;
       case OrderStatus.refunded:
-        return '💰';
+        return AppEmojis.warning;
       case OrderStatus.failed:
-        return '⚠️';
+        return AppEmojis.error;
     }
   }
 }
@@ -428,18 +441,28 @@ extension PaymentMethodExtension on PaymentMethod {
     }
   }
 
-  String get emoji {
+  /// L'icône du moyen de paiement.
+  ///
+  /// Une icône, et pas une illustration du pack : le règlement est un choix
+  /// fonctionnel, coché dans une liste de boutons radio à côté d'une adresse
+  /// et d'un mode de livraison qui portent eux aussi des icônes.
+  ///
+  /// L'`emoji` qu'elle remplace donnait par ailleurs le même `'💳'` à
+  /// [PaymentMethod.creditCard] et à [PaymentMethod.debitCard] : les deux
+  /// lignes de la liste étaient impossibles à distinguer au premier coup
+  /// d'œil. Le débit prend maintenant sa propre icône.
+  IconData get icone {
     switch (this) {
       case PaymentMethod.mobileMoney:
-        return '📱';
+        return Icons.smartphone_rounded;
       case PaymentMethod.creditCard:
-        return '💳';
+        return Icons.credit_card_rounded;
       case PaymentMethod.debitCard:
-        return '💳';
+        return Icons.credit_score_rounded;
       case PaymentMethod.wallet:
-        return '👛';
+        return Icons.account_balance_wallet_rounded;
       case PaymentMethod.cash:
-        return '💵';
+        return Icons.payments_rounded;
     }
   }
 }

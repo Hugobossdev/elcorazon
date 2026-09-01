@@ -548,7 +548,16 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(type.pastille, style: const TextStyle(fontSize: 20)),
+                    // L'icône du type, la même que sur les cartes du carnet.
+                    // Elle remplace l'emoji Unicode que cette puce était seule
+                    // à afficher — voir `TypeAdresse.icone`.
+                    Icon(
+                      type.icone,
+                      size: 20,
+                      color: isSelected
+                          ? encre
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                     const SizedBox(width: 8),
                     Text(
                       type.libelle,

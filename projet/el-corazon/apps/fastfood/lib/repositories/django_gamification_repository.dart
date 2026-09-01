@@ -47,7 +47,11 @@ class DjangoGamificationRepository {
             'id': challenge.id,
             'title': challenge.title,
             'description': challenge.description,
-            'icon': '🎯',
+            // Vide, comme le rendent `achievement.icon` et `badge.icon`
+            // quand le serveur n'en publie pas : le contrat `Challenge` ne
+            // porte pas d'icône, et la fabriquer ici — c'était `'🎯'` —
+            // inventait une donnée. Aucun écran ne lit cette clé.
+            'icon': '',
             'reward': challenge.rewardPoints,
             'target': challenge.targetValue,
             'criteria': challenge.challengeType,

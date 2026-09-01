@@ -171,8 +171,9 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
         return CategoryChipBar(
           labels: libelles,
           selectedIndex: _categorieRetenue + 1,
+          // « Tout » n'illustre rien : c'est l'absence de filtre.
           leadingBuilder: (index) =>
-              index == 0 ? null : categories[index - 1].pastille,
+              index == 0 ? null : categories[index - 1].illustration,
           onSelected: (index) =>
               setState(() => _categorieRetenue = index - 1),
         );
@@ -206,9 +207,17 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
         final identifiant = appService.currentUser?.id;
         if (identifiant == null) return const SizedBox.shrink();
 
+        // Le classement est fait par le service, sur trois signaux du serveur
+        // — historique du compte, `is_popular`, note moyenne. L'écran n'en
+        // reprend que les six premiers.
+        //
+        // Le filtre qui se trouvait ici, `isPopular && ratingAverage > 4.0`,
+        // rendait la section **structurellement vide** : le serveur ouvre tout
+        // article à `rating_average: 0.00` et n'a encore aucun avis en base.
+        // Aucun plat ne pouvait franchir 4,0, si bien que « Nos suggestions »
+        // ne s'est jamais affichée — sans erreur nulle part pour le dire.
         final suggestions = aiService
             .getRecommendationsForUser(identifiant)
-            .where((item) => item.isPopular && item.ratingAverage > 4.0)
             .take(6)
             .toList();
 

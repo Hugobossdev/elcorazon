@@ -1,5 +1,7 @@
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
+import 'package:elcorazon_core/elcorazon_core.dart'
+    show AppEmoji, AppEmojiToken;
 import 'package:flutter/material.dart';
 
 /// Champ de recherche du design system.
@@ -112,8 +114,14 @@ class CategoryChipBar extends StatelessWidget {
   final ValueChanged<int> onSelected;
   final EdgeInsets padding;
 
-  /// Pastille (emoji) posée avant l'intitulé.
-  final String? Function(int index)? leadingBuilder;
+  /// L'illustration posée avant l'intitulé, ou `null` pour n'en poser aucune.
+  ///
+  /// Le rappel rendait auparavant une `String` — l'emoji Unicode que le
+  /// serveur portait sur la catégorie. Il rend maintenant un token du pack :
+  /// c'est le client qui choisit le dessin, à partir du slug, et `AppEmoji` se
+  /// charge du reste. Une catégorie que le pack ne couvre pas rend `null` et
+  /// n'affiche que son intitulé, ce qui est correct.
+  final AppEmojiToken? Function(int index)? leadingBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -149,8 +157,20 @@ class CategoryChipBar extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (pastille != null && pastille.isNotEmpty) ...[
-                        Text(pastille, style: const TextStyle(fontSize: 14)),
+                      if (pastille != null) ...[
+                        // Décorative : l'intitulé juste à côté porte déjà le
+                        // nom de la catégorie, et un lecteur d'écran n'a pas
+                        // à l'entendre deux fois. La teinte suit l'encre de la
+                        // puce, pour que le repli en icône passe en
+                        // `onPrimary` avec le texte quand elle est retenue.
+                        AppEmoji(
+                          pastille,
+                          size: AppEmoji.tailleXS,
+                          decoratif: true,
+                          color: actif
+                              ? theme.colorScheme.onPrimary
+                              : theme.colorScheme.onSurfaceVariant,
+                        ),
                         const SizedBox(width: 6),
                       ],
                       Text(

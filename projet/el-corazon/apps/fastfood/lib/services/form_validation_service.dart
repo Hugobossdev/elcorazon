@@ -132,10 +132,10 @@ class FormValidationService extends ChangeNotifier {
                   message: 'Le nom ne peut pas dépasser 50 caractères',),
               ValidationRule(
                   type: ValidationType.sqlInjection,
-                  message: '⚠️ Le nom contient des caractères non autorisés. Utilisez uniquement des lettres, espaces et tirets.',),
+                  message: 'Le nom contient des caractères non autorisés. Utilisez uniquement des lettres, espaces et tirets.',),
               ValidationRule(
                   type: ValidationType.xss,
-                  message: '⚠️ Le nom contient du contenu non autorisé.',),
+                  message: 'Le nom contient du contenu non autorisé.',),
               ValidationRule(
                   type: ValidationType.sanitize,),
             ],
@@ -152,10 +152,10 @@ class FormValidationService extends ChangeNotifier {
                   message: 'Veuillez entrer un email valide',),
               ValidationRule(
                   type: ValidationType.sqlInjection,
-                  message: '⚠️ L\'email contient des caractères non autorisés.',),
+                  message: 'L\'email contient des caractères non autorisés.',),
               ValidationRule(
                   type: ValidationType.xss,
-                  message: '⚠️ L\'email contient du contenu non autorisé.',),
+                  message: 'L\'email contient du contenu non autorisé.',),
               ValidationRule(
                   type: ValidationType.sanitize,),
             ],
@@ -190,7 +190,7 @@ class FormValidationService extends ChangeNotifier {
                       'Le mot de passe doit contenir au moins une majuscule, une minuscule et un chiffre',),
               ValidationRule(
                   type: ValidationType.sqlInjection,
-                  message: '⚠️ Le mot de passe contient des caractères non autorisés.',),
+                  message: 'Le mot de passe contient des caractères non autorisés.',),
               ValidationRule(
                   type: ValidationType.maxLength,
                   value: 128,
@@ -501,7 +501,7 @@ class FormValidationService extends ChangeNotifier {
           return ValidationResult(
             isValid: false,
             errorMessage: rule.message ?? 
-                '⚠️ Caractères non autorisés détectés. Veuillez utiliser uniquement des lettres, chiffres et caractères de ponctuation standards.',
+                'Caractères non autorisés détectés. Veuillez utiliser uniquement des lettres, chiffres et caractères de ponctuation standards.',
           );
         }
         break;
@@ -512,7 +512,7 @@ class FormValidationService extends ChangeNotifier {
           return ValidationResult(
             isValid: false,
             errorMessage: rule.message ?? 
-                '⚠️ Contenu non autorisé détecté. Les balises HTML et scripts ne sont pas autorisés.',
+                'Contenu non autorisé détecté. Les balises HTML et scripts ne sont pas autorisés.',
           );
         }
         break;
@@ -524,7 +524,7 @@ class FormValidationService extends ChangeNotifier {
           return ValidationResult(
             isValid: false,
             errorMessage: rule.message ?? 
-                '⚠️ Le contenu contient des caractères non autorisés. Veuillez corriger votre saisie.',
+                'Le contenu contient des caractères non autorisés. Veuillez corriger votre saisie.',
           );
         }
         break;

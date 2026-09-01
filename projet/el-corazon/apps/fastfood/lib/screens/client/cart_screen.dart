@@ -150,7 +150,7 @@ class CartScreen extends StatelessWidget {
     return EmptyStateWidget(
       title: 'Votre panier est vide',
       message: 'Ajoutez des plats et ils apparaîtront ici.',
-      icon: Icons.shopping_cart_outlined,
+      illustration: AppEmojis.cart,
       actionText: 'Découvrir le menu',
       onAction: () => context.goBack(),
     );

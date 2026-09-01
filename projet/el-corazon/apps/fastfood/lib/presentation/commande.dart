@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 /// Vocabulaire d'affichage des commandes, côté client.
@@ -19,20 +21,49 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 /// n'aboutit pas est annulé, avec un motif. L'adaptateur ne pouvait pas les
 /// produire.
 enum StatutCommande {
-  enAttente('pending', 'En attente', '⏳'),
-  confirmee('confirmed', 'Confirmée', '✅'),
-  enPreparation('preparing', 'En préparation', '👨‍🍳'),
-  prete('ready', 'Prête', '📦'),
-  recuperee('picked_up', 'Récupérée', '🏃'),
-  enRoute('on_the_way', 'En route', '🛵'),
-  livree('delivered', 'Livrée', '🎉'),
-  annulee('cancelled', 'Annulée', '❌');
+  enAttente('pending', 'En attente'),
+  confirmee('confirmed', 'Confirmée'),
+  enPreparation('preparing', 'En préparation'),
+  prete('ready', 'Prête'),
+  recuperee('picked_up', 'Récupérée'),
+  enRoute('on_the_way', 'En route'),
+  livree('delivered', 'Livrée'),
+  annulee('cancelled', 'Annulée');
 
-  const StatutCommande(this.versServeur, this.libelle, this.pastille);
+  const StatutCommande(this.versServeur, this.libelle);
 
   final String versServeur;
   final String libelle;
-  final String pastille;
+
+  /// L'illustration de l'étape, pour les endroits qui en portent une.
+  ///
+  /// ## Ce qui a remplacé quoi
+  ///
+  /// Chaque statut portait un emoji Unicode — `'👨‍🍳'` pour la préparation,
+  /// `'🛵'` pour la route. Deux d'entre eux étaient des séquences ZWJ, que les
+  /// Android d'avant 2019 rendent en deux glyphes séparés ou en tofu : le
+  /// client y voyait un homme, puis un couteau.
+  ///
+  /// ## Où elle s'emploie, et où elle ne s'emploie pas
+  ///
+  /// Une illustration par ligne de liste serait du bruit : `DeliveryStatusCard`
+  /// garde sa pastille d'icône et sa `StatusChip`, qui suffisent à lire une
+  /// liste de commandes d'un coup d'œil. Ce getter est là pour les endroits qui
+  /// **portent** l'étape — un en-tête de suivi, une carte d'état, un écran de
+  /// confirmation.
+  ///
+  /// L'annulation prend [eccore.AppEmojis.error] : c'est une sortie du cycle, pas une
+  /// étape de plus — la même distinction que fait [rang].
+  eccore.AppEmojiToken get illustration => switch (this) {
+        StatutCommande.enAttente => eccore.AppEmojis.newOrder,
+        StatutCommande.confirmee => eccore.AppEmojis.orderConfirmed,
+        StatutCommande.enPreparation => eccore.AppEmojis.preparing,
+        StatutCommande.prete => eccore.AppEmojis.orderReady,
+        StatutCommande.recuperee => eccore.AppEmojis.courier,
+        StatutCommande.enRoute => eccore.AppEmojis.delivery,
+        StatutCommande.livree => eccore.AppEmojis.delivered,
+        StatutCommande.annulee => eccore.AppEmojis.error,
+      };
 
   /// Depuis la valeur rendue par le serveur.
   ///
@@ -69,23 +100,54 @@ enum MoyenPaiement {
   mobileMoney(
     'mobile_money',
     'Mobile Money',
-    '📱',
+    Icons.smartphone_rounded,
     'Orange Money, MTN Money, Moov Money',
   ),
-  especes('cash', 'Cash on Delivery', '💵', 'Paiement à la livraison'),
-  portefeuille('wallet', 'FastFoodGo Wallet', '👛', 'Portefeuille FastFoodGo'),
-  carte('card', 'Credit Card', '💳', 'Visa, Mastercard, American Express');
+  especes(
+    'cash',
+    'Cash on Delivery',
+    Icons.payments_rounded,
+    'Paiement à la livraison',
+  ),
+  portefeuille(
+    'wallet',
+    'FastFoodGo Wallet',
+    Icons.account_balance_wallet_rounded,
+    'Portefeuille FastFoodGo',
+  ),
+  carte(
+    'card',
+    'Credit Card',
+    Icons.credit_card_rounded,
+    'Visa, Mastercard, American Express',
+  );
 
   const MoyenPaiement(
     this.versServeur,
     this.libelle,
-    this.pastille,
+    this.icone,
     this.description,
   );
 
   final String versServeur;
   final String libelle;
-  final String pastille;
+
+  /// L'icône du moyen de paiement.
+  ///
+  /// ## Pourquoi une icône, et pas une illustration du pack
+  ///
+  /// Un moyen de paiement est un **choix fonctionnel** : il se coche dans une
+  /// liste de boutons radio, à côté d'une adresse et d'un mode de livraison
+  /// qui portent eux aussi des icônes. Une illustration 3D au milieu de cette
+  /// colonne romprait la ligne et laisserait croire à autre chose qu'un
+  /// réglage.
+  ///
+  /// Ce qui était là avant — `'📱'`, `'💳'`, `'👛'`, `'💵'` — ne tenait déjà
+  /// pas debout : `creditCard` et `debitCard` partageaient le même `'💳'`, et
+  /// `'👛'` (un porte-monnaie de dame) n'évoque pas un portefeuille
+  /// électronique.
+  final IconData icone;
+
   final String description;
 
   /// Depuis la valeur rendue par le serveur.

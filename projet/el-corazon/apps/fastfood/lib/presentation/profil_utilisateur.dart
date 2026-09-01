@@ -33,15 +33,19 @@ extension ProfilAffiche on eccore.User {
     }
   }
 
-  /// La pastille du type de compte.
-  String get pastilleDuType {
+  /// L'illustration du type de compte.
+  ///
+  /// Elle accompagne le libellé, elle ne le remplace pas : c'est
+  /// [libelleDuType] qui porte l'information, l'illustration ne fait que la
+  /// rendre repérable d'un coup d'œil.
+  eccore.AppEmojiToken get illustrationDuType {
     switch (userType) {
       case eccore.UserAccountType.courier:
-        return '🛵';
+        return eccore.AppEmojis.scooter;
       case eccore.UserAccountType.staff:
-        return '🧑‍🍳';
+        return eccore.AppEmojis.preparing;
       default:
-        return '🍔';
+        return eccore.AppEmojis.burger;
     }
   }
 

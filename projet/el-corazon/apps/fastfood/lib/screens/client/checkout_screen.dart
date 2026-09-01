@@ -300,7 +300,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return EmptyStateWidget(
       title: 'Votre panier est vide',
       message: 'Ajoutez des plats avant de commander.',
-      icon: Icons.shopping_cart_outlined,
+      illustration: AppEmojis.cart,
       actionText: 'Voir le menu',
       onAction: () => context.goBack(),
     );
@@ -586,9 +586,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           color: theme.colorScheme.surfaceContainerHigh,
                           borderRadius: DesignConstants.borderRadiusMedium,
                         ),
-                        child: Text(
-                          mode.emoji,
-                          style: const TextStyle(fontSize: 20),
+                        child: Icon(
+                          mode.icone,
+                          size: 20,
+                          color: indisponible
+                              ? theme.colorScheme.onSurfaceVariant
+                                  .withValues(alpha: 0.35)
+                              : theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                       const SizedBox(width: DesignConstants.spacingM),
@@ -815,7 +819,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         if (mounted && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Commande #$finalOrderId passée avec succès! 🎉'),
+              content: Text('Commande #$finalOrderId passée avec succès'),
               backgroundColor: Colors.green,
               duration: const Duration(seconds: 3),
             ),
@@ -828,8 +832,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         final errorColor = Theme.of(context).colorScheme.error;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur lors de la commande: ${e.toString()}'),
+            // Le `detail` du serveur, pas le `toString()` de l'exception :
+            // `problem+json` porte un motif écrit pour être lu — « Cet article
+            // n'est plus disponible », « Minimum de commande non atteint » —
+            // là où `ApiException(409, conflict, …)` ne dit rien à personne.
+            // Même traitement que le devis, quelques lignes plus haut.
+            content: Text(_motif(e)),
             backgroundColor: errorColor,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -840,5 +850,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         });
       }
     }
+  }
+
+  /// Ce qu'il faut montrer d'un échec de commande.
+  ///
+  /// Le réseau est distingué du refus métier : « Impossible de joindre le
+  /// serveur » invite à réessayer, un motif métier invite à corriger quelque
+  /// chose. Les confondre sous un même message générique fait réessayer en
+  /// boucle une commande que le serveur refusera toujours.
+  String _motif(Object erreur) {
+    if (erreur is eccore.ApiException) {
+      if (erreur.code == 'network_error') {
+        return "Connexion perdue : votre commande n'a pas été envoyée. "
+            'Réessayez une fois le réseau revenu.';
+      }
+      if (erreur.isThrottled) {
+        return 'Trop de tentatives coup sur coup. Patientez un instant.';
+      }
+      return erreur.detail;
+    }
+    return 'Commande impossible pour le moment. Réessayez.';
   }
 }

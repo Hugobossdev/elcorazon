@@ -20,6 +20,12 @@
 library;
 
 export 'action_button.dart';
+// Le pack emojis vit dans `elcorazon_core` — un seul exemplaire des
+// trente illustrations pour les trois applications. Il se re-expose ici
+// pour que les ecrans du client y accedent comme au reste du design
+// system, sans un import de plus en tete de chaque fichier.
+export 'package:elcorazon_core/elcorazon_core.dart'
+    show AppEmoji, AppEmojiToken, AppEmojis;
 export 'food_card.dart';
 export 'food_image.dart';
 export 'glass_surface.dart';

@@ -616,8 +616,12 @@ class OfflineSyncService extends ChangeNotifier {
         }
         // L'emoji ne conditionne plus la mise en cache. Une catégorie qui n'en
         // a pas disparaissait purement et simplement du mode hors ligne — un
-        // champ décoratif faisait perdre des données. L'écran affiche un repli
-        // (`CategorieAffichee.pastille`).
+        // champ décoratif faisait perdre des données.
+        //
+        // Il n'en conditionne plus l'affichage non plus : l'illustration se
+        // choisit désormais sur le **slug** (`CategorieAffichee.illustration`).
+        // Le champ reste mis en cache tel que le serveur le rend, sans
+        // réécriture — les entrées déjà rangées se relisent à l'identique.
         return true;
       }).toList();
       

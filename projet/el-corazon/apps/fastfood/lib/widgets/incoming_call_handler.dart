@@ -70,7 +70,16 @@ class _IncomingCallHandlerState extends State<IncomingCallHandler> {
       context: dialogContext,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('📞 Appel entrant'),
+        // Une icône, pas un emoji : un appel entrant est un événement
+        // fonctionnel, et le titre doit se lire à l'identique sur tous les
+        // téléphones — y compris ceux dont la police ne connaît pas le glyphe.
+        title: const Row(
+          children: [
+            Icon(Icons.phone_in_talk_rounded),
+            SizedBox(width: 8),
+            Text('Appel entrant'),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

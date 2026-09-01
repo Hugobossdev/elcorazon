@@ -640,7 +640,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
         icon: Icons.card_giftcard,
         color: AppColors.success,
         background: AppColors.successLight,
-        title: 'Livraison gratuite ! 🎉',
+        title: 'Livraison gratuite !',
       );
     }
 
