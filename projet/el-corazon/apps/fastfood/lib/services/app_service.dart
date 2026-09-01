@@ -89,6 +89,18 @@ class AppService extends ChangeNotifier {
   List<Order> get orders => _orders;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
+
+  /// Pourquoi le catalogue est vide, quand il l'est parce que le chargement a
+  /// échoué. `null` quand il a abouti — fût-ce sur une carte réellement vide.
+  ///
+  /// Les deux se confondaient : `_loadMenuItems` rattrapait toute panne en
+  /// posant une liste vide, et l'écran du menu affichait alors « Aucun plat
+  /// trouvé — aucun plat ne correspond à ces filtres » avec un bouton
+  /// « Réinitialiser les filtres ». Une coupure réseau, un backend arrêté ou un
+  /// 500 se lisaient donc comme une erreur de manipulation du client, et le
+  /// seul recours proposé — retirer des filtres — n'y pouvait rien.
+  String? get erreurCatalogue => _erreurCatalogue;
+  String? _erreurCatalogue;
   List<String> get menuCategoryDisplayNames => _menuCategoryDisplayNames;
   List<eccore.Category> get menuCategories => _menuCategories;
 
@@ -369,6 +381,21 @@ class AppService extends ChangeNotifier {
     }
   }
 
+  /// Passe la commande, et **laisse remonter ce qui l'en empêche**.
+  ///
+  /// ## Ce que le silence coûtait
+  ///
+  /// Cette méthode rattrapait toute exception pour rendre la chaîne vide. Le
+  /// seul appelant — `CheckoutScreen._placeOrder` — n'agit que si
+  /// l'identifiant rendu n'est pas vide, et son propre `catch` ne voyait
+  /// jamais rien puisque plus rien n'était lancé. Résultat : sur un article
+  /// devenu indisponible, un minimum de commande non atteint, un 429 ou une
+  /// coupure réseau, le client appuyait sur « Commander », le voyant tournait,
+  /// s'arrêtait — et **rien ne se passait, sans un mot**. Le bouton paraissait
+  /// mort à l'étape la plus coûteuse du parcours, celle où l'on abandonne.
+  ///
+  /// Le serveur, lui, disait précisément pourquoi : `problem+json` porte un
+  /// `detail` lisible (`common/exceptions.py`). Il était jeté ici.
   Future<String> placeOrderFromCartService(
     eccore.Address? deliveryAddress,
     PaymentMethod paymentMethod,
@@ -378,7 +405,12 @@ class AppService extends ChangeNotifier {
     double discount, {
     String? notes,
   }) async {
-    if (cartItems.isEmpty || _currentUser == null) return '';
+    if (cartItems.isEmpty) {
+      throw Exception('Votre panier est vide.');
+    }
+    if (_currentUser == null) {
+      throw Exception('Connectez-vous pour passer commande.');
+    }
 
     // Le point n'est plus vérifié ici : une `eccore.Address` en porte toujours un, et
     // elle provient toujours du carnet serveur.
@@ -446,18 +478,32 @@ class AppService extends ChangeNotifier {
       notifyListeners();
       return remoteOrder.id;
     } catch (e) {
+      // Tracé **et** relancé : la trace sert au diagnostic, le relancement
+      // sert au client. L'avaler ne faisait ni l'un ni l'autre à l'écran.
       eccore.Journal.trace('Error placing order from cart service: $e');
-      return '';
+      rethrow;
     }
   }
 
   // Finalize an existing order (e.g. group order)
   // Helper methods
 
-  Future<void> _loadMenuItems() async {
+  /// Relit le catalogue depuis le serveur, cache court-circuité.
+  ///
+  /// C'est ce que propose l'écran du menu quand le chargement a échoué : sans
+  /// elle, un cache vide écrit par une tentative malheureuse restait en place
+  /// jusqu'à son expiration, et réessayer ne rapportait rien.
+  Future<void> rechargerLeCatalogue() async {
+    await _loadMenuCategories();
+    await _loadMenuItems(forcerLeReseau: true);
+  }
+
+  Future<void> _loadMenuItems({bool forcerLeReseau = false}) async {
     try {
       // Utiliser le nouveau service de cache intelligent
-      _menuItems = await _menuItemCache.getMenuItems();
+      _menuItems =
+          await _menuItemCache.getMenuItems(forceRefresh: forcerLeReseau);
+      _erreurCatalogue = null;
 
       // Plus de recollement de catégorie : le contrat rend `category` et
       // `category_name` sur l'article lui-même. La boucle qui rattachait
@@ -472,7 +518,12 @@ class AppService extends ChangeNotifier {
     } catch (e) {
       eccore.Journal.trace('❌ Error loading menu items: $e');
       _errorHandler.logError('Erreur lors du chargement du menu', details: e);
+      // La liste est vidée comme avant — un catalogue à moitié lu vaut moins
+      // que pas de catalogue — mais la raison est désormais conservée, pour que
+      // l'écran dise « la carte n'a pas pu être chargée » plutôt que « aucun
+      // plat ne correspond à vos filtres ».
       _menuItems = [];
+      _erreurCatalogue = 'La carte n’a pas pu être chargée.';
       notifyListeners();
     }
   }

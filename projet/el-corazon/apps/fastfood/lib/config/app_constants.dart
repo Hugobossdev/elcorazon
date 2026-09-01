@@ -11,6 +11,15 @@ class AppConstants {
   // sélecteur à construire.
   static const String restaurantSlug = 'el-corazon-lome';
 
+  /// Slug de l'article « gâteau sur mesure » au catalogue.
+  ///
+  /// L'atelier le cherchait par son **nom**, avec un `contains` sur
+  /// « personnalisé » ou « custom » : n'importe quel article du catalogue
+  /// portant l'un de ces mots — un « Menu personnalisé », un « Burger custom » —
+  /// devenait le gâteau sur mesure. Le slug est stable, saisi une fois au
+  /// back-office, et ne dépend d'aucun libellé d'affichage.
+  static const String gateauSurMesureSlug = 'gateau-personnalise';
+
   // Slug de la ville côté backend Django (Phase 6) — une seule ville en base
   // aujourd'hui, cohérent avec `restaurantSlug`.
   static const String citySlug = 'lome';
@@ -54,13 +63,19 @@ class AppConstants {
   /// plutôt qu'un appel qui ne mènerait nulle part.
   static const String supportPhone = '';
 
+  /// Adresse électronique du service client.
+  ///
+  /// **À renseigner avant mise en production.** Elle était écrite en dur dans
+  /// l'écran de contact des visiteurs, sous le domaine `elcorazon.ci` — le
+  /// suffixe de la Côte d'Ivoire, alors que l'établissement est à Lomé. Un
+  /// message envoyé là partait vers un domaine que personne ici ne relève.
+  ///
+  /// Vide, la carte « Email » ne s'affiche pas, exactement comme le geste
+  /// d'appel disparaît quand [supportPhone] est vide : mieux vaut un moyen de
+  /// contact en moins qu'un moyen de contact qui n'aboutit pas.
+  static const String supportEmail = '';
+
   // App Info
   static const String appName = 'Elcora Fast';
   static const String currency = 'FCFA';
 }
-
-
-
-
-
-

@@ -36,6 +36,7 @@ import 'package:elcora_fast/services/theme_service.dart';
 import 'package:elcora_fast/widgets/error_boundary.dart';
 import 'package:elcora_fast/widgets/service_initialization_widget.dart';
 import 'package:elcora_fast/widgets/incoming_call_handler.dart';
+import 'package:elcora_fast/widgets/push_notification_router.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/services/social_service.dart';
 
@@ -110,28 +111,64 @@ void main() async {
 /// Sur mobile, la même omission passe encore plus mal : l'erreur est un
 /// `SocketException` sur un hôte introuvable.
 ///
+/// ## Le préfixe manquant
+///
+/// Le même fichier a ensuite porté `localhost:8000` tout court. Le schéma,
+/// lui, était rattrapé ci-dessous — mais pas le `/api/v1`, et l'API n'est
+/// montée que sous ce préfixe (`config/urls.py`). Le client demandait alors
+/// `/catalog/items/` à un serveur qui ne sert que `/api/v1/catalog/items/` :
+/// **404 sur absolument tout**, catalogue compris, sur un backend parfaitement
+/// sain. Une panne totale, et un symptôme qui ressemble à une base vide.
+///
+/// Les deux oublis sont de la même famille — une adresse de base incomplète
+/// — et se rattrapent donc au même endroit. Un chemin **déjà déclaré** est
+/// laissé intact : `/api/v2` un jour, ou un préfixe de proxy, sont des choix,
+/// pas des oublis.
+///
 /// L'oubli est donc rattrapé ici, et **tracé** : un réglage corrigé en silence
 /// est un réglage qui reste faux dans le fichier.
 @visibleForTesting
 String adresseDeLApi(String? valeurDeclaree) {
-  const repli = 'http://10.0.2.2:8000/api/v1';
+  const prefixe = '/api/v1';
+  const repli = 'http://10.0.2.2:8000$prefixe';
   final declaree = valeurDeclaree?.trim();
 
   if (declaree == null || declaree.isEmpty) return repli;
 
+  var retenue = declaree;
+
   final uri = Uri.tryParse(declaree);
-  if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
-    return declaree;
+  if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+    retenue = 'http://$declaree';
+    Journal.trace(
+      "⚠️ API_BASE_URL ne porte pas de schéma : '$declaree'. "
+      "Utilisation de '$retenue'. Corrigez .env, puis **relancez** — "
+      'le fichier est embarqué comme asset au moment de la compilation, '
+      'un rechargement à chaud ne le renouvelle pas.',
+    );
   }
 
-  final rattrapee = 'http://$declaree';
-  Journal.trace(
-    "⚠️ API_BASE_URL ne porte pas de schéma : '$declaree'. "
-    "Utilisation de '$rattrapee'. Corrigez .env, puis **relancez** — "
-    'le fichier est embarqué comme asset au moment de la compilation, '
-    'un rechargement à chaud ne le renouvelle pas.',
-  );
-  return rattrapee;
+  // La barre finale est retirée avant tout examen : `http://h:8000/` déclare
+  // un chemin `/`, c'est-à-dire aucun, et la garder produirait `//api/v1`.
+  // Les chemins des dépôts commencent tous par `/` (`packages/elcorazon_core`),
+  // l'adresse de base ne doit donc jamais finir par une.
+  while (retenue.endsWith('/')) {
+    retenue = retenue.substring(0, retenue.length - 1);
+  }
+
+  final chemin = Uri.tryParse(retenue)?.path ?? '';
+  if (chemin.isEmpty) {
+    final rattrapee = '$retenue$prefixe';
+    Journal.trace(
+      "⚠️ API_BASE_URL ne porte pas le préfixe '$prefixe' : '$declaree'. "
+      "Utilisation de '$rattrapee'. Sans lui, l'API répond 404 à **toutes** "
+      "les routes — elle n'est montée que sous ce préfixe. Corrigez .env, "
+      'puis **relancez**.',
+    );
+    return rattrapee;
+  }
+
+  return retenue;
 }
 
 /// Adresse d'un canal WebSocket, dérivée de celle de l'API.
@@ -287,7 +324,11 @@ class ClientApp extends StatelessWidget {
             builder: (context, child) {
               return ErrorBoundary(
                 child: IncomingCallHandler(
-                  child: ServiceInitializationWidget(child: child!),
+                  // Sous le `Navigator` de `MaterialApp` : ce guet en a besoin
+                  // pour ouvrir l'écran que désigne une notification touchée.
+                  child: PushNotificationRouter(
+                    child: ServiceInitializationWidget(child: child!),
+                  ),
                 ),
               );
             },

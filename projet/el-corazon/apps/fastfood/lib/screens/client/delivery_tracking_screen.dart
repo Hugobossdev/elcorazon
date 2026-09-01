@@ -82,6 +82,10 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
   /// Vrai une fois le canal temps réel effectivement ouvert.
   bool _suiviTempsReelOuvert = false;
+
+  /// Cadence de la minuterie actuellement en place — sert à ne la
+  /// remplacer que lorsqu'elle doit réellement changer.
+  Duration? _cadenceDeRelecture;
   /// Suivi serveur : livreur affecté et dernière position connue.
   final eccore.TrackingRepository _tracking =
       eccore.TrackingRepository(apiClient: apiClient);
@@ -597,21 +601,46 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         (_) => _calculateEstimatedDeliveryTime(),
       );
 
-      // Rafraîchir la commande depuis la base de données périodiquement
-      // pour s'assurer que l'UI reste synchronisée même si le realtime ne fonctionne pas
-      _orderRefreshTimer = Timer.periodic(
-        const Duration(seconds: 10),
-        (_) {
-          if (mounted) {
-            _loadOrderDetails();
-          }
-        },
-      );
+      // Filet de sécurité : relire la commande périodiquement, pour que
+      // l'écran reste juste même si le temps réel ne passe pas.
+      _programmerRelectureDeLaCommande();
 
       eccore.Journal.trace('✅ Started real-time tracking for order: ${widget.orderId}');
     } catch (e) {
       eccore.Journal.trace('❌ Error starting tracking: $e');
     }
+  }
+
+  /// (Re)programme la relecture périodique de la commande, à la cadence que
+  /// justifie l'état du canal temps réel.
+  ///
+  /// ## Pourquoi la cadence n'est pas fixe
+  ///
+  /// Elle était de dix secondes, quoi qu'il arrive : six `GET /orders/{id}/`
+  /// par minute et par client, sur l'écran qu'on laisse ouvert le plus
+  /// longtemps de toute l'application — et ce **pendant** que le WebSocket
+  /// livrait déjà les mêmes changements. Le filet doublait en permanence la
+  /// source qu'il n'est là que pour suppléer.
+  ///
+  /// Canal ouvert, la relecture ne rattrape qu'un message perdu : une minute
+  /// suffit. Canal fermé, elle est la seule source : dix secondes.
+  ///
+  /// La cadence d'un `Timer.periodic` ne se modifie pas — d'où le
+  /// remplacement, appelé à chaque bascule de [_suiviTempsReelOuvert].
+  void _programmerRelectureDeLaCommande() {
+    final cadence = _suiviTempsReelOuvert
+        ? const Duration(minutes: 1)
+        : const Duration(seconds: 10);
+
+    if (_cadenceDeRelecture == cadence && _orderRefreshTimer?.isActive == true) {
+      return;
+    }
+
+    _cadenceDeRelecture = cadence;
+    _orderRefreshTimer?.cancel();
+    _orderRefreshTimer = Timer.periodic(cadence, (_) {
+      if (mounted) _loadOrderDetails();
+    });
   }
 
   /// Ouvre le canal temps réel, si et seulement si la commande est dans un
@@ -630,6 +659,8 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     final service = _trackingService ??= RealtimeTrackingService();
     await service.trackOrder(widget.orderId);
     _suiviTempsReelOuvert = true;
+    // Le canal reprend la charge : la relecture périodique s'espace.
+    _programmerRelectureDeLaCommande();
     eccore.Journal.trace('✅ Suivi temps réel ouvert pour ${widget.orderId}');
     return true;
   }
@@ -663,6 +694,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       // Le canal est refait à neuf, et seulement s'il a lieu d'être : sur une
       // commande que le serveur ne diffuse pas, il n'y a rien à rétablir.
       _suiviTempsReelOuvert = false;
+      // Le canal est tombé : la relecture redevient la seule source, et
+      // reprend donc sa cadence courte le temps de la reconnexion.
+      _programmerRelectureDeLaCommande();
       final rouvert = await _ouvrirSuiviSiDiffuse();
 
       if (mounted) {

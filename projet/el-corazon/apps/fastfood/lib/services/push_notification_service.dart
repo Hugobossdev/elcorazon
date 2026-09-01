@@ -117,6 +117,20 @@ class PushNotificationService extends ChangeNotifier {
       // on rejoue le message dans une notification locale.
       FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
       FirebaseMessaging.onMessageOpenedApp.listen(_handleOpenedFromMessage);
+
+      // Le troisième cas, et le seul qui manquait : l'application était
+      // **fermée**, et c'est la notification qui l'a lancée.
+      //
+      // `onMessageOpenedApp` ne couvre que l'app déjà vivante en arrière-plan.
+      // Au démarrage à froid, le message qui a servi de déclencheur n'y passe
+      // jamais — il n'est lisible qu'une fois, par `getInitialMessage()`. Sans
+      // cet appel, la notification la plus utile de toutes (« votre commande
+      // arrive ») ouvrait l'application sur l'accueil, comme si l'on avait
+      // touché l'icône.
+      final initial = await messaging.getInitialMessage();
+      if (initial != null) {
+        _handleOpenedFromMessage(initial);
+      }
     } catch (e) {
       // Notamment quand aucun projet Firebase réel n'est configuré (voir
       // `lib/firebase_options.dart`) : l'app tourne sans push plutôt que de
@@ -240,9 +254,26 @@ class PushNotificationService extends ChangeNotifier {
 
     if (response.payload != null) {
       try {
-        final data = json.decode(response.payload!);
-        final notification = PushNotification.fromMap(data);
-        _notificationController.add(notification);
+        // La charge utile est le `data` **du message FCM** — c'est ce que
+        // `_handleForegroundMessage` y encode. `PushNotification.fromMap`
+        // attendait, elle, un objet complet avec ses clés `id`/`title`/`data`,
+        // et lisait donc `map['data']` sur une carte qui n'en a pas : la
+        // notification remontait avec un `data` **vide**, c'est-à-dire sans
+        // l'identifiant de commande — le seul élément qui permet d'ouvrir le
+        // bon écran. Un message touché au premier plan ne menait nulle part.
+        final data = Map<String, dynamic>.from(
+          json.decode(response.payload!) as Map,
+        );
+        _notificationController.add(
+          PushNotification(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            title: '',
+            body: '',
+            data: data,
+            type: PushNotification._getNotificationType(data),
+            timestamp: DateTime.now(),
+          ),
+        );
       } catch (e) {
         Journal.trace('PushNotificationService: Erreur parsing payload - $e');
       }
@@ -585,16 +616,32 @@ class PushNotification {
     };
   }
 
+  /// Le genre porté par la charge utile.
+  ///
+  /// `kind` d'abord : c'est la clé que le serveur écrit, et **la seule**, dans
+  /// toutes ses notifications (`payload_for`, `apps/notifications/push.py`).
+  /// Cette fonction ne lisait que `type`, qui n'existe nulle part côté serveur
+  /// — tout message push retombait donc sur `general`, y compris un
+  /// changement de statut de commande. `type` reste lu en second pour les
+  /// charges utiles fabriquées localement.
+  ///
+  /// Les valeurs reconnues sont celles de `NotificationKind`
+  /// (`order_status`, `delivery_offer`, `payment`, `account`, `marketing`),
+  /// en plus des anciennes, gardées : une notification déjà partie ne se
+  /// renomme pas.
   static NotificationType _getNotificationType(Map<String, dynamic> data) {
-    final type = data['type']?.toString().toLowerCase();
+    final type =
+        (data['kind'] ?? data['type'])?.toString().toLowerCase();
 
     switch (type) {
       case 'order_status':
       case 'order':
       case 'order_update':
         return NotificationType.orderStatus;
+      case 'marketing':
       case 'promotion':
         return NotificationType.promotion;
+      case 'delivery_offer':
       case 'delivery':
         return NotificationType.delivery;
       case 'achievement':

@@ -1,11 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:elcora_fast/config/app_constants.dart';
+import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/theme.dart';
 
+/// Les moyens de joindre l'établissement, pour un visiteur non connecté.
+///
+/// ## Ce que cet écran affichait
+///
+/// Une adresse à Abidjan, un numéro ivoirien, un WhatsApp sur ce même numéro,
+/// une adresse électronique en `.ci`, et trois boutons de réseaux sociaux dont
+/// le rappel était `() {}`. L'établissement est à Lomé : le numéro composé
+/// aboutissait chez un inconnu, à supposer qu'il existe, et le pays affiché
+/// n'était pas le sien.
+///
+/// Le reste de l'application avait déjà été rassemblé sur [AppConstants] — une
+/// seule ville, un seul pays, un seul numéro de support. Cet écran était resté
+/// en arrière avec ses valeurs en dur : c'est le genre d'oubli que la
+/// centralisation existe pour rendre visible.
+///
+/// [AppConstants.supportPhone] est vide tant que le vrai numéro n'est pas
+/// renseigné, et les gestes qui en dépendent disparaissent alors plutôt que de
+/// composer un numéro inventé. Le support écrit, lui, existe pour de bon
+/// (`/support/tickets/`) et prend le relais — même choix que l'écran de suivi
+/// de livraison.
 class GuestContactScreen extends StatelessWidget {
   const GuestContactScreen({super.key});
 
-  static const String _businessAddress = 'Abidjan, Côte d\'Ivoire';
+  /// Ce que Google Maps doit chercher. La ville vient du réglage commun :
+  /// l'établissement n'en a qu'une, et elle est à Lomé.
+  static const String _businessAddress =
+      'El Corazón, ${AppConstants.defaultCityName}';
 
   Future<void> _openAddressInMaps(BuildContext context, String address) async {
     try {
@@ -119,34 +144,64 @@ class GuestContactScreen extends StatelessWidget {
             ),
             const SizedBox(height: 32),
 
-            // Contact Options
+            // Les moyens de contact.
+            //
+            // Le téléphone et WhatsApp ne s'affichent que si un numéro est
+            // réellement configuré. Les deux qui figuraient ici étaient
+            // ivoiriens et inventés : mieux vaut ne rien proposer qu'un
+            // appel qui sonne chez quelqu'un d'autre.
+            if (AppConstants.supportPhone.isNotEmpty) ...[
+              _buildContactCard(
+                context,
+                icon: Icons.phone,
+                title: 'Appelez-nous',
+                subtitle: AppConstants.supportPhone,
+                onTap: () => _makePhoneCall(AppConstants.supportPhone),
+                color: Colors.green,
+              ),
+              const SizedBox(height: 16),
+              _buildContactCard(
+                context,
+                icon: Icons.message,
+                title: 'WhatsApp',
+                subtitle: 'Discutez avec nous',
+                // `wa.me` veut le numéro sans `+` ni séparateurs.
+                onTap: () => _openWhatsApp(
+                  AppConstants.supportPhone.replaceAll(RegExp(r'[^0-9]'), ''),
+                ),
+                color: Colors.green.shade700,
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Le support écrit existe pour de bon — il est adossé aux tickets
+            // (`/support/tickets/`) — mais il demande un compte : le serveur
+            // rattache chaque ticket à son auteur, et cet écran n'est montré
+            // qu'aux visiteurs **non connectés**. Y envoyer directement
+            // remplacerait un numéro qui ne répond pas par un écran qui
+            // répond 401.
+            //
+            // La carte mène donc à la connexion, et le dit.
             _buildContactCard(
               context,
-              icon: Icons.phone,
-              title: 'Appelez-nous',
-              subtitle: '+225 07 00 00 00 00',
-              onTap: () => _makePhoneCall('+2250700000000'),
-              color: Colors.green,
+              icon: Icons.support_agent,
+              title: 'Écrivez-nous',
+              subtitle: 'Connectez-vous pour ouvrir une demande suivie',
+              onTap: () => Navigator.of(context).pushNamed(AppRouter.auth),
+              color: AppColors.primary,
             ),
             const SizedBox(height: 16),
-            _buildContactCard(
-              context,
-              icon: Icons.message, // WhatsApp icon usually custom, using message for now
-              title: 'WhatsApp',
-              subtitle: 'Discutez avec nous',
-              onTap: () => _openWhatsApp('2250700000000'),
-              color: Colors.green.shade700,
-            ),
-            const SizedBox(height: 16),
-            _buildContactCard(
-              context,
-              icon: Icons.email,
-              title: 'Email',
-              subtitle: 'contact@elcorazon.ci',
-              onTap: () => _sendEmail('contact@elcorazon.ci'),
-              color: Colors.blue,
-            ),
-            const SizedBox(height: 16),
+            if (AppConstants.supportEmail.isNotEmpty) ...[
+              _buildContactCard(
+                context,
+                icon: Icons.email,
+                title: 'Email',
+                subtitle: AppConstants.supportEmail,
+                onTap: () => _sendEmail(AppConstants.supportEmail),
+                color: Colors.blue,
+              ),
+              const SizedBox(height: 16),
+            ],
             _buildContactCard(
               context,
               icon: Icons.location_on,
@@ -157,30 +212,13 @@ class GuestContactScreen extends StatelessWidget {
               },
               color: Colors.red,
             ),
-            
-            const SizedBox(height: 48),
-            
-            // Social Media Placeholder
-            const Center(
-              child: Text(
-                'Suivez-nous sur les réseaux sociaux',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildSocialButton(Icons.facebook, Colors.blue[800]!, () {}),
-                const SizedBox(width: 24),
-                _buildSocialButton(Icons.camera_alt, Colors.pink, () {}), // Instagram
-                const SizedBox(width: 24),
-                _buildSocialButton(Icons.alternate_email, Colors.black, () {}), // X / Twitter
-              ],
-            ),
+
+            // Les trois boutons de réseaux sociaux qui suivaient ont été
+            // retirés : leur rappel était `() {}`. Un rond qui s'enfonce sous
+            // le doigt et ne mène nulle part se lit comme une panne de
+            // l'application, alors qu'il n'y avait simplement aucun compte à
+            // ouvrir. Ils reviendront le jour où il y aura des adresses à y
+            // mettre.
           ],
         ),
       ),
@@ -244,19 +282,5 @@ class GuestContactScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSocialButton(IconData icon, Color color, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(50),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-        ),
-        child: Icon(icon, color: color),
-      ),
-    );
-  }
 }
 

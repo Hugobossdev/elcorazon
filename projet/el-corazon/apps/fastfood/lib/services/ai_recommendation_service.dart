@@ -1,15 +1,54 @@
-import 'dart:async';
-import 'dart:math';
-
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:flutter/foundation.dart';
 
-import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/repositories/django_menu_repository.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
+/// Les suggestions de l'accueil, tirées de ce que le client a réellement
+/// commandé.
+///
+/// ## Ce que ce service faisait
+///
+/// Il fabriquait ses propres données. `_loadUserPreferences` écrivait, pour
+/// **tout** compte, les mêmes goûts inventés — « burgers, pizzas, drinks »,
+/// régime végétarien, gamme de prix moyenne — et `_loadUserOrderHistory`
+/// fabriquait deux commandes qui n'avaient jamais eu lieu : un « El Corazón
+/// Burger » à 12,99 et une « Margherita Pizza » à 15,99, livrées au « 123 Main
+/// St ». Le classement qui en découlait était ensuite bousculé par
+/// `Random().nextBool()` pour la météo et `Random().nextDouble()` dans le
+/// score.
+///
+/// Trois conséquences, dont deux invisibles :
+///
+///  * les catégories cherchées étaient anglaises (`breakfast`, `sandwich`,
+///    `drink`, `soup`, `coffee`) et le catalogue est français : « Boissons »
+///    ne contient pas `drink`, « Poulet & Grillades » ne contient rien du
+///    tout. La moitié des règles ne pouvait rien apparier ;
+///  * les seuils de prix — 10 et 20 — étaient en dollars, sur des articles
+///    facturés entre 1 500 et 6 000 F CFA : *tous* les articles tombaient
+///    au-dessus de 20, donc dans une gamme que la préférence inventée
+///    n'accordait jamais. Ce terme du score valait zéro pour tout le monde ;
+///  * `_getPopularRecommendations` cherchait « special », « deluxe » ou
+///    « premium » dans les noms, alors que le serveur **publie** `is_popular`
+///    sur chaque article.
+///
+/// ## Ce qu'il fait
+///
+/// Il n'existe pas de route de recommandation côté serveur, et une vraie
+/// recommandation est un travail de modèle. Ce service se limite donc à ce
+/// qu'on peut établir honnêtement, à partir de trois signaux qui existent pour
+/// de bon :
+///
+///  1. **l'historique réel du client** (`/orders/`, déjà chargé par
+///     `AppService`), qui donne ses catégories par fréquence ;
+///  2. **`is_popular`**, que l'exploitation pose sur l'article ;
+///  3. **la note moyenne** et son nombre d'avis, que le serveur entretient.
+///
+/// Aucun tirage aléatoire : deux ouvertures de l'accueil à une seconde
+/// d'intervalle proposent la même chose, ce qui est le minimum attendu d'une
+/// suggestion.
 class AIRecommendationService extends ChangeNotifier {
   static final AIRecommendationService _instance =
       AIRecommendationService._internal();
@@ -17,530 +56,143 @@ class AIRecommendationService extends ChangeNotifier {
   AIRecommendationService._internal();
 
   final Map<String, List<eccore.MenuItem>> _recommendations = {};
-  final Map<String, UserPreferences> _userPreferences = {};
-  final Map<String, List<Order>> _userOrderHistory = {};
   bool _isInitialized = false;
 
-  // Facteurs de recommandation
-
-  // Getters
   Map<String, List<eccore.MenuItem>> get recommendations =>
       Map.unmodifiable(_recommendations);
-  Map<String, UserPreferences> get userPreferences =>
-      Map.unmodifiable(_userPreferences);
   bool get isInitialized => _isInitialized;
 
-  /// Initialise le service de recommandations IA
   Future<void> initialize() async {
-    if (_isInitialized) return;
-
-    try {
-      // Initialiser les modèles de recommandation
-      await _initializeRecommendationModels();
-
-      _isInitialized = true;
-      notifyListeners();
-    } catch (e) {
-      Journal.trace('Error initializing AIRecommendationService: $e');
-    }
-  }
-
-  /// Initialise les modèles de recommandation
-  Future<void> _initializeRecommendationModels() async {
-    // Initialisation des modèles de recommandation basés sur des algorithmes simples
-    // Ces modèles utilisent:
-    // 1. Analyse collaborative (basée sur l'historique des commandes)
-    // 2. Filtrage basé sur le contenu (catégories, prix, restrictions alimentaires)
-    // 3. Recommandations contextuelles (heure, météo, saison)
-    // 4. Recommandations populaires (items les plus commandés)
-
-    Journal.trace(
-      'AIRecommendationService: Modèles de recommandation initialisés',
-    );
-
-    // Les modèles sont initialisés de manière lazy lors de la première utilisation
-    // via les méthodes _generateRecommendations et _calculateRecommendationScore
-  }
-
-  /// Initialise le service de recommandations pour un utilisateur
-  Future<void> initializeUser(String userId) async {
-    await _loadUserPreferences(userId);
-    await _loadUserOrderHistory(userId);
-    await _generateRecommendations(userId);
-  }
-
-  /// Charge les préférences utilisateur
-  Future<void> _loadUserPreferences(String userId) async {
-    // Simulation des préférences utilisateur basées sur l'historique
-    final preferences = UserPreferences(
-      favoriteCategories: ['burgers', 'pizzas', 'drinks'],
-      dietaryRestrictions: ['vegetarian'],
-      priceRange: PriceRange.medium,
-      preferredSpiceLevel: SpiceLevel.mild,
-      timePreferences: TimePreferences(
-        breakfast: 0.3,
-        lunch: 0.7,
-        dinner: 0.8,
-        lateNight: 0.2,
-      ),
-      seasonalPreferences: {
-        'spring': ['salads', 'light_drinks'],
-        'summer': ['cold_drinks', 'ice_cream'],
-        'autumn': ['warm_drinks', 'comfort_food'],
-        'winter': ['hot_drinks', 'soups'],
-      },
-    );
-
-    _userPreferences[userId] = preferences;
-  }
-
-  /// Charge l'historique des commandes utilisateur
-  Future<void> _loadUserOrderHistory(String userId) async {
-    // Simulation de l'historique des commandes
-    final orders = [
-      Order(
-        id: 'order_1',
-        userId: userId,
-        items: [
-          OrderItem(
-            menuItemId: 'burger_1',
-            menuItemName: 'El Corazón Burger',
-            name: 'El Corazón Burger',
-            category: 'burgers',
-            menuItemImage: '',
-            quantity: 1,
-            unitPrice: 12.99,
-            totalPrice: 12.99,
-            customizations: {},
-          ),
-        ],
-        subtotal: 12.99,
-        total: 17.99,
-        status: OrderStatus.delivered,
-        deliveryAddress: '123 Main St',
-        paymentMethod: PaymentMethod.creditCard,
-        orderTime: DateTime.now().subtract(const Duration(days: 1)),
-        createdAt: DateTime.now().subtract(const Duration(days: 1)),
-      ),
-      Order(
-        id: 'order_2',
-        userId: userId,
-        items: [
-          OrderItem(
-            menuItemId: 'pizza_1',
-            menuItemName: 'Margherita Pizza',
-            name: 'Margherita Pizza',
-            category: 'pizzas',
-            menuItemImage: '',
-            quantity: 1,
-            unitPrice: 15.99,
-            totalPrice: 15.99,
-            customizations: {},
-          ),
-        ],
-        subtotal: 15.99,
-        total: 20.99,
-        status: OrderStatus.delivered,
-        deliveryAddress: '123 Main St',
-        paymentMethod: PaymentMethod.creditCard,
-        orderTime: DateTime.now().subtract(const Duration(days: 3)),
-        createdAt: DateTime.now().subtract(const Duration(days: 3)),
-      ),
-    ];
-
-    _userOrderHistory[userId] = orders;
-  }
-
-  /// Génère des recommandations personnalisées pour un utilisateur
-  Future<void> _generateRecommendations(String userId) async {
-    final preferences = _userPreferences[userId];
-    if (preferences == null) return;
-
-    final menuItems = await _getAvailableMenuItems();
-    final recommendations = <eccore.MenuItem>[];
-
-    // Les recommandations sont calculées localement.
-    //
-    // L'appel qui se trouvait ici visait l'ancien backend Node
-    // (`/api/ai/recommendations`), retiré depuis. Il n'a pas d'équivalent
-    // Django : le classement ci-dessous, fondé sur les préférences déjà
-    // observées, est ce que le service sait faire honnêtement. Une vraie
-    // recommandation est un travail de modèle, côté serveur.
-    // Recommandations basées sur l'historique
-    final historyRecommendations =
-        _getHistoryBasedRecommendations(userId, menuItems);
-    recommendations.addAll(historyRecommendations);
-
-    // Recommandations basées sur l'heure
-    final timeRecommendations =
-        _getTimeBasedRecommendations(preferences, menuItems);
-    recommendations.addAll(timeRecommendations);
-
-    // Recommandations basées sur la météo
-    final weatherRecommendations = _getWeatherBasedRecommendations(menuItems);
-    recommendations.addAll(weatherRecommendations);
-
-    // Recommandations populaires
-    final popularRecommendations = _getPopularRecommendations(menuItems);
-    recommendations.addAll(popularRecommendations);
-
-    // Dédupliquer et trier par score
-    final uniqueRecommendations =
-        _deduplicateAndRank(recommendations, preferences);
-
-    _recommendations[userId] = uniqueRecommendations.take(10).toList();
+    _isInitialized = true;
     notifyListeners();
   }
 
-  /// Recommandations basées sur l'historique des commandes
-  List<eccore.MenuItem> _getHistoryBasedRecommendations(
-    String userId,
-    List<eccore.MenuItem> menuItems,
-  ) {
-    final orders = _userOrderHistory[userId] ?? [];
-    final categoryFrequency = <String, int>{};
-
-    // Calculer la fréquence des catégories commandées
-    for (final order in orders) {
-      for (final item in order.items) {
-        categoryFrequency[item.category] =
-            (categoryFrequency[item.category] ?? 0) + 1;
-      }
+  /// Calcule les suggestions du compte.
+  ///
+  /// Appelé une fois à l'ouverture de session, par `ServiceInitializer`, après
+  /// que `AppService` a chargé le catalogue et l'historique — les deux dont ce
+  /// calcul dépend. Une commande passée en cours de session n'est donc prise
+  /// en compte qu'au prochain démarrage : c'est un décalage assumé, la liste
+  /// n'ayant pas à bouger sous les doigts entre deux visites de l'accueil.
+  Future<void> initializeUser(String userId) async {
+    final articles = await _articlesDisponibles();
+    if (articles.isEmpty) {
+      _recommendations[userId] = const [];
+      _isInitialized = true;
+      notifyListeners();
+      return;
     }
 
-    // Recommander des items des catégories populaires
-    final recommendations = <eccore.MenuItem>[];
-    final sortedCategories = categoryFrequency.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
+    final affinites = _affinitesParCategorie();
 
-    for (final category in sortedCategories.take(3)) {
-      final categoryItems = menuItems
-          .where(
-            (item) => item.categoryName.toLowerCase() == category.key,
-          )
-          .toList();
-      if (categoryItems.isNotEmpty) {
-        recommendations.add(categoryItems.first);
-      }
-    }
+    // Ce que le client a déjà commandé sort de la liste : l'accueil a déjà une
+    // reprise de commande et une section de favoris pour cela. Une
+    // « suggestion » qui propose ce qu'on a mangé la semaine dernière n'en est
+    // pas une.
+    final dejaCommandes = _articlesDejaCommandes();
 
-    return recommendations;
-  }
-
-  /// Recommandations basées sur l'heure de la journée
-  List<eccore.MenuItem> _getTimeBasedRecommendations(
-    UserPreferences preferences,
-    List<eccore.MenuItem> menuItems,
-  ) {
-    final now = DateTime.now();
-    final hour = now.hour;
-    final recommendations = <eccore.MenuItem>[];
-
-    if (hour >= 6 && hour < 11) {
-      // Petit-déjeuner
-      final breakfastItems = menuItems
-          .where(
-            (item) =>
-                item.categoryName
-                        .toLowerCase()
-                        .contains('breakfast') ==
-                    true ||
-                item.name.toLowerCase().contains('breakfast') ||
-                item.name.toLowerCase().contains('pancake') ||
-                item.name.toLowerCase().contains('waffle'),
-          )
-          .toList();
-      recommendations.addAll(breakfastItems.take(2));
-    } else if (hour >= 11 && hour < 15) {
-      // Déjeuner
-      final lunchItems = menuItems
-          .where(
-            (item) =>
-                item.categoryName.toLowerCase().contains('lunch') ==
-                    true ||
-                item.categoryName.toLowerCase().contains('burger') ==
-                    true ||
-                item.categoryName.toLowerCase().contains('sandwich') ==
-                    true,
-          )
-          .toList();
-      recommendations.addAll(lunchItems.take(2));
-    } else if (hour >= 15 && hour < 18) {
-      // Goûter
-      final snackItems = menuItems
-          .where(
-            (item) =>
-                item.categoryName.toLowerCase().contains('dessert') ==
-                    true ||
-                item.categoryName.toLowerCase().contains('drink') ==
-                    true ||
-                item.name.toLowerCase().contains('snack'),
-          )
-          .toList();
-      recommendations.addAll(snackItems.take(2));
-    } else {
-      // Dîner
-      final dinnerItems = menuItems
-          .where(
-            (item) =>
-                item.categoryName
-                        .toLowerCase()
-                        .contains('pizza') ==
-                    true ||
-                item.categoryName.toLowerCase().contains('pasta') ==
-                    true ||
-                item.categoryName.toLowerCase().contains('dinner') ==
-                    true,
-          )
-          .toList();
-      recommendations.addAll(dinnerItems.take(2));
-    }
-
-    return recommendations;
-  }
-
-  /// Recommandations basées sur la météo (simulée)
-  List<eccore.MenuItem> _getWeatherBasedRecommendations(List<eccore.MenuItem> menuItems) {
-    // Simulation de la météo
-    final isHot = Random().nextBool();
-    final recommendations = <eccore.MenuItem>[];
-
-    if (isHot) {
-      // Temps chaud - boissons froides, salades
-      final coldItems = menuItems
-          .where(
-            (item) =>
-                item.categoryName
-                        .toLowerCase()
-                        .contains('drink') ==
-                    true ||
-                item.categoryName.toLowerCase().contains('salad') ==
-                    true ||
-                item.name.toLowerCase().contains('ice') ||
-                item.name.toLowerCase().contains('cold'),
-          )
-          .toList();
-      recommendations.addAll(coldItems.take(2));
-    } else {
-      // Temps froid - boissons chaudes, soupes
-      final hotItems = menuItems
-          .where(
-            (item) =>
-                item.categoryName.toLowerCase().contains('soup') ==
-                    true ||
-                item.name.toLowerCase().contains('hot') ||
-                item.name.toLowerCase().contains('warm') ||
-                item.categoryName.toLowerCase().contains('coffee') ==
-                    true,
-          )
-          .toList();
-      recommendations.addAll(hotItems.take(2));
-    }
-
-    return recommendations;
-  }
-
-  /// Recommandations populaires
-  List<eccore.MenuItem> _getPopularRecommendations(List<eccore.MenuItem> menuItems) {
-    // Simulation des items populaires
-    final popularItems = menuItems
-        .where(
-          (item) =>
-              item.name.toLowerCase().contains('special') ||
-              item.name.toLowerCase().contains('deluxe') ||
-              item.name.toLowerCase().contains('premium'),
-        )
+    final candidats = articles
+        .where((article) => article.isAvailable)
+        .where((article) => !dejaCommandes.contains(article.id))
         .toList();
 
-    return popularItems.take(2).toList();
-  }
-
-  /// Dédupliquer et classer les recommandations
-  List<eccore.MenuItem> _deduplicateAndRank(
-    List<eccore.MenuItem> recommendations,
-    UserPreferences preferences,
-  ) {
-    final uniqueItems = <String, eccore.MenuItem>{};
-
-    for (final item in recommendations) {
-      uniqueItems[item.id] = item;
-    }
-
-    final rankedItems = uniqueItems.values.toList();
-
-    // Trier par score de recommandation
-    rankedItems.sort((a, b) {
-      final scoreA = _calculateRecommendationScore(a, preferences);
-      final scoreB = _calculateRecommendationScore(b, preferences);
-      return scoreB.compareTo(scoreA);
+    candidats.sort((a, b) {
+      final ecart = _score(b, affinites).compareTo(_score(a, affinites));
+      // Départage par nom, et non par ordre d'arrivée : à score égal, la liste
+      // doit être la même d'une ouverture à l'autre.
+      return ecart != 0 ? ecart : a.name.compareTo(b.name);
     });
 
-    return rankedItems;
+    _recommendations[userId] = candidats.take(10).toList();
+    _isInitialized = true;
+    notifyListeners();
   }
 
-  /// Calcule le score de recommandation pour un item
-  double _calculateRecommendationScore(
-    eccore.MenuItem item,
-    UserPreferences preferences,
-  ) {
-    double score = 0.0;
+  List<eccore.MenuItem> getRecommendationsForUser(String userId) {
+    return _recommendations[userId] ?? const [];
+  }
 
-    // Score basé sur les catégories favorites
-    if (preferences.favoriteCategories
-        .contains(item.categoryName.toLowerCase())) {
-      score += 0.3;
+  /// Part de chaque catégorie dans les commandes passées du client, entre 0
+  /// et 1.
+  ///
+  /// La catégorie ne se lit pas sur la ligne de commande : `OrderLine` porte le
+  /// nom de l'article et son prix, pas sa catégorie — `DjangoOrderRepository`
+  /// laisse d'ailleurs `category` vide, faute d'avoir la donnée. Elle se
+  /// retrouve par l'identifiant d'article, sur le catalogue. C'est ce
+  /// rapprochement qui manquait : l'ancienne version comptait des chaînes
+  /// vides, et n'appariait donc jamais rien.
+  Map<String, double> _affinitesParCategorie() {
+    final catalogue = {
+      for (final article in AppService().menuItems) article.id: article,
+    };
+
+    final comptes = <String, int>{};
+    var total = 0;
+
+    for (final commande in AppService().orders) {
+      for (final ligne in commande.items) {
+        final article = catalogue[ligne.menuItemId];
+        if (article == null || article.categorySlug.isEmpty) continue;
+        comptes[article.categorySlug] =
+            (comptes[article.categorySlug] ?? 0) + ligne.quantity;
+        total += ligne.quantity;
+      }
     }
 
-    // Score basé sur la gamme de prix
-    if (item.prixAffiche <= 10 && preferences.priceRange == PriceRange.low) {
-      score += 0.2;
-    } else if (item.prixAffiche > 10 &&
-        item.prixAffiche <= 20 &&
-        preferences.priceRange == PriceRange.medium) {
-      score += 0.2;
-    } else if (item.prixAffiche > 20 && preferences.priceRange == PriceRange.high) {
-      score += 0.2;
-    }
+    if (total == 0) return const {};
+    return {
+      for (final entree in comptes.entries) entree.key: entree.value / total,
+    };
+  }
 
-    // Score basé sur les restrictions alimentaires
-    if (preferences.dietaryRestrictions.contains('vegetarian') &&
-        item.estVegetarien) {
-      score += 0.2;
-    }
-    if (preferences.dietaryRestrictions.contains('vegan') && item.estVegan) {
-      score += 0.2;
-    }
+  Set<String> _articlesDejaCommandes() {
+    return {
+      for (final commande in AppService().orders)
+        for (final ligne in commande.items) ligne.menuItemId,
+    };
+  }
 
-    // Score basé sur la popularité (simulé)
-    score += Random().nextDouble() * 0.1;
+  /// Trois termes, tous adossés à une donnée du serveur.
+  ///
+  /// L'affinité pèse le plus : c'est le seul signal propre à **ce** client.
+  /// Les deux autres le remplacent quand il n'y a pas encore d'historique — un
+  /// compte neuf reçoit alors les articles mis en avant et les mieux notés, ce
+  /// qui est exactement ce qu'on lui montrerait à défaut de le connaître.
+  double _score(eccore.MenuItem article, Map<String, double> affinites) {
+    var score = (affinites[article.categorySlug] ?? 0) * 0.5;
+
+    if (article.isPopular) score += 0.25;
+
+    // La note n'entre en compte que si quelqu'un a noté. Une moyenne de 0,00
+    // sur zéro avis — ce que porte tout catalogue neuf — ne dit rien du plat,
+    // et la traiter comme une mauvaise note enterrerait toute la carte.
+    if (article.ratingCount > 0) {
+      score += (article.ratingAverage / 5) * 0.25;
+    }
 
     return score;
   }
 
-  /// Obtient les items du menu disponibles
-  Future<List<eccore.MenuItem>> _getAvailableMenuItems() async {
+  /// Le catalogue, depuis la mémoire de `AppService` si elle est chaude, du
+  /// serveur sinon.
+  Future<List<eccore.MenuItem>> _articlesDisponibles() async {
     try {
-      final appService = AppService();
-      if (appService.isInitialized) {
-        final items = appService.menuItems;
-        if (items.isNotEmpty) {
-          return items;
-        }
-      }
+      final enMemoire = AppService().menuItems;
+      if (enMemoire.isNotEmpty) return enMemoire;
 
-      final items = (await DjangoMenuRepository().getMenuItems())
-          .where((item) => item.isAvailable)
+      final articles = (await DjangoMenuRepository().getMenuItems())
+          .where((article) => article.estCommandable)
           .toList();
 
-      if (items.isEmpty) {
-        Journal.trace('AIRecommendationService: aucun article disponible au catalogue');
+      if (articles.isEmpty) {
+        Journal.trace(
+          'AIRecommendationService: aucun article disponible au catalogue',
+        );
       }
-
-      return items;
+      return articles;
     } catch (e) {
-      Journal.trace('Error getting menu items: $e');
-      return [];
+      Journal.trace('AIRecommendationService: catalogue indisponible - $e');
+      return const [];
     }
   }
-
-  /// Met à jour les préférences utilisateur
-  Future<void> updateUserPreferences(
-    String userId,
-    UserPreferences preferences,
-  ) async {
-    _userPreferences[userId] = preferences;
-    await _generateRecommendations(userId);
-    notifyListeners();
-  }
-
-  /// Ajoute une commande à l'historique utilisateur
-  Future<void> addOrderToHistory(String userId, Order order) async {
-    _userOrderHistory[userId] = (_userOrderHistory[userId] ?? [])..add(order);
-    await _generateRecommendations(userId);
-    notifyListeners();
-  }
-
-  /// Obtient les recommandations pour un utilisateur
-  List<eccore.MenuItem> getRecommendationsForUser(String userId) {
-    return _recommendations[userId] ?? [];
-  }
-
-  /// Obtient les recommandations basées sur un item
-  List<eccore.MenuItem> getSimilarItems(eccore.MenuItem item) {
-    // Simulation d'items similaires
-    final similarItems = <eccore.MenuItem>[];
-    final allItems = _recommendations.values.expand((list) => list).toList();
-
-    // Trouver des items de la même catégorie
-    final sameCategoryItems = allItems
-        .where(
-          (otherItem) =>
-              otherItem.categorySlug == item.categorySlug &&
-              otherItem.id != item.id,
-        )
-        .toList();
-
-    similarItems.addAll(sameCategoryItems.take(3));
-
-    return similarItems;
-  }
-
-  /// Analyse les tendances de commande
-  Map<String, dynamic> analyzeOrderTrends(String userId) {
-    final orders = _userOrderHistory[userId] ?? [];
-    final trends = <String, dynamic>{};
-
-    // Tendance par catégorie
-    final categoryTrends = <String, int>{};
-    for (final order in orders) {
-      for (final item in order.items) {
-        categoryTrends[item.category] =
-            (categoryTrends[item.category] ?? 0) + 1;
-      }
-    }
-
-    trends['categoryTrends'] = categoryTrends;
-    trends['totalOrders'] = orders.length;
-    trends['averageOrderValue'] = orders.isNotEmpty
-        ? orders.map((o) => o.total).reduce((a, b) => a + b) / orders.length
-        : 0.0;
-
-    return trends;
-  }
 }
-
-class UserPreferences {
-  final List<String> favoriteCategories;
-  final List<String> dietaryRestrictions;
-  final PriceRange priceRange;
-  final SpiceLevel preferredSpiceLevel;
-  final TimePreferences timePreferences;
-  final Map<String, List<String>> seasonalPreferences;
-
-  UserPreferences({
-    required this.favoriteCategories,
-    required this.dietaryRestrictions,
-    required this.priceRange,
-    required this.preferredSpiceLevel,
-    required this.timePreferences,
-    required this.seasonalPreferences,
-  });
-}
-
-class TimePreferences {
-  final double breakfast;
-  final double lunch;
-  final double dinner;
-  final double lateNight;
-
-  TimePreferences({
-    required this.breakfast,
-    required this.lunch,
-    required this.dinner,
-    required this.lateNight,
-  });
-}
-
-enum PriceRange { low, medium, high }
-
-enum SpiceLevel { mild, medium, hot }

@@ -42,6 +42,70 @@ void main() {
     });
   });
 
+  /// Deuxième omission du même fichier, un cran plus coûteuse que la
+  /// première : `API_BASE_URL=localhost:8000`, sans `/api/v1`. Le schéma était
+  /// rattrapé, le préfixe non — et l'API n'est montée que sous lui
+  /// (`config/urls.py`). Toutes les routes répondaient 404 sur un backend
+  /// parfaitement sain, ce qui se lit comme une base vide plutôt que comme un
+  /// réglage incomplet.
+  group('Préfixe /api/v1 manquant', () {
+    test('un hôte nu et sans préfixe reçoit les deux', () {
+      expect(adresseDeLApi('localhost:8000'), 'http://localhost:8000/api/v1');
+    });
+
+    test('une adresse complète mais sans préfixe le reçoit', () {
+      expect(
+        adresseDeLApi('http://localhost:8000'),
+        'http://localhost:8000/api/v1',
+      );
+    });
+
+    test('une barre finale ne produit pas //api/v1', () {
+      // `Uri.parse('http://h:8000/').path` vaut '/', c'est-à-dire aucun
+      // chemin : la barre est retirée avant l'examen, sans quoi l'adresse de
+      // base finirait par une — or tous les chemins des dépôts commencent
+      // par une.
+      expect(
+        adresseDeLApi('http://localhost:8000/'),
+        'http://localhost:8000/api/v1',
+      );
+    });
+
+    test('un domaine en https aussi', () {
+      expect(
+        adresseDeLApi('https://elcorazon-backend.onrender.com'),
+        'https://elcorazon-backend.onrender.com/api/v1',
+      );
+    });
+  });
+
+  group('Chemin déjà déclaré', () {
+    test("le préfixe présent n'est pas redoublé", () {
+      expect(
+        adresseDeLApi('http://localhost:8000/api/v1'),
+        'http://localhost:8000/api/v1',
+      );
+    });
+
+    test('un autre chemin est un choix, pas un oubli : il est respecté', () {
+      // Une v2 le jour venu, ou le préfixe d'un proxy. Le rattrapage ne
+      // s'applique qu'à l'absence de chemin — deviner au-delà reviendrait à
+      // défaire un réglage volontaire.
+      expect(
+        adresseDeLApi('https://api.elcorazon.tg/api/v2'),
+        'https://api.elcorazon.tg/api/v2',
+      );
+    });
+
+    test('une barre finale est retirée même quand le chemin existe', () {
+      // `baseUrl` + `/catalog/items/` ne doit pas produire de double barre.
+      expect(
+        adresseDeLApi('http://localhost:8000/api/v1/'),
+        'http://localhost:8000/api/v1',
+      );
+    });
+  });
+
   group('Absence de réglage', () {
     test('sans valeur, on retombe sur l\'hôte de l\'émulateur Android', () {
       expect(adresseDeLApi(null), 'http://10.0.2.2:8000/api/v1');
