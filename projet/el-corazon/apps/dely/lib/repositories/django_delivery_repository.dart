@@ -36,11 +36,88 @@ class Course {
   /// lui qui ouvre le suivi (`ws/orders/{id}/tracking/`) et la discussion.
   String get orderId => assignment.orderId;
 
+  /// Référence lisible de la commande, telle que le serveur la fabrique.
+  ///
+  /// Les écrans affichaient jusqu'ici les huit premiers caractères de l'UUID
+  /// — `#3F2A1B9C`. Illisible à voix haute au téléphone, et introuvable dans
+  /// le back-office, qui ne connaît que cette référence-là. Le champ voyage
+  /// depuis toujours dans l'affectation (`order_reference`) ; personne ne le
+  /// lisait. Le repli sur l'identifiant court reste pour le cas, théorique,
+  /// d'une commande sans référence.
+  String get reference => assignment.orderReference.isNotEmpty
+      ? assignment.orderReference
+      : assignmentId.substring(0, assignmentId.length.clamp(0, 8)).toUpperCase();
+
   /// Étapes que le serveur autorise depuis l'état courant. C'est la source des
   /// boutons à afficher : la machine à états n'est pas rejouée côté client.
   List<String> get allowedTransitions => assignment.allowedTransitions;
 
   EtapeCourse get etape => EtapeCourse.depuisServeur(assignment.status);
+
+  /// La prochaine étape que le livreur peut demander, ou `null` s'il n'y en a
+  /// aucune.
+  ///
+  /// ## Pourquoi cette lecture, et pas un `switch` sur [etape]
+  ///
+  /// Les trois écrans rejouaient la machine à états côté client, chacun avec
+  /// son propre `switch`, et chacun avec un trou différent : l'écran des
+  /// livraisons n'avait pas de cas pour `acceptee`, si bien que son bouton
+  /// « Suivant » ne faisait rien sur une course fraîchement acceptée ;
+  /// l'écran de suivi proposait « Livré » dès l'acceptation, une transition
+  /// que le serveur refuse (la machine est acyclique et sans raccourci).
+  ///
+  /// `allowed_transitions` est calculé par `DELIVERY_MACHINE.targets_from` et
+  /// rendu sur chaque affectation. C'est **la** source des boutons : la table
+  /// des transitions ne se recopie pas, elle se lit.
+  ///
+  /// Les issues qui ne sont pas une progression — refus, annulation — en sont
+  /// exclues : elles ont leurs propres gestes, avec leurs propres
+  /// confirmations, et ne doivent jamais tomber sous le bouton « suivant ».
+  EtapeCourse? get prochaineEtape {
+    for (final etape in const [
+      EtapeCourse.recuperee,
+      EtapeCourse.enRoute,
+      EtapeCourse.livree,
+    ]) {
+      if (allowedTransitions.contains(etape.versServeur)) return etape;
+    }
+    return null;
+  }
+
+  /// Le serveur accepte-t-il que je prenne cette course ?
+  bool get peutAccepter =>
+      allowedTransitions.contains(eccore.DeliveryStatus.accepted);
+
+  /// Le serveur accepte-t-il que je la refuse ?
+  ///
+  /// Refuser est un geste distinct de l'annulation : décliner une proposition
+  /// n'incrémente pas le compteur d'annulations du livreur.
+  bool get peutRefuser =>
+      allowedTransitions.contains(eccore.DeliveryStatus.declined);
+
+  /// Point de retrait — l'établissement, tel que le serveur le situe.
+  ///
+  /// Ces quatre coordonnées voyagent dans chaque affectation
+  /// (`pickup_location`, `delivery_location`, obligatoires côté serveur).
+  /// L'écran de suivi les ignorait : il géocodait la **chaîne** d'adresse de
+  /// livraison, et plaçait le restaurant sur un point écrit en dur.
+  double get latitudeRetrait => assignment.pickupLatitude;
+  double get longitudeRetrait => assignment.pickupLongitude;
+
+  /// Point de dépôt — l'adresse du client, telle que la commande la porte.
+  double get latitudeLivraison => assignment.deliveryLatitude;
+  double get longitudeLivraison => assignment.deliveryLongitude;
+
+  /// Le livreur a-t-il déjà le repas en main ?
+  ///
+  /// Décide de la destination à afficher : le restaurant avant la
+  /// récupération, le client après. Envoyer un livreur chez le client alors
+  /// qu'il n'a pas encore récupéré la commande est le défaut le plus coûteux
+  /// que puisse commettre un écran de navigation.
+  bool get repasRecupere =>
+      assignment.status == eccore.DeliveryStatus.pickedUp ||
+      assignment.status == eccore.DeliveryStatus.onTheWay ||
+      assignment.status == eccore.DeliveryStatus.delivered;
 
   MoyenPaiement get moyenPaiement =>
       MoyenPaiement.depuisServeur(commande?.paymentMethod);
@@ -79,6 +156,16 @@ class Course {
   DateTime get passeeLe => commande?.placedAt ?? assignment.offeredAt;
 
   DateTime? get livraisonEstimeeA => commande?.estimatedDeliveryAt;
+
+  /// Moment où la course a été **livrée**, tel que le serveur l'a horodaté.
+  ///
+  /// C'est la date qui compte pour les gains et l'historique. Ils se
+  /// fondaient sur [passeeLe], c'est-à-dire, pour une course livrée dont le
+  /// détail n'est plus relu, sur `offered_at` — le moment où la course a été
+  /// *proposée*. Une course proposée à 23 h 50 et livrée à 00 h 10 tombait
+  /// donc dans les gains de la veille, et le total du jour ne correspondait
+  /// à aucune journée de travail.
+  DateTime? get livreeLe => assignment.deliveredAt;
 
   /// La course m'est proposée et je n'y ai pas encore répondu.
   bool get estProposee => assignment.status == eccore.DeliveryStatus.offered;

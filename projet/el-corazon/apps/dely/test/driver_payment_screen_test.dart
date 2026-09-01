@@ -177,12 +177,15 @@ void main() {
       expect(find.text('7${nbsp}000 CFA'), findsWidgets);
     });
 
-    testWidgets('la référence est courte et lisible', (tester) async {
+    testWidgets('la référence est celle du serveur', (tester) async {
       await afficher(tester, course());
 
-      // Huit caractères en majuscules : ce qu'on lit à voix haute au
-      // téléphone, pas un UUID complet.
-      expect(find.text('#A1B2C3D4'), findsOneWidget);
+      // `order_reference`, et non les huit premiers caractères de l'UUID :
+      // c'est la seule référence qu'un client sait lire à voix haute et que
+      // le back-office sait retrouver. Le fragment d'UUID affiché jusqu'ici
+      // (`#A1B2C3D4`) n'existait nulle part ailleurs que sur cet écran.
+      expect(find.text('CMD-0001'), findsOneWidget);
+      expect(find.text('#A1B2C3D4'), findsNothing);
     });
 
     testWidgets('une course sans détail reste affichable', (tester) async {
@@ -191,7 +194,7 @@ void main() {
       await afficher(tester, Course(assignment: affectation()));
 
       expect(find.text('Rue du Commerce, Lomé'), findsOneWidget);
-      expect(find.text('#A1B2C3D4'), findsOneWidget);
+      expect(find.text('CMD-0001'), findsOneWidget);
     });
   });
 

@@ -12,6 +12,7 @@ import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
 import 'package:elcora_dely/screens/payments/driver_payment_screen.dart';
 import 'package:elcora_dely/screens/communication/chat_screen.dart';
+import 'package:elcora_dely/presentation/messages_erreur.dart';
 
 class DeliveryNavigationScreen extends StatefulWidget {
   const DeliveryNavigationScreen({super.key});
@@ -142,13 +143,13 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
           ),
           _buildDrawerItem(
             icon: Icons.payment,
-            title: 'Paiements',
+            title: 'Encaissement',
             onTap: () => _navigateToPayments(),
           ),
           _buildDrawerItem(
             icon: Icons.chat,
-            title: 'Support',
-            onTap: () => _navigateToSupport(),
+            title: 'Écrire au client',
+            onTap: () => _navigateToClientChat(),
           ),
           const Divider(),
           _buildDrawerItem(
@@ -221,7 +222,10 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  user?.email ?? 'driver@fasteat.ci',
+                  // `driver@fasteat.ci` s'affichait ici en repli : une adresse
+                  // inventée, sous une marque qui n'est pas la nôtre, montrée
+                  // comme si c'était celle du livreur connecté.
+                  user?.email ?? '',
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 14,
@@ -337,35 +341,30 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
     }
   }
 
-  void _navigateToSupport() {
+  /// Ouvre la discussion avec le client de la course en cours.
+  ///
+  /// Cette entrée s'appelait « Support » et ouvrait le canal
+  /// `ws/orders/{id}/chat/` — celui du **client**. Le nom promettait
+  /// l'entreprise, le canal livrait le client. Elle dit maintenant ce qu'elle
+  /// fait ; il n'existe pas de canal de support pour un livreur au contrat.
+  void _navigateToClientChat() {
     final appService = Provider.of<AppService>(context, listen: false);
-    final assignedDeliveries = appService.assignedDeliveries;
+    final course = appService.activeCourse;
 
-    if (assignedDeliveries.isNotEmpty) {
-      final order = assignedDeliveries.first;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChatScreen(
-            order: order,
-            chatType: 'support',
-          ),
-        ),
-      );
-    } else {
-      // Aucune course : il n'y a pas de conversation à ouvrir.
-      //
-      // Une commande fictive était fabriquée ici pour ouvrir quand même
-      // l'écran. Son identifiant `mock-...` faisait ouvrir un canal
-      // `ws/orders/{id}/chat/` que le serveur refuse : la discussion ne se
-      // connectait jamais, et le livreur attendait devant un écran vide.
+    if (course == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Aucune course en cours : pas de discussion à ouvrir.'),
           backgroundColor: Colors.orange,
         ),
       );
+      return;
     }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => ChatScreen(order: course)),
+    );
   }
 
   void _navigateToSettings() {
@@ -422,7 +421,7 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Erreur lors de la déconnexion: $e'),
+              content: Text(messageErreur(e)),
               backgroundColor: Colors.red,
             ),
           );
@@ -463,7 +462,7 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
                 Expanded(
                   child: _buildQuickActionButton(
                     icon: Icons.payment,
-                    title: 'Paiement',
+                    title: 'Encaissement',
                     onTap: () {
                       Navigator.pop(context);
                       _navigateToPayments();
@@ -474,10 +473,10 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
                 Expanded(
                   child: _buildQuickActionButton(
                     icon: Icons.chat,
-                    title: 'Support',
+                    title: 'Client',
                     onTap: () {
                       Navigator.pop(context);
-                      _navigateToSupport();
+                      _navigateToClientChat();
                     },
                   ),
                 ),

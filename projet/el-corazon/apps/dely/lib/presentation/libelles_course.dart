@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 /// Vocabulaire d'affichage des courses — étapes et moyens de paiement.
@@ -26,14 +28,14 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 /// La projection inverse — déduire l'écran du statut de commande — avait
 /// produit le constat C4 de l'audit.
 enum EtapeCourse {
-  proposee('Proposée', '⏳'),
-  acceptee('Acceptée', '✅'),
-  recuperee('Récupérée', '🏃'),
-  enRoute('En route', '🛵'),
-  livree('Livrée', '🎉'),
-  annulee('Annulée', '❌');
+  proposee('Proposée'),
+  acceptee('Acceptée'),
+  recuperee('Récupérée'),
+  enRoute('En route'),
+  livree('Livrée'),
+  annulee('Annulée');
 
-  const EtapeCourse(this.libelle, this.pastille);
+  const EtapeCourse(this.libelle);
 
   /// Depuis la valeur rendue par le serveur (`eccore.DeliveryStatus`).
   ///
@@ -51,7 +53,27 @@ enum EtapeCourse {
   }
 
   final String libelle;
-  final String pastille;
+
+  /// L'illustration de l'étape, prise dans le pack partagé du socle.
+  ///
+  /// ## Ce qui a remplacé quoi
+  ///
+  /// Chaque étape portait un emoji Unicode — `'🛵'` pour la route, `'🎉'` pour
+  /// la livraison. Ils venaient de la police du téléphone, pas de nous : sur
+  /// les Android d'entrée de gamme que beaucoup de livreurs utilisent, un
+  /// glyphe récent s'affiche en carré vide, et l'étape devenait illisible.
+  ///
+  /// Le pack vit dans `elcorazon_core` : le livreur et le client voient donc
+  /// **la même illustration pour la même étape**, ce que deux jeux d'emojis
+  /// tenus séparément ne garantissaient pas.
+  eccore.AppEmojiToken get illustration => switch (this) {
+        EtapeCourse.proposee => eccore.AppEmojis.newOrder,
+        EtapeCourse.acceptee => eccore.AppEmojis.orderConfirmed,
+        EtapeCourse.recuperee => eccore.AppEmojis.courier,
+        EtapeCourse.enRoute => eccore.AppEmojis.delivery,
+        EtapeCourse.livree => eccore.AppEmojis.delivered,
+        EtapeCourse.annulee => eccore.AppEmojis.error,
+      };
 
   /// La course occupe encore le livreur.
   bool get estEnCours => this != EtapeCourse.livree && this != EtapeCourse.annulee;
@@ -78,12 +100,12 @@ enum EtapeCourse {
 
 /// Moyen de paiement d'une commande, tel que l'écran d'encaissement le nomme.
 enum MoyenPaiement {
-  especes('Espèces', '💵'),
-  mobileMoney('Mobile Money', '📱'),
-  carte('Carte bancaire', '💳'),
-  portefeuille('Portefeuille El Corazón', '👛');
+  especes('Espèces', Icons.payments_rounded),
+  mobileMoney('Mobile Money', Icons.smartphone_rounded),
+  carte('Carte bancaire', Icons.credit_card_rounded),
+  portefeuille('Portefeuille El Corazón', Icons.account_balance_wallet_rounded);
 
-  const MoyenPaiement(this.libelle, this.pastille);
+  const MoyenPaiement(this.libelle, this.icone);
 
   /// Depuis la valeur rendue par le serveur.
   ///
@@ -100,7 +122,15 @@ enum MoyenPaiement {
   }
 
   final String libelle;
-  final String pastille;
+
+  /// L'icône du moyen de paiement.
+  ///
+  /// Une icône, et pas une illustration du pack : ce que le livreur lit ici
+  /// est un **réglage de la course**, au milieu d'une fiche d'informations —
+  /// numéro, statut, montant. Les mêmes icônes que l'écran de règlement du
+  /// client, pour que les deux applications ne nomment pas différemment la
+  /// même chose.
+  final IconData icone;
 
   /// Le livreur doit encaisser à la remise.
   bool get aEncaisser => this == MoyenPaiement.especes;

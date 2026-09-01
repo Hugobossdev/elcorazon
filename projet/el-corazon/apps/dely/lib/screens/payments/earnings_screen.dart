@@ -8,7 +8,9 @@ import 'package:elcora_dely/widgets/loading_widget.dart';
 import 'package:elcora_dely/widgets/custom_button.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:elcora_dely/presentation/messages_erreur.dart';
+import 'package:elcorazon_core/elcorazon_core.dart'
+    show Journal, Money, Withdrawal;
 
 class EarningsScreen extends StatefulWidget {
   const EarningsScreen({super.key});
@@ -19,13 +21,20 @@ class EarningsScreen extends StatefulWidget {
 
 class _EarningsScreenState extends State<EarningsScreen> {
   bool _isLoading = true;
+  bool _isWithdrawing = false;
   String _selectedPeriod = 'today';
 
-  // Sample data - in real app, fetch from backend
-  /// Gains par période — `calculateEarnings` les produit déjà en `num`, seul
-  /// le champ qui les retenait était typé `dynamic`.
+  /// Gains par période, en unité mineure — somme des `courier_fee` que le
+  /// serveur a arrêtées sur les courses livrées de la période.
   Map<String, Map<String, num>> _earningsData = {};
-  List<Map<String, dynamic>> _recentEarnings = [];
+
+  /// Les dernières courses livrées, pour la liste « gains récents ».
+  List<Course> _recentDeliveries = const [];
+
+  /// Demandes de retrait déjà faites. Un retrait naît « en attente » : sans
+  /// cette liste, le livreur demandait, voyait son solde baisser, et n'avait
+  /// plus aucun moyen de savoir où en était son versement.
+  List<Withdrawal> _withdrawals = const [];
 
   @override
   void initState() {
@@ -49,16 +58,34 @@ class _EarningsScreenState extends State<EarningsScreen> {
         Journal.trace('⚠️ Could not refresh orders, using cached data: $e');
       }
 
+      // Les courses livrées **dont le serveur a horodaté la livraison**.
+      //
+      // Le regroupement par période se faisait sur `passeeLe`, c'est-à-dire,
+      // pour une course livrée dont le détail de commande n'est plus relu, sur
+      // `offered_at` — le moment où la course avait été *proposée*. Une course
+      // proposée à 23 h 50 et livrée à 00 h 10 comptait donc dans les gains de
+      // la veille, et le total d'une journée ne correspondait à aucune journée
+      // de travail.
       final deliveries = appService.assignedDeliveries
-          .where((course) => course.etape == EtapeCourse.livree)
-          .toList();
+          .where((course) =>
+              course.etape == EtapeCourse.livree && course.livreeLe != null)
+          .toList()
+        ..sort((a, b) => b.livreeLe!.compareTo(a.livreeLe!));
 
       final todayDeliveries =
-          deliveries.where((c) => _isToday(c.passeeLe)).toList();
+          deliveries.where((c) => _isToday(c.livreeLe!)).toList();
       final weekDeliveries =
-          deliveries.where((c) => _isThisWeek(c.passeeLe)).toList();
+          deliveries.where((c) => _isThisWeek(c.livreeLe!)).toList();
       final monthDeliveries =
-          deliveries.where((c) => _isThisMonth(c.passeeLe)).toList();
+          deliveries.where((c) => _isThisMonth(c.livreeLe!)).toList();
+
+      // Best-effort : l'écran reste utilisable sans l'historique des retraits.
+      var withdrawals = const <Withdrawal>[];
+      try {
+        withdrawals = await appService.loadWithdrawals();
+      } catch (e) {
+        Journal.trace('⚠️ Historique des retraits illisible : $e');
+      }
 
       /// Somme des rémunérations que le serveur a arrêtées pour ces courses.
       ///
@@ -87,19 +114,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
             'month': calculerGains(monthDeliveries),
           };
 
-          final triees = List<Course>.from(deliveries)
-            ..sort((a, b) => b.passeeLe.compareTo(a.passeeLe));
-
-          _recentEarnings = triees
-              .take(10)
-              .map((course) => {
-                    'id': course.orderId,
-                    'orderId': course.orderId.substring(0, 8).toUpperCase(),
-                    'amount': course.remuneration?.amountMinor ?? 0,
-                    'timestamp': course.passeeLe,
-                  })
-              .toList();
-
+          _recentDeliveries = deliveries.take(10).toList();
+          _withdrawals = withdrawals;
           _isLoading = false;
         });
       }
@@ -109,8 +125,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
         final errorHandler =
             Provider.of<ErrorHandlerService>(context, listen: false);
         errorHandler.logError('Erreur chargement gains', details: e);
-        errorHandler.showErrorSnackBar(
-            context, 'Erreur de chargement des gains: $e');
+        errorHandler.showErrorSnackBar(context, messageErreur(e));
       }
     }
   }
@@ -135,47 +150,154 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return date.month == now.month && date.year == now.year;
   }
 
+  /// Demande un retrait sur le **solde**, montant choisi par le livreur.
+  ///
+  /// ## Ce qui a remplacé quoi
+  ///
+  /// L'écran envoyait le total de la **période sélectionnée** : demander un
+  /// retrait avec l'onglet « Aujourd'hui » ouvert ne réclamait que les gains
+  /// du jour, alors que le bloc au-dessus l'annonçait comme le « solde
+  /// disponible » — un solde qui changeait donc en touchant un sélecteur de
+  /// période. Selon l'onglet, la demande était soit très inférieure à ce que
+  /// le livreur avait gagné, soit supérieure à son solde et refusée par le
+  /// serveur (`InsufficientBalance`), sans que l'écran explique pourquoi.
+  ///
+  /// Le solde qui fait foi est `total_earnings` du dossier livreur, que le
+  /// serveur débite sous verrou. Il ne se recompose pas à partir des courses
+  /// rendues : l'historique servi à l'application est borné.
   Future<void> _requestWithdrawal() async {
+    if (_isWithdrawing) return;
+
+    final appService = Provider.of<AppService>(context, listen: false);
+    final solde = appService.soldeDisponible;
+
+    if (solde == null || solde.amountMinor <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Aucun solde disponible pour le retrait'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final montant = await _demanderMontant(solde);
+    if (montant == null || !mounted) return;
+
+    setState(() => _isWithdrawing = true);
     try {
-      final appService = Provider.of<AppService>(context, listen: false);
-      final totalEarnings = _getCurrentEarnings()['total'] ?? 0.0;
-
-      if (totalEarnings <= 0) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Aucun solde disponible pour le retrait'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return;
-      }
-
-      // In real app, integrate with PayDunya for withdrawal
-      await appService.requestWithdrawal(totalEarnings.toDouble());
+      await appService.requestWithdrawal(montant);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Demande de retrait soumise avec succès'),
+            content: Text(
+              'Demande enregistrée. Le versement est traité par '
+              'El Corazón : votre solde est déjà débité.',
+            ),
             backgroundColor: Colors.green,
           ),
         );
+        await _loadEarningsData();
       }
     } catch (e) {
       if (mounted) {
         final errorHandler =
             Provider.of<ErrorHandlerService>(context, listen: false);
         errorHandler.logError('Erreur retrait', details: e);
-        errorHandler.showErrorSnackBar(context, 'Erreur de retrait: $e');
+        // « Le montant demandé dépasse les gains disponibles. » vaut
+        // mieux que le nom de la classe d'exception.
+        errorHandler.showErrorSnackBar(context, messageErreur(e));
       }
+    } finally {
+      if (mounted) setState(() => _isWithdrawing = false);
     }
+  }
+
+  /// Combien retirer, dans la limite du solde. Rend l'unité mineure.
+  Future<int?> _demanderMontant(Money solde) async {
+    final controleur =
+        TextEditingController(text: '${solde.amountMinor}');
+
+    return showDialog<int>(
+      context: context,
+      builder: (context) {
+        String? erreur;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Demander un retrait'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Solde disponible : ${solde.format()}'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controleur,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Montant à retirer',
+                    suffixText: solde.currency,
+                    errorText: erreur,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Le montant est débité de votre solde immédiatement. Le '
+                  'versement est ensuite exécuté par El Corazón.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Annuler'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final saisi = int.tryParse(controleur.text.trim());
+                  // La même vérification qu'au serveur, pour l'expliquer ici
+                  // plutôt que de la subir en erreur d'API.
+                  setDialogState(() {
+                    erreur = saisi == null || saisi <= 0
+                        ? 'Entrez un montant supérieur à zéro.'
+                        : saisi > solde.amountMinor
+                            ? 'Vous ne pouvez pas retirer plus que '
+                                '${solde.format()}.'
+                            : null;
+                  });
+                  if (erreur == null) Navigator.pop(context, saisi);
+                },
+                child: const Text('Demander'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Map<String, num> _getCurrentEarnings() {
     return _earningsData[_selectedPeriod] ?? {};
   }
+
+  /// Devise dans laquelle le livreur est payé, telle que le serveur la rend.
+  ///
+  /// `'FCFA'` était collé en dur derrière chaque nombre, y compris derrière un
+  /// `toStringAsFixed(2)` qui affichait « 1500.00 FCFA » — or le franc CFA n'a
+  /// pas de décimales, et `Money.format()` le sait (`CURRENCY_EXPONENTS`).
+  String get _devise =>
+      Provider.of<AppService>(context, listen: false)
+          .soldeDisponible
+          ?.currency ??
+      'XOF';
+
+  /// Un montant en unité mineure, écrit selon la règle unique du socle.
+  String _formatMontant(num montantMineur) =>
+      Money(amountMinor: montantMineur.round(), currency: _devise).format();
 
   @override
   Widget build(BuildContext context) {
@@ -341,9 +463,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
         ),
         child: Column(
           children: [
-            const Text(
-              'Gains totaux',
-              style: TextStyle(
+            Text(
+              switch (_selectedPeriod) {
+                'week' => 'Gains de la semaine',
+                'month' => 'Gains du mois',
+                _ => 'Gains du jour',
+              },
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
@@ -351,7 +477,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              '${earnings['total']?.toStringAsFixed(0) ?? '0'} FCFA',
+              _formatMontant(earnings['total'] ?? 0),
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 32,
@@ -419,7 +545,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             _buildBreakdownItem(
               'Livraisons',
               '$deliveriesCount livraison${deliveriesCount > 1 ? 's' : ''}',
-              '${deliveriesEarning.toStringAsFixed(0)} FCFA',
+              _formatMontant(deliveriesEarning),
               Icons.delivery_dining,
               Colors.blue,
             ),
@@ -428,7 +554,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             _buildBreakdownItem(
               'Gain moyen',
               'par livraison',
-              '${avgPerDelivery.toStringAsFixed(0)} FCFA',
+              deliveriesCount > 0 ? _formatMontant(avgPerDelivery) : '—',
               Icons.payments_outlined,
               Colors.purple,
             ),
@@ -501,17 +627,27 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   ),
             ),
             const SizedBox(height: 16),
-            ..._recentEarnings.map((earning) => _buildEarningItem(earning)),
+            if (_recentDeliveries.isEmpty)
+              Text(
+                'Aucune livraison terminée pour l\'instant.',
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+            else
+              ..._recentDeliveries.map(_buildEarningItem),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildEarningItem(Map<String, dynamic> earning) {
-    // Typé une fois ici : la carte est dynamique, et le compilateur ne dirait
-    // rien d'une clé disparue.
-    final montant = earning['amount']! as num;
+  /// Une ligne de gain — la course, et ce qu'elle a rapporté.
+  ///
+  /// Elle passait par une `Map<String, dynamic>` recopiée à partir de la
+  /// course, où le compilateur ne disait rien d'une clé disparue. La course
+  /// est passée telle quelle : ses champs sont typés, et sa référence est
+  /// celle du serveur plutôt qu'un fragment d'UUID.
+  Widget _buildEarningItem(Course course) {
+    final montant = course.remuneration?.amountMinor ?? 0;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -533,14 +669,14 @@ class _EarningsScreenState extends State<EarningsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Commande ${earning['orderId']}',
+                  course.reference,
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
                   ),
                 ),
                 Text(
-                  _formatTimestamp(earning['timestamp']),
+                  _formatTimestamp(course.livreeLe ?? course.passeeLe),
                   style: TextStyle(
                     color: Colors.grey[600],
                     fontSize: 12,
@@ -553,7 +689,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${montant.toStringAsFixed(0)} FCFA',
+                course.remuneration?.format() ?? _formatMontant(montant),
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
@@ -566,8 +702,16 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
+  /// Le solde et la demande de retrait.
+  ///
+  /// « Solde disponible » affichait ici le total de la **période
+  /// sélectionnée** : il changeait en touchant « Aujourd'hui » / « Cette
+  /// semaine » / « Ce mois », alors qu'un solde ne dépend pas de la fenêtre
+  /// qu'on regarde. Le vrai solde est `total_earnings` du dossier livreur, que
+  /// le serveur débite à chaque retrait.
   Widget _buildWithdrawalSection() {
-    final totalEarnings = _getCurrentEarnings()['total'] ?? 0.0;
+    final solde = Provider.of<AppService>(context).soldeDisponible;
+    final montantDisponible = solde?.amountMinor ?? 0;
 
     return Card(
       elevation: 2,
@@ -598,10 +742,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         ),
                       ),
                       Text(
-                        '${totalEarnings.toStringAsFixed(0)} FCFA',
+                        solde?.format() ?? '—',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
+                        ),
+                      ),
+                      Text(
+                        'Tous vos gains non encore retirés',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 11,
                         ),
                       ),
                     ],
@@ -609,7 +760,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 ),
                 CustomButton(
                   text: 'Retirer',
-                  onPressed: totalEarnings > 0 ? _requestWithdrawal : null,
+                  onPressed: montantDisponible > 0 && !_isWithdrawing
+                      ? _requestWithdrawal
+                      : null,
                   icon: Icons.account_balance_wallet,
                 ),
               ],
@@ -628,7 +781,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Les retraits sont traités dans les 24h via PayDunya',
+                      // Le délai annoncé était « dans les 24 h », que rien ne
+                      // garantit : le versement est un geste de
+                      // l'exploitation, exécuté quand elle l'exécute. Mieux
+                      // vaut décrire le mécanisme que promettre un délai.
+                      'Votre demande débite le solde immédiatement. Le '
+                      'versement est ensuite exécuté par El Corazón.',
                       style: TextStyle(
                         color: Colors.blue[700],
                         fontSize: 12,
@@ -638,8 +796,64 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 ],
               ),
             ),
+            if (_withdrawals.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 8),
+              Text(
+                'Mes demandes',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              ..._withdrawals.take(5).map(_buildWithdrawalItem),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// Une demande de retrait et son sort.
+  ///
+  /// Ce que le livreur a besoin de savoir tient dans ces trois lignes : le
+  /// montant, la date, et où en est le versement. Un retrait échoué recrédite
+  /// le solde côté serveur (`WithdrawalService.fail`) — sa raison est donc
+  /// affichée, pour qu'il ne s'étonne pas de voir son solde remonter.
+  Widget _buildWithdrawalItem(Withdrawal retrait) {
+    final (couleur, libelle) = switch (retrait.status) {
+      'completed' => (Colors.green, 'Versé'),
+      'processing' => (Colors.blue, 'En cours de versement'),
+      'failed' => (Colors.red, 'Échoué'),
+      'cancelled' => (Colors.grey, 'Annulé'),
+      _ => (Colors.orange, 'En attente'),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(Icons.circle, size: 10, color: couleur),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  retrait.amount.format(),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  retrait.failureReason.isEmpty
+                      ? '$libelle · ${_formatTimestamp(retrait.createdAt)}'
+                      : '$libelle · ${retrait.failureReason}',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

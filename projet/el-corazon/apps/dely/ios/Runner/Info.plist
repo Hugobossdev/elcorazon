@@ -49,6 +49,21 @@
 	<string>Cette application a besoin d'accéder à votre position pour le suivi des livraisons.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Cette application a besoin d'accéder à votre position pour le suivi des livraisons en arrière-plan.</string>
+	<!-- Clé exigée depuis iOS 11 pour demander l'autorisation permanente.
+	     `NSLocationAlwaysUsageDescription` seule est ignorée : la demande
+	     échouait donc silencieusement, et le suivi s'arrêtait dès que le livreur
+	     rangeait son téléphone. -->
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Votre position est partagée pendant vos courses, pour que le client suive sa livraison. Elle n'est pas relevée entre deux courses.</string>
+	<!-- Le suivi doit survivre au passage en arrière-plan : un livreur roule, il
+	     ne regarde pas son écran. `remote-notification` laisse arriver la course
+	     proposée application fermée — c'est le seul flux où rater un événement a
+	     un coût métier direct (ADR-008). -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Cette application a besoin d'accéder à votre caméra pour les appels vidéo et la vérification d'identité.</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -80,7 +80,10 @@ class DriverPaymentScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _ligne(theme, 'Commande', '#${_reference()}'),
+                    // La référence du serveur, et non un fragment d'UUID :
+                    // c'est elle qu'on lit à voix haute au téléphone, et la
+                    // seule que le back-office reconnaisse.
+                    _ligne(theme, 'Commande', order.reference),
                     _ligne(theme, 'Adresse', order.adresseLivraison),
                     _ligne(
                       theme,
@@ -126,12 +129,6 @@ class DriverPaymentScreen extends StatelessWidget {
       ),
     );
   }
-
-  /// Référence courte, lisible à voix haute au téléphone.
-  String _reference() =>
-      order.orderId.length <= 8
-          ? order.orderId
-          : order.orderId.substring(0, 8).toUpperCase();
 
   Widget _ligne(ThemeData theme, String libelle, String valeur) {
     return Padding(

@@ -1,11 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:elcora_dely/services/app_service.dart';
-import 'package:elcora_dely/services/location_service.dart';
-import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:url_launcher/url_launcher.dart';
 
+import 'package:elcora_dely/config/api_config.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/notification_service.dart';
+import 'package:elcora_dely/services/realtime_tracking_service.dart';
+import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
+
+/// Réglages du livreur.
+///
+/// ## Ce que cet écran n'est plus
+///
+/// Il portait sept réglages — notifications, son, vibration, suivi GPS,
+/// acceptation automatique, langue, thème — écrits dans `SharedPreferences`
+/// par un bouton « Sauvegarder les paramètres », et **relus par personne**.
+/// Aucun n'avait le moindre effet : couper « Suivi GPS » n'arrêtait pas le
+/// suivi, activer « Accepter automatiquement » n'acceptait rien, changer la
+/// langue ne changeait pas la langue, et « Sombre » ne donnait pas de thème
+/// sombre — l'application n'en déclare pas.
+///
+/// Un interrupteur qui ne fait rien est pire qu'un interrupteur absent : le
+/// livreur qui coupe « Suivi GPS » croit avoir cessé d'être suivi. Ils ont
+/// donc été retirés plutôt que déguisés.
+///
+/// ## Ce qu'il montre à la place
+///
+/// L'état réel de ce dont dépend son travail — position et notifications —
+/// et le chemin pour le corriger quand il est mauvais. Ces deux
+/// autorisations-là appartiennent au système d'exploitation ; l'application
+/// ne peut que les demander et dire où elles en sont.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -14,81 +39,24 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _notificationsEnabled = true;
-  bool _locationTrackingEnabled = true;
-  bool _autoAcceptOrders = false;
-  bool _soundEnabled = true;
-  bool _vibrationEnabled = true;
-  String _language = 'fr';
-  String _theme = 'light';
+  /// Autorisation de localisation, telle que le système la donne.
+  LocationPermission? _permission;
+  bool _serviceActif = true;
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    _relireEtatLocalisation();
   }
 
-  Future<void> _loadSettings() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
-        _locationTrackingEnabled =
-            prefs.getBool('location_tracking_enabled') ?? true;
-        _autoAcceptOrders = prefs.getBool('auto_accept_orders') ?? false;
-        _soundEnabled = prefs.getBool('sound_enabled') ?? true;
-        _vibrationEnabled = prefs.getBool('vibration_enabled') ?? true;
-        _language = prefs.getString('language') ?? 'fr';
-        _theme = prefs.getString('theme') ?? 'light';
-      });
-    } catch (e) {
-      Journal.trace('Error loading settings: $e');
-    }
-  }
-
-  Future<void> _saveSettings() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('notifications_enabled', _notificationsEnabled);
-      await prefs.setBool(
-          'location_tracking_enabled', _locationTrackingEnabled);
-      await prefs.setBool('auto_accept_orders', _autoAcceptOrders);
-      await prefs.setBool('sound_enabled', _soundEnabled);
-      await prefs.setBool('vibration_enabled', _vibrationEnabled);
-      await prefs.setString('language', _language);
-      await prefs.setString('theme', _theme);
-
-      if (!mounted) return;
-
-      // Update services based on settings
-      final locationService =
-          Provider.of<LocationService>(context, listen: false);
-
-      if (_locationTrackingEnabled) {
-        await locationService.requestLocationPermission();
-      }
-
-      // Notification settings are handled by the service itself
-      // The service will respect the _notificationsEnabled flag
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Paramètres sauvegardés'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur lors de la sauvegarde: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+  Future<void> _relireEtatLocalisation() async {
+    final actif = await Geolocator.isLocationServiceEnabled();
+    final permission = await Geolocator.checkPermission();
+    if (!mounted) return;
+    setState(() {
+      _serviceActif = actif;
+      _permission = permission;
+    });
   }
 
   @override
@@ -99,41 +67,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Theme.of(context).colorScheme.onPrimary,
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _buildProfileSection(),
-          const SizedBox(height: 24),
-          _buildNotificationsSection(),
-          const SizedBox(height: 24),
-          _buildLocationSection(),
-          const SizedBox(height: 24),
-          _buildDeliverySection(),
-          const SizedBox(height: 24),
-          _buildAppearanceSection(),
-          const SizedBox(height: 24),
-          _buildAboutSection(),
-          const SizedBox(height: 24),
-          _buildSaveButton(),
-        ],
+      body: RefreshIndicator(
+        onRefresh: _relireEtatLocalisation,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _buildProfileSection(),
+            const SizedBox(height: 24),
+            _buildLocationSection(),
+            const SizedBox(height: 24),
+            _buildNotificationsSection(),
+            const SizedBox(height: 24),
+            _buildAboutSection(),
+          ],
+        ),
       ),
     );
   }
+
+  // --------------------------------------------------------------- profil
 
   Widget _buildProfileSection() {
     return Consumer<AppService>(
       builder: (context, appService, child) {
         final user = appService.currentUser;
+        final nom = user?.fullName ?? 'Livreur';
         return Card(
           elevation: 2,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
             leading: CircleAvatar(
               radius: 30,
               backgroundColor: Theme.of(context).colorScheme.primary,
               child: Text(
-                user?.fullName.substring(0, 2).toUpperCase() ?? 'DR',
+                nom.length >= 2 ? nom.substring(0, 2).toUpperCase() : 'LI',
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -141,13 +108,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             title: Text(
-              user?.fullName ?? 'Livreur',
+              nom,
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
-            subtitle: Text(user?.email ?? 'driver@fasteat.ci'),
+            // Plus de `driver@fasteat.ci` en repli : une adresse inventée,
+            // d'une marque qui n'est pas la nôtre, affichée comme si c'était
+            // celle du livreur.
+            subtitle: Text(user?.email ?? 'Session non chargée'),
             trailing: IconButton(
               icon: const Icon(Icons.edit),
-              onPressed: () => _editProfile(),
+              onPressed: _editProfile,
             ),
           ),
         );
@@ -155,172 +125,143 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildNotificationsSection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'Notifications',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-          ),
-          SwitchListTile(
-            title: const Text('Activer les notifications'),
-            subtitle: const Text(
-                'Recevoir des notifications pour les nouvelles commandes'),
-            value: _notificationsEnabled,
-            onChanged: (value) {
-              setState(() {
-                _notificationsEnabled = value;
-              });
-              _saveSettings();
-            },
-          ),
-          SwitchListTile(
-            title: const Text('Son'),
-            subtitle: const Text('Activer les sons de notification'),
-            value: _soundEnabled,
-            onChanged: (value) {
-              setState(() {
-                _soundEnabled = value;
-              });
-              _saveSettings();
-            },
-          ),
-          SwitchListTile(
-            title: const Text('Vibration'),
-            subtitle: const Text('Activer les vibrations'),
-            value: _vibrationEnabled,
-            onChanged: (value) {
-              setState(() {
-                _vibrationEnabled = value;
-              });
-              _saveSettings();
-            },
-          ),
-        ],
-      ),
-    );
-  }
+  // ---------------------------------------------------------- localisation
 
   Widget _buildLocationSection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'Localisation',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+    return Consumer<RealtimeTrackingService>(
+      builder: (context, tracking, child) {
+        final obstacle = tracking.trackingUnavailableReason;
+        final suit = tracking.isTrackingLocation && obstacle == null;
+
+        return _section(
+          'Position',
+          [
+            _statutTuile(
+              actif: suit,
+              titre: suit ? 'Votre position est partagée' : 'Suivi interrompu',
+              detail: suit
+                  ? 'Pendant vos courses, pour que le client suive sa '
+                      'livraison. Rien n\'est relevé entre deux courses.'
+                  : obstacle ??
+                      'Le suivi démarre à la connexion, une fois la position '
+                      'autorisée.',
             ),
-          ),
-          SwitchListTile(
-            title: const Text('Suivi GPS'),
-            subtitle: const Text('Partager votre position en temps réel'),
-            value: _locationTrackingEnabled,
-            onChanged: (value) {
-              setState(() {
-                _locationTrackingEnabled = value;
-              });
-              _saveSettings();
-            },
-          ),
-          ListTile(
-            title: const Text('Permissions de localisation'),
-            subtitle: const Text('Gérer les permissions'),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => _manageLocationPermissions(),
-          ),
-        ],
-      ),
+            if (!_serviceActif)
+              ListTile(
+                leading: const Icon(Icons.location_disabled, color: Colors.red),
+                title: const Text('Localisation désactivée'),
+                subtitle: const Text('Activez-la dans les réglages du téléphone'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () async {
+                  await Geolocator.openLocationSettings();
+                  await _relireEtatLocalisation();
+                },
+              )
+            else if (_permission == LocationPermission.deniedForever)
+              ListTile(
+                leading: const Icon(Icons.block, color: Colors.red),
+                title: const Text('Position refusée définitivement'),
+                subtitle: const Text(
+                  'Elle ne peut plus être redemandée depuis l\'application',
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () async {
+                  await Geolocator.openAppSettings();
+                  await _relireEtatLocalisation();
+                },
+              )
+            else if (_permission == LocationPermission.denied)
+              ListTile(
+                leading: const Icon(Icons.location_searching,
+                    color: Colors.orange),
+                title: const Text('Autoriser la position'),
+                subtitle: const Text('Nécessaire pour recevoir des courses'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () async {
+                  await Geolocator.requestPermission();
+                  await _relireEtatLocalisation();
+                },
+              ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildDeliverySection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'Livraison',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+  // ---------------------------------------------------------- notifications
+
+  Widget _buildNotificationsSection() {
+    return Consumer<NotificationService>(
+      builder: (context, notifications, child) {
+        final autorisees = notifications.isAuthorized;
+
+        return _section(
+          'Notifications',
+          [
+            _statutTuile(
+              actif: autorisees,
+              titre: autorisees
+                  ? 'Les courses proposées vous sont notifiées'
+                  : 'Notifications refusées',
+              detail: autorisees
+                  // Le son et la vibration se règlent par canal, dans les
+                  // réglages du système : deux interrupteurs les proposaient
+                  // ici sans qu'aucun code ne les lise.
+                  ? 'Son et vibration se règlent dans les réglages du '
+                      'téléphone, canal « Courses proposées ».'
+                  : 'Sans elles, une course proposée ne vous parviendra que '
+                      'si l\'application est ouverte.',
             ),
-          ),
-          SwitchListTile(
-            title: const Text('Accepter automatiquement'),
-            subtitle:
-                const Text('Accepter automatiquement les nouvelles commandes'),
-            value: _autoAcceptOrders,
-            onChanged: (value) {
-              setState(() {
-                _autoAcceptOrders = value;
-              });
-              _saveSettings();
-            },
-          ),
-          const ListTile(
-          ),
-        ],
-      ),
+            if (!autorisees)
+              ListTile(
+                leading:
+                    const Icon(Icons.notifications_off, color: Colors.orange),
+                title: const Text('Activer les notifications'),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () => Geolocator.openAppSettings(),
+              ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildAppearanceSection() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'Apparence',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-          ),
-          ListTile(
-            title: const Text('Langue'),
-            subtitle: Text(_language == 'fr' ? 'Français' : 'English'),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => _selectLanguage(),
-          ),
-          ListTile(
-            title: const Text('Thème'),
-            subtitle: Text(_theme == 'light' ? 'Clair' : 'Sombre'),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => _selectTheme(),
-          ),
-        ],
-      ),
-    );
-  }
+  // -------------------------------------------------------------- à propos
 
   Widget _buildAboutSection() {
+    return _section(
+      'À propos',
+      [
+        const ListTile(
+          title: Text('Version'),
+          subtitle: Text('1.0.0'),
+        ),
+        ListTile(
+          title: const Text('Politique de confidentialité'),
+          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+          onTap: _showPrivacyPolicy,
+        ),
+        ListTile(
+          title: const Text('Conditions d\'utilisation'),
+          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+          onTap: _showTermsOfService,
+        ),
+        // N'apparaît que si une adresse est configurée : une entrée de
+        // contact qui n'ouvre rien vaut moins que pas d'entrée du tout.
+        if (ApiConfig.supportEmail.isNotEmpty)
+          ListTile(
+            title: const Text('Contacter El Corazón'),
+            subtitle: Text(ApiConfig.supportEmail),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: _contactSupport,
+          ),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------- fabriques
+
+  Widget _section(String titre, List<Widget> enfants) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -331,266 +272,161 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: Text(
-              'À propos',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+              titre,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
           ),
-          const ListTile(
-            title: Text('Version'),
-            subtitle: Text('1.0.0'),
-          ),
-          ListTile(
-            title: const Text('Politique de confidentialité'),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => _showPrivacyPolicy(),
-          ),
-          ListTile(
-            title: const Text('Conditions d\'utilisation'),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => _showTermsOfService(),
-          ),
-          ListTile(
-            title: const Text('Support'),
-            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-            onTap: () => _contactSupport(),
-          ),
+          ...enfants,
+          const SizedBox(height: 8),
         ],
       ),
     );
   }
 
-  Widget _buildSaveButton() {
-    return ElevatedButton(
-      onPressed: _saveSettings,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+  /// Un état, pas un interrupteur : ce que l'application constate, et non ce
+  /// qu'elle prétend commander.
+  Widget _statutTuile({
+    required bool actif,
+    required String titre,
+    required String detail,
+  }) {
+    final couleur = actif ? Colors.green : Colors.orange;
+    return ListTile(
+      leading: Icon(
+        actif ? Icons.check_circle : Icons.warning_amber_rounded,
+        color: couleur,
       ),
-      child: const Text(
-        'Sauvegarder les paramètres',
-        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-      ),
+      title: Text(titre, style: TextStyle(color: couleur)),
+      subtitle: Text(detail),
+      isThreeLine: true,
     );
   }
+
+  // ---------------------------------------------------------------- gestes
 
   void _editProfile() {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => const DriverProfileScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const DriverProfileScreen()),
     );
   }
 
-  void _manageLocationPermissions() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Permissions de localisation'),
-        content: const Text(
-          'Pour utiliser le suivi GPS, l\'application a besoin de l\'accès à votre localisation.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                final locationService =
-                    Provider.of<LocationService>(context, listen: false);
-                final hasPermission =
-                    await locationService.requestLocationPermission();
-                if (context.mounted) {
-                  if (hasPermission) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Permission de localisation accordée'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Permission de localisation refusée'),
-                        backgroundColor: Colors.orange,
-                      ),
-                    );
-                  }
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Erreur: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
-            child: const Text('Autoriser'),
-          ),
-        ],
-      ),
+  /// Ouvre le courrier vers l'adresse de support **configurée**.
+  ///
+  /// ## Ce qui a remplacé quoi
+  ///
+  /// Trois entrées occupaient cette place : « Appeler le support », sous un
+  /// numéro ivoirien inventé (`+225 01 02 03 04 05`) dans une application dont
+  /// toute la géographie est togolaise ; « Envoyer un email », vers
+  /// `support@elcorazon.ci` ; et « Chat en direct — disponible 8 h - 22 h ».
+  /// Aucune des trois n'ouvrait quoi que ce soit : elles affichaient « Appel
+  /// en cours… », « Ouverture de l'application mail… », « Chat de support
+  /// indisponible », et c'était tout.
+  ///
+  /// L'adresse n'est pas écrite ici mais lue dans `.env` : il n'existe aucune
+  /// coordonnée de support réelle dans ce dépôt, et en inventer une serait
+  /// recommencer le défaut qu'on corrige. Tant qu'elle n'est pas renseignée,
+  /// l'entrée ne s'affiche pas.
+  Future<void> _contactSupport() async {
+    final adresse = ApiConfig.supportEmail;
+    if (adresse.isEmpty) return;
+
+    final uri = Uri(
+      scheme: 'mailto',
+      path: adresse,
+      queryParameters: {
+        'subject': 'Application livreur — demande d\'assistance',
+      },
     );
-  }
 
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      return;
+    }
 
-  void _selectLanguage() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sélectionner la langue'),
-        // La sélection est portée par le groupe et non plus par chaque tuile :
-        // `RadioListTile.groupValue` et `.onChanged` sont dépréciés depuis
-        // Flutter 3.32. Les deux tuiles faisaient le même traitement, il ne
-        // s'écrit donc plus qu'une fois.
-        content: RadioGroup<String>(
-          groupValue: _language,
-          onChanged: (value) {
-            setState(() {
-              _language = value!;
-            });
-            Navigator.pop(context);
-          },
-          child: const Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<String>(
-                title: Text('Français'),
-                value: 'fr',
-              ),
-              RadioListTile<String>(
-                title: Text('English'),
-                value: 'en',
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _selectTheme() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Sélectionner le thème'),
-        // Même migration que pour la langue — voir `_selectLanguage`.
-        content: RadioGroup<String>(
-          groupValue: _theme,
-          onChanged: (value) {
-            setState(() {
-              _theme = value!;
-            });
-            Navigator.pop(context);
-          },
-          child: const Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<String>(
-                title: Text('Clair'),
-                value: 'light',
-              ),
-              RadioListTile<String>(
-                title: Text('Sombre'),
-                value: 'dark',
-              ),
-            ],
-          ),
-        ),
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Aucune application de messagerie : écrivez à $adresse'),
+        backgroundColor: Colors.orange,
       ),
     );
   }
 
   void _showPrivacyPolicy() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Politique de confidentialité'),
-        content: const SingleChildScrollView(
-          child: Text(
-            '''
-Dernière mise à jour : 06 Décembre 2025
+    _showTexte(
+      'Politique de confidentialité',
+      '''
+Dernière mise à jour : 06 décembre 2025
 
-1. Collecte des informations
-Nous collectons les informations suivantes lorsque vous utilisez notre application :
-- Informations d'identification (nom, adresse e-mail, numéro de téléphone)
-- Données de localisation (pour le suivi des livraisons)
-- Historique des commandes et des paiements
+1. Données collectées
+Dans le cadre de vos livraisons, l'application collecte :
+- votre identité et vos coordonnées (nom, adresse e-mail, téléphone) ;
+- les pièces justificatives de votre dossier (identité, permis, véhicule) ;
+- votre position, pendant vos courses uniquement.
 
-2. Utilisation des données
-Vos données sont utilisées pour :
-- Traiter et livrer vos commandes
-- Améliorer nos services
-- Vous envoyer des mises à jour sur vos commandes
-- Assurer la sécurité de votre compte
+2. Suivi de position
+Votre position est relevée et transmise tant qu'une course vous est
+attribuée, afin que le client suive sa livraison. Elle n'est pas relevée
+entre deux courses. Une notification visible sur votre téléphone signale
+chaque période de suivi.
 
-3. Partage des données
-Nous ne vendons pas vos données personnelles. Elles peuvent être partagées avec :
-- Les restaurants partenaires (pour la préparation)
-- Les livreurs (pour la livraison)
-- Les prestataires de paiement (pour la transaction)
+3. Partage
+Le client dont vous portez la commande voit votre prénom, votre type de
+véhicule, votre note et votre position pendant sa livraison — rien après.
+Vos pièces justificatives ne sont accessibles qu'au personnel chargé de la
+validation des dossiers.
 
 4. Vos droits
-Vous avez le droit d'accéder, de modifier ou de supprimer vos données personnelles à tout moment via les paramètres de l'application ou en contactant le support.
-
-Pour plus de détails, veuillez contacter notre délégué à la protection des données.
-            ''',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
+Vous pouvez consulter et corriger votre nom et votre téléphone depuis votre
+profil, et demander l'accès, la rectification ou l'effacement de vos données
+auprès d'El Corazón.
+      ''',
     );
   }
 
   void _showTermsOfService() {
-    showDialog(
+    _showTexte(
+      'Conditions d\'utilisation',
+      '''
+Dernière mise à jour : 06 décembre 2025
+
+1. Objet
+Cette application est réservée aux livreurs d'El Corazón. Elle vous permet de
+recevoir les courses qui vous sont proposées, de les faire avancer, et de
+suivre vos gains.
+
+2. Courses
+Une course vous est proposée nommément ; vous êtes libre de l'accepter ou de
+la refuser. Une course acceptée par un autre livreur ne vous est plus
+proposée.
+
+3. Encaissement
+Sur une commande réglée en espèces, vous encaissez le montant indiqué à la
+remise. Vous ne manipulez aucune donnée bancaire : les autres règlements sont
+faits par le client depuis son application.
+
+4. Gains
+Votre rémunération est arrêtée par El Corazón à l'acceptation de chaque
+course, et ne change pas ensuite. Une demande de retrait débite votre solde
+et ouvre une intention de versement, exécutée par El Corazón.
+
+5. Position
+L'exercice de vos courses suppose que le partage de position soit actif. Sans
+lui, le client ne peut pas suivre sa livraison.
+      ''',
+    );
+  }
+
+  void _showTexte(String titre, String corps) {
+    showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Conditions d\'utilisation'),
-        content: const SingleChildScrollView(
-          child: Text(
-            '''
-Dernière mise à jour : 06 Décembre 2025
-
-1. Acceptation des conditions
-En téléchargeant et en utilisant l'application El Corazon Dely, vous acceptez d'être lié par ces conditions d'utilisation.
-
-2. Services
-El Corazon Dely est une plateforme de livraison de repas connectant les utilisateurs avec notre restaurant et nos livreurs partenaires.
-
-3. Commandes et Paiements
-- Toutes les commandes sont sujettes à disponibilité.
-- Les prix sont indiqués en FCFA et incluent les taxes applicables.
-- Le paiement est dû au moment de la commande ou à la livraison selon l'option choisie.
-
-4. Livraison
-- Les temps de livraison sont des estimations et peuvent varier.
-- Vous devez être présent à l'adresse indiquée pour réceptionner la commande.
-
-5. Annulation
-Vous pouvez annuler votre commande sans frais tant qu'elle n'a pas été confirmée par le restaurant.
-
-6. Responsabilité
-Nous nous efforçons de fournir un service de qualité, mais nous ne pouvons être tenus responsables des retards dus à des circonstances imprévues (météo, trafic, etc.).
-            ''',
-          ),
-        ),
+        title: Text(titre),
+        content: SingleChildScrollView(child: Text(corps)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -599,77 +435,5 @@ Nous nous efforçons de fournir un service de qualité, mais nous ne pouvons êt
         ],
       ),
     );
-  }
-
-  void _contactSupport() {
-    // Naviguer vers l'écran de chat avec le support
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Contactez le support',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 24),
-              ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: Colors.blue,
-                  child: Icon(Icons.phone, color: Colors.white),
-                ),
-                title: const Text('Appeler le support'),
-                subtitle: const Text('+225 01 02 03 04 05'),
-                onTap: () {
-                  Navigator.pop(context);
-                  // Implémenter l'appel téléphonique
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Appel en cours...')),
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-              ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: Colors.green,
-                  child: Icon(Icons.email, color: Colors.white),
-                ),
-                title: const Text('Envoyer un email'),
-                subtitle: const Text('support@elcorazon.ci'),
-                onTap: () {
-                  Navigator.pop(context);
-                  // Implémenter l'envoi d'email
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Ouverture de l\'application mail...')),
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-              ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: Colors.purple,
-                  child: Icon(Icons.chat, color: Colors.white),
-                ),
-                title: const Text('Chat en direct'),
-                subtitle: const Text('Disponible 8h - 22h'),
-                onTap: () {
-                  Navigator.pop(context);
-                  // Pour l'instant, afficher un message car nous n'avons pas accès facile à ChatScreen ici
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Chat de support indisponible depuis les paramètres')),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      );
   }
 }

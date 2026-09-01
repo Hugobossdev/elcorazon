@@ -97,8 +97,20 @@ Future<void> _initializeCoreServices() async {
     Journal.trace('⚠️ Failed to initialize Firebase: ${e.toString()}');
   }
 
-  // Initialize other services lazily when needed
-  // This improves startup performance
+  try {
+    // Après Firebase, et jamais avant : `FirebaseMessaging.instance` exige
+    // l'application initialisée.
+    //
+    // Cet appel manquait. `NotificationService.initialize()` n'avait aucun
+    // appelant dans tout `lib/` : aucune permission n'était demandée, aucun
+    // jeton FCM obtenu, et `AppService` n'enregistrait donc jamais l'appareil
+    // auprès de `/auth/devices/`. Le serveur poussait ses offres de course
+    // vers une liste d'appareils vide, et une course proposée n'atteignait le
+    // livreur que si l'application était au premier plan au bon moment.
+    await NotificationService().initialize();
+  } catch (e) {
+    Journal.trace('⚠️ Failed to initialize NotificationService: ${e.toString()}');
+  }
 }
 
 class DeliverApp extends StatelessWidget {
@@ -153,10 +165,7 @@ class DeliverApp extends StatelessWidget {
             case '/chat':
               final args = settings.arguments as Map<String, dynamic>;
               return MaterialPageRoute(
-                builder: (context) => ChatScreen(
-                  order: args['order'],
-                  chatType: args['chatType'] ?? 'customer',
-                ),
+                builder: (context) => ChatScreen(order: args['order']),
               );
             default:
               return MaterialPageRoute(

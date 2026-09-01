@@ -439,28 +439,43 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     );
   }
 
+  /// L'état du dossier, et ce qu'il implique concrètement.
+  ///
+  /// `suspended` — l'un des quatre états de `VerificationStatus` — tombait
+  /// dans le `default` et s'affichait « En attente » : un livreur suspendu
+  /// lisait donc que son dossier était en cours d'instruction, et attendait
+  /// une validation qui ne viendrait pas.
+  ///
+  /// La phrase compte autant que le mot : « Rejeté » seul ne dit pas qu'aucune
+  /// course ne sera plus proposée.
   Widget _buildVerificationStatus() {
-    Color color;
-    IconData icon;
-    String text;
-
-    switch (_courier?.verificationStatus) {
-      case 'approved':
-        color = Colors.green;
-        icon = Icons.check_circle;
-        text = 'Vérifié';
-        break;
-      case 'rejected':
-        color = Colors.red;
-        icon = Icons.cancel;
-        text = 'Rejeté';
-        break;
-      case 'pending':
-      default:
-        color = Colors.orange;
-        icon = Icons.hourglass_empty;
-        text = 'En attente';
-    }
+    final (color, icon, text, detail) = switch (_courier?.verificationStatus) {
+      'approved' => (
+          Colors.green,
+          Icons.check_circle,
+          'Vérifié',
+          'Vous pouvez recevoir des courses.',
+        ),
+      'rejected' => (
+          Colors.red,
+          Icons.cancel,
+          'Rejeté',
+          'Aucune course ne peut vous être proposée. Contactez El Corazón.',
+        ),
+      'suspended' => (
+          Colors.red,
+          Icons.pause_circle_filled,
+          'Suspendu',
+          'Votre compte est suspendu : aucune course ne vous sera proposée.',
+        ),
+      _ => (
+          Colors.orange,
+          Icons.hourglass_empty,
+          'En attente de validation',
+          'Aucune course ne vous sera proposée tant que le dossier n\'est '
+              'pas validé.',
+        ),
+    };
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -470,14 +485,32 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         border: Border.all(color: color.withValues(alpha: 0.5)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, color: color),
           const SizedBox(width: 12),
-          Text(
-            'Statut: $text',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.bold,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Dossier : $text',
+                  style: TextStyle(color: color, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(detail, style: TextStyle(color: color, fontSize: 12)),
+                // Les motifs saisis par le personnel lors du refus. Le champ
+                // voyageait dans le dossier sans que rien ne l'affiche : le
+                // livreur voyait « Rejeté » sans savoir ce qu'il devait
+                // corriger.
+                if ((_courier?.verificationNotes ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    _courier!.verificationNotes,
+                    style: TextStyle(color: color, fontSize: 12),
+                  ),
+                ],
+              ],
             ),
           ),
         ],

@@ -14,12 +14,15 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 class ChatScreen extends StatefulWidget {
   final Course order;
-  final String chatType; // 'customer' or 'support'
+  // `chatType` a disparu. Il valait `'customer'` ou `'support'` et ne
+  // changeait que trois libellés : les deux valeurs ouvraient le même canal
+  // `ws/orders/{id}/chat/`, qui relie le livreur au **client** de la commande.
+  // Un livreur qui croyait écrire au support écrivait à son client.
+  //
+  // Il n'existe pas de canal de support pour un livreur au contrat : les
+  // routes `/support/*` sont toutes réservées aux clients.
 
-  const ChatScreen({
-    required this.order, super.key,
-    this.chatType = 'customer',
-  });
+  const ChatScreen({required this.order, super.key});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -238,7 +241,9 @@ class _ChatScreenState extends State<ChatScreen> {
             builder: (context) => CallScreen(
               order: widget.order,
               callType: isVideo ? CallType.video : CallType.voice,
-              callerName: widget.chatType == 'customer' ? 'Client' : 'Support',
+              callerName: widget.order.destinataire.isEmpty
+                  ? 'Client'
+                  : widget.order.destinataire,
             ),
           ),
         ));
@@ -310,7 +315,9 @@ class _ChatScreenState extends State<ChatScreen> {
             Row(
               children: [
                 Text(
-                  widget.chatType == 'customer' ? 'Client' : 'Support',
+                  widget.order.destinataire.isEmpty
+                      ? 'Client'
+                      : widget.order.destinataire,
                   style: const TextStyle(fontSize: 16),
                 ),
                 const SizedBox(width: 8),
@@ -326,7 +333,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
             Text(
-              'Commande #${widget.order.orderId.substring(0, 8)}',
+              widget.order.reference,
               style:
                   const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
             ),
@@ -420,7 +427,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       children: [
                         const SizedBox(width: 40),
                         Text(
-                          '${widget.chatType == 'customer' ? 'Client' : 'Support'} est en train d\'écrire...',
+                          'Le client est en train d\'écrire...',
                           style: TextStyle(
                             color: Colors.grey[600],
                             fontStyle: FontStyle.italic,

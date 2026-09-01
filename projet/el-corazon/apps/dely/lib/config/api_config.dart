@@ -26,6 +26,16 @@ class ApiConfig {
   /// canal.
   static String get agoraAppId => dotenv.env['AGORA_APP_ID'] ?? '';
 
+  /// Adresse à laquelle un livreur écrit pour se faire aider.
+  ///
+  /// Vide par défaut, et l'écran des réglages masque alors l'entrée. Elle
+  /// était écrite en dur — `support@elcorazon.ci`, à côté d'un numéro ivoirien
+  /// inventé — dans une application dont toute la géographie est togolaise, et
+  /// les deux ne servaient qu'à être affichés : aucun bouton ne les ouvrait.
+  /// Une coordonnée de contact change sans qu'on redéploie ; elle appartient à
+  /// la configuration.
+  static String get supportEmail => dotenv.env['SUPPORT_EMAIL'] ?? '';
+
   static String get environment => dotenv.env['ENVIRONMENT'] ?? 'development';
   static const bool debugMode = kDebugMode;
 

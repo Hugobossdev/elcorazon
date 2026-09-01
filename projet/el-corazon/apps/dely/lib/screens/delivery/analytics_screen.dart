@@ -5,6 +5,7 @@ import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show Money;
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 
@@ -22,7 +23,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // Deux onglets, plus trois. Le troisième, « Rapports », proposait de
+    // générer un rapport quotidien ou hebdomadaire et listait trois rapports
+    // « récents » à télécharger : les cinq boutons n'appelaient rien et
+    // affichaient un message d'attente qui ne se résolvait jamais.
+    //
+    // Il ne pouvait pas en être autrement : toutes les routes
+    // `/analytics/reports/*` exigent la permission `analytics.read`, qu'un
+    // compte livreur n'a pas. Câbler ces boutons demanderait un endpoint qui
+    // n'existe pas ; les laisser, c'était promettre une fonctionnalité que
+    // rien ne peut rendre.
+    _tabController = TabController(length: 2, vsync: this);
     _initializeServices();
   }
 
@@ -110,7 +121,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
           tabs: const [
             Tab(text: 'Performance', icon: Icon(Icons.speed)),
             Tab(text: 'Statistiques', icon: Icon(Icons.analytics)),
-            Tab(text: 'Rapports', icon: Icon(Icons.assessment)),
           ],
         ),
       ),
@@ -119,7 +129,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
         children: [
           _buildPerformanceTab(),
           _buildStatisticsTab(),
-          _buildReportsTab(),
         ],
       ),
     );
@@ -152,16 +161,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
   Widget _buildStatisticsTab() {
     return Consumer<AppService>(
       builder: (context, appService, child) {
+        // Comptées à la date de **livraison**, horodatée par le serveur, et
+        // non à `passeeLe` — qui vaut, sur une course livrée dont le détail
+        // n'est plus relu, le moment où la course a été *proposée*.
         final deliveries = appService.assignedDeliveries;
-        final completedToday = deliveries
-            .where((c) => c.etape == EtapeCourse.livree && _isToday(c.passeeLe))
-            .length;
-        final completedThisWeek = deliveries
-            .where((c) => c.etape == EtapeCourse.livree && _isThisWeek(c.passeeLe))
-            .length;
-        final completedThisMonth = deliveries
-            .where((c) => c.etape == EtapeCourse.livree && _isThisMonth(c.passeeLe))
-            .length;
+        final livrees = deliveries
+            .where((c) =>
+                c.etape == EtapeCourse.livree && c.livreeLe != null)
+            .toList();
+        final completedToday =
+            livrees.where((c) => _isToday(c.livreeLe!)).length;
+        final completedThisWeek =
+            livrees.where((c) => _isThisWeek(c.livreeLe!)).length;
+        final completedThisMonth =
+            livrees.where((c) => _isThisMonth(c.livreeLe!)).length;
 
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -171,27 +184,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
               _buildStatsOverview(
                   completedToday, completedThisWeek, completedThisMonth),
               const SizedBox(height: 20),
-              _buildDeliveryChart(deliveries),
+              _buildDeliveryChart(livrees),
               const SizedBox(height: 20),
-              _buildEarningsBreakdown(deliveries),
+              _buildEarningsBreakdown(livrees),
             ],
           ),
         );
       },
-    );
-  }
-
-  Widget _buildReportsTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildReportActions(),
-          const SizedBox(height: 20),
-          _buildRecentReports(),
-        ],
-      ),
     );
   }
 
@@ -494,9 +493,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       weeklyData[i] = 0;
     }
 
-    for (final course
-        in deliveries.where((c) => c.etape == EtapeCourse.livree)) {
-      final weekday = course.passeeLe.weekday % 7;
+    for (final course in deliveries) {
+      final weekday = (course.livreeLe ?? course.passeeLe).weekday % 7;
       weeklyData[weekday] = (weeklyData[weekday] ?? 0) + 1;
     }
 
@@ -559,15 +557,19 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-  Widget _buildEarningsBreakdown(List<Course> deliveries) {
-    final completedDeliveries =
-        deliveries.where((c) => c.etape == EtapeCourse.livree);
+  Widget _buildEarningsBreakdown(List<Course> completedDeliveries) {
     // Rémunération arrêtée par le serveur, et non 10 % d'un total de commande
     // qui n'est pas relu une fois la course terminée — il valait zéro.
     final totalEarnings = completedDeliveries.fold<int>(
       0,
       (somme, course) => somme + (course.remuneration?.amountMinor ?? 0),
     );
+    final devise = completedDeliveries
+            .map((c) => c.remuneration?.currency)
+            .firstWhere((c) => c != null, orElse: () => null) ??
+        'XOF';
+    String format(int montantMineur) =>
+        Money(amountMinor: montantMineur, currency: devise).format();
 
     return Card(
       elevation: 2,
@@ -589,7 +591,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
               children: [
                 const Text('Total des gains'),
                 Text(
-                  '${totalEarnings.toStringAsFixed(2)} FCFA',
+                  format(totalEarnings),
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -611,8 +613,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('Gain moyen par livraison'),
-                Text(
-                    '${(totalEarnings / completedDeliveries.length).toStringAsFixed(2)} FCFA'),
+                // Sans livraison, cette division rendait `NaN` et l'écran
+                // affichait « NaN FCFA » — ce que voit tout livreur qui ouvre
+                // ses statistiques avant sa première course.
+                Text(completedDeliveries.isEmpty
+                    ? '—'
+                    : format(totalEarnings ~/ completedDeliveries.length)),
               ],
             ),
           ],
@@ -621,140 +627,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     );
   }
 
-  Widget _buildReportActions() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Générer un rapport',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _generateDailyReport,
-                    icon: const Icon(Icons.today),
-                    label: const Text('Rapport quotidien'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _generateWeeklyReport,
-                    icon: const Icon(Icons.date_range),
-                    label: const Text('Rapport hebdomadaire'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.secondary,
-                      foregroundColor:
-                          Theme.of(context).colorScheme.onSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecentReports() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Rapports récents',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            const SizedBox(height: 12),
-            _buildReportItem('Rapport quotidien', 'Aujourd\'hui', Icons.today),
-            _buildReportItem(
-                'Rapport hebdomadaire', 'Cette semaine', Icons.date_range),
-            _buildReportItem(
-                'Rapport mensuel', 'Ce mois', Icons.calendar_month),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReportItem(String title, String date, IconData icon) {
-    return ListTile(
-      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-      title: Text(title),
-      subtitle: Text(date),
-      trailing: IconButton(
-        icon: const Icon(Icons.download),
-        onPressed: () => _downloadReport(title),
-      ),
-    );
-  }
-
-  void _generateDailyReport() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Génération du rapport quotidien...'),
-        backgroundColor: Colors.blue,
-      ),
-    );
-  }
-
-  void _generateWeeklyReport() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Génération du rapport hebdomadaire...'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
-  void _downloadReport(String reportName) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Téléchargement de $reportName...'),
-        backgroundColor: Colors.orange,
-      ),
-    );
-  }
-
-  String _formatOperationName(String operation) {
-    switch (operation) {
-      case 'accept_delivery':
-        return 'Acceptation livraison';
-      case 'process_payment':
-        return 'Traitement paiement';
-      case 'save_address':
-        return 'Sauvegarde adresse';
-      case 'set_default_address':
-        return 'Définition adresse par défaut';
-      case 'delete_address':
-        return 'Suppression adresse';
-      case 'apply_promo_code':
-        return 'Application code promo';
-      default:
-        return operation;
-    }
-  }
+  /// Nom lisible d'une opération mesurée.
+  ///
+  /// Cinq entrées de plus étaient listées ici — carnet d'adresses, code promo,
+  /// paiement — reprises de l'application cliente. Un livreur n'enregistre pas
+  /// d'adresse et n'applique pas de code promo ; aucune de ces opérations
+  /// n'est jamais chronométrée dans cette application-ci.
+  String _formatOperationName(String operation) => switch (operation) {
+        'accept_delivery' => 'Acceptation de course',
+        _ => operation,
+      };
 
   String _getWeekdayName(int weekday) {
     const days = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
@@ -781,19 +663,4 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
     return date.month == now.month && date.year == now.year;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

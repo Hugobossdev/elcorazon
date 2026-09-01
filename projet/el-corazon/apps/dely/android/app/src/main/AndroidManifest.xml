@@ -1,4 +1,59 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permissions du livreur.
+         Aucune n'etait declaree, et aucun greffon ne les apporte : le manifeste
+         de `geolocator_android` ne contient qu'un service, pas une seule
+         `uses-permission`. En release, `Geolocator.requestPermission()` refusait
+         donc d'office, et le suivi ne demarrait jamais sur Android. -->
+
+    <!-- Reseau. `firebase_messaging` declare deja INTERNET, mais le suivi n'a
+         pas a dependre de la presence d'un greffon de notification. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Position. La precision fine est necessaire : un releve grossier
+         (~1 km) ne dit rien d'utile a un client qui attend son repas, et le
+         serveur ecarte de toute facon les releves a moins de 100 m du
+         precedent. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+
+    <!-- Le suivi doit survivre au passage en arriere-plan : un livreur roule,
+         il ne regarde pas son telephone. Le service de premier plan de
+         geolocator (declare par son propre manifeste) exige ces deux
+         permissions, la seconde depuis Android 14.
+
+         `ACCESS_BACKGROUND_LOCATION` n'y figure volontairement pas : un service
+         de premier plan visible suffit au besoin, et cette permission-la
+         demande une justification separee au Play Store. Suivre un livreur
+         sans qu'il le voie n'est pas ce qu'on veut faire. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+
+    <!-- Android 13+. Sans elle, la notification de course proposee est
+         silencieusement supprimee par le systeme. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- Ouverture de Google Maps / Waze / du composeur, depuis la fiche de
+         course. Sans ce filtre, `canLaunchUrl` rend faux sur Android 11+ et
+         chaque bouton de navigation retombe sur son message d'echec. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO"/>
+            <data android:scheme="mailto"/>
+        </intent>
+    </queries>
     <application
         android:label="El Corazon Dely"
         android:name="${applicationName}"

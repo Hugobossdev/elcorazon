@@ -45,11 +45,26 @@ class AppService extends ChangeNotifier {
         unawaited(_registerPushDeviceBestEffort());
       }
     });
+
+    // Une notification poussée annonce, elle ne fait pas foi : sa charge utile
+    // ne porte que des identifiants (ADR-008). Elle déclenche donc une
+    // relecture, seule à rendre l'étape, les transitions permises et les
+    // montants. C'est ce qui fait qu'une course proposée pendant que
+    // l'application dormait apparaît vraiment à l'écran quand le livreur
+    // l'ouvre — et pas seulement dans le volet de notifications.
+    _notificationOpenedSubscription =
+        _notificationService.openedNotifications.listen((_) {
+      if (_currentUser != null) {
+        unawaited(loadAvailableOrders(forceRefresh: true));
+      }
+    });
   }
 
   final ProviderContainer _container;
   late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
   late final StreamSubscription<String> _tokenRefreshSubscription;
+  late final StreamSubscription<Map<String, dynamic>>
+      _notificationOpenedSubscription;
 
   eccore.User? _currentUser;
   bool _isInitialized = false;
@@ -91,6 +106,7 @@ class AppService extends ChangeNotifier {
     _sessionSubscription.close();
     unawaited(_courseOffersSubscription?.cancel());
     unawaited(_tokenRefreshSubscription.cancel());
+    unawaited(_notificationOpenedSubscription.cancel());
     super.dispose();
   }
 
@@ -106,6 +122,14 @@ class AppService extends ChangeNotifier {
     // n'a aucune carte ouverte.
     if (_currentUser != null && !wasConnected) {
       unawaited(trackingService.startCourierSession());
+      // À **chaque** ouverture de session, connexion comme restauration au
+      // démarrage. L'enregistrement n'était fait qu'après `loginDriver` : un
+      // livreur qui rouvrait l'application sans se reconnecter — le cas
+      // courant — ne réenregistrait rien, et un jeton qui avait tourné
+      // pendant que l'application était fermée n'était jamais rattrapé, la
+      // rotation n'étant annoncée qu'aux applications qui tournent.
+      // `/auth/devices/` est un upsert, prévu pour être rappelé au lancement.
+      unawaited(_registerPushDeviceBestEffort());
     } else if (_currentUser == null && wasConnected) {
       _coursesByOrderId.clear();
       _courierProfile = null;
@@ -228,6 +252,11 @@ class AppService extends ChangeNotifier {
       // Avant la révocation : `/auth/devices/` exige la session qu'on est en
       // train de fermer.
       await _unregisterPushDeviceBestEffort();
+      // Puis côté appareil : sans cela le jeton reste valide, et le téléphone
+      // resterait joignable pour le compte qui vient de partir si le
+      // détachement serveur avait échoué. Un appareil de flotte passe de main
+      // en main entre deux tournées.
+      await _notificationService.deleteToken();
       // Révoque le jeton de rafraîchissement côté serveur et efface le
       // stockage sécurisé (Phase 6) ; `_currentUser` repasse à `null` via le
       // pont d'écoute (`_onSessionChanged`), pas ici directement.
@@ -453,29 +482,53 @@ class AppService extends ChangeNotifier {
         email: email,
         password: password,
       );
-      // `_currentUser` est déjà à jour ici (le pont d'écoute est synchrone
-      // par rapport au changement d'état) ; les orchestrations Supabase qui
-      // suivaient (statut en ligne, courses disponibles) sont différées au
-      // domaine livraison (pas encore migré) plutôt qu'appelées avec un
-      // identifiant Django qu'aucune ligne Supabase ne connaît.
-      await _registerPushDeviceBestEffort();
+      // L'enregistrement de l'appareil n'est plus fait ici : il suit
+      // désormais l'ouverture de session (`_onSessionChanged`), qui couvre
+      // aussi la restauration au démarrage. Le faire aux deux endroits
+      // enverrait deux fois la même requête à chaque connexion.
       notifyListeners();
-    } catch (e) {
-      throw Exception('Erreur de connexion: $e');
+    } catch (_) {
+      // Ré-émise telle quelle : l'écran la met en mots (`messageErreur`), et
+      // c'est le `detail` du serveur qui doit arriver au livreur. L'emballage
+      // qui était fait ici produisait « Exception: Erreur de connexion:
+      // ApiException(401, invalid_credentials, …) » — trois couches devant
+      // l'unique phrase utile.
+      rethrow;
     }
   }
 
   /// Met à jour son propre nom et son téléphone (`PATCH /auth/me/`).
+  ///
+  /// Aucun `catch` : l'`ApiException` remonte telle quelle. Elle était
+  /// réemballée dans une `Exception` nue portant son seul `detail`, ce qui en
+  /// perdait le type — donc le statut et le code — et empêchait l'écran de
+  /// distinguer une panne réseau d'un refus métier.
   Future<void> updateOwnProfile({required String fullName, required String phone}) async {
-    try {
-      final updated = await _container
-          .read(eccore.authRepositoryProvider)
-          .updateProfile(fullName: fullName, phone: phone);
-      _currentUser = updated;
-      notifyListeners();
-    } on eccore.ApiException catch (e) {
-      throw Exception(e.detail);
-    }
+    _currentUser = await _container
+        .read(eccore.authRepositoryProvider)
+        .updateProfile(fullName: fullName, phone: phone);
+    notifyListeners();
+  }
+
+  /// Solde réellement disponible au retrait, tel que le serveur le tient.
+  ///
+  /// C'est `total_earnings` du dossier livreur, débité sous verrou à chaque
+  /// demande de retrait (`WithdrawalService.request`). Il ne se recalcule pas
+  /// à partir des courses : l'historique rendu à l'application est **borné**
+  /// (trois pages de livraisons récentes), et en additionner les
+  /// rémunérations donne toujours moins que le solde — ou davantage, si des
+  /// retraits ont déjà été demandés.
+  eccore.Money? get soldeDisponible => _courierProfile?.totalEarnings;
+
+  /// Les demandes de retrait déjà faites — `GET /payments/withdrawals/`.
+  ///
+  /// Un retrait naît « en attente » : c'est l'exploitation qui exécute le
+  /// versement. Sans cette liste, le livreur demandait et n'avait plus aucun
+  /// moyen de savoir ce qu'il était advenu de sa demande.
+  Future<List<eccore.Withdrawal>> loadWithdrawals() {
+    return eccore.PaymentRepository(
+      apiClient: _container.read(eccore.apiClientProvider),
+    ).getWithdrawals();
   }
 
   /// Demande le retrait de ses gains — `POST /payments/withdrawals/`.
@@ -489,26 +542,32 @@ class AppService extends ChangeNotifier {
   ///
   /// Les montants sont en unité mineure (ADR-007) ; en francs CFA, l'unité
   /// mineure est le franc.
-  Future<void> requestWithdrawal(double amount) async {
+  /// [amount] est en **unité mineure** — le franc, en XOF (ADR-007).
+  ///
+  /// La devise n'est plus supposée : elle est celle des gains du dossier, que
+  /// le serveur exige identique (`WithdrawalService.request` refuse un retrait
+  /// dans une autre devise). `'XOF'` était écrit en dur ici.
+  Future<void> requestWithdrawal(int amount) async {
     final payments = eccore.PaymentRepository(
       apiClient: _container.read(eccore.apiClientProvider),
     );
+    final devise = _courierProfile?.totalEarnings?.currency ?? 'XOF';
 
+    // L'`ApiException` d'un solde insuffisant remonte telle quelle : son
+    // `detail` — « Le montant demandé dépasse les gains disponibles. » — est
+    // ce que l'écran doit afficher.
+    await payments.requestWithdrawal(
+      eccore.Money(amountMinor: amount, currency: devise),
+    );
+
+    // Le solde affiché vient du dossier livreur (`total_earnings`), que le
+    // serveur vient de débiter : le relire évite d'afficher un montant que le
+    // backend ne confirmerait pas. Best-effort — le retrait, lui, est acquis.
     try {
-      await payments.requestWithdrawal(
-        eccore.Money(amountMinor: amount.round(), currency: 'XOF'),
-      );
-      // Le solde affiché vient du dossier livreur (`total_earnings`), que le
-      // serveur vient de débiter : le relire évite d'afficher un montant que le
-      // backend ne confirmerait pas.
-      try {
-        _courierProfile = await _delivery.profile();
-        notifyListeners();
-      } catch (e) {
-        eccore.Journal.trace('Dossier livreur illisible après retrait : $e');
-      }
-    } on eccore.ApiException catch (e) {
-      throw Exception(e.detail);
+      _courierProfile = await _delivery.profile();
+      notifyListeners();
+    } catch (e) {
+      eccore.Journal.trace('Dossier livreur illisible après retrait : $e');
     }
   }
 

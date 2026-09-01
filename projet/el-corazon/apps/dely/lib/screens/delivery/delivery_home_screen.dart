@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/performance_service.dart';
+import 'package:elcora_dely/services/realtime_tracking_service.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
@@ -11,7 +12,9 @@ import 'package:elcora_dely/screens/communication/chat_screen.dart';
 import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal, User;
+import 'package:elcora_dely/presentation/messages_erreur.dart';
+import 'package:elcorazon_core/elcorazon_core.dart'
+    show AppEmoji, AppEmojis, Journal, User;
 
 class DeliveryHomeScreen extends StatefulWidget {
   const DeliveryHomeScreen({super.key});
@@ -25,6 +28,15 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
   bool _isLoading = false;
   bool _isRefreshing = false;
   DateTime? _lastRefreshTime;
+
+  /// Le dernier rechargement a-t-il échoué ?
+  ///
+  /// L'écran gardait sa liste en cache sans rien dire quand la requête
+  /// échouait — un rafraîchissement « silencieux » ne montrait même pas de
+  /// message. Le livreur lisait donc des courses vieilles de plusieurs
+  /// minutes en croyant les voir à jour, ce qui est précisément ce qu'il ne
+  /// faut pas laisser croire en perte de réseau.
+  bool _lastRefreshFailed = false;
 
   @override
   void initState() {
@@ -67,6 +79,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     try {
       final appService = Provider.of<AppService>(context, listen: false);
       await appService.loadAvailableOrders();
+      if (mounted) setState(() => _lastRefreshFailed = false);
 
       if (mounted && !silent) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -79,6 +92,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _lastRefreshFailed = true);
         final errorHandler = Provider.of<ErrorHandlerService>(
           context,
           listen: false,
@@ -340,7 +354,8 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                                 ],
                               ),
                             ),
-                          _buildStatusCard(context, user, isOnline: appService.isOnline),
+                          _buildLiaisonBanner(),
+                          _buildStatusCard(context, user, appService),
                           const SizedBox(height: 20),
                           _buildStatsCard(context, assignedDeliveries),
                           const SizedBox(height: 20),
@@ -394,11 +409,23 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
 
   // Le statut « en ligne » vient du dossier livreur, pas du compte : il est
   // passé en paramètre plutôt que lu sur `user`, où il était recopié.
+  /// L'en-tête du livreur : qui il est, et s'il peut travailler.
+  ///
+  /// « En ligne » ne suffit pas. L'éligibilité réelle est `can_accept_orders`,
+  /// calculée par le serveur : en ligne **et** dossier validé **et** compte
+  /// actif (L1). Un livreur dont le dossier est en attente pouvait se déclarer
+  /// en ligne, voir la pastille passer au vert, et attendre indéfiniment des
+  /// courses que le serveur ne lui proposerait jamais — sans que rien ne le
+  /// lui dise.
   Widget _buildStatusCard(
     BuildContext context,
-    User user, {
-    required bool isOnline,
-  }) {
+    User user,
+    AppService appService,
+  ) {
+    final isOnline = appService.isOnline;
+    final peutTravailler = appService.canAcceptOrders;
+    final dossier = appService.courierProfile?.verificationStatus;
+
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -436,7 +463,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Bonjour, ${user.fullName}! 🛵',
+                        'Bonjour, ${user.fullName}',
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -473,24 +500,29 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
             ),
             const SizedBox(height: 16),
             if (!isOnline)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info, color: Colors.white, size: 20),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Vous êtes hors ligne. Activez votre statut pour recevoir des commandes.',
-                        style: TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
+              _buildStatusNotice(
+                Icons.info,
+                'Vous êtes hors ligne. Activez votre statut pour recevoir '
+                'des courses.',
+              )
+            else if (!peutTravailler)
+              // En ligne mais inéligible : le cas que rien ne signalait.
+              _buildStatusNotice(
+                Icons.warning_amber_rounded,
+                switch (dossier) {
+                  'pending' =>
+                    'Votre dossier est en cours de validation : aucune course '
+                        'ne vous sera proposée tant qu\'il n\'est pas validé.',
+                  'rejected' =>
+                    'Votre dossier a été rejeté. Contactez El Corazón : aucune '
+                        'course ne peut vous être proposée.',
+                  'suspended' =>
+                    'Votre compte est suspendu : aucune course ne peut vous '
+                        'être proposée.',
+                  _ =>
+                    'Vous êtes en ligne, mais votre dossier ne permet pas '
+                        'encore de recevoir des courses.',
+                },
               ),
           ],
         ),
@@ -498,12 +530,92 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
     );
   }
 
+  /// Dit quand l'écran ne peut plus garantir ce qu'il montre.
+  ///
+  /// Deux causes, deux conséquences distinctes pour le livreur :
+  ///
+  /// * la **file temps réel** est fermée — les courses proposées n'arriveront
+  ///   plus d'elles-mêmes, seulement au prochain rechargement ;
+  /// * le **dernier rechargement a échoué** — ce qui est affiché date d'avant,
+  ///   et une course peut avoir été prise par un collègue entre-temps.
+  ///
+  /// Rien n'était dit ni dans un cas ni dans l'autre.
+  Widget _buildLiaisonBanner() {
+    return Consumer<RealtimeTrackingService>(
+      builder: (context, tracking, child) {
+        final fileFermee = !tracking.isConnected;
+        if (!fileFermee && !_lastRefreshFailed) return const SizedBox.shrink();
+
+        final grave = _lastRefreshFailed;
+        final couleur = grave ? Colors.red : Colors.orange;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: couleur.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: couleur.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.cloud_off, color: couleur, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  grave
+                      ? 'Impossible de joindre le serveur. Les courses '
+                          'affichées datent du dernier chargement réussi.'
+                      : 'Alertes temps réel interrompues. Les nouvelles '
+                          'courses apparaîtront au prochain rafraîchissement.',
+                  style: TextStyle(color: couleur, fontSize: 12),
+                ),
+              ),
+              TextButton(
+                onPressed: () => _refreshOrders(),
+                child: const Text('Réessayer'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStatusNotice(IconData icone, String message) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(icone, color: Colors.white, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatsCard(BuildContext context, List<Course> assignedDeliveries) {
+    // La date qui compte est celle de la **livraison**, horodatée par le
+    // serveur. Ce compteur lisait `passeeLe`, c'est-à-dire — le détail d'une
+    // course livrée n'étant pas relu — le moment où la course avait été
+    // *proposée*. Une course proposée avant minuit et livrée après comptait
+    // pour la veille.
     final completedToday = assignedDeliveries
         .where(
           (order) =>
               order.etape == EtapeCourse.livree &&
-              _isToday(order.passeeLe),
+              order.livreeLe != null &&
+              _isToday(order.livreeLe!),
         )
         .length;
 
@@ -669,7 +781,11 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Center(
-                    child: Text('📦', style: TextStyle(fontSize: 20)),
+                    child: AppEmoji(
+                      AppEmojis.newOrder,
+                      size: AppEmoji.tailleXS,
+                      decoratif: true,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -678,12 +794,16 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Commande #${order.orderId.substring(0, 8).toUpperCase()}',
+                        order.reference,
                         style: const TextStyle(fontWeight: FontWeight.bold),
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        '${order.articles.length} articles - ${order.total?.format() ?? '—'}',
+                        // Le restaurant décide s'il vaut la peine de traverser
+                        // la ville ; le nombre d'articles, non.
+                        '${order.assignment.restaurantName} · '
+                        '${order.articles.length} article'
+                        '${order.articles.length > 1 ? 's' : ''}',
                         style: TextStyle(color: Colors.grey[600], fontSize: 12),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -719,17 +839,46 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => _acceptOrder(context, order),
-                icon: const Icon(Icons.check, size: 18),
-                label: const Text('Accepter la livraison'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                ),
-              ),
+            // Refuser était impossible : `AppService.declineDelivery` existait,
+            // le contrat expose `/assignments/{id}/decline/`, et aucun écran ne
+            // les appelait. Un livreur à qui on proposait une course qu'il ne
+            // pouvait pas prendre — trop loin, fin de service, panne — n'avait
+            // d'autre choix que de la laisser expirer, en la retenant tout ce
+            // temps loin d'un collègue disponible.
+            //
+            // Les deux gestes ne s'affichent que si le serveur les déclare
+            // permis (`allowed_transitions`).
+            Row(
+              children: [
+                if (order.peutRefuser)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _declineOrder(context, order),
+                      icon: const Icon(Icons.close, size: 18),
+                      label: const Text('Refuser'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                      ),
+                    ),
+                  ),
+                if (order.peutRefuser && order.peutAccepter)
+                  const SizedBox(width: 12),
+                if (order.peutAccepter)
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _acceptOrder(context, order),
+                      icon: const Icon(Icons.check, size: 18),
+                      label: const Text('Accepter'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor:
+                            Theme.of(context).colorScheme.onPrimary,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
         ),
@@ -806,9 +955,10 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Center(
-                    child: Text(
-                      order.etape.pastille,
-                      style: const TextStyle(fontSize: 20),
+                    child: AppEmoji(
+                      order.etape.illustration,
+                      size: AppEmoji.tailleXS,
+                      decoratif: true,
                     ),
                   ),
                 ),
@@ -818,7 +968,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Commande #${order.orderId.substring(0, 8).toUpperCase()}',
+                        order.reference,
                         style: const TextStyle(fontWeight: FontWeight.bold),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -872,34 +1022,35 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () => _updateDeliveryStatus(context, order),
-                    icon: Icon(_getNextActionIcon(order.etape), size: 18),
-                    label: Text(_getNextActionText(order.etape)),
+                // Le bouton n'apparaît que si le serveur a une étape à offrir
+                // depuis l'état courant. Il était affiché en toutes
+                // circonstances, y compris sur une course livrée où il ne
+                // faisait rien.
+                if (order.prochaineEtape != null)
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _updateDeliveryStatus(context, order),
+                      icon:
+                          Icon(_getNextActionIcon(order.prochaineEtape), size: 18),
+                      label: Text(_getNextActionText(order.prochaineEtape)),
+                    ),
                   ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _openChat(context, order),
-                    icon: const Icon(Icons.chat, size: 18),
-                    label: const Text('Chat'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _openSupportChat(context, order),
-                    icon: const Icon(Icons.support_agent, size: 18),
-                    label: const Text('Support'),
-                  ),
-                ),
-              ],
+            // Un seul bouton de discussion. Le second, « Support », ouvrait le
+            // même canal `ws/orders/{id}/chat/` que le premier, avec pour
+            // seule différence un en-tête disant « Support » : le message du
+            // livreur partait donc **chez le client** sous une étiquette qui
+            // lui faisait croire l'inverse. Le contrat n'expose aucun canal de
+            // support pour un livreur (`/support/*` est réservé aux clients).
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _openChat(context, order),
+                icon: const Icon(Icons.chat, size: 18),
+                label: const Text('Écrire au client'),
+              ),
             ),
           ],
         ),
@@ -918,15 +1069,30 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       await appService.updateOnlineStatus(newStatus);
 
       if (context.mounted) {
+        // Le serveur rend le dossier à jour : c'est `canAcceptOrders` (L1),
+        // pas `isOnline`, qui dit si des courses arriveront. Se déclarer en
+        // ligne avec un dossier non validé ne change rien, et l'annoncer
+        // comme un succès laissait le livreur attendre des courses qui ne
+        // pouvaient pas lui être proposées.
+        final enLigneEtEligible = appService.isOnline &&
+            appService.canAcceptOrders;
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              newStatus
-                  ? 'Vous êtes maintenant en ligne'
-                  : 'Vous êtes maintenant hors ligne',
+              !appService.isOnline
+                  ? 'Vous êtes maintenant hors ligne'
+                  : enLigneEtEligible
+                      ? 'Vous êtes en ligne : les courses peuvent arriver'
+                      : 'Vous êtes en ligne, mais votre dossier n\'est pas '
+                          'validé : aucune course ne vous sera proposée',
             ),
-            backgroundColor: newStatus ? Colors.green : Colors.grey,
-            duration: const Duration(seconds: 2),
+            backgroundColor: !appService.isOnline
+                ? Colors.grey
+                : enLigneEtEligible
+                    ? Colors.green
+                    : Colors.orange,
+            duration: const Duration(seconds: 3),
           ),
         );
         // Rafraîchir l'interface
@@ -936,7 +1102,10 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur lors de la mise à jour du statut: $e'),
+            // Le serveur refuse la bascule d'un dossier non validé par
+            // un 409 dont le `detail` dit exactement pourquoi ; l'afficher
+            // brut donnait « ApiException(409, business_rule_violation, … ) ».
+            content: Text(messageErreur(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -963,7 +1132,7 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Livraison acceptée pour la commande #${order.orderId.substring(0, 8).toUpperCase()}',
+              'Course ${order.reference} acceptée',
             ),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 2),
@@ -983,10 +1152,80 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
           listen: false,
         );
         errorHandler.logError('Erreur acceptation livraison', details: e);
-        errorHandler.showErrorSnackBar(
-          context,
-          'Erreur lors de l\'acceptation de la livraison: $e',
+        // Une course prise par un collègue revient en 409 avec sa
+        // raison : « Cette course a déjà été acceptée. »
+        errorHandler.showErrorSnackBar(context, messageErreur(e));
+      }
+    }
+  }
+
+  /// Refuse une course proposée, avec sa raison.
+  ///
+  /// Distinct d'une annulation : décliner une proposition n'incrémente pas le
+  /// compteur d'annulations du livreur (`deliveries_cancelled`), et la raison
+  /// remonte au personnel qui réaffecte.
+  Future<void> _declineOrder(BuildContext context, Course order) async {
+    final raison = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        final controleur = TextEditingController();
+        return AlertDialog(
+          title: const Text('Refuser la course'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'La course ${order.reference} sera proposée à un collègue.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controleur,
+                autofocus: true,
+                maxLength: 200,
+                decoration: const InputDecoration(
+                  labelText: 'Raison (facultative)',
+                  hintText: 'Trop loin, fin de service, panne…',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controleur.text.trim()),
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Refuser'),
+            ),
+          ],
         );
+      },
+    );
+
+    if (raison == null || !context.mounted) return;
+
+    try {
+      final appService = Provider.of<AppService>(context, listen: false);
+      await appService.declineDelivery(order.orderId, reason: raison);
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Course ${order.reference} refusée'),
+            backgroundColor: Colors.grey,
+          ),
+        );
+        setState(() {});
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Provider.of<ErrorHandlerService>(context, listen: false)
+            .showErrorSnackBar(context, messageErreur(e));
       }
     }
   }
@@ -1001,27 +1240,21 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
   }
 
   Future<void> _updateDeliveryStatus(BuildContext context, Course order) async {
+    // L'étape suivante est celle que le **serveur** déclare atteignable, et
+    // non un `switch` recopié ici : la table des transitions vit dans
+    // `DELIVERY_MACHINE`, et chaque copie côté client finit par diverger.
+    final suivante = order.prochaineEtape;
+    if (suivante == null) return;
+
+    if (suivante == EtapeCourse.livree &&
+        !await _confirmerLivraison(context, order)) {
+      return;
+    }
+    if (!context.mounted) return;
+
     try {
       final appService = Provider.of<AppService>(context, listen: false);
-      EtapeCourse suivante;
-
-      // Déroulement : acceptée → récupérée → en route → livrée
-      switch (order.etape) {
-        case EtapeCourse.acceptee:
-          suivante = EtapeCourse.recuperee;
-          await appService.markOrderPickedUp(order.orderId);
-          break;
-        case EtapeCourse.recuperee:
-          suivante = EtapeCourse.enRoute;
-          await appService.markOrderOnTheWay(order.orderId);
-          break;
-        case EtapeCourse.enRoute:
-          suivante = EtapeCourse.livree;
-          await appService.markOrderDelivered(order.orderId);
-          break;
-        default:
-          return;
-      }
+      await appService.updateOrderStatus(order.orderId, suivante);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1040,39 +1273,61 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
           listen: false,
         );
         errorHandler.logError('Erreur mise à jour statut', details: e);
-        errorHandler.showErrorSnackBar(
-          context,
-          'Erreur lors de la mise à jour: $e',
-        );
+        errorHandler.showErrorSnackBar(context, messageErreur(e));
       }
     }
   }
 
-  String _getNextActionText(EtapeCourse etape) {
-    switch (etape) {
-      case EtapeCourse.acceptee:
-        return 'Récupérée';
-      case EtapeCourse.recuperee:
-        return 'En route';
-      case EtapeCourse.enRoute:
-        return 'Livré';
-      default:
-        return 'Suivant';
-    }
+  /// Demande confirmation avant de déclarer la livraison faite.
+  ///
+  /// L'étape est irréversible côté serveur — la machine est acyclique, et
+  /// c'est elle qui crédite la rémunération. Elle rappelle le montant quand
+  /// il y a de l'argent à encaisser : partir sans avoir été payé ne se
+  /// rattrape pas.
+  Future<bool> _confirmerLivraison(BuildContext context, Course order) async {
+    final montant =
+        order.moyenPaiement.aEncaisser ? order.total?.format() : null;
+
+    final confirme = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmer la livraison'),
+        content: Text(
+          montant == null
+              ? 'La commande ${order.reference} a bien été remise au client ?'
+                  '\n\nCette étape est définitive.'
+              : 'La commande ${order.reference} a bien été remise, et vous '
+                  'avez encaissé $montant ?\n\nCette étape est définitive.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Pas encore'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Oui, c\'est livré'),
+          ),
+        ],
+      ),
+    );
+    return confirme ?? false;
   }
 
-  IconData _getNextActionIcon(EtapeCourse etape) {
-    switch (etape) {
-      case EtapeCourse.acceptee:
-        return Icons.shopping_bag;
-      case EtapeCourse.recuperee:
-        return Icons.delivery_dining;
-      case EtapeCourse.enRoute:
-        return Icons.check_circle;
-      default:
-        return Icons.arrow_forward;
-    }
-  }
+  /// Ce que le bouton fait faire, nommé par le geste et non par l'état.
+  String _getNextActionText(EtapeCourse? etape) => switch (etape) {
+        EtapeCourse.recuperee => 'Récupérée',
+        EtapeCourse.enRoute => 'En route',
+        EtapeCourse.livree => 'Livré',
+        _ => 'Suivant',
+      };
+
+  IconData _getNextActionIcon(EtapeCourse? etape) => switch (etape) {
+        EtapeCourse.recuperee => Icons.shopping_bag,
+        EtapeCourse.enRoute => Icons.delivery_dining,
+        EtapeCourse.livree => Icons.check_circle,
+        _ => Icons.arrow_forward,
+      };
 
   Color _getStatusColor(EtapeCourse etape) {
     switch (etape) {
@@ -1092,15 +1347,6 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => ChatScreen(order: order),
-      ),
-    );
-  }
-
-  void _openSupportChat(BuildContext context, Course order) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatScreen(order: order, chatType: 'support'),
       ),
     );
   }

@@ -6,13 +6,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/directions_service.dart';
-import 'package:elcora_dely/services/geocoding_service.dart' as geocoding;
 import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/widgets/loading_widget.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:elcora_dely/presentation/messages_erreur.dart';
 
 class RealTimeTrackingScreen extends StatefulWidget {
   final Course order;
@@ -31,10 +31,20 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   Set<Polyline> _polylines = {};
 
   LatLng? _driverLocation;
-  LatLng? _customerLocation;
-  LatLng? _restaurantLocation;
+
+  /// Les deux points de la course, lus sur l'affectation — voir [_course].
+  late LatLng _restaurantLocation;
+  late LatLng _customerLocation;
+
+  /// La course, telle qu'elle est **maintenant**.
+  ///
+  /// Part de celle qu'on a reçue, puis suit `AppService` : sans cela, franchir
+  /// une étape depuis cet écran n'en changeait pas l'affichage, et le trajet
+  /// continuait de viser le restaurant après la récupération.
+  late Course _course;
 
   bool _isTracking = false;
+  bool _isUpdatingStatus = false;
   bool _isLoading = true;
   bool _isCalculatingRoute = false;
   String _estimatedTime = 'Calcul en cours...';
@@ -42,7 +52,6 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
 
   StreamSubscription<Position>? _positionSubscription;
   final DirectionsService _directionsService = DirectionsService();
-  final geocoding.GeocodingService _geocodingService = geocoding.GeocodingService();
   
   // Dernière position pour éviter trop de recalculs
   LatLng? _lastCalculatedPosition;
@@ -51,8 +60,26 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   @override
   void initState() {
     super.initState();
+    _course = widget.order;
+    _restaurantLocation =
+        LatLng(_course.latitudeRetrait, _course.longitudeRetrait);
+    _customerLocation =
+        LatLng(_course.latitudeLivraison, _course.longitudeLivraison);
     _initializeTracking();
   }
+
+  /// Où le livreur doit se rendre **en ce moment** : le restaurant tant qu'il
+  /// n'a pas le repas, le client ensuite.
+  ///
+  /// L'écran visait le client dès l'ouverture, quelle que soit l'étape. Un
+  /// livreur qui venait d'accepter voyait donc un itinéraire vers une adresse
+  /// où il n'avait rien à faire, et une durée estimée qui ne comptait pas le
+  /// passage au restaurant.
+  LatLng get _destination =>
+      _course.repasRecupere ? _customerLocation : _restaurantLocation;
+
+  String get _destinationLibelle =>
+      _course.repasRecupere ? 'Client' : 'Restaurant';
 
   @override
   void dispose() {
@@ -80,30 +107,16 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
 
       _driverLocation = LatLng(position.latitude, position.longitude);
 
-      // Obtenir les coordonnées de l'adresse de livraison depuis la commande
-      try {
-        final customerLatLng = await _geocodingService.geocodeAddress(
-          widget.order.adresseLivraison,
-        );
-        
-        if (customerLatLng != null) {
-          // Convertir geocoding.LatLng en google_maps_flutter.LatLng
-          _customerLocation = LatLng(customerLatLng.latitude, customerLatLng.longitude);
-          Journal.trace('✅ Coordonnées client obtenues: $_customerLocation');
-        } else {
-          // Fallback: utiliser des coordonnées par défaut si le géocodage échoue
-          _customerLocation = const LatLng(5.3599, -4.0083);
-          Journal.trace('⚠️ Utilisation de coordonnées par défaut pour le client');
-        }
-      } catch (e) {
-        Journal.trace('❌ Erreur géocodage adresse client: $e');
-        // Fallback: utiliser des coordonnées par défaut
-        _customerLocation = const LatLng(5.3599, -4.0083);
-      }
-
-      // Position du restaurant (à configurer selon votre restaurant)
-      // TODO: Récupérer depuis la base de données ou configuration
-      _restaurantLocation = const LatLng(5.3600, -4.0080); // Exemple: Lomé, Togo
+      // Les deux points sont déjà connus (voir `initState`) : ils viennent de
+      // l'affectation, que le serveur rend avec `pickup_location` et
+      // `delivery_location`, tous deux obligatoires.
+      //
+      // Cet écran géocodait à la place la **chaîne** d'adresse de livraison,
+      // et retombait, quand le géocodage échouait, sur `LatLng(5.3599,
+      // -4.0083)` — Abidjan, sous un commentaire annonçant Lomé. Le
+      // restaurant, lui, était un point écrit en dur, le même pour tous les
+      // établissements. Un livreur pouvait donc être guidé vers un autre pays
+      // sans qu'aucune erreur ne s'affiche.
 
       // Start tracking
       if (mounted) {
@@ -209,7 +222,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   }
 
   Future<void> _calculateRoute() async {
-    if (_driverLocation == null || _customerLocation == null || !mounted) {
+    if (_driverLocation == null || !mounted) {
       return;
     }
 
@@ -238,7 +251,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       // Utiliser Google Directions API pour obtenir la vraie route
       final routeInfo = await _directionsService.getRoute(
         origin: _driverLocation!,
-        destination: _customerLocation!,
+        destination: _destination,
       );
 
       if (routeInfo != null && mounted) {
@@ -274,12 +287,12 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   void _calculateRouteFallback() {
     try {
       double distance = 0.0;
-      if (_driverLocation != null && _customerLocation != null) {
+      if (_driverLocation != null) {
         distance = _calculateDistance(
           _driverLocation!.latitude,
           _driverLocation!.longitude,
-          _customerLocation!.latitude,
-          _customerLocation!.longitude,
+          _destination.latitude,
+          _destination.longitude,
         );
       }
 
@@ -300,7 +313,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       }
 
       // Créer un polyline simple (ligne droite)
-      _updateRoutePolyline([_driverLocation!, _customerLocation!]);
+      _updateRoutePolyline([_driverLocation!, _destination]);
     } catch (e) {
       Journal.trace('❌ Erreur calcul route fallback: $e');
     }
@@ -371,28 +384,26 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
               snippet: 'Livreur',
             ),
           ),
-        if (_customerLocation != null)
-          Marker(
-            markerId: const MarkerId('customer'),
-            position: _customerLocation!,
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueGreen),
-            infoWindow: InfoWindow(
-              title: 'Client',
-              snippet: widget.order.adresseLivraison,
-            ),
+        Marker(
+          markerId: const MarkerId('customer'),
+          position: _customerLocation,
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(
+            title:
+                _course.destinataire.isEmpty ? 'Client' : _course.destinataire,
+            snippet: _course.adresseLivraison,
           ),
-        if (_restaurantLocation != null)
-          Marker(
-            markerId: const MarkerId('restaurant'),
-            position: _restaurantLocation!,
-            icon:
-                BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-            infoWindow: const InfoWindow(
-              title: 'Restaurant',
-              snippet: 'Point de départ',
-            ),
+        ),
+        Marker(
+          markerId: const MarkerId('restaurant'),
+          position: _restaurantLocation,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: InfoWindow(
+            title: _course.assignment.restaurantName,
+            snippet: 'Point de retrait',
           ),
+        ),
       };
     });
   }
@@ -437,26 +448,61 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
     }
   }
 
+  /// Fait franchir une étape à la course, puis relit ce que le serveur a
+  /// réellement enregistré.
+  ///
+  /// L'écran fermait auparavant dès l'appel parti, quelle que soit l'étape :
+  /// le livreur en déduisait que c'était fait, alors que la réponse pouvait
+  /// encore refuser. Il ne se ferme plus que sur une course terminée, et
+  /// l'affichage — étape, destination, boutons — suit la course rendue.
   Future<void> _updateOrderStatus(EtapeCourse etape) async {
+    if (_isUpdatingStatus) return;
+
+    if (etape == EtapeCourse.livree && !await _confirmerLivraison()) return;
+    if (!mounted) return;
+
+    setState(() => _isUpdatingStatus = true);
     try {
       final appService = Provider.of<AppService>(context, listen: false);
-      await appService.updateOrderStatus(widget.order.orderId, etape);
+      await appService.updateOrderStatus(_course.orderId, etape);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Statut mis à jour: ${etape.libelle}'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        // Navigate back after status update
+      // La course rendue par le serveur porte la nouvelle étape **et** les
+      // transitions désormais permises : c'est elle qui décide de la suite.
+      final rafraichie = appService.courseForOrder(_course.orderId);
+
+      if (!mounted) return;
+      setState(() {
+        if (rafraichie != null) _course = rafraichie;
+        _isUpdatingStatus = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Course mise à jour : ${etape.libelle}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // La course est close : il n'y a plus rien à suivre sur cette carte.
+      if (_course.prochaineEtape == null) {
+        _stopTracking();
         Navigator.pop(context);
+      } else {
+        // La destination vient peut-être de changer (restaurant -> client) :
+        // sans cette remise à zéro, l'étranglement anti-recalcul garderait le
+        // tracé vers le restaurant pendant trente secondes après que le
+        // livreur a déclaré avoir récupéré la commande.
+        _lastCalculatedPosition = null;
+        _lastCalculationTime = null;
+        _updateMarkers();
+        await _calculateRoute();
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _isUpdatingStatus = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur de mise à jour: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -464,11 +510,54 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
     }
   }
 
+  /// Demande confirmation avant de déclarer la livraison faite.
+  ///
+  /// L'étape est **irréversible** : la machine à états du serveur est
+  /// acyclique, une course livrée ne se rouvre pas, et c'est elle qui crédite
+  /// la rémunération et incrémente les compteurs. Un appui malheureux sur un
+  /// téléphone posé sur un guidon ne doit pas la déclencher.
+  ///
+  /// Il n'y a **pas** de preuve de livraison à demander ici : le contrat
+  /// n'expose ni code, ni photo, ni signature — `Assignment.proof_of_delivery`
+  /// existe en base mais aucun sérialiseur ni aucune vue ne le rend
+  /// accessible. En fabriquer une côté application donnerait une garantie que
+  /// rien ne vérifie.
+  Future<bool> _confirmerLivraison() async {
+    final montant = _course.moyenPaiement.aEncaisser
+        ? _course.total?.format()
+        : null;
+
+    final confirme = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmer la livraison'),
+        content: Text(
+          montant == null
+              ? 'La commande ${_course.reference} a bien été remise au client ?\n\n'
+                  'Cette étape est définitive.'
+              : 'La commande ${_course.reference} a bien été remise, et vous '
+                  'avez encaissé $montant ?\n\nCette étape est définitive.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Pas encore'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Oui, c\'est livré'),
+          ),
+        ],
+      ),
+    );
+    return confirme ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Suivi - Commande #${widget.order.orderId.substring(0, 8)}'),
+        title: Text('Suivi — ${_course.reference}'),
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
@@ -533,7 +622,9 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
                   flex: 3,
                   child: GoogleMap(
                     initialCameraPosition: CameraPosition(
-                      target: _driverLocation ?? const LatLng(5.3599, -4.0083),
+                      // Jamais un point écrit en dur : à défaut de position
+                      // du livreur, la carte s'ouvre sur là où il doit aller.
+                      target: _driverLocation ?? _destination,
                       zoom: 15,
                     ),
                     onMapCreated: (GoogleMapController controller) {
@@ -618,45 +709,19 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
 
                         // Order status
                         Text(
-                          'Statut: ${widget.order.etape.libelle}',
+                          'Étape : ${_course.etape.libelle}',
                           style:
                               Theme.of(context).textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.bold,
                                   ),
                         ),
+                        Text(
+                          'Direction : $_destinationLibelle',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                         const SizedBox(height: 16),
 
-                        // Action buttons
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () =>
-                                    _updateOrderStatus(EtapeCourse.recuperee),
-                                icon: const Icon(Icons.shopping_bag),
-                                label: const Text('Commande récupérée'),
-                                style: OutlinedButton.styleFrom(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: () =>
-                                    _updateOrderStatus(EtapeCourse.livree),
-                                icon: const Icon(Icons.check_circle),
-                                label: const Text('Livré'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                        _buildActionSuivante(),
                       ],
                     ),
                   ),
@@ -665,6 +730,88 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
             ),
     );
   }
+
+  /// L'unique bouton d'avancement, décidé par le serveur.
+  ///
+  /// Deux boutons figés occupaient cette place — « Commande récupérée » et
+  /// « Livré » — affichés quelle que soit l'étape. « Livré » était donc
+  /// proposé à un livreur qui venait d'accepter, sur une transition que la
+  /// machine à états refuse : l'appui produisait une erreur, sans que rien
+  /// n'ait indiqué que le geste était impossible.
+  ///
+  /// `allowed_transitions` dit ce que le serveur accepte depuis l'état
+  /// courant. Un seul bouton en découle, et il disparaît quand il n'y a plus
+  /// rien à franchir.
+  Widget _buildActionSuivante() {
+    final suivante = _course.prochaineEtape;
+
+    if (suivante == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.green.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.green, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Course terminée — ${_course.etape.libelle}.',
+                style: const TextStyle(color: Colors.green),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final estLivraison = suivante == EtapeCourse.livree;
+
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed:
+            _isUpdatingStatus ? null : () => _updateOrderStatus(suivante),
+        icon: _isUpdatingStatus
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : Icon(_iconeEtape(suivante)),
+        label: Text(_libelleAction(suivante)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: estLivraison
+              ? Colors.green
+              : Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+        ),
+      ),
+    );
+  }
+
+  /// Le geste, pas l'état : le bouton dit ce que le livreur fait, l'étiquette
+  /// d'étape au-dessus dit où il en est.
+  String _libelleAction(EtapeCourse etape) => switch (etape) {
+        EtapeCourse.recuperee => 'J\'ai récupéré la commande',
+        EtapeCourse.enRoute => 'Je pars chez le client',
+        EtapeCourse.livree => 'J\'ai livré la commande',
+        _ => etape.libelle,
+      };
+
+  IconData _iconeEtape(EtapeCourse etape) => switch (etape) {
+        EtapeCourse.recuperee => Icons.shopping_bag,
+        EtapeCourse.enRoute => Icons.delivery_dining,
+        EtapeCourse.livree => Icons.check_circle,
+        _ => Icons.arrow_forward,
+      };
 
   Widget _buildInfoCard(
       String title, String value, IconData icon, Color color) {

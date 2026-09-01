@@ -4,10 +4,13 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
+import 'package:elcorazon_core/elcorazon_core.dart'
+    show AppEmoji, AppEmojiToken;
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcora_dely/presentation/messages_erreur.dart';
 
 class DeliveryOrdersScreen extends StatefulWidget {
   const DeliveryOrdersScreen({super.key});
@@ -283,10 +286,12 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
             color: _getStatusColor(order.etape).withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
+          // Décorative : le libellé de l'étape est juste en dessous.
           child: Center(
-            child: Text(
-              order.etape.pastille,
-              style: const TextStyle(fontSize: 24),
+            child: AppEmoji(
+              order.etape.illustration,
+              size: AppEmoji.tailleS,
+              decoratif: true,
             ),
           ),
         ),
@@ -296,7 +301,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Livraison #${order.orderId.substring(0, 8).toUpperCase()}',
+                'Livraison ${order.reference}',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -487,17 +492,18 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
           ),
         ),
         const SizedBox(width: 12),
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () => _updateDeliveryStatus(order),
-            icon: Icon(_getNextActionIcon(order.etape), size: 18),
-            label: Text(_getNextActionText(order.etape)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+        if (order.prochaineEtape != null)
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: () => _updateDeliveryStatus(order),
+              icon: Icon(_getNextActionIcon(order.prochaineEtape), size: 18),
+              label: Text(_getNextActionText(order.prochaineEtape)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -523,21 +529,22 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
   }
 
   Future<void> _updateDeliveryStatus(Course order) async {
+    // L'étape vient de `allowed_transitions`, pas d'un `switch` local. Celui
+    // qui était ici n'avait **pas de cas pour `acceptee`** : sur une course
+    // fraîchement acceptée — l'étape la plus courante de cet écran — le
+    // bouton « Suivant » tombait dans le `default` et ne faisait
+    // rigoureusement rien. Le livreur appuyait, rien ne se passait, aucune
+    // erreur ne s'affichait.
+    final suivante = order.prochaineEtape;
+    if (suivante == null) return;
+
+    if (suivante == EtapeCourse.livree && !await _confirmerLivraison(order)) {
+      return;
+    }
+    if (!mounted) return;
+
     try {
       final appService = Provider.of<AppService>(context, listen: false);
-      EtapeCourse suivante;
-
-      switch (order.etape) {
-        case EtapeCourse.recuperee:
-          suivante = EtapeCourse.enRoute;
-          break;
-        case EtapeCourse.enRoute:
-          suivante = EtapeCourse.livree;
-          break;
-        default:
-          return;
-      }
-
       await appService.updateOrderStatus(order.orderId, suivante);
 
       if (mounted) {
@@ -557,35 +564,56 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
           listen: false,
         );
         errorHandler.logError('Erreur mise à jour statut', details: e);
-        errorHandler.showErrorSnackBar(
-          context,
-          'Erreur lors de la mise à jour: $e',
-        );
+        errorHandler.showErrorSnackBar(context, messageErreur(e));
       }
     }
   }
 
-  String _getNextActionText(EtapeCourse etape) {
-    switch (etape) {
-      case EtapeCourse.recuperee:
-        return 'En route';
-      case EtapeCourse.enRoute:
-        return 'Livré';
-      default:
-        return 'Suivant';
-    }
+  /// Demande confirmation avant de déclarer la livraison faite — l'étape est
+  /// irréversible côté serveur, et c'est elle qui crédite la rémunération.
+  Future<bool> _confirmerLivraison(Course order) async {
+    final montant =
+        order.moyenPaiement.aEncaisser ? order.total?.format() : null;
+
+    final confirme = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmer la livraison'),
+        content: Text(
+          montant == null
+              ? 'La commande ${order.reference} a bien été remise au client ?'
+                  '\n\nCette étape est définitive.'
+              : 'La commande ${order.reference} a bien été remise, et vous '
+                  'avez encaissé $montant ?\n\nCette étape est définitive.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Pas encore'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Oui, c\'est livré'),
+          ),
+        ],
+      ),
+    );
+    return confirme ?? false;
   }
 
-  IconData _getNextActionIcon(EtapeCourse etape) {
-    switch (etape) {
-      case EtapeCourse.recuperee:
-        return Icons.delivery_dining;
-      case EtapeCourse.enRoute:
-        return Icons.check_circle;
-      default:
-        return Icons.arrow_forward;
-    }
-  }
+  String _getNextActionText(EtapeCourse? etape) => switch (etape) {
+        EtapeCourse.recuperee => 'Récupérée',
+        EtapeCourse.enRoute => 'En route',
+        EtapeCourse.livree => 'Livré',
+        _ => 'Suivant',
+      };
+
+  IconData _getNextActionIcon(EtapeCourse? etape) => switch (etape) {
+        EtapeCourse.recuperee => Icons.shopping_bag,
+        EtapeCourse.enRoute => Icons.delivery_dining,
+        EtapeCourse.livree => Icons.check_circle,
+        _ => Icons.arrow_forward,
+      };
 
   Color _getStatusColor(EtapeCourse etape) {
     switch (etape) {
@@ -635,6 +663,10 @@ class DeliveryDetailsSheet extends StatefulWidget {
 }
 
 class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
+  /// La course de cette fiche. Raccourci de lecture : la moitié des méthodes
+  /// de cette classe la désignaient, chacune par `widget.order`.
+  Course get _course => widget.order;
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -706,11 +738,12 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
             const SizedBox(height: 12),
             _buildInfoRow(
               'Numéro',
-              '#${widget.order.orderId.substring(0, 8).toUpperCase()}',
+              widget.order.reference,
             ),
             _buildInfoRow(
               'Statut',
-              '${widget.order.etape.pastille} ${widget.order.etape.libelle}',
+              widget.order.etape.libelle,
+              illustration: widget.order.etape.illustration,
             ),
             _buildInfoRow(
               'Montant',
@@ -718,7 +751,8 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
             ),
             _buildInfoRow(
               'Paiement',
-              '${widget.order.moyenPaiement.pastille} ${widget.order.moyenPaiement.libelle}',
+              widget.order.moyenPaiement.libelle,
+              icone: widget.order.moyenPaiement.icone,
             ),
             if (widget.order.livraisonEstimeeA != null)
               _buildInfoRow(
@@ -890,46 +924,45 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              height: 150,
-              decoration: BoxDecoration(
-                color: Colors.grey[200],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.map, size: 48, color: Colors.grey[600]),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Carte interactive',
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Fonctionnalité à venir',
-                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
+            // Le carré gris « Carte interactive — fonctionnalité à venir » qui
+            // occupait cette place a disparu : il tenait 150 pixels de haut
+            // pour ne rien montrer. La carte existe, elle est dans l'écran de
+            // suivi, et le bouton ci-dessous y mène.
+            Text(
+              _course.repasRecupere
+                  ? 'Vers ${_course.destinataire.isEmpty ? 'le client' : _course.destinataire} — ${_course.adresseLivraison}'
+                  : 'Vers ${_course.assignment.restaurantName} pour le retrait',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => _openNavigation(),
-                icon: const Icon(Icons.navigation),
-                label: const Text('Ouvrir la navigation'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            RealTimeTrackingScreen(order: _course),
+                      ),
+                    ),
+                    icon: const Icon(Icons.map),
+                    label: const Text('Suivi'),
+                  ),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _openNavigation(),
+                    icon: const Icon(Icons.navigation),
+                    label: const Text('Itinéraire'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -937,14 +970,43 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
+  /// Une ligne de la fiche de course.
+  ///
+  /// [illustration] et [icone] remplacent les emojis Unicode que deux de ces
+  /// lignes collaient devant leur valeur — `'🛵 En route'`, `'💵 Espèces'`.
+  /// Concaténés dans la chaîne, ils se lisaient à voix haute au milieu du mot
+  /// et dépendaient de la police du téléphone. Les deux restent facultatifs :
+  /// numéro, montant et heure n'illustrent rien.
+  Widget _buildInfoRow(
+    String label,
+    String value, {
+    AppEmojiToken? illustration,
+    IconData? icone,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: TextStyle(color: Colors.grey[600])),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (illustration != null) ...[
+                // Décorative : la valeur juste à côté porte l'information.
+                AppEmoji(
+                  illustration,
+                  size: AppEmoji.tailleXS,
+                  decoratif: true,
+                ),
+                const SizedBox(width: 6),
+              ] else if (icone != null) ...[
+                Icon(icone, size: 18, color: Colors.grey[700]),
+                const SizedBox(width: 6),
+              ],
+              Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+            ],
+          ),
         ],
       ),
     );
@@ -1051,50 +1113,58 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
     }
   }
 
+  /// Ouvre l'itinéraire vers l'étape en cours, **par coordonnées**.
+  ///
+  /// La version précédente lançait une *recherche textuelle* Google Maps sur
+  /// la chaîne d'adresse de livraison — `maps/search/?query=Rue%20...`. Deux
+  /// conséquences : la recherche pouvait tomber sur une homonymie à l'autre
+  /// bout de la ville, et elle visait le client même quand le livreur devait
+  /// d'abord passer au restaurant.
+  ///
+  /// L'affectation porte les deux points en clair (`pickup_location`,
+  /// `delivery_location`) : un couple latitude/longitude ne s'interprète pas.
+  /// L'adresse reste jointe en libellé, pour que le livreur lise où il va.
   Future<void> _openNavigation() async {
     try {
-      final address = widget.order.adresseLivraison;
+      final vaChezLeClient = _course.repasRecupere;
+      final latitude = vaChezLeClient
+          ? _course.latitudeLivraison
+          : _course.latitudeRetrait;
+      final longitude = vaChezLeClient
+          ? _course.longitudeLivraison
+          : _course.longitudeRetrait;
+      final libelle = vaChezLeClient
+          ? _course.adresseLivraison
+          : _course.assignment.restaurantName;
 
-      if (address.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Adresse de livraison non disponible'),
-              backgroundColor: Colors.orange,
-            ),
-          );
+      // Google Maps d'abord, Waze ensuite, puis le schéma `geo:` — que toute
+      // application de cartographie Android déclare, y compris hors ligne.
+      final destinations = [
+        Uri.parse(
+          'https://www.google.com/maps/dir/?api=1'
+          '&destination=$latitude,$longitude&travelmode=driving',
+        ),
+        Uri.parse('https://waze.com/ul?ll=$latitude,$longitude&navigate=yes'),
+        Uri.parse(
+          'geo:$latitude,$longitude?q=$latitude,$longitude'
+          '(${Uri.encodeComponent(libelle)})',
+        ),
+      ];
+
+      for (final uri in destinations) {
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          return;
         }
-        return;
       }
 
-      // Essayer d'ouvrir Google Maps d'abord
-      final googleMapsUri = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(address)}',
-      );
-
-      final canLaunchGoogleMaps = await canLaunchUrl(googleMapsUri);
-
-      if (canLaunchGoogleMaps) {
-        await launchUrl(googleMapsUri, mode: LaunchMode.externalApplication);
-      } else {
-        // Fallback: essayer Waze
-        final wazeUri = Uri.parse(
-          'https://waze.com/ul?q=${Uri.encodeComponent(address)}',
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Aucune application de navigation trouvée'),
+            backgroundColor: Colors.orange,
+          ),
         );
-        final canLaunchWaze = await canLaunchUrl(wazeUri);
-
-        if (canLaunchWaze) {
-          await launchUrl(wazeUri, mode: LaunchMode.externalApplication);
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Aucune application de navigation trouvée'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-        }
       }
     } catch (e) {
       if (mounted) {
