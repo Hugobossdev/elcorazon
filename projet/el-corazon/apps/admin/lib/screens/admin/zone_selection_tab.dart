@@ -383,7 +383,7 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
       SnackBar(
         content: Text(
           ecrit
-              ? '${ouverte ? '✅' : '⛔'} « ${zone.name} » '
+              ? '« ${zone.name} » '
                   '${ouverte ? 'est desservie' : 'n’est plus desservie'}'
               : service.error ?? 'Changement refusé par le serveur.',
         ),
@@ -463,7 +463,7 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('✅ Barème de « ${zone.name} » enregistré'),
+        content: Text('Barème de « ${zone.name} » enregistré'),
         backgroundColor: Theme.of(context).colorScheme.inverseSurface,
       ),
     );

@@ -18,6 +18,7 @@ import 'package:admin/screens/admin/driver_assignment_dialog.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/payments_service.dart';
 import 'package:admin/utils/price_formatter.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show AppEmoji;
 
 class OrderManagementScreen extends StatefulWidget {
   const OrderManagementScreen({super.key});
@@ -378,10 +379,9 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
                   ],
                 ),
                 child: Center(
-                  child: Text(
-                    order.statut.pastille,
-                    style: const TextStyle(fontSize: 28),
-                  ),
+                  // Portante : c'est le seul repère visuel de l'étape sur
+                  // cette ligne, et l'opérateur balaie la liste des yeux.
+                  child: AppEmoji(order.statut.illustration),
                 ),
               ),
               title: Row(
@@ -713,8 +713,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         SnackBar(
           content: Text(
             success
-                ? '✅ Commande #${order.id.substring(0, 8).toUpperCase()} acceptée'
-                : '❌ Erreur lors de l\'acceptation',
+                ? 'Commande #${order.id.substring(0, 8).toUpperCase()} acceptée'
+                : 'Erreur lors de l\'acceptation',
           ),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -778,8 +778,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         SnackBar(
           content: Text(
             success
-                ? '✅ Commande #${order.id.substring(0, 8).toUpperCase()} refusée'
-                : '❌ Erreur lors du refus',
+                ? 'Commande #${order.id.substring(0, 8).toUpperCase()} refusée'
+                : 'Erreur lors du refus',
           ),
           backgroundColor: success ? Colors.orange : Colors.red,
         ),
@@ -820,8 +820,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         SnackBar(
           content: Text(
             success
-                ? '✅ Commande #${order.id.substring(0, 8).toUpperCase()} mise en préparation'
-                : '❌ Erreur lors de la mise en préparation',
+                ? 'Commande #${order.id.substring(0, 8).toUpperCase()} mise en préparation'
+                : 'Erreur lors de la mise en préparation',
           ),
           backgroundColor: success ? Colors.orange : Colors.red,
         ),
@@ -862,8 +862,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         SnackBar(
           content: Text(
             success
-                ? '✅ Commande #${order.id.substring(0, 8).toUpperCase()} marquée comme prête'
-                : '❌ Erreur lors de la mise à jour',
+                ? 'Commande #${order.id.substring(0, 8).toUpperCase()} marquée comme prête'
+                : 'Erreur lors de la mise à jour',
           ),
           backgroundColor: success ? Colors.green : Colors.red,
         ),
@@ -911,8 +911,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen>
         SnackBar(
           content: Text(
             success
-                ? '✅ Commande #${order.id.substring(0, 8).toUpperCase()} marquée comme livrée'
-                : '❌ Erreur lors de la mise à jour',
+                ? 'Commande #${order.id.substring(0, 8).toUpperCase()} marquée comme livrée'
+                : 'Erreur lors de la mise à jour',
           ),
           backgroundColor: success ? Colors.green : Colors.red,
         ),

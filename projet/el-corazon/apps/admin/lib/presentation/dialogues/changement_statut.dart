@@ -50,8 +50,8 @@ Future<void> confirmerChangementStatut({
       SnackBar(
         content: Text(
           applique
-              ? '✅ Statut changé: ${nouveauStatut.libelle}'
-              : '❌ Erreur lors du changement de statut',
+              ? 'Statut changé: ${nouveauStatut.libelle}'
+              : 'Erreur lors du changement de statut',
         ),
         backgroundColor: fondDuBandeau,
         duration: const Duration(seconds: 2),

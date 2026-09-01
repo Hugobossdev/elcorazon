@@ -436,8 +436,13 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                   child: Text(driver.fullName[0]),
                 ),
                 title: Text(driver.fullName),
-                subtitle: Text(
-                    '${driver.deliveriesCompleted} livraisons • ⭐ ${driver.ratingAverage}',),
+                subtitle: Row(
+                  children: [
+                    Text('${driver.deliveriesCompleted} livraisons • '),
+                    const Icon(Icons.star_rounded, size: 14),
+                    Text(' ${driver.ratingAverage}'),
+                  ],
+                ),
                 onTap: () async {
                   Navigator.pop(context);
                   await orderService.assignDriver(order.id, driver.id);

@@ -18,6 +18,7 @@ import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/ui/ui.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show AppEmoji;
 
 class AdvancedOrderManagementScreen extends StatefulWidget {
   const AdvancedOrderManagementScreen({super.key});
@@ -515,14 +516,14 @@ class _AdvancedOrderManagementScreenState
             const SizedBox(height: 12),
             if (urgentOrders.isNotEmpty) ...[
               Text(
-                '⚠️ ${urgentOrders.length} commande(s) urgente(s)',
+                '${urgentOrders.length} commande(s) urgente(s)',
                 style: TextStyle(color: sem.danger),
               ),
               const SizedBox(height: 4),
             ],
             if (overdueOrders.isNotEmpty) ...[
               Text(
-                '🚨 ${overdueOrders.length} commande(s) en retard',
+                '${overdueOrders.length} commande(s) en retard',
                 style: TextStyle(color: sem.danger),
               ),
             ],
@@ -990,9 +991,11 @@ class _AdvancedOrderManagementScreenState
       leading: CircleAvatar(
         backgroundColor:
             couleurDeStatut(order.statut, Theme.of(context).colorScheme).withValues(alpha: 0.1),
-        child: Text(
-          order.statut.pastille,
-          style: const TextStyle(fontSize: 16),
+        // Décorative : le libellé de l'étape est dans le sous-titre.
+        child: AppEmoji(
+          order.statut.illustration,
+          size: AppEmoji.tailleXS,
+          decoratif: true,
         ),
       ),
       title: Text('Commande #${order.id.substring(0, 8).toUpperCase()}'),

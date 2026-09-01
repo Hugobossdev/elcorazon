@@ -589,8 +589,8 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
           SnackBar(
             content: Text(
               success
-                  ? '✅ ${client.fullName} a été suspendu'
-                  : '❌ Erreur lors de la suspension',
+                  ? '${client.fullName} a été suspendu'
+                  : 'Erreur lors de la suspension',
             ),
             backgroundColor: inverseSurfaceColor,
           ),

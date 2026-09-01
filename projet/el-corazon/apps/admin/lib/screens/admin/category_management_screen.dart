@@ -93,10 +93,26 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
                           Theme.of(context).primaryColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
-                      category.emoji.isEmpty ? '🍽️' : category.emoji,
-                      style: const TextStyle(fontSize: 20),
-                    ),
+                    // L'emoji tel que l'etablissement l'a saisi. Il reste
+                    // affiche en Unicode, et c'est voulu : c'est **ici qu'on
+                    // le compose**, et l'operateur doit voir exactement ce
+                    // qu'il enregistre.
+                    //
+                    // Le repli, lui, tombe : afficher `'🍽️'` quand le champ
+                    // est vide rendait une categorie sans emoji impossible a
+                    // distinguer d'une categorie ayant l'assiette pour emoji.
+                    child: category.emoji.isEmpty
+                        ? Icon(
+                            Icons.label_off_outlined,
+                            size: 20,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          )
+                        : Text(
+                            category.emoji,
+                            style: const TextStyle(fontSize: 20),
+                          ),
                   ),
                   title: Text(
                     category.name,
@@ -156,8 +172,13 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
   void _showCategoryDialog(BuildContext context, {eccore.ManagedCategory? category}) {
     final nameController = TextEditingController(text: category?.name);
     final descController = TextEditingController(text: category?.description);
-    final emojiController =
-        TextEditingController(text: category?.emoji ?? '🍽️');
+    // Vide pour une nouvelle categorie, et non `'🍽️'`.
+    //
+    // Le champ etant pre-rempli, toute categorie creee sans y toucher partait
+    // au serveur avec une assiette : une valeur que personne n'avait choisie,
+    // ensuite servie a tous les clients. Le champ vide enregistre une chaine
+    // vide, ce que le contrat prevoit (`emoji = models.CharField(blank=True)`).
+    final emojiController = TextEditingController(text: category?.emoji ?? '');
 
     DialogHelper.showSafeDialog(
       context: context,

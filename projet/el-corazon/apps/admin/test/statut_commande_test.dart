@@ -56,9 +56,17 @@ void main() {
       expect(StatutCommande.annulee.libelle, 'Annulée');
     });
 
-    test('chaque statut a une pastille distincte', () {
-      final pastilles = StatutCommande.values.map((s) => s.pastille).toSet();
-      expect(pastilles, hasLength(StatutCommande.values.length));
+    test('chaque statut a une illustration distincte', () {
+      // Deux étapes qui partageraient la même illustration seraient
+      // indiscernables dans la liste de supervision, où l'opérateur balaie
+      // les vignettes avant de lire les libellés.
+      //
+      // La pastille Unicode que ce cas éprouvait est devenue un token du pack
+      // partagé (`elcorazon_core`) : le back-office, le client et le livreur
+      // montrent désormais la même image pour la même étape.
+      final illustrations =
+          StatutCommande.values.map((s) => s.illustration).toSet();
+      expect(illustrations, hasLength(StatutCommande.values.length));
     });
   });
 

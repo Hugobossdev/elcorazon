@@ -141,7 +141,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     if (mounted && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('✅ Paramètres sauvegardés avec succès'),
+          content: const Text('Paramètres sauvegardés avec succès'),
           backgroundColor: inverseSurfaceColor,
         ),
       );
@@ -419,7 +419,7 @@ class _SettingsScreenState extends State<SettingsScreen>
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('✅ Barème de « ${zone.name} » enregistré'),
+        content: Text('Barème de « ${zone.name} » enregistré'),
         backgroundColor: Theme.of(context).colorScheme.inverseSurface,
       ),
     );

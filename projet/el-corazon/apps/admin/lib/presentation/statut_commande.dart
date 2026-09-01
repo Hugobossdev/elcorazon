@@ -1,3 +1,5 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
 /// Vocabulaire d'affichage des statuts de commande, côté back-office.
 ///
 /// Pourquoi ce fichier existe
@@ -19,22 +21,44 @@
 /// un mouvement de paiement, pas un état de commande ; ce qui n'aboutit pas
 /// est annulé avec un motif.
 enum StatutCommande {
-  enAttente('pending', 'En attente', '⏳'),
-  confirmee('confirmed', 'Confirmée', '✅'),
-  enPreparation('preparing', 'En préparation', '👨‍🍳'),
-  prete('ready', 'Prête', '📦'),
-  recuperee('picked_up', 'Récupérée', '🏃‍♂️'),
-  enRoute('on_the_way', 'En route', '🛵'),
-  livree('delivered', 'Livrée', '🎉'),
-  annulee('cancelled', 'Annulée', '❌');
+  enAttente('pending', 'En attente'),
+  confirmee('confirmed', 'Confirmée'),
+  enPreparation('preparing', 'En préparation'),
+  prete('ready', 'Prête'),
+  recuperee('picked_up', 'Récupérée'),
+  enRoute('on_the_way', 'En route'),
+  livree('delivered', 'Livrée'),
+  annulee('cancelled', 'Annulée');
 
-  const StatutCommande(this.versServeur, this.libelle, this.pastille);
+  const StatutCommande(this.versServeur, this.libelle);
 
   /// La valeur que le serveur attend et rend.
   final String versServeur;
 
   final String libelle;
-  final String pastille;
+
+  /// L'illustration de l'étape, prise dans le pack partagé du socle.
+  ///
+  /// ## Pourquoi elle vient du socle
+  ///
+  /// Les trois applications décrivaient les mêmes huit étapes avec leurs
+  /// propres emojis Unicode, tenus séparément. Rien ne garantissait qu'ils
+  /// restent d'accord : le back-office pouvait montrer un statut que le client
+  /// ne reconnaissait pas. Le pack vit maintenant dans `elcorazon_core`, et
+  /// **une étape a la même illustration partout**.
+  ///
+  /// Deux des emojis remplacés (`'👨‍🍳'`, `'🏃‍♂️'`) étaient des séquences
+  /// ZWJ, que les Android anciens décomposent en glyphes séparés.
+  eccore.AppEmojiToken get illustration => switch (this) {
+        StatutCommande.enAttente => eccore.AppEmojis.newOrder,
+        StatutCommande.confirmee => eccore.AppEmojis.orderConfirmed,
+        StatutCommande.enPreparation => eccore.AppEmojis.preparing,
+        StatutCommande.prete => eccore.AppEmojis.orderReady,
+        StatutCommande.recuperee => eccore.AppEmojis.courier,
+        StatutCommande.enRoute => eccore.AppEmojis.delivery,
+        StatutCommande.livree => eccore.AppEmojis.delivered,
+        StatutCommande.annulee => eccore.AppEmojis.error,
+      };
 
   /// Depuis la valeur rendue par le serveur.
   ///

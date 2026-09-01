@@ -18,6 +18,8 @@
 /// lue derrière un `!` dans une branche qu'aucun statut n'atteignait.
 library;
 
+import 'package:flutter/material.dart';
+
 /// Décision de vérification, telle que le siège la lit.
 ///
 /// Trois valeurs, parce que `CourierProfile.verificationStatus` n'en produit
@@ -26,11 +28,11 @@ library;
 /// était morte, et l'assertion de non-nullité qu'elle contenait aurait planté
 /// le jour où quelqu'un l'aurait rendue atteignable.
 enum StatutVerification {
-  enAttente('En attente', '⏳'),
-  approuve('Approuvé', '✅'),
-  refuse('Refusé', '❌');
+  enAttente('En attente', Icons.hourglass_top_rounded),
+  approuve('Approuvé', Icons.verified_rounded),
+  refuse('Refusé', Icons.cancel_rounded);
 
-  const StatutVerification(this.libelle, this.pastille);
+  const StatutVerification(this.libelle, this.icone);
 
   /// Depuis `CourierProfile.verificationStatus`.
   ///
@@ -45,7 +47,13 @@ enum StatutVerification {
   }
 
   final String libelle;
-  final String pastille;
+
+  /// L'icône de la décision.
+  ///
+  /// Une icône, pas une illustration : ce que le siège lit ici est l'état d'un
+  /// dossier administratif. Les emojis remplacés — `'⏳'`, `'✅'`, `'❌'` —
+  /// n'étaient d'ailleurs affichés nulle part.
+  final IconData icone;
 }
 
 /// Nature d'une pièce. Trois, comme les trois URL du dossier.

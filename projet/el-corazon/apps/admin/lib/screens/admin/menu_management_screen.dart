@@ -140,10 +140,14 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
 
                           final category = categories[index - 1];
                           return ListTile(
-                            leading: Text(
-                              category.emoji.isEmpty ? '📁' : category.emoji,
-                              style: const TextStyle(fontSize: 20),
-                            ),
+                            // Meme regle que l'ecran des categories : on
+                            // montre ce qui est saisi, sans inventer de repli.
+                            leading: category.emoji.isEmpty
+                                ? const Icon(Icons.folder_outlined, size: 20)
+                                : Text(
+                                    category.emoji,
+                                    style: const TextStyle(fontSize: 20),
+                                  ),
                             title: Text(category.name),
                             selected: _selectedCategoryId == category.id,
                             onTap: () {

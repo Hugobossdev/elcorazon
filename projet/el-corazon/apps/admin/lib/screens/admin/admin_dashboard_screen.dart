@@ -22,6 +22,7 @@ import 'package:admin/screens/admin/driver_documents_dashboard_screen.dart';
 import 'package:admin/screens/admin/active_deliveries_screen.dart';
 import 'package:admin/screens/admin/menu_management_screen.dart';
 import 'package:admin/ui/ui.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' show AppEmoji;
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -293,7 +294,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '$greeting, ${user?.fullName ?? 'Admin'}! 👋',
+                      '$greeting, ${user?.fullName ?? 'Admin'}',
                       style: theme.textTheme.headlineSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: scheme.onPrimary,
@@ -581,7 +582,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     leading: CircleAvatar(
                       backgroundColor:
                           _getStatusColor(order.statut).withValues(alpha: 0.1),
-                      child: Text(order.statut.pastille),
+                      child: AppEmoji(
+                        order.statut.illustration,
+                        size: AppEmoji.tailleXS,
+                        decoratif: true,
+                      ),
                     ),
                     title:
                         Text('CMD #${order.id.substring(0, 8).toUpperCase()}'),

@@ -189,7 +189,7 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
     if (pendingOrders.isNotEmpty) {
       notifications.add({
         'id': 'pending_orders',
-        'title': '⚠️ Commandes en attente',
+        'title': 'Commandes en attente',
         'message':
             '${pendingOrders.length} commande(s) nécessitent votre attention',
         'time': DateTime.now(),
@@ -206,7 +206,7 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
     for (final order in recentOrders.take(3)) {
       notifications.add({
         'id': 'order_${order.id}',
-        'title': '📦 Nouvelle commande',
+        'title': 'Nouvelle commande',
         'message':
             'Commande #${order.id.substring(0, 8).toUpperCase()} - ${PriceFormatter.format(order.totalAffiche)}',
         'time': order.passeeLe,

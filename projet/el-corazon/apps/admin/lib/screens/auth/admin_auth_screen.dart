@@ -297,13 +297,26 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
               width: 1.5,
             ),
           ),
-          child: Text(
-            '🔒 Accès sécurisé aux fonctionnalités admin',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                size: 18,
+                color: Theme.of(context).colorScheme.onPrimary,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'Accès sécurisé aux fonctionnalités admin',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
