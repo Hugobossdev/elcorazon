@@ -20,15 +20,16 @@ class CustomizationOption {
   /// Vrai quand l'option vient du catalogue serveur — son [id] est alors un
   /// identifiant que `POST /carts/{slug}/lines/` accepte.
   ///
-  /// Les options de démonstration ([_getDefaultCustomizationOptions]) portent
-  /// des identifiants inventés (`cake-shape-round`) : les envoyer au serveur
-  /// produit un 400. C'est ce drapeau qui permet à un écran de savoir s'il
-  /// compose une commande réelle ou une simple maquette.
+  /// Toutes les options en portent désormais un : elles ne naissent plus que
+  /// de [CustomizationOption.fromRemote]. Le drapeau reste la **dernière
+  /// garde** avant l'envoi ([selectedOptionIds]) — le constructeur public
+  /// permet toujours de fabriquer une option sans catalogue, et une telle
+  /// option ne doit jamais atteindre le serveur, qui la refuserait en
+  /// emportant la ligne entière.
   final bool isRemote;
 
   /// Nombre minimal de choix imposé par le groupe côté serveur
-  /// (`OptionGroup.min_select`). Zéro pour les options locales, dont la règle
-  /// vient de [CustomizationService._categoryConstraints].
+  /// (`OptionGroup.min_select`) — le même que `validate_selection` revalide.
   final int minSelections;
 
   CustomizationOption({
@@ -63,77 +64,6 @@ class CustomizationOption {
       maxQuantity: group.maxSelect,
       minSelections: group.minSelect,
       isRemote: true,
-    );
-  }
-
-  factory CustomizationOption.fromDatabase(Map<String, dynamic> row) {
-    // Parser l'option depuis la jointure
-    final option = Map<String, dynamic>.from(
-        row['customization_options'] as Map<String, dynamic>? ?? {},);
-
-    // Récupérer l'ID (peut être dans option ou dans row)
-    final id = (option['id']?.toString() ??
-                row['customization_option_id']?.toString() ??
-                '')
-            .isEmpty
-        ? throw Exception('Customization option ID is missing')
-        : (option['id'] ?? row['customization_option_id']).toString();
-
-    final name = option['name']?.toString() ?? 'Option';
-    final category = option['category']?.toString() ?? 'extra';
-
-    // Parser le price_modifier avec gestion des nulls
-    final priceModifier = (option['price_modifier'] as num?)?.toDouble() ?? 0.0;
-
-    // is_default peut être dans row (menu_item_customizations) ou option
-    final isDefaultValue = (row['is_default'] as bool?) ??
-        (option['is_default'] as bool?) ??
-        false;
-
-    // is_required vient de menu_item_customizations
-    final isRequiredValue = (row['is_required'] as bool?) ?? false;
-
-    // Parser max_quantity avec gestion des nulls
-    int maxQuantityValue = 1;
-    if (option['max_quantity'] is int) {
-      maxQuantityValue = option['max_quantity'] as int;
-    } else if (option['max_quantity'] is num) {
-      maxQuantityValue = (option['max_quantity'] as num).toInt();
-    } else if (option['max_quantity'] != null) {
-      maxQuantityValue = int.tryParse(option['max_quantity'].toString()) ?? 1;
-    }
-    if (maxQuantityValue < 1) maxQuantityValue = 1;
-
-    final description = option['description']?.toString();
-    final imageUrl = option['image_url']?.toString();
-
-    // Parser les allergènes
-    List<String>? allergens;
-    final rawAllergens = option['allergens'];
-    if (rawAllergens is List && rawAllergens.isNotEmpty) {
-      allergens = rawAllergens
-          .map((e) => e.toString())
-          .where((e) => e.isNotEmpty)
-          .toList();
-    } else if (rawAllergens is String && rawAllergens.isNotEmpty) {
-      allergens = rawAllergens
-          .split(',')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-    }
-
-    return CustomizationOption(
-      id: id,
-      name: name,
-      category: category,
-      priceModifier: priceModifier,
-      isDefault: isDefaultValue == true,
-      isRequired: isRequiredValue == true,
-      maxQuantity: maxQuantityValue,
-      description: description,
-      imageUrl: imageUrl,
-      allergens: allergens,
     );
   }
 
@@ -225,6 +155,27 @@ class CategoryConstraint {
   });
 }
 
+/// Où en est la lecture des options d'un article.
+///
+/// Les quatre situations rendaient auparavant la même chose — une liste vide —
+/// et l'écran ne pouvait donc pas les distinguer.
+enum EtatDesOptions {
+  /// Jamais demandé : la fiche n'a pas encore été ouverte.
+  aDemander,
+
+  /// Appel en cours.
+  enLecture,
+
+  /// Le serveur a répondu : cet article n'a rien à personnaliser.
+  sansOption,
+
+  /// Le serveur a répondu avec des groupes d'options.
+  avecOptions,
+
+  /// L'appel a échoué. Voir [CustomizationService.erreurDesOptions].
+  enErreur,
+}
+
 class CustomizationService extends ChangeNotifier {
   static final CustomizationService _instance =
       CustomizationService._internal();
@@ -233,619 +184,83 @@ class CustomizationService extends ChangeNotifier {
 
 
   final Map<String, List<CustomizationOption>> _itemOptions = {};
-  Map<String, List<CustomizationOption>> _defaultOptionsByName = {};
   final Map<String, ItemCustomization> _currentCustomizations = {};
-  
-  // ✅ Centralisation des contraintes par catégorie
-  final Map<String, CategoryConstraint> _categoryConstraints = {
-    // Gâteaux - Choix unique requis
-    'shape': const CategoryConstraint(category: 'shape', isSingleChoice: true, isRequired: true),
-    'size': const CategoryConstraint(category: 'size', isSingleChoice: true, isRequired: true),
-    'flavor': const CategoryConstraint(category: 'flavor', isSingleChoice: true, isRequired: true),
-    'tiers': const CategoryConstraint(category: 'tiers', isSingleChoice: true, isRequired: true),
-    'icing': const CategoryConstraint(category: 'icing', isSingleChoice: true, isRequired: true),
-    'dietary': const CategoryConstraint(category: 'dietary', isSingleChoice: true, isRequired: true),
-    'color': const CategoryConstraint(category: 'color', isSingleChoice: true),
-    'texture': const CategoryConstraint(category: 'texture', isSingleChoice: true),
-    
-    // Gâteaux - Choix multiples limités
-    'filling': const CategoryConstraint(category: 'filling', maxSelections: 2),
-    'decoration': const CategoryConstraint(category: 'decoration', maxSelections: 5), // Augmenté à 5
-    
-    // Burgers/Pizzas - Standards
-    'cooking': const CategoryConstraint(category: 'cooking', isSingleChoice: true, isRequired: true),
-    'sauce': const CategoryConstraint(category: 'sauce', maxSelections: 2),
-    'extra': const CategoryConstraint(category: 'extra', maxSelections: 5),
-    'ingredient': const CategoryConstraint(category: 'ingredient', maxSelections: 5),
-  };
+
+  /// Où en est la lecture des options de chaque article.
+  ///
+  /// Sans cet état, trois situations se ressemblaient trait pour trait — une
+  /// liste vide : « pas encore demandé », « demandé, l'article n'a aucune
+  /// option » et « demandé, le serveur n'a pas répondu ». L'écran ne pouvait
+  /// donc ni attendre, ni annoncer une absence, ni signaler une panne ; il
+  /// affichait une page sans options dans les trois cas.
+  final Map<String, EtatDesOptions> _etats = {};
+
+  /// Le message d'erreur de la dernière lecture, par article.
+  final Map<String, String> _erreurs = {};
 
   bool _isInitialized = false;
 
   bool get isInitialized => _isInitialized;
 
+  /// Rien à précharger : les options d'un article viennent de son **détail**
+  /// (`MenuItemDetailSerializer`), lu à l'ouverture de sa fiche.
+  ///
+  /// Cette méthode ne construisait plus qu'une table de démonstration ; elle ne
+  /// garde son corps vide que parce que les écrans l'attendent avant de
+  /// composer.
   Future<void> initialize() async {
     if (_isInitialized) return;
-
-    try {
-      await _loadCustomizationOptions();
-      _isInitialized = true;
-      notifyListeners();
-    } catch (e) {
-      eccore.Journal.trace('Error initializing Customization Service: $e');
-    }
+    _isInitialized = true;
+    notifyListeners();
   }
 
-  /// Plus de préchargement global des options.
+  /// Où en est la lecture des options de [menuItemId].
+  EtatDesOptions etatDesOptions(String menuItemId) =>
+      _etats[menuItemId] ?? EtatDesOptions.aDemander;
+
+  /// Pourquoi la lecture a échoué, quand elle a échoué.
+  String? erreurDesOptions(String menuItemId) => _erreurs[menuItemId];
+
+
+  /// Les options de [menuItemId], telles que le catalogue les publie.
   ///
-  /// L'ancienne version lisait d'un coup la table entière des personnalisations
-  /// de tous les articles. Le contrat Django ne porte les groupes d'options que
-  /// sur le **détail** d'un article (`MenuItemDetailSerializer`), justement
-  /// pour ne pas traîner ces lignes dans chaque liste de menu : elles sont donc
-  /// chargées à la demande, par article ouvert
-  /// ([_loadOptionsForMenuItem]).
-  Future<void> _loadCustomizationOptions() async {
-    _defaultOptionsByName = _getDefaultCustomizationOptions();
+  /// Liste vide quand l'article n'en a pas — et c'est une réponse, pas un
+  /// manque. La version précédente prenait ce vide pour une invitation : elle
+  /// se rabattait sur une table de démonstration écrite dans ce fichier,
+  /// appariée à l'article **par son nom**, avec des variantes
+  /// (`contains` dans les deux sens). Un article du catalogue nommé « Burger
+  /// Classique » — ou seulement « Burger » — héritait donc de suppléments
+  /// inventés, libellés en euros (`priceModifier: 2.0`) et affichés en francs
+  /// CFA. Aucun de ces identifiants n'existant côté serveur, la ligne partait
+  /// ensuite sans options.
+  List<CustomizationOption> _getOptionsForMenuItem(String menuItemId) {
+    return _itemOptions[menuItemId] ?? const <CustomizationOption>[];
   }
 
-  Map<String, List<CustomizationOption>> _getDefaultCustomizationOptions() {
-    return {
-      'Burger Classique': [
-        CustomizationOption(
-          id: 'size-small',
-          name: 'Petit',
-          category: 'size',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'size-medium',
-          name: 'Moyen',
-          category: 'size',
-          priceModifier: 2.0,
-        ),
-        CustomizationOption(
-          id: 'size-large',
-          name: 'Grand',
-          category: 'size',
-          priceModifier: 4.0,
-        ),
-        CustomizationOption(
-          id: 'cooking-rare',
-          name: 'Saignant',
-          category: 'cooking',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cooking-medium',
-          name: 'À point',
-          category: 'cooking',
-        ),
-        CustomizationOption(
-          id: 'cooking-well',
-          name: 'Bien cuit',
-          category: 'cooking',
-        ),
-        CustomizationOption(
-          id: 'extra-cheese',
-          name: 'Fromage supplémentaire',
-          category: 'extra',
-          priceModifier: 1.5,
-        ),
-        CustomizationOption(
-          id: 'extra-bacon',
-          name: 'Bacon supplémentaire',
-          category: 'extra',
-          priceModifier: 2.0,
-        ),
-        CustomizationOption(
-          id: 'sauce-ketchup',
-          name: 'Ketchup',
-          category: 'sauce',
-        ),
-        CustomizationOption(
-          id: 'sauce-mayo',
-          name: 'Mayonnaise',
-          category: 'sauce',
-        ),
-        CustomizationOption(
-          id: 'sauce-mustard',
-          name: 'Moutarde',
-          category: 'sauce',
-        ),
-      ],
-      'Gâteau personnalisé': [
-        // Formes
-        CustomizationOption(
-          id: 'cake-shape-round',
-          name: 'Rond',
-          category: 'shape',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cake-shape-square',
-          name: 'Carré',
-          category: 'shape',
-          priceModifier: 2000.0,
-        ),
-        CustomizationOption(
-          id: 'cake-shape-heart',
-          name: 'Cœur',
-          category: 'shape',
-          priceModifier: 3500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-shape-rectangle',
-          name: 'Rectangle',
-          category: 'shape',
-          priceModifier: 2500.0,
-        ),
-
-        // Tailles
-        CustomizationOption(
-          id: 'cake-size-small',
-          name: 'Petit (6 personnes)',
-          category: 'size',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cake-size-medium',
-          name: 'Moyen (10 personnes)',
-          category: 'size',
-          priceModifier: 6000.0,
-        ),
-        CustomizationOption(
-          id: 'cake-size-large',
-          name: 'Grand (16 personnes)',
-          category: 'size',
-          priceModifier: 11000.0,
-        ),
-
-        // Saveurs
-        CustomizationOption(
-          id: 'cake-flavor-vanilla',
-          name: 'Vanille',
-          category: 'flavor',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cake-flavor-chocolate',
-          name: 'Chocolat',
-          category: 'flavor',
-          priceModifier: 2000.0,
-        ),
-        CustomizationOption(
-          id: 'cake-flavor-strawberry',
-          name: 'Fraise',
-          category: 'flavor',
-          priceModifier: 2500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-flavor-mix',
-          name: 'Vanille & Chocolat',
-          category: 'flavor',
-          priceModifier: 3000.0,
-        ),
-
-        // Étages
-        CustomizationOption(
-          id: 'cake-tier-1',
-          name: '1 étage (standard)',
-          category: 'tiers',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cake-tier-2',
-          name: '2 étages (+12 parts)',
-          category: 'tiers',
-          priceModifier: 7000.0,
-        ),
-        CustomizationOption(
-          id: 'cake-tier-3',
-          name: '3 étages (+20 parts)',
-          category: 'tiers',
-          priceModifier: 12000.0,
-        ),
-
-        // Glaçages / Icing
-        CustomizationOption(
-          id: 'cake-icing-buttercream',
-          name: 'Crème au beurre vanille',
-          category: 'icing',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cake-icing-creamcheese',
-          name: 'Cream cheese citron',
-          category: 'icing',
-          priceModifier: 2500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-icing-ganache',
-          name: 'Ganache chocolat noir',
-          category: 'icing',
-          priceModifier: 3000.0,
-        ),
-
-        // Régime / Allergies
-        CustomizationOption(
-          id: 'cake-diet-standard',
-          name: 'Classique',
-          category: 'dietary',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cake-diet-no-nuts',
-          name: 'Sans fruits à coque',
-          category: 'dietary',
-          priceModifier: 1500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-diet-gluten-free',
-          name: 'Sans gluten',
-          category: 'dietary',
-          priceModifier: 3500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-diet-lactose-free',
-          name: 'Sans lactose',
-          category: 'dietary',
-          priceModifier: 3000.0,
-        ),
-
-        // Garnitures (multi)
-        CustomizationOption(
-          id: 'cake-filling-cream',
-          name: 'Crème fouettée',
-          category: 'filling',
-          priceModifier: 1500.0,
-          maxQuantity: 2,
-        ),
-        CustomizationOption(
-          id: 'cake-filling-ganache',
-          name: 'Ganache chocolat',
-          category: 'filling',
-          priceModifier: 2000.0,
-          maxQuantity: 2,
-        ),
-        CustomizationOption(
-          id: 'cake-filling-fruits',
-          name: 'Compotée de fruits rouges',
-          category: 'filling',
-          priceModifier: 2500.0,
-          maxQuantity: 2,
-        ),
-
-        // Décorations (multi)
-        CustomizationOption(
-          id: 'cake-deco-fruits',
-          name: 'Fruits frais',
-          category: 'decoration',
-          priceModifier: 2000.0,
-          maxQuantity: 3,
-        ),
-        CustomizationOption(
-          id: 'cake-deco-chocolate',
-          name: 'Copeaux de chocolat',
-          category: 'decoration',
-          priceModifier: 1500.0,
-          maxQuantity: 3,
-        ),
-        CustomizationOption(
-          id: 'cake-deco-macarons',
-          name: 'Macarons assortis',
-          category: 'decoration',
-          priceModifier: 3000.0,
-          maxQuantity: 3,
-        ),
-        CustomizationOption(
-          id: 'cake-deco-photo',
-          name: 'Photo comestible',
-          category: 'decoration',
-          priceModifier: 4000.0,
-        ),
-        CustomizationOption(
-          id: 'cake-deco-message',
-          name: 'Message en sucre',
-          category: 'decoration',
-          priceModifier: 1000.0,
-        ),
-        
-        // 🎨 NOUVELLES OPTIONS AVANCÉES - Couleurs
-        CustomizationOption(
-          id: 'cake-color-white',
-          name: 'Blanc',
-          category: 'color',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cake-color-pink',
-          name: 'Rose',
-          category: 'color',
-          priceModifier: 1500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-color-blue',
-          name: 'Bleu',
-          category: 'color',
-          priceModifier: 1500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-color-purple',
-          name: 'Violet',
-          category: 'color',
-          priceModifier: 1500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-color-gradient',
-          name: 'Dégradé personnalisé',
-          category: 'color',
-          priceModifier: 3000.0,
-        ),
-        
-        // 🎨 Textures de glaçage
-        CustomizationOption(
-          id: 'cake-texture-smooth',
-          name: 'Lisse',
-          category: 'texture',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cake-texture-rough',
-          name: 'Rustique',
-          category: 'texture',
-          priceModifier: 1000.0,
-        ),
-        CustomizationOption(
-          id: 'cake-texture-ombré',
-          name: 'Ombré',
-          category: 'texture',
-          priceModifier: 2500.0,
-        ),
-        CustomizationOption(
-          id: 'cake-texture-marble',
-          name: 'Marbré',
-          category: 'texture',
-          priceModifier: 2000.0,
-        ),
-        
-        // 🎨 Décorations avancées
-        CustomizationOption(
-          id: 'cake-deco-flowers',
-          name: 'Fleurs comestibles',
-          category: 'decoration',
-          priceModifier: 3500.0,
-          maxQuantity: 3,
-        ),
-        CustomizationOption(
-          id: 'cake-deco-fondant',
-          name: 'Pâte à sucre',
-          category: 'decoration',
-          priceModifier: 4000.0,
-          maxQuantity: 3,
-        ),
-        CustomizationOption(
-          id: 'cake-deco-edible-glitter',
-          name: 'Paillettes comestibles',
-          category: 'decoration',
-          priceModifier: 2000.0,
-          maxQuantity: 3,
-        ),
-        CustomizationOption(
-          id: 'cake-deco-gold-leaf',
-          name: 'Feuille d\'or',
-          category: 'decoration',
-          priceModifier: 5000.0,
-          maxQuantity: 3,
-        ),
-        CustomizationOption(
-          id: 'cake-deco-3d-figures',
-          name: 'Figurines 3D',
-          category: 'decoration',
-          priceModifier: 6000.0,
-          maxQuantity: 3,
-        ),
-        
-        // 🎨 Garnitures spéciales
-        CustomizationOption(
-          id: 'cake-filling-nutella',
-          name: 'Nutella',
-          category: 'filling',
-          priceModifier: 3000.0,
-          maxQuantity: 2,
-        ),
-        CustomizationOption(
-          id: 'cake-filling-caramel',
-          name: 'Caramel au beurre salé',
-          category: 'filling',
-          priceModifier: 2500.0,
-          maxQuantity: 2,
-        ),
-        CustomizationOption(
-          id: 'cake-filling-lemon-curd',
-          name: 'Crème au citron',
-          category: 'filling',
-          priceModifier: 2000.0,
-          maxQuantity: 2,
-        ),
-      ],
-      'Burger Bacon': [
-        CustomizationOption(
-          id: 'size-small',
-          name: 'Petit',
-          category: 'size',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'size-medium',
-          name: 'Moyen',
-          category: 'size',
-          priceModifier: 2.0,
-        ),
-        CustomizationOption(
-          id: 'size-large',
-          name: 'Grand',
-          category: 'size',
-          priceModifier: 4.0,
-        ),
-        CustomizationOption(
-          id: 'cooking-rare',
-          name: 'Saignant',
-          category: 'cooking',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'cooking-medium',
-          name: 'À point',
-          category: 'cooking',
-        ),
-        CustomizationOption(
-          id: 'cooking-well',
-          name: 'Bien cuit',
-          category: 'cooking',
-        ),
-        CustomizationOption(
-          id: 'extra-cheese',
-          name: 'Fromage supplémentaire',
-          category: 'extra',
-          priceModifier: 1.5,
-        ),
-        CustomizationOption(
-          id: 'extra-bacon',
-          name: 'Bacon supplémentaire',
-          category: 'extra',
-          priceModifier: 2.0,
-        ),
-        CustomizationOption(
-          id: 'sauce-bbq',
-          name: 'Sauce BBQ',
-          category: 'sauce',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'sauce-ketchup',
-          name: 'Ketchup',
-          category: 'sauce',
-        ),
-      ],
-      'Pizza Margherita': [
-        CustomizationOption(
-          id: 'size-small',
-          name: 'Petite (25cm)',
-          category: 'size',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'size-medium',
-          name: 'Moyenne (30cm)',
-          category: 'size',
-          priceModifier: 3.0,
-        ),
-        CustomizationOption(
-          id: 'size-large',
-          name: 'Grande (35cm)',
-          category: 'size',
-          priceModifier: 6.0,
-        ),
-        CustomizationOption(
-          id: 'extra-mozzarella',
-          name: 'Mozzarella supplémentaire',
-          category: 'extra',
-          priceModifier: 2.0,
-        ),
-        CustomizationOption(
-          id: 'extra-basil',
-          name: 'Basilic frais',
-          category: 'extra',
-          priceModifier: 1.0,
-        ),
-      ],
-      'Pizza Pepperoni': [
-        CustomizationOption(
-          id: 'size-small',
-          name: 'Petite (25cm)',
-          category: 'size',
-          isDefault: true,
-        ),
-        CustomizationOption(
-          id: 'size-medium',
-          name: 'Moyenne (30cm)',
-          category: 'size',
-          priceModifier: 3.0,
-        ),
-        CustomizationOption(
-          id: 'size-large',
-          name: 'Grande (35cm)',
-          category: 'size',
-          priceModifier: 6.0,
-        ),
-        CustomizationOption(
-          id: 'extra-pepperoni',
-          name: 'Pepperoni supplémentaire',
-          category: 'extra',
-          priceModifier: 2.5,
-        ),
-        CustomizationOption(
-          id: 'extra-cheese',
-          name: 'Fromage supplémentaire',
-          category: 'extra',
-          priceModifier: 1.5,
-        ),
-      ],
-    };
-  }
-
-  List<CustomizationOption> _getOptionsForMenuItem(
-    String menuItemId, {
-    String? fallbackName,
-  }) {
-    // D'abord, essayer de charger depuis la base de données si pas encore chargé
-    final stored = _itemOptions[menuItemId];
-    if (stored != null && stored.isNotEmpty) {
-      eccore.Journal.trace(
-          '✅ Options trouvées en cache pour $menuItemId: ${stored.length} options',);
-      return stored;
-    }
-
-    // Fallback sur les options par défaut basées sur le nom (vérifier plusieurs variantes)
-    if (fallbackName != null) {
-      // Essayer le nom exact
-      var defaults = _defaultOptionsByName[fallbackName];
-
-      // Si pas trouvé, essayer des variantes
-      if (defaults == null) {
-        final lowerName = fallbackName.toLowerCase();
-        for (final entry in _defaultOptionsByName.entries) {
-          if (entry.key.toLowerCase() == lowerName ||
-              lowerName.contains(entry.key.toLowerCase()) ||
-              entry.key.toLowerCase().contains(lowerName)) {
-            defaults = entry.value;
-            eccore.Journal.trace(
-                '✅ Options par défaut trouvées pour "$fallbackName" via variante "${entry.key}"',);
-            break;
-          }
-        }
-      }
-
-      if (defaults != null && defaults.isNotEmpty) {
-        final cloned = defaults.map((opt) => opt.copyWith()).toList();
-        _itemOptions[menuItemId] = cloned;
-        eccore.Journal.trace(
-            '✅ ${cloned.length} options par défaut chargées pour $menuItemId',);
-        return cloned;
-      }
-    }
-
-    eccore.Journal.trace(
-        '⚠️ Aucune option trouvée pour $menuItemId (fallback: $fallbackName)',);
-    _itemOptions.putIfAbsent(menuItemId, () => []);
-    return _itemOptions[menuItemId]!;
-  }
-
-  /// Charge les options de personnalisation pour un menu item spécifique
+  /// Lit au catalogue les groupes d'options de [menuItemId].
+  ///
+  /// Trois issues, et elles restent distinctes :
+  ///
+  /// * le serveur répond avec des groupes → [EtatDesOptions.avecOptions] ;
+  /// * le serveur répond sans groupe → [EtatDesOptions.sansOption]. L'article
+  ///   n'a rien à personnaliser, ce qui est une réponse valide : la version
+  ///   précédente n'enregistrait rien dans ce cas — `if (options.isNotEmpty)` —
+  ///   si bien que chaque ouverture de la fiche relançait l'appel, et que
+  ///   l'écran ne pouvait pas distinguer ce silence d'un chargement en cours ;
+  /// * l'appel échoue → [EtatDesOptions.enErreur], et le motif est conservé.
+  ///   Il était auparavant tracé puis oublié, et la fiche se composait comme si
+  ///   l'article n'avait aucune option — donc s'ajoutait au panier sans les
+  ///   choix que le serveur exige, pour être refusée en 409.
   Future<void> _loadOptionsForMenuItem(String menuItemId) async {
-    if (_itemOptions.containsKey(menuItemId) &&
-        _itemOptions[menuItemId]!.isNotEmpty) {
-      return; // Déjà chargé
+    final etat = _etats[menuItemId];
+    if (etat == EtatDesOptions.avecOptions ||
+        etat == EtatDesOptions.sansOption) {
+      return; // Déjà lu, et la réponse est connue.
     }
+
+    _etats[menuItemId] = EtatDesOptions.enLecture;
+    _erreurs.remove(menuItemId);
+    notifyListeners();
 
     try {
       final item = await eccore.CatalogRepository(apiClient: apiClient)
@@ -857,45 +272,67 @@ class CustomizationService extends ChangeNotifier {
             if (option.isAvailable) CustomizationOption.fromRemote(option, group),
       ];
 
-      if (options.isNotEmpty) {
-        _itemOptions[menuItemId] = options;
-        eccore.Journal.trace(
-            '✅ Loaded ${options.length} customization options for menu item $menuItemId',);
-        notifyListeners();
-      }
+      _itemOptions[menuItemId] = options;
+      _etats[menuItemId] = options.isEmpty
+          ? EtatDesOptions.sansOption
+          : EtatDesOptions.avecOptions;
+      eccore.Journal.trace(
+          '✅ ${options.length} option(s) de personnalisation pour $menuItemId',);
     } catch (e) {
-      eccore.Journal.trace('⚠️ Error loading customization options for $menuItemId: $e');
+      // Pas de repli : une erreur réseau n'est pas un article sans option, et
+      // la confondre avec elle laissait composer une ligne que le serveur
+      // refuse. L'écran a de quoi le dire et proposer de réessayer.
+      _etats[menuItemId] = EtatDesOptions.enErreur;
+      _erreurs[menuItemId] =
+          'Les options de ce plat n’ont pas pu être chargées.';
+      eccore.Journal.trace('⚠️ Options de $menuItemId illisibles : $e');
     }
+
+    notifyListeners();
   }
 
-  List<CustomizationOption> getOptionsForMenuItem(
-    String menuItemId, {
-    String? fallbackName,
-  }) {
-    return _getOptionsForMenuItem(menuItemId, fallbackName: fallbackName);
+  /// Relit les options d'un article après un échec.
+  Future<void> rechargerLesOptions(String menuItemId) async {
+    _etats.remove(menuItemId);
+    _itemOptions.remove(menuItemId);
+    await _loadOptionsForMenuItem(menuItemId);
+  }
+
+  List<CustomizationOption> getOptionsForMenuItem(String menuItemId) {
+    return _getOptionsForMenuItem(menuItemId);
   }
 
   /// Installe les options d'un article sans passer par le réseau.
   ///
   /// Le service est un singleton dont les options viennent du détail d'un
-  /// article : sans ce point d'entrée, la règle qui distingue une option du
-  /// catalogue d'une option de démonstration ne serait vérifiable qu'en
-  /// lançant l'application.
+  /// article : sans ce point d'entrée, les règles de choix et de chiffrage ne
+  /// seraient vérifiables qu'en lançant l'application.
   @visibleForTesting
   void seedOptionsForTest(
     String menuItemId,
     List<CustomizationOption> options,
   ) {
     _itemOptions[menuItemId] = options;
+    _etats[menuItemId] = options.isEmpty
+        ? EtatDesOptions.sansOption
+        : EtatDesOptions.avecOptions;
+  }
+
+  /// Remet le service à neuf entre deux tests — le singleton garde sinon les
+  /// options et les états de l'essai précédent.
+  @visibleForTesting
+  void resetForTest() {
+    _itemOptions.clear();
+    _etats.clear();
+    _erreurs.clear();
+    _currentCustomizations.clear();
   }
 
   // Get options by category for an item
   Map<String, List<CustomizationOption>> getOptionsByCategory(
-    String menuItemId, {
-    String? fallbackName,
-  }) {
-    final allOptions =
-        getOptionsForMenuItem(menuItemId, fallbackName: fallbackName);
+    String menuItemId,
+  ) {
+    final allOptions = getOptionsForMenuItem(menuItemId);
     final Map<String, List<CustomizationOption>> categorized = {};
 
     for (final option in allOptions) {
@@ -923,7 +360,7 @@ class CustomizationService extends ChangeNotifier {
     }
 
     final options =
-        _getOptionsForMenuItem(menuItemId, fallbackName: menuItemName);
+        _getOptionsForMenuItem(menuItemId);
 
     eccore.Journal.trace(
         '🎂 Start customization pour $menuItemName ($menuItemId): ${options.length} options disponibles',);
@@ -939,11 +376,7 @@ class CustomizationService extends ChangeNotifier {
     for (final option in options) {
       if (option.isDefault) {
         final category = option.category;
-        final constraint = constraintFor(
-          menuItemId,
-          category,
-          fallbackName: menuItemName,
-        );
+        final constraint = constraintFor(menuItemId, category);
 
         if (constraint.isSingleChoice) {
           defaultSelections[category] = [option.id];
@@ -970,6 +403,9 @@ class CustomizationService extends ChangeNotifier {
       selections: defaultSelections,
       quantities: defaultQuantities,
     );
+    // Une option retenue d'office peut porter un supplément : le total doit
+    // le montrer dès l'ouverture, pas seulement après la première touche.
+    _rechiffrer(sessionId);
 
     notifyListeners();
   }
@@ -985,11 +421,18 @@ class CustomizationService extends ChangeNotifier {
     final customization = _currentCustomizations[sessionId];
     if (customization == null) return;
 
-    final Map<String, List<String>> newSelections =
-        Map.from(customization.selections);
+    final Map<String, List<String>> newSelections = {
+      for (final entry in customization.selections.entries)
+        entry.key: List<String>.from(entry.value),
+    };
 
     if (isSelected) {
-      newSelections[category] = (newSelections[category] ?? [])..add(optionId);
+      // `..add` sans garde retenait deux fois la même option — comptée deux
+      // fois dans le total, et envoyée en double au serveur.
+      final retenues = newSelections[category] ?? <String>[];
+      if (!retenues.contains(optionId)) {
+        newSelections[category] = retenues..add(optionId);
+      }
     } else {
       newSelections[category]?.remove(optionId);
       if (newSelections[category]?.isEmpty == true) {
@@ -999,6 +442,7 @@ class CustomizationService extends ChangeNotifier {
 
     _currentCustomizations[sessionId] =
         customization.copyWith(selections: newSelections);
+    _rechiffrer(sessionId);
     notifyListeners();
   }
 
@@ -1017,7 +461,25 @@ class CustomizationService extends ChangeNotifier {
 
     _currentCustomizations[sessionId] =
         customization.copyWith(quantities: newQuantities);
+    _rechiffrer(sessionId);
     notifyListeners();
+  }
+
+  /// Reporte sur la session le supplément de ses options.
+  ///
+  /// [ItemCustomization.totalPriceModifier] n'était renseigné que par
+  /// [finishCustomization], qui referme la session dans le même geste : le
+  /// champ valait donc **zéro pendant toute la composition**. La barre d'ajout
+  /// le lisait pour annoncer son total, et affichait le prix nu du plat quelle
+  /// que soit la taille, la cuisson ou les suppléments retenus — jusqu'au
+  /// panier, où le montant changeait sans explication.
+  void _rechiffrer(String sessionId) {
+    final customization = _currentCustomizations[sessionId];
+    if (customization == null) return;
+
+    _currentCustomizations[sessionId] = customization.copyWith(
+      totalPriceModifier: calculatePriceModifier(sessionId),
+    );
   }
 
   // Update special instructions
@@ -1041,7 +503,8 @@ class CustomizationService extends ChangeNotifier {
     for (final entry in customization.selections.entries) {
       for (final optionId in entry.value) {
         final quantity = customization.quantities[optionId] ?? 1;
-        final option = _findOptionById(optionId);
+        final option =
+            _findOptionById(customization.menuItemId, optionId);
         if (option != null) {
           total += option.priceModifier * quantity;
         }
@@ -1051,14 +514,16 @@ class CustomizationService extends ChangeNotifier {
     return total;
   }
 
-  // Find option by ID
-  CustomizationOption? _findOptionById(String optionId) {
-    for (final options in _itemOptions.values) {
-      for (final option in options) {
-        if (option.id == optionId) {
-          return option;
-        }
-      }
+  /// L'option [optionId] **parmi celles de [menuItemId]**.
+  ///
+  /// La recherche balayait auparavant `_itemOptions.values` — les options de
+  /// tous les articles ouverts depuis le lancement, ce service étant un
+  /// singleton — et rendait la première correspondance trouvée. Deux articles
+  /// qui partagent un identifiant d'option sans partager son prix se
+  /// contaminaient donc l'un l'autre, au tarif du premier consulté.
+  CustomizationOption? _findOptionById(String menuItemId, String optionId) {
+    for (final option in _itemOptions[menuItemId] ?? const <CustomizationOption>[]) {
+      if (option.id == optionId) return option;
     }
     return null;
   }
@@ -1075,33 +540,22 @@ class CustomizationService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Get constraint for a category
-  CategoryConstraint getCategoryConstraint(String category) {
-    return _categoryConstraints[category] ??
-        CategoryConstraint(category: category);
-  }
-
   /// Contrainte applicable à une catégorie **de cet article**.
   ///
-  /// Quand les options viennent du catalogue, la règle vient avec elles :
+  /// La règle vient du groupe qui porte les options :
   /// `OptionGroup.min_select`/`max_select` sont saisis par l'exploitation, et
-  /// c'est ce couple que le serveur revalide (`validate_selection`). S'en
-  /// remettre à [_categoryConstraints] serait ici doublement faux — cette
-  /// table est indexée par des étiquettes locales (`shape`, `size`) quand le
-  /// serveur groupe par nom de groupe (« Forme », « Taille »), si bien
-  /// qu'aucune n'était trouvée : plus rien n'était requis ni plafonné côté
-  /// app, et l'écart n'apparaissait qu'au refus du serveur.
+  /// c'est ce couple que le serveur revalide (`validate_selection`).
   ///
-  /// La table locale reste la règle des options de démonstration, qui n'ont
-  /// pas de groupe pour la porter.
-  CategoryConstraint constraintFor(
-    String menuItemId,
-    String category, {
-    String? fallbackName,
-  }) {
+  /// Une table locale doublait cette règle pour les options de démonstration,
+  /// indexée par des étiquettes inventées (`shape`, `size`) quand le serveur
+  /// groupe par nom de groupe (« Forme », « Taille ») : elle ne s'appliquait
+  /// donc jamais à un vrai article, et rien ne l'y aurait rendue juste. Elle a
+  /// disparu avec les options qu'elle décrivait. Reste la contrainte neutre —
+  /// aucun minimum, aucun plafond — pour une catégorie dont aucune option n'est
+  /// connue, cas qui ne survit qu'au temps du chargement.
+  CategoryConstraint constraintFor(String menuItemId, String category) {
     CustomizationOption? remote;
-    for (final option
-        in getOptionsForMenuItem(menuItemId, fallbackName: fallbackName)) {
+    for (final option in getOptionsForMenuItem(menuItemId)) {
       if (option.category == category && option.isRemote) {
         remote = option;
         break;
@@ -1109,7 +563,7 @@ class CustomizationService extends ChangeNotifier {
     }
 
     if (remote == null) {
-      return getCategoryConstraint(category);
+      return CategoryConstraint(category: category);
     }
 
     return CategoryConstraint(
@@ -1124,11 +578,36 @@ class CustomizationService extends ChangeNotifier {
     );
   }
 
+  /// Ce que la ligne du panier doit **montrer** : par groupe, les libellés
+  /// retenus.
+  ///
+  /// L'écran de personnalisation recopiait jusqu'ici ses `selections` telles
+  /// quelles — c'est-à-dire des **identifiants**. Le panier affichait donc
+  /// « Cuisson du steak: [3fa85f64-5717-4562-b3fc-2c963f66afa6] » à un client
+  /// qui avait choisi « Bien cuit ». Les identifiants continuent de partir de
+  /// leur côté, par [selectedOptionIds] : ce sont deux usages distincts d'une
+  /// même sélection, et les confondre donnait un panier illisible.
+  Map<String, String> libellesRetenus(String sessionId) {
+    final customization = _currentCustomizations[sessionId];
+    if (customization == null) return const {};
+
+    final libelles = <String, String>{};
+    for (final entry in customization.selections.entries) {
+      final noms = <String>[];
+      for (final optionId in entry.value) {
+        final option = _findOptionById(customization.menuItemId, optionId);
+        if (option != null) noms.add(option.name);
+      }
+      if (noms.isNotEmpty) libelles[entry.key] = noms.join(', ');
+    }
+    return libelles;
+  }
+
   /// Identifiants des options retenues, tels que le panier doit les envoyer.
   ///
-  /// Vide tant que les options ne viennent pas du catalogue : un identifiant
-  /// de démonstration (`cake-shape-round`) n'existe pas côté serveur, et
-  /// l'envoyer ferait refuser toute la ligne.
+  /// Seules les options du catalogue en sortent : un identifiant fabriqué
+  /// hors catalogue n'existe pas côté serveur, et l'envoyer ferait refuser
+  /// toute la ligne.
   List<String> selectedOptionIds(String sessionId) {
     final customization = _currentCustomizations[sessionId];
     if (customization == null) return const [];
@@ -1136,7 +615,8 @@ class CustomizationService extends ChangeNotifier {
     final ids = <String>[];
     for (final selected in customization.selections.values) {
       for (final optionId in selected) {
-        final option = _findOptionById(optionId);
+        final option =
+            _findOptionById(customization.menuItemId, optionId);
         if (option != null && option.isRemote) {
           ids.add(option.id);
         }
@@ -1147,9 +627,8 @@ class CustomizationService extends ChangeNotifier {
 
   /// Vrai quand cet article a de vraies options de catalogue — donc quand une
   /// personnalisation peut être commandée telle qu'elle est composée.
-  bool hasRemoteOptions(String menuItemId, {String? fallbackName}) {
-    return getOptionsForMenuItem(menuItemId, fallbackName: fallbackName)
-        .any((option) => option.isRemote);
+  bool hasRemoteOptions(String menuItemId) {
+    return getOptionsForMenuItem(menuItemId).any((option) => option.isRemote);
   }
 
   /// Vrai quand le catalogue impose un choix sur cet article — une cuisson,
@@ -1159,20 +638,22 @@ class CustomizationService extends ChangeNotifier {
   /// pas ses groupes d'options, si bien qu'un « + » posé sur une carte ne peut
   /// pas savoir, sans cet appel, qu'il compose une ligne que
   /// `POST /carts/{slug}/lines/` refusera en 409.
-  Future<bool> exigeUnChoix(String menuItemId, {String? fallbackName}) async {
+  Future<bool> exigeUnChoix(String menuItemId) async {
     if (!_isInitialized) {
       await initialize();
     }
     if (_isInitialized) {
       await _loadOptionsForMenuItem(menuItemId);
     }
-    return _getOptionsForMenuItem(menuItemId, fallbackName: fallbackName)
+    return _getOptionsForMenuItem(menuItemId)
         .any((option) => option.isRemote && option.minSelections > 0);
   }
 
   // Validate customization for an item
-  Map<String, dynamic> validateCustomization(
-      String sessionId, String menuItemName,) {
+  /// La session porte déjà son article : le nom passé en second argument ne
+  /// servait qu'à retrouver les options de démonstration par appariement de
+  /// nom, et n'a plus d'objet.
+  Map<String, dynamic> validateCustomization(String sessionId) {
     final customization = _currentCustomizations[sessionId];
     if (customization == null) {
       return {
@@ -1182,10 +663,8 @@ class CustomizationService extends ChangeNotifier {
     }
 
     final List<String> errors = [];
-    final List<CustomizationOption> availableOptions = getOptionsForMenuItem(
-      customization.menuItemId,
-      fallbackName: menuItemName,
-    );
+    final List<CustomizationOption> availableOptions =
+        getOptionsForMenuItem(customization.menuItemId);
 
     // Group options by category
     final Map<String, List<CustomizationOption>> optionsByCategory = {};
@@ -1200,11 +679,8 @@ class CustomizationService extends ChangeNotifier {
     // découvrir au moment d'ajouter au panier ce qu'il aurait pu savoir en
     // composant.
     for (final category in optionsByCategory.keys) {
-      final constraint = constraintFor(
-        customization.menuItemId,
-        category,
-        fallbackName: menuItemName,
-      );
+      final constraint =
+          constraintFor(customization.menuItemId, category);
       final selectedOptions = customization.selections[category] ?? [];
       final selectedCount = selectedOptions.length;
 
@@ -1213,7 +689,7 @@ class CustomizationService extends ChangeNotifier {
         // Double vérification : est-ce que cette catégorie a vraiment des options disponibles ?
         if (optionsByCategory[category]!.isNotEmpty) {
            errors.add(
-              'Veuillez sélectionner une option pour ${_translateCategory(category)}',);
+              'Veuillez sélectionner une option pour « $category »',);
         }
       }
 
@@ -1225,19 +701,19 @@ class CustomizationService extends ChangeNotifier {
           constraint.isSingleChoice ? 1 : constraint.maxSelections;
       if (selectedCount > effectiveMax) {
         errors.add(
-            'Maximum $effectiveMax choix pour ${_translateCategory(category)}',);
+            'Maximum $effectiveMax choix pour « $category »',);
       }
 
       // Vérifier min selections (si > 0)
       if (selectedCount < constraint.minSelections) {
          errors.add(
-            'Veuillez sélectionner au moins ${constraint.minSelections} option(s) pour ${_translateCategory(category)}',);
+            'Veuillez sélectionner au moins ${constraint.minSelections} option(s) pour « $category »',);
       }
     }
 
     // Validate quantities
     for (final entry in customization.quantities.entries) {
-      final option = _findOptionById(entry.key);
+      final option = _findOptionById(customization.menuItemId, entry.key);
       if (option != null && entry.value > option.maxQuantity) {
         errors.add(
             'Quantité maximale dépassée pour ${option.name} (max: ${option.maxQuantity})',);
@@ -1276,11 +752,12 @@ class CustomizationService extends ChangeNotifier {
 
     // Add selected options
     for (final entry in customization.selections.entries) {
-      final String category = _translateCategory(entry.key);
+      final String category = entry.key;
       final List<String> optionNames = [];
 
       for (final optionId in entry.value) {
-        final option = _findOptionById(optionId);
+        final option =
+            _findOptionById(customization.menuItemId, optionId);
         if (option != null) {
           final int quantity = customization.quantities[optionId] ?? 1;
           String optionText = option.name;
@@ -1308,41 +785,4 @@ class CustomizationService extends ChangeNotifier {
     return summaryParts.join('\n');
   }
 
-  // Translate category names to French
-  String _translateCategory(String category) {
-    switch (category) {
-      case 'size':
-        return 'Taille';
-      case 'cooking':
-        return 'Cuisson';
-      case 'ingredient':
-        return 'Ingrédients';
-      case 'sauce':
-        return 'Sauces';
-      case 'extra':
-        return 'Extras';
-      case 'shape':
-        return 'Forme';
-      case 'flavor':
-        return 'Saveur';
-      case 'filling':
-        return 'Garniture';
-      case 'decoration':
-        return 'Décoration';
-      case 'color':
-        return 'Couleur';
-      case 'texture':
-        return 'Texture';
-      case 'tiers':
-        return 'Étages';
-      case 'icing':
-        return 'Glaçage';
-      case 'dietary':
-        return 'Préférence alimentaire';
-      default:
-        return category;
-    }
-  }
-
-  String translateCategory(String category) => _translateCategory(category);
 }

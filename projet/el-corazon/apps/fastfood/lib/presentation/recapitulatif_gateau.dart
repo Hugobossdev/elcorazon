@@ -54,10 +54,8 @@ class RecapitulatifGateau extends StatelessWidget {
         Provider.of<CustomizationService>(context, listen: false);
     final current =
         customizationService.getCurrentCustomization(customizationId);
-    final optionsByCategory = customizationService.getOptionsByCategory(
-      gateau.id,
-      fallbackName: gateau.name,
-    );
+    final optionsByCategory =
+        customizationService.getOptionsByCategory(gateau.id);
     final optionLookup = <String, CustomizationOption>{};
     for (final entry in optionsByCategory.entries) {
       for (final option in entry.value) {
@@ -205,7 +203,7 @@ class RecapitulatifGateau extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      service.translateCategory(categorie),
+                      categorie,
                       style: AppTypography.labelLg(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),

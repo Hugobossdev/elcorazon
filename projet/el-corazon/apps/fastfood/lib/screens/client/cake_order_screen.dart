@@ -66,35 +66,9 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
   List<eccore.MenuItem> _readyCakes = [];
   eccore.MenuItem? _customCakeItem;
 
-  /// Vrai quand [_customCakeItem] vient réellement du catalogue.
-  ///
-  /// Faux, l'article affiché est la maquette en mémoire : son identifiant
-  /// n'existe pas côté serveur, aucune commande ne peut en naître. L'écran
-  /// laisse alors composer — c'est une vitrine utile — mais refuse
-  /// explicitement l'ajout au panier, là où l'ancienne version y déposait une
-  /// ligne que la synchronisation rejetait ensuite en silence.
-  bool _customCakeIsFromCatalog = false;
-
   String? _dessertsCategoryId;
   bool _isLoading = true;
   String? _error;
-
-  /// Ordre de présentation des familles d'options, du plus structurant au plus
-  /// décoratif. Une famille absente de cette liste passe à la fin, par ordre
-  /// alphabétique — le catalogue peut donc en publier de nouvelles sans que
-  /// cet écran soit retouché.
-  static const _ordreDesFamilles = [
-    'shape',
-    'size',
-    'flavor',
-    'tiers',
-    'color',
-    'texture',
-    'icing',
-    'filling',
-    'decoration',
-    'dietary',
-  ];
 
   @override
   void initState() {
@@ -171,43 +145,36 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     }
   }
 
-  /// Retrouve l'article « Gâteau personnalisé » du catalogue, sinon en
-  /// fabrique un en mémoire.
+  /// Retrouve l'article « gâteau sur mesure » du catalogue, par son slug.
   ///
-  /// L'ancienne version le **créait dans le catalogue** quand il manquait :
-  /// écrire un article depuis l'app client n'est plus possible, et ne devrait
-  /// jamais l'avoir été — le catalogue s'écrit depuis le back-office
-  /// (`catalog/manage/items/`, permission `catalog.write`). Le repli en
-  /// mémoire, lui, existait déjà : c'est le comportement nominal désormais
-  /// tant que l'établissement n'a pas publié l'article.
+  /// Deux choses ont disparu ici.
+  ///
+  /// L'**appariement par nom** d'abord : la version précédente retenait le
+  /// premier article dont le nom contenait « personnalisé » ou « custom ».
+  /// N'importe quel autre article ainsi nommé devenait le gâteau sur mesure.
+  /// Le slug ([AppConstants.gateauSurMesureSlug]) est stable et ne dépend
+  /// d'aucun libellé.
+  ///
+  /// La **maquette en mémoire** ensuite. Quand le catalogue ne publiait pas
+  /// l'article, l'écran en fabriquait un : un `MenuItem` inventé, à un prix
+  /// inventé de 20 000 F CFA, garni d'options de démonstration. On composait
+  /// donc un gâteau entier — forme, taille, saveur, décor, créneau — avant
+  /// d'apprendre, tout en bas, que rien de tout cela n'était commandable.
+  /// L'atelier dit maintenant d'emblée qu'il n'est pas ouvert.
   Future<void> _loadCustomCakeItem(DjangoMenuRepository menuRepository) async {
     try {
-      final customCake = (await menuRepository.getMenuItems())
-          .where(
-            (item) =>
-                item.name.toLowerCase().contains('personnalisé') ||
-                item.name.toLowerCase().contains('custom'),
-          )
+      _customCakeItem = (await menuRepository.getMenuItems())
+          .where((item) => item.slug == AppConstants.gateauSurMesureSlug)
           .firstOrNull;
 
-      if (customCake != null) {
-        _customCakeItem = customCake;
-        _customCakeIsFromCatalog = true;
-        Journal.trace(
-          '✅ Gâteau personnalisé trouvé au catalogue : ${customCake.id}',
-        );
-        return;
-      }
-
-      _customCakeIsFromCatalog = false;
-      _customCakeItem = _gateauEnApercu(
-        id: 'cake-custom-${DateTime.now().millisecondsSinceEpoch}',
+      Journal.trace(
+        _customCakeItem == null
+            ? '⚠️ Gâteau sur mesure absent du catalogue : atelier fermé'
+            : '✅ Gâteau sur mesure trouvé au catalogue : ${_customCakeItem!.id}',
       );
-      Journal.trace('⚠️ Gâteau personnalisé absent du catalogue, aperçu local');
     } catch (e) {
-      Journal.trace('❌ Chargement du gâteau personnalisé: $e');
-      _customCakeIsFromCatalog = false;
-      _customCakeItem = _gateauEnApercu(id: 'cake-custom-default');
+      Journal.trace('❌ Chargement du gâteau sur mesure: $e');
+      _customCakeItem = null;
     }
   }
 
@@ -258,48 +225,10 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     }
   }
 
-  /// Le gâteau sur mesure **tel qu'on le montre** quand le catalogue ne le
-  /// publie pas.
-  ///
-  /// Ce n'est pas un article commandable : `_customCakeIsFromCatalog` reste
-  /// faux et l'écran affiche `_avisNonPublie`. Il n'existe que pour que les
-  /// options aient un support à afficher.
-  ///
-  /// Son image est **nulle**, et non l'adresse d'une photo de banque : montrer
-  /// un gâteau qui n'est pas celui de l'établissement promet ce que personne
-  /// ne livrera, et fait dépendre l'écran d'un hôte extérieur. `FoodImage`
-  /// rend à la place la plaque teintée du design system.
-  eccore.MenuItem _gateauEnApercu({required String id}) {
-    return eccore.MenuItem(
-      id: id,
-      restaurantSlug: AppConstants.restaurantSlug,
-      categorySlug: _dessertsCategoryId ?? '',
-      categoryName: 'Desserts',
-      name: 'Gâteau personnalisé',
-      slug: 'gateau-personnalise',
-      description:
-          'Composez votre gâteau idéal : forme, taille, saveur et décor.',
-      image: null,
-      price: const eccore.Money(amountMinor: 2000000, currency: 'XOF'),
-      preparationMinutes: 90,
-      allergens: const [],
-      dietaryTags: const [],
-      isAvailable: false,
-      isPopular: true,
-      vipExclusive: false,
-      ratingAverage: 0,
-      ratingCount: 0,
-      sortOrder: 0,
-    );
-  }
-
   void _applySmartPrefill(CustomizationService service, eccore.MenuItem cake) {
     final suggerees = optionsSuggereesPar(
       '${cake.name} ${cake.description}',
-      service.getOptionsForMenuItem(
-        _customCakeItem!.id,
-        fallbackName: _customCakeItem!.name,
-      ),
+      service.getOptionsForMenuItem(_customCakeItem!.id),
     );
 
     var prefilledCount = 0;
@@ -584,49 +513,71 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       );
     }
 
+    // L'établissement n'a pas publié l'article : le dire, plutôt que d'ouvrir
+    // un atelier de démonstration dont rien n'était commandable.
     if (_customCakeItem == null) {
-      return const etats.EmptyStateWidget(
-        title: 'Atelier indisponible',
-        message: 'Le gâteau sur mesure n’est pas accessible pour le moment.',
+      return etats.EmptyStateWidget(
+        title: 'Atelier fermé',
+        message: 'Le gâteau sur mesure n’est pas encore proposé à la carte. '
+            'Les gâteaux prêts à emporter restent disponibles dans l’onglet '
+            '« À la carte ».',
         icon: Icons.cake_outlined,
+        actionText: 'Voir les gâteaux',
+        onAction: () => _tabController.animateTo(0),
       );
     }
 
     return Consumer<CustomizationService>(
       builder: (context, service, child) {
-        final optionsByCategory = service.getOptionsByCategory(
-          _customCakeItem!.id,
-          fallbackName: _customCakeItem!.name,
-        );
+        final etat = service.etatDesOptions(_customCakeItem!.id);
         final customization = service.getCurrentCustomization(_customizationId);
 
-        if (optionsByCategory.isEmpty || customization == null) {
+        // Les quatre états de la lecture, distincts. Ils rendaient tous la même
+        // chose — une page de chargement sans fin — quand les options
+        // n'arrivaient pas.
+        if (etat == EtatDesOptions.aDemander ||
+            etat == EtatDesOptions.enLecture ||
+            customization == null) {
           return const etats.PageLoadingWidget(
             message: 'Chargement des options…',
           );
         }
 
-        final familles = optionsByCategory.entries.toList()
-          ..sort((a, b) {
-            final indexA = _ordreDesFamilles.indexOf(a.key);
-            final indexB = _ordreDesFamilles.indexOf(b.key);
-            if (indexA == -1 && indexB == -1) return a.key.compareTo(b.key);
-            if (indexA == -1) return 1;
-            if (indexB == -1) return -1;
-            return indexA.compareTo(indexB);
-          });
+        if (etat == EtatDesOptions.enErreur) {
+          return etats.EmptyStateWidget(
+            title: 'Options indisponibles',
+            message: service.erreurDesOptions(_customCakeItem!.id) ??
+                'Les options du gâteau n’ont pas pu être chargées.',
+            icon: Icons.cloud_off_rounded,
+            actionText: 'Réessayer',
+            onAction: () async {
+              await service.rechargerLesOptions(_customCakeItem!.id);
+              await _initializeCustomization();
+            },
+          );
+        }
+
+        if (etat == EtatDesOptions.sansOption) {
+          return const etats.EmptyStateWidget(
+            title: 'Rien à composer',
+            message: 'Le gâteau sur mesure est publié à la carte, mais aucune '
+                'option n’y est encore rattachée. Contactez la boutique pour '
+                'composer votre gâteau.',
+            icon: Icons.cake_outlined,
+          );
+        }
+
+        // L'ordre du catalogue, tel que le serveur rend les groupes. Un tri
+        // local les rangeait selon une liste de clés de démonstration
+        // (`shape`, `size`…) qu'aucun groupe réel ne porte : il retombait donc
+        // sur l'ordre alphabétique, et « Décoration » passait avant « Taille ».
+        final familles = service
+            .getOptionsByCategory(_customCakeItem!.id)
+            .entries
+            .toList();
 
         final priceModifier = service.calculatePriceModifier(_customizationId);
         final finalPrice = _customCakeItem!.prixAffiche + priceModifier;
-
-        // Commandable seulement si l'article **et** ses options viennent du
-        // catalogue : sans les deux, la ligne déposée au panier serait refusée
-        // par le serveur, et l'était en silence.
-        final isOrderable = _customCakeIsFromCatalog &&
-            service.hasRemoteOptions(
-              _customCakeItem!.id,
-              fallbackName: _customCakeItem!.name,
-            );
 
         var etape = 0;
 
@@ -644,10 +595,6 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
               priceModifier: priceModifier,
               finalPrice: finalPrice,
             ),
-            if (!isOrderable) ...[
-              const SizedBox(height: DesignConstants.spacingM),
-              _avisNonPublie(theme),
-            ],
             for (final famille in familles) ...[
               const SizedBox(height: DesignConstants.spacingM),
               _etape(
@@ -681,11 +628,9 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
         final priceModifier = service.calculatePriceModifier(_customizationId);
         final finalPrice = _customCakeItem!.prixAffiche + priceModifier;
-        final isOrderable = _customCakeIsFromCatalog &&
-            service.hasRemoteOptions(
-              _customCakeItem!.id,
-              fallbackName: _customCakeItem!.name,
-            );
+        // L'article vient du catalogue — c'est la seule provenance possible
+        // désormais — et ses options aussi : la ligne sera acceptée.
+        final isOrderable = service.hasRemoteOptions(_customCakeItem!.id);
 
         return GlassBottomBar(
           child: StickySummaryBar(
@@ -711,57 +656,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     CustomizationService service,
     String category,
   ) {
-    return service.constraintFor(
-      _customCakeItem!.id,
-      category,
-      fallbackName: _customCakeItem!.name,
-    );
-  }
-
-  /// Dit pourquoi la composition ne peut pas être commandée : l'établissement
-  /// n'a pas publié l'article « Gâteau personnalisé » au catalogue.
-  ///
-  /// Le dire ici plutôt que d'échouer au panier — l'ancienne version acceptait
-  /// l'ajout, et la ligne disparaissait à la première synchronisation.
-  Widget _avisNonPublie(ThemeData theme) {
-    return SectionCard(
-      color: theme.colorScheme.errorContainer,
-      borderColor: theme.colorScheme.error.withValues(alpha: 0.3),
-      shadow: false,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            Icons.info_outline_rounded,
-            size: DesignConstants.iconSizeMedium,
-            color: theme.colorScheme.onErrorContainer,
-          ),
-          const SizedBox(width: DesignConstants.spacingM),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Commande sur mesure indisponible',
-                  style: AppTypography.titleLg(
-                    color: theme.colorScheme.onErrorContainer,
-                  ),
-                ),
-                const SizedBox(height: DesignConstants.spacingXS),
-                Text(
-                  'Le gâteau personnalisé n’est pas encore publié à la carte. '
-                  'Les étapes ci-dessous sont un aperçu : contactez la '
-                  'boutique pour composer votre gâteau.',
-                  style: AppTypography.bodyMd(
-                    color: theme.colorScheme.onErrorContainer,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+    return service.constraintFor(_customCakeItem!.id, category);
   }
 
   // ------------------------------------------------------------- les étapes
@@ -780,7 +675,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     required CustomizationService service,
   }) {
     final contrainte = _constraintFor(service, categorie);
-    final titre = '$numero. ${service.translateCategory(categorie)}';
+    final titre = '$numero. $categorie';
 
     final Widget corps;
     if (categorie == 'color') {
@@ -852,8 +747,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
 
     if (coche && retenues.length >= contrainte.maxSelections) {
       context.showErrorMessage(
-        '${service.translateCategory(categorie)} : '
-        '${contrainte.maxSelections} option(s) au maximum.',
+        '$categorie : ${contrainte.maxSelections} option(s) au maximum.',
       );
       return;
     }
@@ -1224,11 +1118,11 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     }
 
     // Garde de sécurité : le bouton est déjà désactivé dans ce cas, mais
-    // déposer un article hors catalogue produirait une ligne que le serveur
-    // refuse — autant le dire ici plutôt qu'à la synchronisation.
-    if (!_customCakeIsFromCatalog) {
+    // déposer une ligne dont les options ne viennent pas du catalogue
+    // produirait un refus du serveur — autant le dire ici.
+    if (!service.hasRemoteOptions(_customCakeItem!.id)) {
       _showError(
-        'Le gâteau personnalisé n’est pas encore publié à la carte : '
+        'Les options du gâteau ne sont pas chargées : '
         'la commande sur mesure est indisponible.',
       );
       return;
@@ -1244,7 +1138,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     // Validation des familles requises, telle que le service la porte — c'est
     // la même que `validate_selection` côté Django, connue avant l'appel.
     final validation =
-        service.validateCustomization(_customizationId, _customCakeItem!.name);
+        service.validateCustomization(_customizationId);
     if (validation['isValid'] != true) {
       final errors = (validation['errors'] as List<dynamic>)
           .map((e) => e.toString())
@@ -1295,10 +1189,8 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
     setState(() => _isSubmitting = true);
 
     final optionLookup = <String, CustomizationOption>{};
-    final optionsByCategory = service.getOptionsByCategory(
-      _customCakeItem!.id,
-      fallbackName: _customCakeItem!.name,
-    );
+    final optionsByCategory =
+        service.getOptionsByCategory(_customCakeItem!.id);
     for (final entry in optionsByCategory.entries) {
       for (final option in entry.value) {
         optionLookup[option.id] = option;
@@ -1338,7 +1230,7 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
       final labels = optionIds
           .map((id) => optionLookup[id]?.name ?? id)
           .toList(growable: false);
-      customizationsMap[service.translateCategory(category)] = labels.join(', ');
+      customizationsMap[category] = labels.join(', ');
     });
 
     final deliveryDateIso = selectedDateTime;

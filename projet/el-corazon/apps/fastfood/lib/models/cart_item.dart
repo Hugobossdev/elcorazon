@@ -1,3 +1,5 @@
+import 'package:elcora_fast/presentation/tarification.dart';
+
 /// Modèle pour les éléments du panier
 class CartItem {
   final String id;
@@ -17,6 +19,21 @@ class CartItem {
   /// donc une liste vide, et n'est pas commandable.
   final List<String> selectedOptionIds;
 
+  /// Supplément des options retenues, **pour un exemplaire**, tel que le
+  /// configurateur l'a annoncé au moment de l'ajout.
+  ///
+  /// Il ne décide de rien : le prix qui fait foi reste celui du serveur
+  /// (invariant C1), et il écrase celui-ci dès que le panier est synchronisé —
+  /// `CartService._fromRemoteLine` reçoit un `unit_price` qui intègre déjà les
+  /// options, et repose donc la ligne avec un supplément nul.
+  ///
+  /// Il existe pour la fenêtre qui sépare l'ajout de cette synchronisation :
+  /// la ligne n'y portait que le prix nu du plat au catalogue. Un burger à
+  /// 3 000 composé avec 1 500 de suppléments s'affichait au panier à 3 000,
+  /// puis passait à 4 500 sans un mot — l'écart exact que le panier est censé
+  /// éviter. Le montrer d'emblée vaut mieux que de le découvrir à l'addition.
+  final double supplementOptions;
+
   CartItem({
     required this.id,
     required this.menuItemId,
@@ -26,10 +43,21 @@ class CartItem {
     this.imageUrl,
     this.customizations = const {},
     this.selectedOptionIds = const [],
+    this.supplementOptions = 0.0,
   });
 
-  /// Prix total pour cet élément (prix × quantité)
-  double get totalPrice => price * quantity;
+  /// Prix d'un exemplaire, suppléments d'options compris.
+  double get prixUnitaire => prixUnitairePersonnalise(
+        prixDeBase: price,
+        supplementOptions: supplementOptions,
+      );
+
+  /// Prix total pour cet élément (prix unitaire × quantité)
+  double get totalPrice => totalDeLigne(
+        prixDeBase: price,
+        supplementOptions: supplementOptions,
+        quantite: quantity,
+      );
 
   /// Longueur maximale d'une note de ligne — `CartLineWriteSerializer.notes`
   /// (`max_length=500`). Dépasser produit un 400 qui, au milieu d'une boucle
@@ -78,6 +106,7 @@ class CartItem {
     String? imageUrl,
     Map<String, dynamic>? customizations,
     List<String>? selectedOptionIds,
+    double? supplementOptions,
   }) {
     return CartItem(
       id: id ?? this.id,
@@ -88,6 +117,7 @@ class CartItem {
       imageUrl: imageUrl ?? this.imageUrl,
       customizations: customizations ?? this.customizations,
       selectedOptionIds: selectedOptionIds ?? this.selectedOptionIds,
+      supplementOptions: supplementOptions ?? this.supplementOptions,
     );
   }
 
@@ -102,6 +132,7 @@ class CartItem {
       'image_url': imageUrl,
       'customizations': customizations,
       'selected_option_ids': selectedOptionIds,
+      'options_supplement': supplementOptions,
     };
   }
 
@@ -122,6 +153,7 @@ class CartItem {
       selectedOptionIds: (map['selected_option_ids'] as List<dynamic>? ?? const [])
           .map((id) => id.toString())
           .toList(),
+      supplementOptions: (map['options_supplement'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -141,7 +173,8 @@ class CartItem {
         other.quantity == quantity &&
         other.imageUrl == imageUrl &&
         other.customizations.toString() == customizations.toString() &&
-        other.selectedOptionIds.toString() == selectedOptionIds.toString();
+        other.selectedOptionIds.toString() == selectedOptionIds.toString() &&
+        other.supplementOptions == supplementOptions;
   }
 
   @override
@@ -153,6 +186,7 @@ class CartItem {
         quantity.hashCode ^
         imageUrl.hashCode ^
         customizations.hashCode ^
-        selectedOptionIds.hashCode;
+        selectedOptionIds.hashCode ^
+        supplementOptions.hashCode;
   }
 }

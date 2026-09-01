@@ -60,9 +60,7 @@ void main() {
 
   setUp(() async {
     service = CustomizationService();
-    service.clearAllCustomizations();
-    // Charge les options de démonstration, celles que le configurateur montre
-    // tant que l'établissement n'a pas publié son gâteau au catalogue.
+    service.resetForTest();
     await service.initialize();
   });
 
@@ -115,7 +113,7 @@ void main() {
         false,
       );
 
-      final validation = service.validateCustomization('session-2', 'Gâteau personnalisé');
+      final validation = service.validateCustomization('session-2');
 
       expect(validation['isValid'], isFalse);
       expect((validation['errors'] as List).join(), contains('Forme'));
@@ -132,46 +130,108 @@ void main() {
       // Une troisième décoration : le groupe n'en accepte que deux.
       service.updateSelection('session-3', 'Décoration', 'de-trop', true);
 
-      final validation = service.validateCustomization('session-3', 'Gâteau personnalisé');
+      final validation = service.validateCustomization('session-3');
 
       expect(validation['isValid'], isFalse);
     });
   });
 
-  group('Options de démonstration', () {
-    test('aucun identifiant n’est envoyé au serveur', () async {
-      // L'établissement n'a pas publié l'article : le configurateur reste une
-      // vitrine. Envoyer `cake-shape-round` produirait un 400, et l'ancienne
-      // version y perdait la ligne — puis le panier distant tout entier.
-      await service.startCustomization(
-        'session-locale',
-        'gateau-en-memoire',
-        'Gâteau personnalisé',
-      );
-
-      // La maquette est bien peuplée — et sélectionnée : c'est justement ce
-      // qui rendait le piège invisible.
-      expect(
-        service.getOptionsForMenuItem(
-          'gateau-en-memoire',
-          fallbackName: 'Gâteau personnalisé',
-        ),
-        isNotEmpty,
-      );
-      expect(
-        service.getCurrentCustomization('session-locale')!.selections,
-        isNotEmpty,
-      );
-
-      expect(service.hasRemoteOptions('gateau-en-memoire'), isFalse);
-      expect(service.selectedOptionIds('session-locale'), isEmpty);
+  group('Aucune option n’est fabriquée', () {
+    /// C'est la garantie que ce nettoyage installe, et l'ancienne version
+    /// faisait exactement l'inverse.
+    ///
+    /// Une table de démonstration de cinq cents lignes vivait dans
+    /// `customization_service.dart` : des burgers, des pizzas et un gâteau,
+    /// appariés à un article **par son nom** — nom exact, puis `contains` dans
+    /// les deux sens. Un article du catalogue nommé « Burger Classique », ou
+    /// seulement « Burger », héritait donc de « Fromage supplémentaire
+    /// +1.5 » : des euros, affichés en francs CFA par un formateur qui n'avait
+    /// aucun moyen de savoir. Et aucun de ces identifiants n'existant côté
+    /// serveur, la ligne partait ensuite sans la moindre option.
+    test('un article inconnu n’a aucune option', () {
+      expect(service.getOptionsForMenuItem('article-jamais-lu'), isEmpty);
+      expect(service.getOptionsByCategory('article-jamais-lu'), isEmpty);
+      expect(service.hasRemoteOptions('article-jamais-lu'), isFalse);
     });
 
-    test('la table locale garde sa règle pour la maquette', () {
-      final forme = service.constraintFor('gateau-en-memoire', 'shape');
+    test('un nom qui évoque la démonstration n’en réveille aucune', () {
+      // Les noms qui déclenchaient l'appariement, un par un.
+      for (final nom in [
+        'Burger Classique',
+        'burger',
+        'Pizza Pepperoni',
+        'Gâteau personnalisé',
+      ]) {
+        expect(
+          service.getOptionsForMenuItem(nom),
+          isEmpty,
+          reason: '« $nom » ne doit plus réveiller d’options fictives',
+        );
+      }
+    });
 
-      expect(forme.isRequired, isTrue);
-      expect(forme.isSingleChoice, isTrue);
+    test('aucune sélection par défaut n’apparaît sur un article inconnu',
+        () async {
+      // La maquette se pré-sélectionnait toute seule : l'écran s'ouvrait sur
+      // une composition déjà faite, dont le client héritait sans l'avoir
+      // choisie.
+      await service.startCustomization(
+        'session-inconnue',
+        'article-jamais-lu',
+        'Burger Classique',
+      );
+
+      expect(
+        service.getCurrentCustomization('session-inconnue')!.selections,
+        isEmpty,
+      );
+      expect(service.selectedOptionIds('session-inconnue'), isEmpty);
+      expect(service.calculatePriceModifier('session-inconnue'), 0);
+    });
+
+    test('un article inconnu n’impose aucune contrainte inventée', () {
+      // La table locale répondait « requis, choix unique » pour `shape` ou
+      // `size` sur n'importe quel article, y compris ceux du catalogue.
+      for (final categorie in ['shape', 'size', 'cooking', 'sauce']) {
+        final contrainte = service.constraintFor('article-jamais-lu', categorie);
+        expect(contrainte.isRequired, isFalse, reason: categorie);
+        expect(contrainte.minSelections, 0, reason: categorie);
+      }
+    });
+
+    test('le raccourci d’ajout ne se déclenche pas sur un article inconnu',
+        () async {
+      // `exigeUnChoix` détournait vers l'écran de personnalisation les
+      // articles que la maquette prétendait obligatoires.
+      expect(await service.exigeUnChoix('article-jamais-lu'), isFalse);
+    });
+  });
+
+  group('États de lecture', () {
+    test('un article jamais lu est à demander, pas vide', () {
+      expect(
+        service.etatDesOptions('article-jamais-lu'),
+        EtatDesOptions.aDemander,
+      );
+      expect(service.erreurDesOptions('article-jamais-lu'), isNull);
+    });
+
+    test('un article lu avec options le dit', () {
+      service.seedOptionsForTest('gateau-distant', optionsDuCatalogue());
+
+      expect(
+        service.etatDesOptions('gateau-distant'),
+        EtatDesOptions.avecOptions,
+      );
+    });
+
+    test('un article lu sans option le dit aussi', () {
+      // Le serveur a répondu : cet article n'a rien à personnaliser. C'est une
+      // réponse, et elle ne doit pas se confondre avec « pas encore lu ».
+      service.seedOptionsForTest('plat-nu', const []);
+
+      expect(service.etatDesOptions('plat-nu'), EtatDesOptions.sansOption);
+      expect(service.getOptionsForMenuItem('plat-nu'), isEmpty);
     });
   });
 }

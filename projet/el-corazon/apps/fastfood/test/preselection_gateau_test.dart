@@ -42,17 +42,46 @@ void main() {
     });
   });
 
-  group('Par mot-clé et identifiant', () {
-    test('« cœur » et « coeur » désignent la même forme', () {
-      expect(suggerees('Gâteau en forme de cœur', formes),
-          ['cake-shape-heart'],);
-      expect(suggerees('Gateau en forme de coeur', formes),
-          ['cake-shape-heart'],);
+  group('Plus aucune correspondance par identifiant', () {
+    /// Un second chemin cherchait un mot français dans le texte et sa
+    /// traduction anglaise dans l'**identifiant** de l'option : « cœur » et
+    /// `cake-shape-heart`. Il ne fonctionnait que sur les identifiants des
+    /// options de démonstration ; ceux du catalogue sont des UUID, où
+    /// « heart » n'apparaît jamais. Une pré-sélection qui ne marche que sur
+    /// des données fictives vaut moins qu'une absence de pré-sélection : elle
+    /// donne l'illusion d'un réglage que le client croira validé.
+    test('l’identifiant ne suggère plus rien à lui seul', () {
+      // L'option se nomme « Rond » — mais le texte, lui, ne dit que « round ».
+      final formeDuCatalogue = [
+        _option(
+          'b3f1c2d4-0000-4000-8000-000000000001',
+          'Rond',
+          categorie: 'Forme',
+        ),
+      ];
+
+      expect(suggerees('Round shape cake', formeDuCatalogue), isEmpty);
     });
 
-    test('le mot-clé seul ne suffit pas : l’identifiant doit suivre', () {
-      // « rond » est un mot connu, mais aucune option de parfum ne porte
-      // « round » dans son identifiant.
+    test('mais le nom de l’option suffit, quel que soit l’identifiant', () {
+      // C'est le seul chemin qui reste, et il porte sur des libellés saisis
+      // au back-office des deux côtés.
+      final formeDuCatalogue = [
+        _option(
+          'b3f1c2d4-0000-4000-8000-000000000002',
+          'Cœur',
+          categorie: 'Forme',
+        ),
+      ];
+
+      expect(
+        suggerees('Gâteau en forme de cœur', formeDuCatalogue),
+        ['b3f1c2d4-0000-4000-8000-000000000002'],
+      );
+    });
+
+    test('un mot connu ne coche plus une option d’une autre famille', () {
+      // « rond » ne doit pas atteindre les parfums.
       expect(suggerees('Gâteau rond', parfums), isEmpty);
     });
   });

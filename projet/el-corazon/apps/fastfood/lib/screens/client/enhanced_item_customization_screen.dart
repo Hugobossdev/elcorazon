@@ -1,4 +1,5 @@
 import 'package:elcora_fast/presentation/catalogue.dart';
+import 'package:elcora_fast/presentation/tarification.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
@@ -73,17 +74,6 @@ class _EnhancedItemCustomizationScreenState
   /// ne lui a pas encore demandé.
   final Set<String> _reclames = <String>{};
 
-  /// Titres des familles locales, que la démonstration désigne par une clé
-  /// technique. Les groupes du catalogue, eux, portent déjà leur nom
-  /// d'affichage — « Cuisson du steak », « Taille » — puisque c'est celui que
-  /// l'exploitation a saisi.
-  static const _titresLocaux = <String, String>{
-    'size': 'Choisir la taille',
-    'ingredient': 'Ingrédients',
-    'sauce': 'Sauces',
-    'supplement': 'Suppléments',
-  };
-
   @override
   void initState() {
     super.initState();
@@ -126,11 +116,7 @@ class _EnhancedItemCustomizationScreenState
     CustomizationService service,
     String categorie,
   ) {
-    final parCategorie = service.getOptionsByCategory(
-      _menuItemId,
-      fallbackName: widget.item.name,
-    );
-    return parCategorie[categorie] ?? const [];
+    return service.getOptionsByCategory(_menuItemId)[categorie] ?? const [];
   }
 
   /// Les groupes de cet article, tels que le catalogue les publie.
@@ -142,10 +128,7 @@ class _EnhancedItemCustomizationScreenState
   /// partait donc sans options, et `POST /carts/{slug}/lines/` la refusait en
   /// 409 dès qu'un groupe exigeait un choix.
   List<_Famille> _familles(CustomizationService service) {
-    final parCategorie = service.getOptionsByCategory(
-      _menuItemId,
-      fallbackName: widget.item.name,
-    );
+    final parCategorie = service.getOptionsByCategory(_menuItemId);
 
     return [
       for (final entry in parCategorie.entries)
@@ -158,15 +141,15 @@ class _EnhancedItemCustomizationScreenState
     String categorie,
     List<CustomizationOption> options,
   ) {
-    final contrainte = service.constraintFor(
-      _menuItemId,
-      categorie,
-      fallbackName: widget.item.name,
-    );
+    final contrainte = service.constraintFor(_menuItemId, categorie);
 
     return _Famille(
       cle: categorie,
-      titre: _titresLocaux[categorie] ?? categorie,
+      // Le nom du groupe, tel que l'exploitation l'a saisi au back-office —
+      // « Cuisson du steak », « Taille ». Une table de titres vivait ici pour
+      // traduire les clés techniques des options de démonstration (`size`,
+      // `sauce`) ; elle est partie avec elles.
+      titre: categorie,
       minimum: contrainte.minSelections,
       maximum: contrainte.maxSelections,
       unique: contrainte.isSingleChoice,
@@ -232,10 +215,7 @@ class _EnhancedItemCustomizationScreenState
               _enTete(theme),
               const SizedBox(height: DesignConstants.spacingL),
               _reperes(theme),
-              for (final famille in _familles(service)) ...[
-                const SizedBox(height: DesignConstants.spacingL),
-                _groupe(service, famille),
-              ],
+              ..._corpsDesOptions(theme, service),
               const SizedBox(height: DesignConstants.spacingL),
               _instructions(theme),
             ],
@@ -473,6 +453,117 @@ class _EnhancedItemCustomizationScreenState
 
   // ------------------------------------------------------------------ options
 
+  /// Ce que la page montre à la place des groupes selon l'état de leur
+  /// lecture.
+  ///
+  /// Les quatre situations se ressemblaient : la page affichait des groupes,
+  /// ou rien. « Rien » couvrait aussi bien un article sans option qu'un appel
+  /// en cours ou un serveur muet — et le bouton d'ajout restait actif dans les
+  /// trois cas, si bien qu'une panne réseau faisait déposer au panier une ligne
+  /// sans les choix que le catalogue exige, refusée en 409.
+  List<Widget> _corpsDesOptions(ThemeData theme, CustomizationService service) {
+    switch (service.etatDesOptions(_menuItemId)) {
+      case EtatDesOptions.aDemander:
+      case EtatDesOptions.enLecture:
+        return [
+          const SizedBox(height: DesignConstants.spacingL),
+          _encart(
+            theme,
+            icone: Icons.hourglass_empty_rounded,
+            titre: 'Chargement des options…',
+            message: 'Nous lisons les choix disponibles pour ce plat.',
+          ),
+        ];
+
+      case EtatDesOptions.enErreur:
+        return [
+          const SizedBox(height: DesignConstants.spacingL),
+          _encart(
+            theme,
+            icone: Icons.cloud_off_rounded,
+            titre: 'Options indisponibles',
+            message: service.erreurDesOptions(_menuItemId) ??
+                'Les options de ce plat n’ont pas pu être chargées.',
+            fond: theme.colorScheme.errorContainer,
+            encre: theme.colorScheme.onErrorContainer,
+            action: 'Réessayer',
+            onAction: () => service.rechargerLesOptions(_menuItemId),
+          ),
+        ];
+
+      case EtatDesOptions.sansOption:
+        // Une réponse, pas un manque : ce plat se commande tel quel.
+        return [
+          const SizedBox(height: DesignConstants.spacingL),
+          _encart(
+            theme,
+            icone: Icons.restaurant_rounded,
+            titre: 'Aucune option de personnalisation',
+            message: 'Ce plat se commande tel quel. '
+                'Vous pouvez laisser une instruction ci-dessous.',
+          ),
+        ];
+
+      case EtatDesOptions.avecOptions:
+        return [
+          for (final famille in _familles(service)) ...[
+            const SizedBox(height: DesignConstants.spacingL),
+            _groupe(service, famille),
+          ],
+        ];
+    }
+  }
+
+  Widget _encart(
+    ThemeData theme, {
+    required IconData icone,
+    required String titre,
+    required String message,
+    Color? fond,
+    Color? encre,
+    String? action,
+    VoidCallback? onAction,
+  }) {
+    final couleur = encre ?? theme.colorScheme.onSurfaceVariant;
+
+    return SectionCard(
+      color: fond ?? theme.colorScheme.surfaceContainerLow,
+      shadow: false,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icone, size: DesignConstants.iconSizeMedium, color: couleur),
+          const SizedBox(width: DesignConstants.spacingM),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titre,
+                  style: AppTypography.titleLg(
+                    color: encre ?? theme.colorScheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: DesignConstants.spacingXS),
+                Text(message, style: AppTypography.bodyMd(color: couleur)),
+                if (action != null && onAction != null) ...[
+                  const SizedBox(height: DesignConstants.spacingS),
+                  ActionButton(
+                    label: action,
+                    emphasis: ActionEmphasis.outlined,
+                    height: 40,
+                    expand: false,
+                    onPressed: onAction,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _groupe(CustomizationService service, _Famille famille) {
     final options = _options(service, famille.cle);
     final retenues = _retenues(service, famille.cle);
@@ -606,12 +697,24 @@ class _EnhancedItemCustomizationScreenState
   Widget _barreDAjout(CustomizationService service) {
     final theme = Theme.of(context);
     // L'écart des options couvre **toutes** les sélections, la taille
-    // comprise : l'ajouter une seconde fois au prix de base — ce que faisait
-    // `_prixDeBase` — annonçait un total supérieur à celui que le serveur
-    // facture ensuite.
-    final personnalisation = service.getCurrentCustomization(_sessionId);
-    final ecartOptions = personnalisation?.totalPriceModifier ?? 0.0;
-    final total = (widget.item.prixAffiche + ecartOptions) * _quantity;
+    // comprise : l'ajouter une seconde fois au prix de base annoncerait un
+    // total supérieur à celui que le serveur facture ensuite.
+    //
+    // Il est demandé au service plutôt que lu sur
+    // `ItemCustomization.totalPriceModifier` : ce champ n'était renseigné que
+    // par `finishCustomization`, qui referme la session dans le même geste. Il
+    // valait donc zéro pendant toute la composition, et cette barre affichait
+    // le prix nu du plat quelles que soient les options retenues.
+    final ecartOptions = service.calculatePriceModifier(_sessionId);
+    final prixUnitaire = prixUnitairePersonnalise(
+      prixDeBase: widget.item.prixAffiche,
+      supplementOptions: ecartOptions,
+    );
+    final total = totalDeLigne(
+      prixDeBase: widget.item.prixAffiche,
+      supplementOptions: ecartOptions,
+      quantite: _quantity,
+    );
 
     return GlassBottomBar(
       child: Column(
@@ -629,12 +732,22 @@ class _EnhancedItemCustomizationScreenState
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    'Total',
-                    style: AppTypography.bodyMd(
-                      color: theme.colorScheme.onSurfaceVariant,
+                  // Le détail du prix unitaire n'apparaît que lorsqu'il diffère
+                  // du total — sinon il répéterait la même somme deux fois.
+                  if (_quantity > 1)
+                    Text(
+                      '${PriceFormatter.format(prixUnitaire)} l’unité',
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    )
+                  else
+                    Text(
+                      'Total',
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
                   Text(
                     PriceFormatter.format(total),
                     style: AppTypography.priceDisplay(
@@ -647,9 +760,11 @@ class _EnhancedItemCustomizationScreenState
           ),
           const SizedBox(height: DesignConstants.spacingM),
           ActionButton(
-            label: widget.item.isAvailable
-                ? 'Ajouter au panier'
-                : 'Plat indisponible',
+            label: !widget.item.isAvailable
+                ? 'Plat indisponible'
+                : _optionsIncertaines(service)
+                    ? 'Options indisponibles'
+                    : 'Ajouter au panier',
             emphasis: ActionEmphasis.gradient,
             icon: widget.item.isAvailable
                 ? Icons.shopping_cart_rounded
@@ -662,12 +777,27 @@ class _EnhancedItemCustomizationScreenState
             // L'indisponibilité, elle, le grise : aucune manipulation de
             // l'écran n'y remédie, et l'encart en tête de page a déjà dit
             // pourquoi.
-            onPressed:
-                widget.item.isAvailable ? () => _addToCart(service) : null,
+            //
+            // Il est également neutralisé tant que les options ne sont pas
+            // connues : ajouter alors déposerait une ligne sans les choix que
+            // le catalogue exige, refusée en 409 par `validate_selection`.
+            onPressed: widget.item.isAvailable && !_optionsIncertaines(service)
+                ? () => _addToCart(service)
+                : null,
           ),
         ],
       ),
     );
+  }
+
+  /// Vrai tant qu'on ignore ce que ce plat propose — lecture en cours, ou
+  /// échouée. Un article sans option n'est pas incertain : il est connu, et
+  /// commandable tel quel.
+  bool _optionsIncertaines(CustomizationService service) {
+    final etat = service.etatDesOptions(_menuItemId);
+    return etat == EtatDesOptions.aDemander ||
+        etat == EtatDesOptions.enLecture ||
+        etat == EtatDesOptions.enErreur;
   }
 
   Future<void> _addToCart(CustomizationService service) async {
@@ -689,6 +819,17 @@ class _EnhancedItemCustomizationScreenState
       // exigeait un choix — « Cuisson du steak » sur presque tous les burgers.
       final optionIds = service.selectedOptionIds(_sessionId);
 
+      // Ce que la ligne du panier doit **montrer** : « Cuisson du steak : Bien
+      // cuit », et non l'identifiant de l'option. L'écran recopiait jusqu'ici
+      // ses `selections` telles quelles, c'est-à-dire des identifiants, et le
+      // panier affichait « Cuisson du steak: [3fa85f64-5717-…] ».
+      final libelles = service.libellesRetenus(_sessionId);
+
+      // Le supplément annoncé à l'instant par la barre du bas, reporté sur la
+      // ligne pour que le panier affiche le même montant que cette page. Le
+      // serveur le remplacera par le sien à la synchronisation (ADR-007).
+      final supplement = service.calculatePriceModifier(_sessionId);
+
       final customization = service.finishCustomization(_sessionId);
       if (customization == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -704,16 +845,22 @@ class _EnhancedItemCustomizationScreenState
       // — il chiffre les options depuis leurs identifiants (ADR-007), et
       // c'est son total qui fait foi au panier comme à la commande.
 
+      // Seuls des libellés destinés à l'affichage, et rien qui soit déjà porté
+      // ailleurs sur la ligne.
+      //
+      // `quantity` y figurait, alors que `CartItem.quantity` la porte déjà :
+      // comme `addItem` fusionne deux lignes sur l'égalité de leurs
+      // personnalisations, un burger ajouté à 1 puis à 2 donnait **deux
+      // lignes** au lieu d'une à trois exemplaires. `special_instructions`
+      // y figurait même vide, et le panier affichait « special_instructions:
+      // null ». Le texte libre passe par la clé `note`, la seule que
+      // `CartItem.remoteNotes` transmet au serveur et que la carte du panier
+      // sait présenter.
+      final instructions = _instructionsController.text.trim();
       final customizationsMap = <String, dynamic>{
-        'quantity': _quantity,
-        'special_instructions': _instructionsController.text.trim().isNotEmpty
-            ? _instructionsController.text.trim()
-            : null,
+        ...libelles,
+        if (instructions.isNotEmpty) 'note': instructions,
       };
-
-      for (final entry in customization.selections.entries) {
-        customizationsMap[entry.key] = entry.value;
-      }
 
       if (widget.onAddToCart != null) {
         widget.onAddToCart!(widget.item, _quantity, customizationsMap);
@@ -723,6 +870,7 @@ class _EnhancedItemCustomizationScreenState
           quantity: _quantity,
           customizations: customizationsMap,
           optionIds: optionIds,
+          optionsSupplement: supplement,
         );
       }
 
@@ -762,9 +910,8 @@ class _Famille {
     this.tarifante = false,
   });
 
-  /// Clé de catégorie chez `CustomizationService` : le nom du groupe pour une
-  /// option du catalogue (« Cuisson du steak »), une étiquette locale pour la
-  /// démonstration (`size`, `ingredient`, `sauce`, `supplement`).
+  /// Clé de catégorie chez `CustomizationService` : le nom du groupe publié au
+  /// catalogue — « Cuisson du steak », « Taille ».
   final String cle;
 
   final String titre;

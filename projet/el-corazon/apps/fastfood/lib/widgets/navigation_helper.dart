@@ -137,14 +137,20 @@ class NavigationHelper {
     BuildContext context,
     eccore.MenuItem item,
   ) async {
+    // Un plat retiré de la carte ne s'ajoute pas. La grille du menu ne montre
+    // plus son bouton, mais ce raccourci sert aussi aux carrousels de
+    // l'accueil et aux favoris — où l'article a pu être mis de côté quand il
+    // était encore servi.
+    if (!item.isAvailable) {
+      context.showErrorMessage('${item.name} n’est plus servi pour l’instant');
+      return;
+    }
+
     final customization =
         Provider.of<CustomizationService>(context, listen: false);
     final cart = Provider.of<CartService>(context, listen: false);
 
-    final choixRequis = await customization.exigeUnChoix(
-      item.id,
-      fallbackName: item.name,
-    );
+    final choixRequis = await customization.exigeUnChoix(item.id);
 
     if (!context.mounted) return;
 

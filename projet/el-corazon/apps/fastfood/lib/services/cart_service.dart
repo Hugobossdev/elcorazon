@@ -10,6 +10,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/cart_item.dart';
+import 'package:elcora_fast/presentation/tarification.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
@@ -55,7 +56,15 @@ class CartService extends ChangeNotifier {
   /// Somme des lignes, telle qu'affichée. Le serveur relit les prix au
   /// catalogue à la commande (invariant C1) : ce cumul sert à montrer un
   /// panier, jamais à décider d'un montant.
-  double get subtotal => _items.fold(0.0, (sum, item) => sum + item.totalPrice);
+  ///
+  /// Dès qu'un devis existe, c'est **son** sous-total qui est rendu : lui seul
+  /// a relu le catalogue. Le cumul local ne sert qu'avant, et il compte
+  /// désormais les suppléments d'options que les lignes portent
+  /// ([CartItem.supplementOptions]) — sans quoi le sous-total montait d'un
+  /// coup, sans explication, à l'arrivée du devis.
+  double get subtotal =>
+      _quote?.subtotal.toMajorUnits() ??
+      sousTotalDuPanier(_items.map((item) => item.totalPrice));
 
   /// Frais de livraison du dernier devis. Zéro tant qu'aucun devis n'existe —
   /// et [hasQuote] permet à l'écran de dire « calculés à la validation »
@@ -168,11 +177,15 @@ class CartService extends ChangeNotifier {
 
   /// Ajoute un article au panier avec protection contre les doublons
   ///
-  /// [optionIds] porte les options du catalogue retenues sur la ligne. Elles
-  /// ne modifient **pas** le prix ici : c'est le serveur qui les valorise
-  /// (invariant C1), et le devis du panier qui fait foi. Deux lignes du même
-  /// article aux options différentes restent deux lignes — la même règle que
-  /// `CartService._identical_line` côté serveur.
+  /// [optionIds] porte les options du catalogue retenues sur la ligne. Le
+  /// serveur reste seul à les valoriser (invariant C1) et son devis fait foi ;
+  /// [optionsSupplement] n'est que le montant **déjà annoncé au client** par la
+  /// fiche produit, reporté sur la ligne pour que le panier affiche le même
+  /// total que l'écran d'où il vient. Il est nul dès que le serveur a rendu son
+  /// `unit_price`, qui intègre les options.
+  ///
+  /// Deux lignes du même article aux options différentes restent deux lignes —
+  /// la même règle que `CartService._identical_line` côté serveur.
   /// Repose au panier les articles d'une commande passée.
   ///
   /// La **décision** — quels articles sont encore à la carte — vit dans
@@ -203,6 +216,7 @@ class CartService extends ChangeNotifier {
     int quantity = 1,
     Map<String, dynamic>? customizations,
     List<String> optionIds = const [],
+    double optionsSupplement = 0.0,
   }) {
     if (quantity <= 0) {
       eccore.Journal.trace('⚠️ La quantité doit être supérieure à 0');
@@ -243,6 +257,7 @@ class CartService extends ChangeNotifier {
         imageUrl: menuItem.image,
         customizations: normalizedCustomizations,
         selectedOptionIds: normalizedOptionIds,
+        supplementOptions: optionsSupplement,
       );
 
       _items.add(newItem);
@@ -672,6 +687,10 @@ class CartService extends ChangeNotifier {
       imageUrl: line.image,
       customizations: customizations,
       selectedOptionIds: line.options.map((option) => option.id).toList()..sort(),
+      // `supplementOptions` reste à zéro, et c'est le point : `unit_price`
+      // intègre déjà les options. Y reporter le supplément estimé par la fiche
+      // produit les compterait deux fois — 5 000 + 500 deviendrait 6 000 au
+      // retour de synchronisation.
     );
   }
 

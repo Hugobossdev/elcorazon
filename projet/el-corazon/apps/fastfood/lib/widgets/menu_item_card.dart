@@ -217,7 +217,29 @@ class MenuItemCard extends StatelessWidget {
         if (item.ratingAverage > 0 && quantity == 0)
           Positioned(left: 8, bottom: 8, child: _note(theme)),
 
-        if (onAddToCart != null)
+        // Un plat que la cuisine ne sert plus se dit ici, et son bouton
+        // d'ajout disparaît.
+        //
+        // Cette carte — celle de la grille du menu et des carrousels de
+        // l'accueil — ne marquait pas l'indisponibilité, quand `FoodCard`, son
+        // homologue, la marque depuis toujours. Le « + » restait donc actif :
+        // on ajoutait au panier un plat que le serveur refuse, et on ne
+        // l'apprenait qu'au règlement.
+        if (!item.isAvailable)
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.scrim.withValues(alpha: 0.55),
+              ),
+              child: Center(
+                child: Text(
+                  'Indisponible',
+                  style: AppTypography.labelLg(color: Colors.white),
+                ),
+              ),
+            ),
+          )
+        else if (onAddToCart != null)
           Positioned(
             right: 8,
             bottom: 8,
