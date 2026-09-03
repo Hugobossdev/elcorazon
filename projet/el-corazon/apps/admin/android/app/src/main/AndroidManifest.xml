@@ -31,6 +31,20 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Cle Google Maps de la carte de supervision.
+             La valeur est injectee par Gradle depuis `local.properties`
+             (`maps.apiKey`) ou l'environnement : voir `app/build.gradle.kts`.
+             Elle n'est donc pas versionnee, contrairement a celles des deux
+             applications mobiles.
+
+             Sans cle, la carte rend une tuile grise sans message - c'est
+             precisement l'etat dans lequel se trouvait ce manifeste, qui ne
+             portait aucune `meta-data` alors que `google_maps_flutter` est
+             declare et que `driver_map_screen` construit une `GoogleMap`. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${mapsApiKey}" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

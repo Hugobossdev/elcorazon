@@ -1091,8 +1091,88 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
         children: [
           Positioned.fill(child: _buildMapWidget(fullScreen: true)),
           _barreFlottante(theme),
+          _bandeauDeSuivi(theme),
           _feuilleDeSuivi(theme),
         ],
+      ),
+    );
+  }
+
+  /// Dit au client que le suivi s'est interrompu, et qu'il repartira seul.
+  ///
+  /// ## Ce que son absence coûtait
+  ///
+  /// La reconnexion existait et fonctionnait — `_attemptReconnect` refait le
+  /// canal, reprend la cadence courte de relecture, et rouvre le suivi dès que
+  /// le serveur l'accepte. Mais `_isReconnecting` n'était affiché **nulle
+  /// part** : le client voyait un repère qui cesse d'avancer, sans savoir si
+  /// son livreur était arrêté, si son téléphone avait perdu le réseau, ou si
+  /// l'application était en panne. Une carte figée sans explication se lit
+  /// comme une panne, et l'appel au support suit.
+  ///
+  /// Il montre aussi la **fraîcheur** du dernier relevé quand le canal est
+  /// ouvert mais que plus rien n'arrive : le socket peut tenir pendant que le
+  /// livreur traverse une zone sans réseau, et le point à l'écran vieillit
+  /// alors en silence.
+  Widget _bandeauDeSuivi(ThemeData theme) {
+    final releve = _deliveryLocation;
+    final fraicheur = releve == null
+        ? null
+        : eccore.FraicheurPosition.depuis(releve.releveeA);
+
+    final (String message, Color couleur)? annonce = switch ((
+      _isReconnecting,
+      fraicheur,
+    )) {
+      (true, _) => (
+          'Connexion perdue — le suivi reprendra automatiquement.',
+          theme.colorScheme.error,
+        ),
+      (false, eccore.FraicheurPosition.perdue) => (
+          'Position figée — dernier relevé ${eccore.ageLisible(releve!.releveeA)}.',
+          AppColors.warning,
+        ),
+      (false, eccore.FraicheurPosition.retardee) => (
+          'Dernière position ${eccore.ageLisible(releve!.releveeA)}.',
+          AppColors.warning,
+        ),
+      _ => null,
+    };
+
+    if (annonce == null) return const SizedBox.shrink();
+
+    return Positioned(
+      // Sous la barre flottante, au-dessus de la feuille de suivi : c'est la
+      // bande de carte que le client regarde en premier quand le repère cesse
+      // d'avancer.
+      top: MediaQuery.of(context).padding.top + 72,
+      left: DesignConstants.spacingM,
+      right: DesignConstants.spacingM,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: annonce.$2.withValues(alpha: 0.92),
+          borderRadius: DesignConstants.borderRadiusMedium,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.wifi_tethering_off_rounded,
+                size: 16,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  annonce.$1,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -102,8 +102,10 @@ void main() {
     test('deux points confondus n’ont pas de cap', () {
       // Un livreur immobile n'a pas de direction : faire pivoter son repère
       // vers un cap calculé sur du bruit GPS le ferait tourner sur place.
-      expect(capDuSegment(const LatLng(6.13, 1.22), const LatLng(6.13, 1.22)),
-          isNull);
+      expect(
+        capDuSegment(const LatLng(6.13, 1.22), const LatLng(6.13, 1.22)),
+        isNull,
+      );
     });
   });
 }

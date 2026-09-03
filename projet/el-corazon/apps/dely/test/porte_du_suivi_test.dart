@@ -26,6 +26,11 @@ import 'package:flutter_test/flutter_test.dart';
 /// `geolocator` et ne s'ouvre de toute façon jamais hors session — ce que le
 /// premier test vérifie.
 void main() {
+  // Le service s'inscrit comme observateur du cycle de vie (`WidgetsBinding`)
+  // pour relire l'obstacle au retour au premier plan : sans liaison de test,
+  // `stopCourierSession` lève avant d'avoir rien fermé.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late RealtimeTrackingService suivi;
 
   setUp(() {
@@ -77,6 +82,40 @@ void main() {
 
       suivi.removeListener(compter);
       expect(notifications, 0, reason: 'aucun changement d’état à annoncer');
+    });
+  });
+
+  group('Pas de suivi fantôme', () {
+    test('une course refermée pendant l’attente ne rouvre pas le flux', () async {
+      // Le scénario que la garde d'entrée seule ne couvrait pas :
+      //
+      //   1. le livreur accepte      -> `_startPositionEmission` démarre ;
+      //   2. il attend la demande de permission du système, qui suspend ;
+      //   3. la course se termine    -> `_arreterEmission` ne trouve aucun
+      //      abonnement à couper, puisqu'il n'y en a pas encore ;
+      //   4. la continuation reprend -> le flux s'ouvrait pour une course qui
+      //      n'existe plus, et le GPS tournait jusqu'à la déconnexion sous une
+      //      notification « Course en cours » qui ne correspondait à rien.
+      //
+      // La condition est désormais relue **après** l'attente. Ici, sans session
+      // ouverte, elle est fausse des deux côtés — ce que ce test constate.
+      final ouverture = suivi.suivreLaCourse(enCours: true);
+      await suivi.suivreLaCourse(enCours: false);
+      await ouverture;
+
+      expect(suivi.isTrackingLocation, isFalse);
+      expect(suivi.currentPosition, isNull);
+    });
+
+    test('fermer la session coupe tout et se laisse rejouer', () async {
+      // Appelée à la déconnexion, et rappelée si le compte change deux fois de
+      // suite : elle doit être sans effet la seconde fois plutôt que de lever.
+      await suivi.stopCourierSession();
+      await suivi.stopCourierSession();
+
+      expect(suivi.isConnected, isFalse);
+      expect(suivi.isTrackingLocation, isFalse);
+      expect(suivi.currentPosition, isNull);
     });
   });
 

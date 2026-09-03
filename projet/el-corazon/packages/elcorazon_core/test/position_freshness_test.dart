@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// vide : on ne cherche pas un livreur dont on croit savoir où il est. Ces
 /// tests fixent la frontière entre « en direct », « en retard » et « perdu ».
 void main() {
-  final maintenant = DateTime.utc(2026, 9, 3, 12, 0, 0);
+  final maintenant = DateTime.utc(2026, 9, 3, 12);
 
   FraicheurPosition depuis(Duration age) =>
       FraicheurPosition.depuis(maintenant.subtract(age), maintenant: maintenant);

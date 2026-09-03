@@ -62,10 +62,11 @@ class RealtimeTrackingService extends ChangeNotifier
     final lus = eccore.TrackingSettings.depuisEnvironnement(
       dotenv.isInitialized ? dotenv.env : const {},
     );
-    final avertissement = lus.avertissement;
-    if (avertissement != null) {
-      // Journalisé, pas appliqué : un `.env` douteux ne doit pas couper le
-      // suivi, il doit se voir.
+    // **Toutes** les anomalies, pas seulement la première : n'en montrer qu'une
+    // fait corriger le `.env` par tâtonnement, un redémarrage par ligne.
+    // Journalisées, pas appliquées — un `.env` douteux ne doit pas couper le
+    // suivi, il doit se voir.
+    for (final avertissement in lus.avertissements) {
       eccore.Journal.trace('⚠️ Réglage de suivi : $avertissement');
     }
     return _reglagesLus = lus;
@@ -227,6 +228,11 @@ class RealtimeTrackingService extends ChangeNotifier
   /// **N'allume pas le GPS.** Le suivi de position, lui, est adossé à la
   /// course : voir [_courseEnCours] et [suivreLaCourse].
   Future<void> startCourierSession() async {
+    // Rappelée sur une session déjà ouverte, elle inscrirait l'observateur une
+    // seconde fois : `addObserver` empile, `removeObserver` n'en retire qu'un,
+    // et chaque retour au premier plan déclencherait alors deux ouvertures de
+    // flux concurrentes.
+    if (_sessionOpen) return;
     _sessionOpen = true;
     // L'observateur de cycle de vie relit l'obstacle au retour au premier plan :
     // c'est là que le livreur revient d'un aller dans les réglages du système,
@@ -283,6 +289,12 @@ class RealtimeTrackingService extends ChangeNotifier
     await _startPositionEmission();
   }
 
+  /// Le suivi a-t-il encore lieu d'être, ici et maintenant ?
+  ///
+  /// Une session ouverte **et** une course en cours. Nommé plutôt que recopié :
+  /// il se relit après chaque `await`, et une des trois relectures manquait.
+  bool get _suiviAttendu => _sessionOpen && _courseEnCours;
+
   /// Coupe le flux, le battement et la reprise, et oublie la dernière position.
   ///
   /// La position est oubliée délibérément : la garder ferait repartir le
@@ -309,7 +321,7 @@ class RealtimeTrackingService extends ChangeNotifier
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    if (!_sessionOpen || !_courseEnCours) return;
+    if (!_suiviAttendu) return;
     if (_positionSubscription != null) return;
 
     unawaited(_startPositionEmission());
@@ -399,9 +411,23 @@ class RealtimeTrackingService extends ChangeNotifier
     // Garde de dernier recours : le flux ne s'ouvre que pour une course. Sans
     // elle, une reprise programmée juste avant la livraison rallumerait le GPS
     // après l'arrêt.
-    if (!_sessionOpen || !_courseEnCours) return;
+    if (!_suiviAttendu) return;
 
     final obstacle = await _locationObstacle();
+
+    // **Relue après l'attente**, et pas seulement avant.
+    //
+    // `_locationObstacle` peut afficher la demande de permission du système et
+    // rester suspendu le temps que le livreur réponde — quelques secondes, ou
+    // le temps qu'il range son téléphone. La course peut se terminer pendant
+    // ce temps-là : le suivi s'arrête, `_arreterEmission` ne trouve aucun
+    // abonnement à couper puisqu'il n'y en a pas encore, puis cette
+    // continuation reprend et ouvre le flux **pour une course qui n'existe
+    // plus**. Le GPS tournait alors jusqu'à la déconnexion, sous une
+    // notification « Course en cours » qui ne correspondait à rien — le
+    // fantôme exact que la porte devait supprimer.
+    if (!_suiviAttendu) return;
+
     if (obstacle != null) {
       _trackingUnavailableReason = obstacle;
       eccore.Journal.trace('⚠️ Suivi impossible : $obstacle');
@@ -466,7 +492,7 @@ class RealtimeTrackingService extends ChangeNotifier
   void _programmerLaReprise() {
     _reprisePositionTimer?.cancel();
     _reprisePositionTimer = Timer(reglages.retryInterval, () {
-      if (!_sessionOpen || !_courseEnCours) return;
+      if (!_suiviAttendu) return;
       unawaited(_startPositionEmission());
     });
   }

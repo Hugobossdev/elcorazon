@@ -113,6 +113,66 @@ class TestDepotDePosition:
         assert response.data["received_at"] != response.data["recorded_at"]
 
 
+class TestCoherenceDeLHorodatage:
+    """`recorded_at` vient du client, et n'était borné par rien.
+
+    C'était la seule valeur de ce contrat à ne pas être vérifiée, et trois
+    choses en dépendent : la fraîcheur qu'affiche le back-office,
+    l'échantillonnage, et l'ETA. Un livreur dont l'horloge avance d'une heure
+    — ou qui la règle exprès — se rendait éternellement « en direct » aux yeux
+    du siège, qui cessait alors de s'inquiéter d'un téléphone éteint.
+
+    Les bornes sont larges à dessein : il s'agit d'écarter l'absurde, pas
+    d'exiger une horloge juste.
+    """
+
+    def test_un_horodatage_dans_le_futur_est_refuse(
+        self, as_courier: APIClient, course: Assignment, courier: CourierProfile
+    ) -> None:
+        futur = timezone.now() + dt.timedelta(hours=1)
+
+        response = ping(as_courier, course, moment=futur)
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert LocationPing.objects.count() == 0
+        # Et surtout : le dossier n'est pas empoisonné. C'est lui que le
+        # back-office lit pour dire depuis quand le livreur s'est tu.
+        courier.refresh_from_db()
+        assert courier.last_location_at is None
+
+    def test_une_derive_de_quelques_minutes_reste_acceptee(
+        self, as_courier: APIClient, course: Assignment
+    ) -> None:
+        """L'horloge d'un téléphone n'est pas la nôtre.
+
+        Refuser sur cette base couperait le suivi de livreurs parfaitement
+        honnêtes — et le refus se manifesterait par une carte figée chez le
+        client, sans que personne ne sache pourquoi.
+        """
+        response = ping(as_courier, course, moment=timezone.now() + dt.timedelta(minutes=2))
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_un_horodatage_trop_ancien_est_refuse(
+        self, as_courier: APIClient, course: Assignment
+    ) -> None:
+        """Au-delà d'une heure, le relevé décrit un endroit où le livreur n'est
+        plus : l'écrire fausse le tracé au lieu de le compléter."""
+        response = ping(as_courier, course, moment=timezone.now() - dt.timedelta(hours=3))
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert LocationPing.objects.count() == 0
+
+    def test_un_differe_de_zone_sans_reseau_passe(
+        self, as_courier: APIClient, course: Assignment
+    ) -> None:
+        """C'est la raison d'être de `recorded_at` : un livreur qui traverse un
+        trou de couverture émet en différé, et son relevé doit être gardé."""
+        response = ping(as_courier, course, moment=timezone.now() - dt.timedelta(minutes=20))
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+
 class TestL3:
     def test_un_livreur_ne_suit_pas_la_course_d_un_autre(
         self, client: APIClient, course: Assignment, restaurant: Restaurant

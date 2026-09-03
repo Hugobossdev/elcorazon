@@ -64,9 +64,7 @@ def test_la_liste_le_rend_aussi(as_customer: APIClient, order: Order) -> None:
     assert "restaurant_location" in response.data["results"][0]
 
 
-def test_lordre_des_coordonnees_est_celui_du_contrat(
-    as_customer: APIClient, order: Order
-) -> None:
+def test_lordre_des_coordonnees_est_celui_du_contrat(as_customer: APIClient, order: Order) -> None:
     """`lat`/`lon` nommés, jamais un couple positionnel.
 
     PostGIS stocke `Point(x=lon, y=lat)` — l'inverse de l'ordre de lecture

@@ -1,3 +1,5 @@
+import 'package:elcorazon_core/src/tracking/position_freshness.dart';
+
 /// Cadence du suivi de position — les trois nombres qui décident de ce que
 /// coûte une course en batterie et en réseau.
 ///
@@ -91,28 +93,88 @@ class TrackingSettings {
 
   final TrackingAccuracy accuracy;
 
-  /// Ce que ces réglages ont d'incohérent avec le serveur, ou `null`.
+  /// Tout ce que ces réglages ont d'incohérent — avec le serveur, avec les
+  /// seuils de fraîcheur, ou entre eux. Vide quand tout va bien.
   ///
-  /// Renvoie une phrase plutôt que de lever : un réglage douteux se journalise
-  /// au démarrage et laisse le suivi tourner. Couper le suivi parce qu'un
-  /// `.env` annonce 2 secondes serait pire que la cadence qu'il demande.
-  String? get avertissement {
+  /// Avertit plutôt que de corriger : un réglage douteux se journalise au
+  /// démarrage et laisse le suivi tourner. Couper le suivi parce qu'un `.env`
+  /// annonce 2 secondes serait pire que la cadence qu'il demande.
+  ///
+  /// ## Pourquoi les bornes **hautes** comptent autant que les basses
+  ///
+  /// Seules les valeurs trop petites étaient signalées, parce qu'elles coûtent
+  /// visiblement — batterie, quota, `429`. Les trop grandes ne coûtent rien et
+  /// cassent tout, en silence : à `TRACKING_INTERVAL_SECONDS=600` — la faute de
+  /// frappe naturelle pour 60 — le livreur émet une fois toutes les dix
+  /// minutes, le back-office le déclare « position figée » en permanence
+  /// ([FraicheurPosition.seuilPerte] est à 5 min), et **rien n'apparaît dans
+  /// les journaux**. On cherche alors la panne du côté du réseau, du GPS ou du
+  /// serveur, pas du côté d'un chiffre en trop.
+  List<String> get avertissements {
+    final anomalies = <String>[];
+
     if (emissionInterval < const Duration(seconds: 5)) {
-      return 'TRACKING_INTERVAL_SECONDS=${emissionInterval.inSeconds} : sous '
-          '5 s, le serveur écarte la plupart des relevés (TrackingPingThrottle) '
-          'et la batterie paie pour rien.';
+      anomalies.add(
+        'TRACKING_INTERVAL_SECONDS=${emissionInterval.inSeconds} : sous 5 s, le '
+        'serveur écarte la plupart des relevés (TrackingPingThrottle) et la '
+        'batterie paie pour rien.',
+      );
+    } else if (emissionInterval > FraicheurPosition.seuilRetard) {
+      // Le seuil de comparaison est celui que le back-office applique : les
+      // deux doivent s'accorder, sans quoi une flotte parfaitement suivie
+      // s'affiche en rouge sur la carte de supervision.
+      anomalies.add(
+        'TRACKING_INTERVAL_SECONDS=${emissionInterval.inSeconds} : au-delà de '
+        '${FraicheurPosition.seuilRetard.inSeconds} s, le back-office affiche '
+        'en permanence une position en retard, et au-delà de '
+        '${FraicheurPosition.seuilPerte.inMinutes} min une position figée.',
+      );
     }
+
     if (distanceFilterMeters < 0) {
-      return 'TRACKING_MINIMUM_DISTANCE_METERS=$distanceFilterMeters : une '
-          'distance négative n’a pas de sens, le filtre est ignoré.';
+      anomalies.add(
+        'TRACKING_MINIMUM_DISTANCE_METERS=$distanceFilterMeters : une distance '
+        'négative n’a pas de sens, le filtre est ignoré.',
+      );
+    } else if (distanceFilterMeters > 100) {
+      anomalies.add(
+        'TRACKING_MINIMUM_DISTANCE_METERS=$distanceFilterMeters : au-delà du '
+        'seuil d’écriture du serveur (100 m), les déplacements lents ne sont '
+        'plus relevés.',
+      );
     }
-    if (distanceFilterMeters > 100) {
-      return 'TRACKING_MINIMUM_DISTANCE_METERS=$distanceFilterMeters : au-delà '
-          'du seuil d’écriture du serveur (100 m), les déplacements lents ne '
-          'sont plus relevés.';
+
+    // Le battement passe par la même bride que les relevés du capteur
+    // (`_emitPosition`) : plus court que l'émission, il est intégralement
+    // écarté, et un livreur immobile disparaît quand même de la carte. Le
+    // réglage a l'air actif et ne fait rien — le pire des deux mondes.
+    if (heartbeatInterval < emissionInterval) {
+      anomalies.add(
+        'TRACKING_HEARTBEAT_SECONDS=${heartbeatInterval.inSeconds} est sous '
+        'TRACKING_INTERVAL_SECONDS=${emissionInterval.inSeconds} : le battement '
+        'est écarté par la bride d’émission, il ne sert à rien.',
+      );
+    } else if (heartbeatInterval >= FraicheurPosition.seuilPerte) {
+      anomalies.add(
+        'TRACKING_HEARTBEAT_SECONDS=${heartbeatInterval.inSeconds} : un livreur '
+        'immobile sera déclaré « position figée » avant son prochain battement.',
+      );
     }
-    return null;
+
+    if (retryInterval > const Duration(minutes: 5)) {
+      anomalies.add(
+        'TRACKING_RETRY_SECONDS=${retryInterval.inSeconds} : un livreur qui '
+        'rallume son GPS en cours de course attendra jusqu’à '
+        '${retryInterval.inMinutes} min avant d’être suivi de nouveau.',
+      );
+    }
+
+    return anomalies;
   }
+
+  /// La première anomalie, ou `null`. Raccourci de journalisation.
+  String? get avertissement =>
+      avertissements.isEmpty ? null : avertissements.first;
 
   TrackingSettings copyWith({
     Duration? emissionInterval,
