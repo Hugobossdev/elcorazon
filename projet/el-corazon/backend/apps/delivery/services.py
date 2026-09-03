@@ -26,7 +26,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User, UserType
 from apps.delivery.models import Assignment, CourierProfile, CourierRating
-from apps.delivery.signals import assignment_offered
+from apps.delivery.signals import assignment_accepted, assignment_offered
 from apps.delivery.states import (
     DELIVERY_MACHINE,
     ORDER_STATUS_PROJECTION,
@@ -376,6 +376,10 @@ class AssignmentService:
                 "updated_at",
             ]
         )
+
+        # Après l'écriture, dans la transaction : un abonné qui écrit en base
+        # doit le faire de façon atomique avec l'acceptation qui le déclenche.
+        assignment_accepted.send(sender=Assignment, assignment=current)
         return current
 
     @staticmethod

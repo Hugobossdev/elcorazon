@@ -12,8 +12,9 @@ Aucune route n'est ouverte sans jeton : rien ici n'est public.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
+from django.db import transaction
 from django.db.models import QuerySet
 from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
@@ -21,21 +22,33 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin
+from rest_framework.mixins import (
+    CreateModelMixin,
+    ListModelMixin,
+    RetrieveModelMixin,
+    UpdateModelMixin,
+)
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
+from apps.accounts.models import VerificationPurpose
+from apps.accounts.services import VerificationService
+from apps.accounts.throttling import AuthCodeIssueThrottle, AuthIPThrottle
 from apps.delivery.models import Assignment, CourierProfile, CourierRating
 from apps.delivery.serializers import (
     AssignmentSerializer,
+    CourierApplicationAcceptedSerializer,
     CourierProfileSerializer,
     CourierProvisioningSerializer,
     CourierRatingSerializer,
     CourierRatingWriteSerializer,
+    CourierSelfApplicationSerializer,
+    CourierUpdateSerializer,
     DeclineSerializer,
     DeliveryTransitionSerializer,
     DocumentsSerializer,
@@ -73,11 +86,90 @@ ORDER_ID = OpenApiParameter(
 __all__ = [
     "AssignmentViewSet",
     "CancelAssignmentView",
+    "CourierApplicationView",
     "CourierOnlineView",
     "CourierProfileView",
     "OfferAssignmentView",
     "StaffCourierViewSet",
 ]
+
+
+class CourierApplicationView(APIView):
+    """`/delivery/apply/` — candidature spontanée d'un livreur.
+
+    ## Ce que cette route change, et ce qu'elle ne change pas
+
+    Elle ouvre une **seconde porte** vers `CourierService.provision`, à côté de
+    l'embauche par le back-office (`StaffCourierViewSet.create`). Les deux
+    créent exactement le même objet : un compte de type livreur et un dossier
+    **en attente**, jamais autre chose. Ce qui distingue un candidat d'un
+    embauché n'est donc pas son dossier — il est identique — mais qui a rempli
+    le formulaire.
+
+    L'invariant L1 est intact, et c'est le point : `can_accept_orders` exige
+    `verification_status == approved`, que seule `verification/` peut poser,
+    sous `couriers.approve`. Un candidat ne se valide pas lui-même ; il se met
+    dans la file de ceux dont on lira les pièces.
+
+    ## Pourquoi aucun jeton n'en sort
+
+    L'inscription client (`/auth/register/`) rend un couple de jetons dans la
+    foulée, et c'est cohérent : rien de ce qu'un client peut faire ensuite ne
+    dépend d'une adresse vérifiée. Ici, rendre des jetons ferait de l'écran de
+    saisie du code une étape que le client mobile pourrait sauter — il aurait
+    déjà tout ce qu'il faut pour appeler l'API. La session s'obtient donc
+    **uniquement** par `POST /auth/verify/`, code en main.
+
+    Ouverte sans jeton, et donc limitée en débit comme les routes
+    d'authentification : elle crée un compte et expédie un courriel, les deux
+    choses qu'on ne veut pas voir répétées en boucle depuis une même origine.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [AuthIPThrottle, AuthCodeIssueThrottle]
+
+    @extend_schema(
+        request=CourierSelfApplicationSerializer,
+        responses={201: CourierApplicationAcceptedSerializer},
+        tags=["delivery"],
+    )
+    def post(self, request: Request) -> Response:
+        serializer = CourierSelfApplicationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Les deux services sont atomiques séparément ; les réunir sous une
+        # transaction commune les rend indissociables. Sans elle, une panne à
+        # l'émission du code laisserait un compte créé et muet — et la seconde
+        # tentative du candidat se heurterait à « cette adresse est déjà
+        # prise », sur un compte dont il n'a jamais reçu le code. Le courriel,
+        # lui, part sur `on_commit` : il n'entre pas dans la transaction.
+        with transaction.atomic():
+            # Pas d'`assert_in_scope` ici, contrairement à l'embauche : il n'y
+            # a pas de personnel appelant dont on borne le périmètre. La garde
+            # équivalente est portée par le sérialiseur, qui n'accepte qu'un
+            # établissement ouvert au public.
+            courier = CourierService.provision(
+                application=CourierApplication(**serializer.validated_data)
+            )
+            challenge = VerificationService.issue(
+                user=courier.user, purpose=VerificationPurpose.ACCOUNT_VERIFICATION
+            )
+
+        return Response(
+            {
+                "email": challenge.email,
+                "expires_at": challenge.expires_at,
+                "retry_after": challenge.retry_after,
+                "code_length": challenge.code_length,
+                "verification_status": courier.verification_status,
+                "detail": (
+                    "Votre compte est créé. Saisissez le code envoyé à votre adresse "
+                    "pour l'activer, puis déposez vos pièces : votre dossier sera "
+                    "instruit par El Corazón avant votre première course."
+                ),
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 def courier_of(request: Request) -> CourierProfile:
@@ -202,18 +294,39 @@ class AssignmentViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Assig
         return Response(AssignmentSerializer(assignment).data)
 
 
-class StaffCourierViewSet(CreateModelMixin, ReadOnlyModelViewSet[CourierProfile]):
-    """Flotte, vue et **ouverte** par le personnel de ses établissements.
+class StaffCourierViewSet(
+    CreateModelMixin, UpdateModelMixin, ReadOnlyModelViewSet[CourierProfile]
+):
+    """Flotte, vue, **ouverte** et corrigée par le personnel de ses établissements.
 
-    Pas de suppression, et pas de modification du dossier par le personnel non
-    plus : ce qu'un livreur a livré, encaissé et signé y renvoie. Le retirer du
-    service se fait par la suspension (`verification/`), qui laisse le dossier
-    lisible.
+    Pas de suppression : ce qu'un livreur a livré, encaissé et signé y renvoie.
+    Le retirer du service se fait par la suspension (`verification/`), qui
+    laisse le dossier lisible.
+
+    **La correction, elle, est possible — en `PATCH` seulement.** Le back-office
+    n'avait aucun moyen de rectifier une plaque relevée de travers à l'embauche
+    ou un numéro de téléphone qui change : il fallait ouvrir un second compte,
+    c'est-à-dire dédoubler un livreur et scinder ses compteurs.
+
+    Deux garde-fous portent cette ouverture :
+
+    * `CourierUpdateSerializer` est une **liste blanche**. Le statut du dossier,
+      les pièces, `is_online`, les compteurs, l'établissement et l'adresse
+      électronique n'y figurent pas — voir son docstring, qui dit pour chacun
+      pourquoi ;
+    * `PUT` est refusé (`http_method_names`). Un remplacement complet obligerait
+      l'appelant à renvoyer le dossier entier, et le premier champ qu'il
+      oublierait serait écrasé par un défaut. Une correction est partielle par
+      nature.
     """
 
     permission_classes = [HasReadWritePermission.of(read="couriers.read", write="couriers.write")]
     serializer_class = CourierProfileSerializer
     queryset = CourierProfile.objects.none()  # pour le générateur de schéma
+
+    #: `put` retiré de la liste par défaut de `UpdateModelMixin` : voir le
+    #: docstring de la classe. `delete` n'y a jamais été.
+    http_method_names: ClassVar[list[str]] = ["get", "post", "patch", "head", "options"]
     filterset_fields = {
         "verification_status": ["exact"],
         "is_online": ["exact"],
@@ -232,6 +345,8 @@ class StaffCourierViewSet(CreateModelMixin, ReadOnlyModelViewSet[CourierProfile]
     def get_serializer_class(self) -> type[BaseSerializer[Any]]:
         if self.action == "create":
             return CourierProvisioningSerializer
+        if self.action == "partial_update":
+            return CourierUpdateSerializer
         return CourierProfileSerializer
 
     @extend_schema(
@@ -261,6 +376,32 @@ class StaffCourierViewSet(CreateModelMixin, ReadOnlyModelViewSet[CourierProfile]
             application=CourierApplication(**serializer.validated_data)
         )
         return Response(CourierProfileSerializer(courier).data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        request=CourierUpdateSerializer,
+        responses={200: CourierProfileSerializer},
+        tags=["delivery"],
+    )
+    def partial_update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        """Corrige un dossier — identité de contact et véhicule.
+
+        Pas d'`assert_in_scope` ici, contrairement à `create` : l'objet existe,
+        et `get_queryset` l'a déjà filtré sur le périmètre du compte. Un dossier
+        hors périmètre est donc **introuvable** (404) plutôt qu'interdit (403),
+        ce qui est le comportement de tout le reste du module — l'existence
+        d'un livreur d'une autre enseigne n'a pas à se déduire d'un code de
+        réponse.
+
+        La réponse rend le dossier **complet** et non les seuls champs
+        modifiés : l'écran qui vient de corriger une plaque remplace sa ligne
+        avec ce qu'il reçoit, et une réponse partielle lui ferait perdre les
+        compteurs qu'il affichait.
+        """
+        courier = self.get_object()
+        serializer = CourierUpdateSerializer(instance=courier, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        courier = serializer.save()
+        return Response(CourierProfileSerializer(courier).data)
 
     @extend_schema(
         request=VerificationSerializer,

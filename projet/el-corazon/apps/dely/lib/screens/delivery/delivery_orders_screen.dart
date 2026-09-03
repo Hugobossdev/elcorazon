@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:elcora_dely/screens/communication/call_screen.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
@@ -815,7 +818,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () => _callCustomer(),
+                    onPressed: () => _choisirCommentAppeler(),
                     icon: const Icon(Icons.phone),
                     label: const Text('Appeler'),
                     style: ElevatedButton.styleFrom(
@@ -1016,6 +1019,77 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
     return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
 
+  /// Les deux façons de joindre le client, et ce qui les distingue.
+  ///
+  /// ## Pourquoi un choix, plutôt qu'un bouton qui tranche
+  ///
+  /// Les deux ont un domaine où l'autre échoue, et le livreur est le seul à
+  /// savoir lequel s'applique :
+  ///
+  /// * **l'appel dans l'application** passe par le canal RTC et ne coûte que
+  ///   des données. Il exige que le client ait l'application ouverte ou
+  ///   installée et du réseau, et le serveur le refuse hors livraison en cours
+  ///   — avant, personne n'est en route ; après, la conversation n'a plus
+  ///   d'objet ;
+  /// * **le composeur du téléphone** marche toujours, y compris quand le
+  ///   client n'a plus de données, et c'est le seul qui reste au moment où il
+  ///   faut vraiment joindre quelqu'un — devant une porte fermée. Il consomme
+  ///   du crédit et divulgue le numéro du livreur.
+  ///
+  /// Le numéro du destinataire est rendu au livreur par le contrat
+  /// (`AssignmentSerializer.recipient_phone`) : c'est une asymétrie voulue —
+  /// le client, lui, ne reçoit jamais le numéro personnel de son livreur
+  /// (`CourierPublicSerializer` ne le porte pas).
+  Future<void> _choisirCommentAppeler() async {
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.wifi_calling_3),
+              title: const Text('Appeler dans l\'application'),
+              subtitle: const Text('Gratuit — le client est prévenu dans Dely'),
+              onTap: () => Navigator.of(context).pop('app'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.dialpad),
+              title: const Text('Téléphoner'),
+              subtitle: const Text('Passe par votre opérateur et votre crédit'),
+              onTap: () => Navigator.of(context).pop('tel'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || choix == null) return;
+    if (choix == 'tel') {
+      await _callCustomer();
+      return;
+    }
+
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => CallScreen(
+            orderId: widget.order.orderId,
+            nomInterlocuteur: widget.order.destinataire.isEmpty
+                ? 'Client'
+                : widget.order.destinataire,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Ouvre le composeur du téléphone sur le numéro du destinataire.
   Future<void> _callCustomer() async {
     try {
       // Récupérer le numéro de téléphone depuis le profil utilisateur

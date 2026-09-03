@@ -1,11 +1,31 @@
+import 'dart:async';
+
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:admin/presentation/commande.dart';
-import 'package:admin/services/app_service.dart';
 import 'package:provider/provider.dart';
-import 'package:admin/utils/price_formatter.dart';
+
+import 'package:admin/services/notification_center_service.dart';
 import 'package:admin/ui/admin_color_tokens.dart';
 
+/// Centre de notifications du back-office.
+///
+/// ## Ce que cette boîte montrait
+///
+/// Elle **recomposait** ses lignes à chaque ouverture à partir de la liste de
+/// commandes déjà à l'écran : « N commandes en attente », puis les trois
+/// dernières commandes présentées comme des « nouvelles commandes ». Ce
+/// n'étaient pas des événements mais une seconde lecture de l'état courant, et
+/// cela se voyait : rien n'apparaissait tant que l'écran n'avait pas rechargé,
+/// une annulation de la nuit ne laissait aucune trace, et « lu » n'existait
+/// pas — la liste revenait identique à chaque fois. Les deux entrées portaient
+/// d'ailleurs un `action` vide, avec un chevron qui promettait une destination.
+///
+/// Elle lit désormais `/api/v1/notifications/`, que le serveur produit depuis
+/// toujours et que le back-office était la seule des trois applications à
+/// ignorer. Le tri, la persistance et surtout **le filtrage des destinataires**
+/// viennent de là : chacun ne voit que ce qui concerne son établissement et ses
+/// permissions (`staff_to_alert`).
 class NotificationsDialog extends StatefulWidget {
   const NotificationsDialog({super.key});
 
@@ -14,6 +34,16 @@ class NotificationsDialog extends StatefulWidget {
 }
 
 class _NotificationsDialogState extends State<NotificationsDialog> {
+  @override
+  void initState() {
+    super.initState();
+    // Après la première frame : `context.read` avant celle-ci lirait un arbre
+    // de providers pas encore monté.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(context.read<NotificationCenterService>().refresh());
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
@@ -83,9 +113,23 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
             const Divider(height: 1),
             // Contenu - Liste des notifications
             Expanded(
-              child: Consumer<AppService>(
-                builder: (context, appService, child) {
-                  final notifications = _getNotifications(appService);
+              child: Consumer<NotificationCenterService>(
+                builder: (context, centre, child) {
+                  final notifications = centre.notifications;
+
+                  if (centre.isLoading && notifications.isEmpty) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  if (centre.error != null && notifications.isEmpty) {
+                    return _messageCentre(
+                      context,
+                      icone: Icons.cloud_off,
+                      titre: 'Notifications indisponibles',
+                      detail: centre.error!,
+                      action: () => unawaited(centre.refresh()),
+                    );
+                  }
 
                   if (notifications.isEmpty) {
                     final scheme = Theme.of(context).colorScheme;
@@ -153,9 +197,9 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
                       minHeight: 48,
                     ),
                     child: TextButton.icon(
-                      onPressed: () {
-                        // Marquer toutes comme lues
-                      },
+                      onPressed: () => unawaited(
+                        context.read<NotificationCenterService>().markAllRead(),
+                      ),
                       icon: const Icon(Icons.done_all),
                       label: const Text('Tout marquer comme lu'),
                     ),
@@ -178,75 +222,87 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
     );
   }
 
-  List<Map<String, dynamic>> _getNotifications(AppService appService) {
-    final allOrders = appService.allOrders;
-    final pendingOrders = appService.pendingOrders;
-    final recentOrders = allOrders.take(5).toList();
+  /// Un état vide ou en erreur, présenté de la même façon.
+  Widget _messageCentre(
+    BuildContext context, {
+    required IconData icone,
+    required String titre,
+    required String detail,
+    VoidCallback? action,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icone, size: 64, color: scheme.onSurfaceVariant.withValues(alpha: 0.55)),
+            const SizedBox(height: 16),
+            Text(
+              titre,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              detail,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            if (action != null) ...[
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: action,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Réessayer'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
-    final notifications = <Map<String, dynamic>>[];
-
-    // Notifications pour commandes en attente
-    if (pendingOrders.isNotEmpty) {
-      notifications.add({
-        'id': 'pending_orders',
-        'title': 'Commandes en attente',
-        'message':
-            '${pendingOrders.length} commande(s) nécessitent votre attention',
-        'time': DateTime.now(),
-        'type': 'warning',
-        'icon': Icons.pending,
-        'color': 'warning',
-        'action': () {
-          // Naviguer vers la gestion des commandes
-        },
-      });
-    }
-
-    // Notifications pour commandes récentes
-    for (final order in recentOrders.take(3)) {
-      notifications.add({
-        'id': 'order_${order.id}',
-        'title': 'Nouvelle commande',
-        'message':
-            'Commande #${order.id.substring(0, 8).toUpperCase()} - ${PriceFormatter.format(order.totalAffiche)}',
-        'time': order.passeeLe,
-        'type': 'order',
-        'icon': Icons.shopping_cart,
-        'color': 'info',
-        'action': () {
-          // Afficher les détails de la commande
-        },
-      });
-    }
-
-    return notifications;
+  /// Apparence d'après le `kind` du serveur — la seule clé qui fasse foi.
+  ///
+  /// Les valeurs sont celles de `NotificationKind`. Un genre inconnu de cette
+  /// version de l'application prend l'apparence neutre plutôt que de disparaître :
+  /// une notification qu'on ne sait pas décorer se lit quand même.
+  (IconData, Color) _apparence(BuildContext context, String kind) {
+    final scheme = Theme.of(context).colorScheme;
+    final tokens = AdminColorTokens.semantic(scheme);
+    return switch (kind) {
+      'order_status' => (Icons.shopping_cart, tokens.info),
+      'payment' => (Icons.credit_card_off, tokens.danger),
+      'delivery_offer' => (Icons.delivery_dining, tokens.warning),
+      'account' => (Icons.person, tokens.success),
+      'marketing' => (Icons.campaign, scheme.primary),
+      _ => (Icons.notifications, scheme.primary),
+    };
   }
 
   Widget _buildNotificationItem(
-      BuildContext context, Map<String, dynamic> notification,) {
-    final timeAgo = _formatTimeAgo(notification['time'] as DateTime);
-    final icon = notification['icon'] as IconData;
+    BuildContext context,
+    eccore.AppNotification notification,
+  ) {
+    final timeAgo = _formatTimeAgo(notification.createdAt);
     final scheme = Theme.of(context).colorScheme;
-    final tokens = AdminColorTokens.semantic(scheme);
-    final colorKey = notification['color'];
-    final Color color = switch (colorKey) {
-      'warning' => tokens.warning,
-      'danger' => tokens.danger,
-      'success' => tokens.success,
-      'info' => tokens.info,
-      _ => scheme.primary,
-    };
+    final (icon, color) = _apparence(context, notification.kind);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      elevation: 2,
+      elevation: notification.isRead ? 0 : 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
       child: Container(
-        constraints: const BoxConstraints(
-          minHeight: 56,
-        ),
+        constraints: const BoxConstraints(minHeight: 56),
         child: ListTile(
           leading: Container(
             width: 48,
@@ -258,9 +314,13 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
             child: Icon(icon, color: color, size: 24),
           ),
           title: Text(
-            notification['title'] as String,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
+            notification.title,
+            style: TextStyle(
+              // Le gras distingue le non-lu. C'est la seule chose que « lu »
+              // change à l'écran, et c'est suffisant : masquer les lues
+              // priverait de l'historique, qui est tout l'intérêt d'une
+              // notification persistante.
+              fontWeight: notification.isRead ? FontWeight.normal : FontWeight.bold,
               fontSize: 14,
             ),
           ),
@@ -269,11 +329,8 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
             children: [
               const SizedBox(height: 4),
               Text(
-                notification['message'] as String,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: scheme.onSurfaceVariant,
-                ),
+                notification.body,
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 4),
               Text(
@@ -285,17 +342,12 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
               ),
             ],
           ),
-          trailing: Icon(
-            Icons.chevron_right,
-            color: scheme.onSurfaceVariant.withValues(alpha: 0.55),
+          trailing: notification.isRead
+              ? null
+              : Icon(Icons.circle, size: 10, color: color),
+          onTap: () => unawaited(
+            context.read<NotificationCenterService>().markRead(notification.id),
           ),
-          onTap: () {
-            final action = notification['action'] as VoidCallback?;
-            if (action != null) {
-              Navigator.of(context).pop();
-              action();
-            }
-          },
         ),
       ),
     );

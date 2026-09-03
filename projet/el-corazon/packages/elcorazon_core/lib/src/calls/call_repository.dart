@@ -53,6 +53,22 @@ class CallRepository {
     return RtcCredentials.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// Relit **un** appel (`GET /calls/{id}/`).
+  ///
+  /// C'est ce qu'il faut sur un événement de la file personnelle : elle ne
+  /// transporte que des identifiants (ADR-008), et l'état fait foi côté
+  /// serveur. Parcourir [history] pour retrouver une ligne — ce que faisait
+  /// l'app cliente — pagine l'historique **entier** à chaque sonnerie, c'est-à-
+  /// dire au moment précis où l'on veut la latence la plus basse, et coûte de
+  /// plus en plus cher à mesure que le compte accumule des appels.
+  ///
+  /// Le filtre d'autorisation vit dans le `get_queryset` de la vue : un appel
+  /// qui ne concerne pas l'appelant rend 404, pas 403.
+  Future<Call> getById(String callId) async {
+    final response = await apiClient.get('/calls/$callId/');
+    return Call.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// Historique : les appels auxquels l'appelant a pris part.
   Future<List<Call>> history() async {
     final calls = <Call>[];

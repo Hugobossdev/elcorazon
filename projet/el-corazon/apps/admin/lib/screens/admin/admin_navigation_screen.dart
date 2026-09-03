@@ -14,6 +14,7 @@ import 'package:admin/screens/admin/analytics_screen.dart';
 import 'package:admin/screens/admin/category_management_screen.dart';
 import 'package:admin/screens/admin/customization_management_screen.dart';
 import 'package:admin/screens/admin/menu_management_screen.dart';
+import 'package:admin/screens/admin/payments_screen.dart';
 import 'package:admin/screens/admin/marketing_screen.dart';
 import 'package:admin/screens/admin/promotions_screen.dart';
 import 'package:admin/screens/admin/gamification_management_screen.dart';
@@ -104,6 +105,14 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Carte temps réel',
           icon: Icons.map_rounded,
           index: 11,
+        ),
+        // Les encaissements suivent les commandes : c'est la même question
+        // posée du côté de la caisse. Le service existait et n'était ouvert
+        // par aucune entrée de menu.
+        NavigationItem(
+          title: 'Paiements',
+          icon: Icons.payments_rounded,
+          index: 16,
         ),
       ],
     ),
@@ -259,6 +268,9 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
       case 15:
         screen = const DriverDocumentsDashboardScreen();
         break;
+      case 16:
+        screen = const PaymentsScreen();
+        break;
       default:
         screen = const AdminDashboardScreen();
     }
@@ -303,8 +315,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
 
         final theme = Theme.of(context);
         final scheme = theme.colorScheme;
-        final isMobile =
-            MediaQuery.of(context).size.width < 1024; // Tablet breakpoint
+        final isMobile = MediaQuery.of(context).size.width < 1024; // Tablet breakpoint
 
         if (isMobile) {
           return Scaffold(
@@ -375,6 +386,8 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
         return scheme.primary;
       case 7: // Roles
         return scheme.primary;
+      case 16: // Paiements
+        return sem.success;
       case 12: // Settings
         return scheme.onSurfaceVariant;
       default:
@@ -443,9 +456,8 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
         ),
       ),
       child: Row(
-        mainAxisAlignment: _isSidebarExpanded
-            ? MainAxisAlignment.start
-            : MainAxisAlignment.center,
+        mainAxisAlignment:
+            _isSidebarExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
         children: [
           Container(
             width: 40,
@@ -591,9 +603,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                 Icon(
                   item.icon,
                   size: 20,
-                  color: isSelected
-                      ? primaryColor
-                      : theme.colorScheme.onSurfaceVariant,
+                  color: isSelected ? primaryColor : theme.colorScheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -603,8 +613,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                       color: isSelected
                           ? theme.colorScheme.onSurface
                           : theme.colorScheme.onSurfaceVariant,
-                      fontWeight:
-                          isSelected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                     ),
                   ),
                 ),
@@ -657,9 +666,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
               child: Icon(
                 item.icon,
                 size: 22,
-                color: isSelected
-                    ? primaryColor
-                    : theme.colorScheme.onSurfaceVariant,
+                color: isSelected ? primaryColor : theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -669,7 +676,10 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
   }
 
   Widget _buildSidebarFooter(
-      BuildContext context, AdminAuthService adminAuth, ThemeData theme,) {
+    BuildContext context,
+    AdminAuthService adminAuth,
+    ThemeData theme,
+  ) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -729,12 +739,9 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
             )
           : IconButton(
               icon: Icon(
-                _isSidebarExpanded
-                    ? Icons.menu_open_rounded
-                    : Icons.menu_rounded,
+                _isSidebarExpanded ? Icons.menu_open_rounded : Icons.menu_rounded,
               ),
-              onPressed: () =>
-                  setState(() => _isSidebarExpanded = !_isSidebarExpanded),
+              onPressed: () => setState(() => _isSidebarExpanded = !_isSidebarExpanded),
             ),
     );
   }
@@ -744,7 +751,10 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
   // ===========================================================================
 
   Widget _buildModernAppBar(
-      BuildContext context, AdminAuthService adminAuth, ThemeData theme,) {
+    BuildContext context,
+    AdminAuthService adminAuth,
+    ThemeData theme,
+  ) {
     return Container(
       height: 80,
       padding: const EdgeInsets.symmetric(horizontal: 32),
@@ -944,8 +954,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                               ? theme.colorScheme.primary
                               : theme.colorScheme.onSurfaceVariant,
                           fontSize: 10,
-                          fontWeight:
-                              isSelected ? FontWeight.bold : FontWeight.w500,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                         ),
                       ),
                     ],
@@ -980,9 +989,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
             currentAccountPicture: CircleAvatar(
               backgroundColor: scheme.onPrimary.withValues(alpha: 0.18),
               child: Text(
-                (adminAuth.currentAdmin?.fullName ?? 'A')
-                    .substring(0, 1)
-                    .toUpperCase(),
+                (adminAuth.currentAdmin?.fullName ?? 'A').substring(0, 1).toUpperCase(),
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
@@ -1027,9 +1034,8 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                             color: _selectedIndex == item.index
                                 ? theme.colorScheme.primary
                                 : null,
-                            fontWeight: _selectedIndex == item.index
-                                ? FontWeight.bold
-                                : null,
+                            fontWeight:
+                                _selectedIndex == item.index ? FontWeight.bold : null,
                           ),
                         ),
                         selected: _selectedIndex == item.index,
@@ -1044,8 +1050,10 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                 const Divider(),
                 ListTile(
                   leading: Icon(Icons.logout_rounded, color: scheme.error),
-                  title: Text('Déconnexion',
-                      style: TextStyle(color: scheme.error),),
+                  title: Text(
+                    'Déconnexion',
+                    style: TextStyle(color: scheme.error),
+                  ),
                   onTap: () => _logout(context),
                 ),
               ],

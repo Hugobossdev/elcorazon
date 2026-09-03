@@ -1,10 +1,12 @@
+import 'package:elcorazon_core/elcorazon_core.dart'
+    show LocationAvailability, LocationRemede;
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:elcora_dely/config/api_config.dart';
 import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/location_service.dart';
 import 'package:elcora_dely/services/notification_service.dart';
 import 'package:elcora_dely/services/realtime_tracking_service.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
@@ -39,9 +41,16 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  /// Autorisation de localisation, telle que le système la donne.
-  LocationPermission? _permission;
-  bool _serviceActif = true;
+  /// Ce qui empêche de relever la position, ou [LocationAvailability.disponible].
+  ///
+  /// Cet écran lisait `Geolocator` directement — activation d'un côté,
+  /// permission de l'autre — et recomposait lui-même les quatre cas, avec ses
+  /// propres libellés. Ce sont les mêmes quatre cas que l'application cliente
+  /// affiche, et ils divergeaient déjà : la cause et la phrase viennent
+  /// maintenant du socle (`LocationAvailability`), le geste qui débloque aussi.
+  LocationAvailability? _localisation;
+
+  final LocationService _position = LocationService();
 
   @override
   void initState() {
@@ -50,13 +59,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _relireEtatLocalisation() async {
-    final actif = await Geolocator.isLocationServiceEnabled();
-    final permission = await Geolocator.checkPermission();
+    final etat = await _position.disponibilite();
     if (!mounted) return;
-    setState(() {
-      _serviceActif = actif;
-      _permission = permission;
-    });
+    setState(() => _localisation = etat);
   }
 
   @override
@@ -132,61 +137,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (context, tracking, child) {
         final obstacle = tracking.trackingUnavailableReason;
         final suit = tracking.isTrackingLocation && obstacle == null;
+        final etat = _localisation;
 
         return _section(
           'Position',
           [
             _statutTuile(
               actif: suit,
-              titre: suit ? 'Votre position est partagée' : 'Suivi interrompu',
+              titre: suit ? 'Votre position est partagée' : 'Suivi en veille',
               detail: suit
                   ? 'Pendant vos courses, pour que le client suive sa '
-                      'livraison. Rien n\'est relevé entre deux courses.'
+                      "livraison. Rien n'est relevé entre deux courses."
                   : obstacle ??
-                      'Le suivi démarre à la connexion, une fois la position '
-                      'autorisée.',
+                      // Le libellé disait « le suivi démarre à la connexion » :
+                      // c'était vrai, et c'était le défaut. Le GPS tournait de
+                      // la connexion à la déconnexion, y compris pendant les
+                      // heures d'attente. Il s'allume désormais avec la course.
+                      "Il démarre quand vous acceptez une course, et s'arrête "
+                      'à la livraison.',
             ),
-            if (!_serviceActif)
+            if (etat != null && !etat.estDisponible)
               ListTile(
-                leading: const Icon(Icons.location_disabled, color: Colors.red),
-                title: const Text('Localisation désactivée'),
-                subtitle: const Text('Activez-la dans les réglages du téléphone'),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () async {
-                  await Geolocator.openLocationSettings();
-                  await _relireEtatLocalisation();
-                },
-              )
-            else if (_permission == LocationPermission.deniedForever)
-              ListTile(
-                leading: const Icon(Icons.block, color: Colors.red),
-                title: const Text('Position refusée définitivement'),
-                subtitle: const Text(
-                  'Elle ne peut plus être redemandée depuis l\'application',
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () async {
-                  await Geolocator.openAppSettings();
-                  await _relireEtatLocalisation();
-                },
-              )
-            else if (_permission == LocationPermission.denied)
-              ListTile(
-                leading: const Icon(Icons.location_searching,
-                    color: Colors.orange),
-                title: const Text('Autoriser la position'),
-                subtitle: const Text('Nécessaire pour recevoir des courses'),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () async {
-                  await Geolocator.requestPermission();
-                  await _relireEtatLocalisation();
-                },
+                leading: Icon(_iconeDe(etat), color: _couleurDe(etat)),
+                title: Text(etat.titre),
+                subtitle: Text(etat.consigne),
+                trailing: etat.remede.libelle.isEmpty
+                    ? null
+                    : const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: etat.remede.libelle.isEmpty
+                    ? null
+                    : () async {
+                        await _position.appliquerRemede(etat.remede);
+                        // Relit au retour : le livreur revient peut-être des
+                        // réglages avec le GPS rallumé, et cette tuile doit
+                        // disparaître sans qu'il ait à rouvrir l'écran.
+                        await _relireEtatLocalisation();
+                      },
               ),
           ],
         );
       },
     );
   }
+
+  static IconData _iconeDe(LocationAvailability etat) => switch (etat) {
+        LocationAvailability.serviceDesactive => Icons.location_disabled,
+        LocationAvailability.permissionRefuseeDefinitivement => Icons.block,
+        LocationAvailability.permissionRefusee => Icons.location_searching,
+        _ => Icons.gps_not_fixed,
+      };
+
+  static Color _couleurDe(LocationAvailability etat) => switch (etat) {
+        LocationAvailability.serviceDesactive ||
+        LocationAvailability.permissionRefuseeDefinitivement =>
+          Colors.red,
+        _ => Colors.orange,
+      };
 
   // ---------------------------------------------------------- notifications
 
@@ -218,7 +224,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const Icon(Icons.notifications_off, color: Colors.orange),
                 title: const Text('Activer les notifications'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () => Geolocator.openAppSettings(),
+                // Ouvre la fiche de l'application : c'est là que se
+                // rouvrent des notifications refusées définitivement, comme
+                // pour la position. Le geste passe par le service plutôt
+                // que par un appel direct au greffon de géolocalisation,
+                // dont ce n'était le rôle que par coïncidence d'API.
+                onTap: () => _position.appliquerRemede(
+                  LocationRemede.ouvrirLaFicheDeLApplication,
+                ),
               ),
           ],
         );

@@ -296,6 +296,52 @@ exercé : un appareil Android, un iPhone, ou les deux.
 
 ---
 
+## 6bis. Le back-office (`apps/admin`) — état au 2 septembre 2026
+
+**Aucun push, et c'est bloqué en console, pas dans le code.**
+
+`apps/admin` n'a ni `firebase_core`, ni `firebase_messaging`, ni
+`firebase_options.dart`, ni greffon Gradle `com.google.gms.google-services`.
+Son `applicationId` est resté `com.example.admin`, pour lequel aucune
+application Firebase n'est déclarée dans `elcorazon-9595`.
+
+Ce qui a été fait sans attendre : le back-office **lit désormais les vraies
+notifications** (`/api/v1/notifications/`) au lieu d'en fabriquer à partir de
+sa liste de commandes, et le serveur en produit réellement pour le personnel
+(`staff_to_alert` — établissement de rattachement + permission). Le centre de
+notifications est donc fonctionnel, persistant et cloisonné ; il ne vibre
+simplement pas.
+
+Pour ajouter le push, dans cet ordre :
+
+1. **Renommer le paquet** — `com.example.*` est refusé par Google Play, et une
+   application Firebase se crée pour un nom de paquet qui ne se change pas
+   après coup. Par exemple `com.elcorazon.admin`, dans
+   `android/app/build.gradle.kts` (`namespace` et `applicationId`) et
+   l'arborescence Kotlin.
+2. **Créer l'application Android** dans le projet `elcorazon-9595`
+   (§1), télécharger `google-services.json` dans `apps/admin/android/app/`.
+3. **Ajouter le greffon** `id("com.google.gms.google-services")` dans
+   `android/app/build.gradle.kts` — **après** l'étape 2 : sans le fichier, le
+   greffon fait échouer le build Android.
+4. **Ajouter les dépendances** `firebase_core`, `firebase_messaging`,
+   `flutter_local_notifications` au `pubspec.yaml`, puis
+   `flutterfire configure` pour produire `firebase_options.dart`.
+5. **Reprendre le service de l'app livreur** — `apps/dely/lib/services/
+   notification_service.dart` est le modèle le plus proche : découpage
+   `initialize()` / `enableForUser()`, canal Android, rétention de
+   `getInitialMessage`. Le back-office n'a besoin que d'un canal
+   (`admin_alerts`) et d'une destination : la fiche de commande.
+6. **Enregistrer l'appareil** — `AdminAuthService` doit appeler
+   `AuthRepository.registerDevice` à l'ouverture de session et
+   `unregisterDevice` à la fermeture, comme les deux autres applications.
+
+Rien de tout cela ne demande une modification du backend : `/auth/devices/`
+accepte déjà n'importe quel type de compte, et les notifications du personnel
+partent déjà dans la file d'envoi.
+
+---
+
 ## 7. Ce qui reste à faire
 
 Deux choses, qu'aucune vérification depuis un poste ne peut remplacer.
@@ -324,6 +370,38 @@ Puis le parcours métier, **application fermée** : faire avancer une commande
 d'un statut à l'autre et vérifier que le worker Celery envoie. Si l'historique
 se remplit et que le téléphone reste muet, le worker ne tourne pas ou n'a pas la
 même configuration que l'API.
+
+### 7.1bis Ce que la reprise du 2 septembre 2026 a trouvé
+
+**Le push de l'application cliente ne partait pas du tout** — le même mode
+d'échec que §5.0, mais côté Flutter cette fois.
+
+`PushNotificationService.initialize()` n'avait **aucun appelant**. `main.dart`
+construisait l'objet comme fournisseur (`create: (_) => …`, et `lazy`) sans
+jamais l'initialiser. La chaîne entière était donc inerte : pas de gestionnaire
+d'arrière-plan, pas de canal Android, aucune des trois écoutes de réception,
+donc aucune permission demandée, aucun jeton obtenu, et **aucun appareil client
+enregistré** auprès de `/auth/devices/`. Le serveur poussait vers une liste
+vide. `PushNotificationRouter` — écrit, monté, correct — écoutait un flux que
+rien n'alimentait.
+
+Le symptôme aurait été exactement celui du §7.1 : « le serveur dit `Livré.` et
+rien n'arrive », en cherchant du côté de la permission ou du canal alors que le
+service n'avait jamais démarré.
+
+Trois autres défauts corrigés dans la même passe :
+
+* **la permission était demandée au tout premier lancement**, devant l'écran
+  d'accueil, dans les deux applications. Sur Android 13+ un refus y est
+  **définitif**. Elle est désormais demandée à l'ouverture de session
+  (`prepare()` / `enableForUser()`) ;
+* **`getInitialMessage()` était perdu** : il est lu avant `runApp`, donc avant
+  que le routeur ne soit monté, et un `StreamController.broadcast` jette ce
+  qu'il émet sans auditeur. La notification qui lance l'application — la plus
+  utile de toutes — ne menait nulle part. Elle est maintenant retenue et
+  réclamée au montage ;
+* **`dely` ne naviguait pas** : son seul auditeur rechargeait les courses sans
+  ouvrir la mission annoncée.
 
 ### 7.2 iOS — rien n'est configuré
 

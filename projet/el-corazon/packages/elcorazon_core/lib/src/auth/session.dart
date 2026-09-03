@@ -84,16 +84,86 @@ class SessionNotifier extends AsyncNotifier<User?> {
     }
   }
 
-  Future<User> login({required String email, required String password}) async {
+  Future<User> login({required String email, required String password}) {
+    return _openSession(
+      (repository) => repository.login(email: email, password: password),
+    );
+  }
+
+  /// Présente le code reçu par courriel et ouvre la session.
+  ///
+  /// La garde de rôle s'y applique **exactement comme à la connexion**, et
+  /// pour la même raison : c'est une seconde porte vers un couple de jetons.
+  /// Une garde posée sur `login` seule laisserait passer par celle-ci un
+  /// compte du mauvais type — un client qui saisirait son code dans
+  /// l'application livreur, par exemple.
+  Future<User> verifyAccount({required String email, required String code}) {
+    return _openSession(
+      (repository) => repository.verifyAccount(email: email, code: code),
+    );
+  }
+
+  /// Repose le mot de passe avec le code reçu, et ouvre la session.
+  ///
+  /// Le serveur vient de révoquer toutes les sessions ouvertes ailleurs ; les
+  /// jetons rendus ici sont les seuls valides, et `AuthRepository` les a déjà
+  /// écrits dans le stockage sécurisé.
+  Future<User> resetPassword({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) {
+    return _openSession(
+      (repository) => repository.confirmPasswordReset(
+        email: email,
+        code: code,
+        newPassword: newPassword,
+      ),
+    );
+  }
+
+  /// Relit le compte depuis `/auth/me/` sans toucher aux jetons.
+  ///
+  /// Sert après une action qui change l'état du compte côté serveur — une
+  /// vérification faite depuis un autre appareil, un compte désactivé pendant
+  /// que l'application tournait. Une panne réseau n'y déconnecte personne :
+  /// l'état précédent est conservé, parce qu'un appel raté ne prouve rien sur
+  /// la validité de la session.
+  Future<void> reload() async {
+    final repository = ref.read(authRepositoryProvider);
+    try {
+      final user = await repository.me();
+      if (!_isAllowed(user)) {
+        await repository.logout();
+        state = const AsyncData(null);
+        return;
+      }
+      state = AsyncData(user);
+    } on SessionExpiredException {
+      await ref.read(tokenStorageProvider).clearTokens();
+      state = const AsyncData(null);
+    } on ApiException catch (error) {
+      if (error.isUnauthorized) {
+        await ref.read(tokenStorageProvider).clearTokens();
+        state = const AsyncData(null);
+      }
+    }
+  }
+
+  /// Le corps commun de [login], [verifyAccount] et [resetPassword].
+  ///
+  /// Les trois obtiennent un couple de jetons puis appliquent la même garde de
+  /// rôle. L'écrire trois fois n'aurait pas seulement été redondant : c'est la
+  /// façon dont on finit par en oublier une, et une porte sans garde suffit à
+  /// rendre les deux autres décoratives.
+  Future<User> _openSession(Future<User> Function(AuthRepository) ouvrir) async {
     state = const AsyncLoading();
     final repository = ref.read(authRepositoryProvider);
     try {
-      final user = await repository.login(email: email, password: password);
+      final user = await ouvrir(repository);
       if (!_isAllowed(user)) {
-        // Les jetons viennent d'être écrits par `repository.login` — les
-        // révoquer immédiatement, pas seulement refuser l'état local, sinon
-        // ils restent utilisables par ailleurs (un intercepteur qui les
-        // relirait, par exemple).
+        // Les jetons viennent d'être écrits — les révoquer, pas seulement
+        // refuser l'état local, sinon ils restent utilisables par ailleurs.
         final error = WrongAccountTypeException(user.userType, ref.read(expectedUserTypeProvider));
         await repository.logout();
         state = AsyncError(error, StackTrace.current);
@@ -118,10 +188,14 @@ class SessionNotifier extends AsyncNotifier<User?> {
     state = const AsyncLoading();
     final repository = ref.read(authRepositoryProvider);
     try {
-      // L'inscription ne crée que des comptes `customer` (imposé serveur,
-      // §1 du contrat) : la garde de rôle ne s'applique qu'aux apps qui
-      // acceptent ce type — dely et admin n'exposeront simplement pas
-      // d'écran d'inscription.
+      // `/auth/register/` ne crée que des comptes `customer` (imposé serveur,
+      // §1 du contrat) : la garde de rôle ne s'y applique donc pas, et cette
+      // méthode n'a d'usage que dans l'app cliente.
+      //
+      // Un livreur ne passe **pas** par ici : il dépose une candidature
+      // (`DeliveryRepository.apply`, `POST /delivery/apply/`), qui ne rend
+      // aucun jeton, puis ouvre sa session avec [verifyAccount]. Le compte du
+      // personnel, lui, reste créé par un pair.
       final user = await repository.register(
         email: email,
         password: password,

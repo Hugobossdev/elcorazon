@@ -4,7 +4,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:admin/services/notification_center_service.dart';
 
 /// Session du back-office, contre `/api/v1/auth/*` (Phase 6).
 ///
@@ -18,6 +18,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// * **Le type de compte est vérifié à l'ouverture de session.** Un compte
 ///   client qui se connecterait ici est rejeté par `expectedUserTypeProvider`,
 ///   dans le package — pas par une condition d'écran.
+///
+/// Il n'y a **qu'une** source de session : le serveur. Le contournement de
+/// développement qui vivait ici — une session fabriquée localement, installée
+/// au démarrage depuis `main.dart` — a été retiré. Il ouvrait l'interface
+/// entière sans jeton, si bien que chaque écran s'affichait vide sur des 401
+/// que rien n'expliquait, et il masquait l'écran de connexion à ceux-là mêmes
+/// qui devaient le vérifier.
 class AdminAuthService extends ChangeNotifier {
   static AdminAuthService? _instance;
 
@@ -50,12 +57,6 @@ class AdminAuthService extends ChangeNotifier {
 
   eccore.User? _staff;
 
-  /// Session fabriquée localement — **contournement de développement, à
-  /// retirer** (voir `_devBypassAuth` dans `main.dart`). Tenue à part de
-  /// [_staff] pour que le retrait se limite aux lignes qui la nomment : le
-  /// chemin normal continue de ne dépendre que du serveur.
-  eccore.User? _devStaff;
-
   bool _isLoading = false;
 
   // Déconnexion après inactivité — réglage local, sans rapport avec la
@@ -65,7 +66,7 @@ class AdminAuthService extends ChangeNotifier {
   Duration _inactivityTimeout = const Duration(minutes: 30);
   bool _autoLogoutEnabled = true;
 
-  eccore.User? get currentAdmin => _devStaff ?? _staff;
+  eccore.User? get currentAdmin => _staff;
   bool get isAuthenticated => currentAdmin != null;
   bool get isLoading => _isLoading;
   Duration get inactivityTimeout => _inactivityTimeout;
@@ -126,7 +127,9 @@ class AdminAuthService extends ChangeNotifier {
           .login(email: email, password: password);
       return _staff != null;
     } on eccore.WrongAccountTypeException {
-      eccore.Journal.trace("AdminAuthService: ce compte n'est pas un compte du personnel");
+      eccore.Journal.trace(
+          "AdminAuthService: ce compte n'est pas un compte du personnel",
+          );
       return false;
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('AdminAuthService: connexion refusée — ${e.code}');
@@ -141,18 +144,11 @@ class AdminAuthService extends ChangeNotifier {
     _stopInactivityTimer();
     await _container.read(eccore.sessionProvider.notifier).logout();
     _staff = null;
-    _devStaff = null;
-    notifyListeners();
-  }
-
-  /// Installe une session sans passer par le serveur — **contournement de
-  /// développement, à retirer**.
-  ///
-  /// Ne fabrique aucun jeton, et ne prétend pas le faire : `ApiClient` n'a
-  /// rien à joindre aux requêtes, donc l'API répondra 401. Ce que cela ouvre,
-  /// c'est l'interface ; ce que cela ne peut pas ouvrir, ce sont les données.
-  void installDevSession(eccore.User staff) {
-    _devStaff = staff;
+    // Les notifications d'un compte ne se montrent pas au suivant. Le centre
+    // les relit à chaque ouverture, mais sans ce vidage la boîte afficherait
+    // celles du compte précédent le temps de la requête — sur un poste de
+    // back-office partagé entre deux services, ce n'est pas anodin.
+    NotificationCenterService().clearSession();
     notifyListeners();
   }
 

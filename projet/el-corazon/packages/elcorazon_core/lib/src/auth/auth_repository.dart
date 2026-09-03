@@ -1,6 +1,7 @@
 import 'package:elcorazon_core/src/models/user.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/auth/token_storage.dart';
+import 'package:elcorazon_core/src/auth/verification_challenge.dart';
 
 /// Accès à `/api/v1/auth/*` — un seul endroit qui connaît la forme exacte du
 /// contrat (`backend/apps/accounts/urls.py`, `views.py`, `serializers.py`).
@@ -32,6 +33,70 @@ class AuthRepository {
     final response = await apiClient.post(
       '/auth/login/',
       data: {'email': email, 'password': password},
+    );
+    return _persistAndReturnUser(response.data as Map<String, dynamic>);
+  }
+
+  /// Présente le code reçu par courriel (`POST /auth/verify/`).
+  ///
+  /// Rend un couple de jetons et **le persiste** : c'est la seule route qui
+  /// ouvre la session d'un livreur inscrit par lui-même, `POST
+  /// /delivery/apply/` n'en rendant aucun. Le compte ressort avec
+  /// `emailVerifiedAt` renseigné.
+  ///
+  /// Un code faux, périmé, déjà employé, ou présenté une fois de trop rend la
+  /// même `ApiException` — `invalid_verification_code`, 400. Ne pas les
+  /// distinguer est une décision du serveur, pas une imprécision de ce client :
+  /// le geste utile est le même dans les quatre cas, redemander un code.
+  Future<User> verifyAccount({required String email, required String code}) async {
+    final response = await apiClient.post(
+      '/auth/verify/',
+      data: {'email': email, 'code': code},
+    );
+    return _persistAndReturnUser(response.data as Map<String, dynamic>);
+  }
+
+  /// Redemande un code de vérification (`POST /auth/verify/resend/`).
+  ///
+  /// Répond 202 quoi qu'il arrive — adresse inconnue comprise. Ne jamais en
+  /// déduire qu'un compte existe, ni afficher « adresse inconnue » : le serveur
+  /// s'interdit de le dire, et l'écran ne doit pas le déduire à sa place.
+  Future<VerificationChallenge> resendVerificationCode(String email) async {
+    final response = await apiClient.post(
+      '/auth/verify/resend/',
+      data: {'email': email},
+    );
+    return VerificationChallenge.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Demande un code de réinitialisation (`POST /auth/password/reset/`).
+  ///
+  /// Même contrat que [resendVerificationCode] : 202 systématique.
+  Future<VerificationChallenge> requestPasswordReset(String email) async {
+    final response = await apiClient.post(
+      '/auth/password/reset/',
+      data: {'email': email},
+    );
+    return VerificationChallenge.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Repose le mot de passe avec le code reçu
+  /// (`POST /auth/password/reset/confirm/`).
+  ///
+  /// Toutes les sessions ouvertes sont révoquées côté serveur, y compris sur
+  /// les autres appareils : les jetons rendus ici sont les seuls valides, et
+  /// ils sont persistés dans la foulée.
+  ///
+  /// Un mot de passe refusé par les validateurs ne consomme **pas** le code —
+  /// l'utilisateur peut en proposer un autre sans redemander d'envoi.
+  Future<User> confirmPasswordReset({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    final response = await apiClient.post(
+      '/auth/password/reset/confirm/',
+      data: {'email': email, 'code': code, 'new_password': newPassword},
     );
     return _persistAndReturnUser(response.data as Map<String, dynamic>);
   }

@@ -32,6 +32,16 @@ class RealtimeChannel {
   bool _closedByCaller = false;
   bool _hasRetried = false;
 
+  /// La dernière fermeture était-elle un **refus d'accès** (`4403`) ?
+  ///
+  /// Utile à l'appelant qui supervise sa propre reprise : un refus ne se
+  /// rejoue pas au même rythme qu'une coupure réseau — il ne deviendra pas
+  /// autorisé en insistant, mais il peut le devenir si un rôle est corrigé
+  /// côté serveur. Le distinguer permet d'espacer sans abandonner.
+  ///
+  /// `false` tant qu'aucune fermeture n'a eu lieu.
+  bool get closeCodeWasForbidden => _socket?.closeCode == _forbiddenCloseCode;
+
   Stream<RealtimeEvent> connect() {
     _closedByCaller = false;
     _hasRetried = false;

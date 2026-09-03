@@ -200,6 +200,14 @@ class DjangoDeliveryRepository {
   final eccore.OrderRepository _orders;
   final eccore.TrackingRepository _tracking;
 
+  /// Dépose une candidature de livreur — **la seule méthode sans session**.
+  ///
+  /// Elle ne rend aucun jeton : le serveur s'y refuse pour que la saisie du
+  /// code reste une étape obligée. La session s'ouvre ensuite par
+  /// `AppService.verifierCompte`.
+  Future<eccore.CourierApplicationReceipt> apply(eccore.CourierApplication application) =>
+      _delivery.apply(application);
+
   /// Le dossier du livreur connecté.
   Future<eccore.CourierProfile> profile() => _delivery.me();
 

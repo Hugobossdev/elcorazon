@@ -21,7 +21,14 @@ from apps.accounts.permissions import PERMISSION_CHOICES, validate_permissions
 from common.models import TimeStampedModel, UUIDModel
 from common.storage import user_media
 
-__all__ = ["Device", "Role", "User", "UserType"]
+__all__ = [
+    "Device",
+    "Role",
+    "User",
+    "UserType",
+    "VerificationCode",
+    "VerificationPurpose",
+]
 
 
 class UserType(models.TextChoices):
@@ -240,3 +247,85 @@ class Device(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.get_platform_display()} — {self.user.email}"
+
+
+class VerificationPurpose(models.TextChoices):
+    """À quoi sert un code — et donc ce qu'il autorise une fois présenté.
+
+    Le motif est stocké **et vérifié** à la présentation. Sans lui, un code
+    obtenu par « mot de passe oublié » vaudrait vérification de compte, et
+    inversement : un seul canal suffirait alors à obtenir les deux effets.
+    """
+
+    ACCOUNT_VERIFICATION = "account_verification", "Vérification du compte"
+    PASSWORD_RESET = "password_reset", "Réinitialisation du mot de passe"
+
+
+class VerificationCode(UUIDModel, TimeStampedModel):
+    """Code à usage unique envoyé à l'utilisateur, et sa trace.
+
+    ## Le code n'est pas stocké
+
+    Seule son empreinte l'est, par le même jeu de hacheurs que les mots de
+    passe (`check_password`). Une copie de la base ne rend donc pas les codes
+    en circulation : elle rendrait, sinon, la capacité de valider n'importe
+    quel compte et de réinitialiser n'importe quel mot de passe — c'est-à-dire
+    exactement ce que ce mécanisme est censé protéger.
+
+    ## Un seul code vivant à la fois
+
+    La contrainte partielle `one_live_code_per_purpose` le garantit en base.
+    Sans elle, chaque renvoi laisserait le précédent utilisable : au bout de
+    dix demandes, dix codes valides pour le même compte, et l'espace à deviner
+    est divisé d'autant. `consumed_at` couvre donc les deux fins possibles —
+    **employé** par son destinataire, ou **remplacé** par un renvoi. Dans les
+    deux cas il ne sert plus, et c'est la seule chose que la contrainte a
+    besoin de savoir.
+
+    ## Les tentatives sont comptées
+
+    Six chiffres, c'est un million de possibilités : sans compteur, un
+    attaquant qui les parcourt trouve en quelques minutes. `attempts` ferme le
+    code après un petit nombre d'essais — la limitation de débit HTTP ne suffit
+    pas, elle se contourne en répartissant les requêtes.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="verification_codes")
+    purpose = models.CharField(max_length=32, choices=VerificationPurpose.choices, db_index=True)
+    code_hash = models.CharField(max_length=128)
+
+    # L'adresse **réellement servie**, recopiée ici. Celle du compte peut
+    # changer ensuite ; savoir où le code est parti est ce qu'on cherche quand
+    # un utilisateur affirme n'avoir rien reçu.
+    sent_to = models.EmailField()
+
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "code de vérification"
+        verbose_name_plural = "codes de vérification"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "purpose"],
+                condition=models.Q(consumed_at__isnull=True),
+                name="one_live_code_per_purpose",
+            ),
+        ]
+        indexes = [models.Index(fields=["user", "purpose", "-created_at"])]
+
+    def __str__(self) -> str:
+        # Jamais le code, ni son empreinte : cette chaîne finit dans les
+        # journaux d'administration et les traces d'erreur.
+        return f"{self.get_purpose_display()} — {self.sent_to}"
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_live(self) -> bool:
+        """Encore présentable : ni employé, ni remplacé, ni périmé."""
+        return self.consumed_at is None and not self.is_expired

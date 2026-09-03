@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
@@ -22,12 +23,16 @@ __all__ = [
     "CustomerStatsSerializer",
     "DeviceSerializer",
     "LoginSerializer",
+    "PasswordResetConfirmSerializer",
     "PermissionSerializer",
     "ProfileUpdateSerializer",
     "RegisterSerializer",
     "RoleSerializer",
     "TokenPairSerializer",
     "UserSerializer",
+    "VerificationChallengeSerializer",
+    "VerificationRequestSerializer",
+    "VerifyCodeSerializer",
 ]
 
 
@@ -134,6 +139,84 @@ class ChangePasswordSerializer(serializers.Serializer[Any]):
 
 class RefreshSerializer(serializers.Serializer[Any]):
     refresh = serializers.CharField()
+
+
+# ------------------------------------------------- vérification par code
+
+
+def _code_field() -> serializers.RegexField:
+    """Le champ « code », taillé sur la longueur réellement émise.
+
+    Construit à partir du réglage plutôt que figé à six chiffres : les deux
+    valeurs doivent bouger ensemble, et un formulaire qui refuserait un code
+    que le serveur vient d'envoyer serait un blocage sans message
+    compréhensible.
+    """
+    longueur = settings.ACCOUNT_VERIFICATION_CODE_LENGTH
+    return serializers.RegexField(
+        rf"^\d{{{longueur}}}$",
+        error_messages={"invalid": f"Le code comporte {longueur} chiffres."},
+        trim_whitespace=True,
+    )
+
+
+class VerificationRequestSerializer(serializers.Serializer[Any]):
+    """Demande d'envoi ou de renvoi d'un code : l'adresse, et rien d'autre.
+
+    Pas de mot de passe : cette route s'emprunte précisément quand on ne l'a
+    plus, ou quand on n'a pas encore de session.
+    """
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
+
+
+class VerifyCodeSerializer(VerificationRequestSerializer):
+    """Présentation d'un code reçu."""
+
+    code = _code_field()
+
+
+class PasswordResetConfirmSerializer(VerifyCodeSerializer):
+    """Code reçu + nouveau mot de passe.
+
+    Le mot de passe est éprouvé ici **sans utilisateur**, ce qui écarte le seul
+    validateur qui en demande un — la similarité avec le nom et l'adresse. Ce
+    n'est pas un oubli : le service refera la passe complète, en connaissant le
+    compte, une fois le code accepté. La faire ici avec l'utilisateur
+    obligerait à retrouver le compte **avant** d'avoir vu le moindre code, et à
+    répondre différemment selon qu'il existe ou non — c'est-à-dire à dire à qui
+    demande si telle adresse est inscrite chez nous.
+    """
+
+    new_password = serializers.CharField(write_only=True, min_length=8, trim_whitespace=False)
+
+    def validate_new_password(self, value: str) -> str:
+        validate_password(value)
+        return value
+
+
+class VerificationChallengeSerializer(serializers.Serializer[Any]):
+    """Ce que le serveur rend après avoir émis un code.
+
+    `retry_after` et `expires_at` viennent du serveur et pas d'une constante
+    côté client : ce sont les mêmes réglages qui gouvernent réellement
+    l'émission, et un compte à rebours qui les devinerait finirait par proposer
+    « Renvoyer » à un moment où le serveur refuse encore.
+
+    Rien de ce corps ne dit si l'adresse correspond à un compte. La réponse est
+    identique dans les deux cas, y compris `retry_after` — un délai nul pour
+    une adresse inconnue et soixante secondes pour une adresse connue suffirait
+    à faire de cette route un annuaire.
+    """
+
+    email = serializers.EmailField(read_only=True)
+    expires_at = serializers.DateTimeField(read_only=True)
+    retry_after = serializers.IntegerField(read_only=True)
+    code_length = serializers.IntegerField(read_only=True)
+    detail = serializers.CharField(read_only=True)
 
 
 # --------------------------------------------------------------- back-office

@@ -55,10 +55,22 @@ class ApiClient {
   ///   « jeton expiré » ; le confondre avec le second remonte `session_expired`
   ///   à l'écran de connexion au lieu du vrai motif, et consomme au passage un
   ///   refresh token encore valide pour rien.
+  /// Les routes de vérification et de reprise de compte y figurent pour les
+  /// mêmes deux raisons, en plus fort encore : on les emprunte précisément
+  /// quand la session manque — ou, pour la réinitialisation, quand le mot de
+  /// passe lui-même manque. Y joindre un jeton périmé ferait répondre 401
+  /// *avant* que la vue ne voie le code, c'est-à-dire fermerait la porte de
+  /// secours au moment où elle sert.
   static const _publicAuthPaths = {
     '/auth/login/',
     '/auth/register/',
     '/auth/token/refresh/',
+    '/auth/verify/',
+    '/auth/verify/resend/',
+    '/auth/password/reset/',
+    '/auth/password/reset/confirm/',
+    // Candidature de livreur : la seule route de `delivery` ouverte sans jeton.
+    '/delivery/apply/',
   };
 
   static bool _isPublicAuthPath(String path) =>

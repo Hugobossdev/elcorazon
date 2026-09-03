@@ -8,10 +8,13 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 /// Elle construit une `eccore.Order` par son JSON plutôt que par son
 /// constructeur : c'est cette lecture-là que le produit exécute, et un test qui
 /// court-circuite le décodage ne dit rien de ce qui arrive du serveur.
-Map<String, dynamic> montantJson(int mineur) =>
-    {'amount': '$mineur', 'currency': 'XOF'};
+Map<String, dynamic> montantJson(int mineur) => {'amount': '$mineur', 'currency': 'XOF'};
 
-eccore.Order commandeDeTest({
+/// Le JSON d'une commande, tel que le rend `/orders/manage/`.
+///
+/// Exposé à part du modèle pour qu'un test puisse vérifier ce que le contrat
+/// contient — et surtout ce qu'il ne contient pas.
+Map<String, dynamic> commandeJson({
   String id = 'commande-1',
   String reference = 'CMD-0001',
   String statut = 'preparing',
@@ -23,12 +26,13 @@ eccore.Order commandeDeTest({
   int totalCfa = 4500,
   DateTime? passeeLe,
   DateTime? livraisonPrevueLe,
+  DateTime? livreeLe,
   List<dynamic>? lignes,
   List<dynamic>? transitions,
 }) {
   final quand = (passeeLe ?? DateTime(2026, 8, 8, 12)).toIso8601String();
 
-  return eccore.Order.fromJson({
+  return {
     'id': id,
     'reference': reference,
     'restaurant': 'el-corazon-lome',
@@ -47,12 +51,50 @@ eccore.Order commandeDeTest({
     'recipient_phone': '+22890000000',
     'placed_at': quand,
     'estimated_delivery_at': livraisonPrevueLe?.toIso8601String(),
+    'delivered_at': livreeLe?.toIso8601String(),
     'delivery_instructions': consignes,
     'lines': lignes ?? const [],
     'status_events': transitions ?? const [],
     'created_at': quand,
     'updated_at': quand,
-  });
+  };
+}
+
+/// La même commande, montée en modèle du socle.
+eccore.Order commandeDeTest({
+  String id = 'commande-1',
+  String reference = 'CMD-0001',
+  String statut = 'preparing',
+  String destinataire = 'Awa',
+  String adresse = 'Rue du Commerce',
+  String repere = '',
+  String moyenPaiement = 'mobile_money',
+  String consignes = '',
+  int totalCfa = 4500,
+  DateTime? passeeLe,
+  DateTime? livraisonPrevueLe,
+  DateTime? livreeLe,
+  List<dynamic>? lignes,
+  List<dynamic>? transitions,
+}) {
+  return eccore.Order.fromJson(
+    commandeJson(
+      id: id,
+      reference: reference,
+      statut: statut,
+      destinataire: destinataire,
+      adresse: adresse,
+      repere: repere,
+      moyenPaiement: moyenPaiement,
+      consignes: consignes,
+      totalCfa: totalCfa,
+      passeeLe: passeeLe,
+      livraisonPrevueLe: livraisonPrevueLe,
+      livreeLe: livreeLe,
+      lignes: lignes,
+      transitions: transitions,
+    ),
+  );
 }
 
 /// Une ligne de commande, avec ses options figées.

@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:elcora_dely/config/adresses.dart';
 
 
 /// Conversation livreur ↔ client sur `ws/orders/{id}/chat/` (Phase 6).
@@ -41,16 +41,8 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
-  static String _chatWsUrl(String orderId) {
-    final apiBaseUrl = dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1';
-    final apiUri = Uri.parse(apiBaseUrl);
-    return Uri(
-      scheme: apiUri.scheme == 'https' ? 'wss' : 'ws',
-      host: apiUri.host,
-      port: apiUri.port,
-      path: '/ws/orders/$orderId/chat/',
-    ).toString();
-  }
+  static String _chatWsUrl(String orderId) =>
+      adresseWebSocket('/ws/orders/$orderId/chat/');
 
   /// Messages reçus depuis l'ouverture du canal. Vide au départ : le serveur
   /// n'a pas d'historique à servir.

@@ -40,6 +40,8 @@ class PushNotificationService extends ChangeNotifier {
   bool _isInitialized = false;
   String? _userId;
   String? _fcmToken;
+  AuthorizationStatus _authorization = AuthorizationStatus.notDetermined;
+  StreamSubscription<String>? _abonnementRotation;
   final StreamController<PushNotification> _notificationController =
       StreamController<PushNotification>.broadcast();
 
@@ -57,86 +59,167 @@ class PushNotificationService extends ChangeNotifier {
   /// Jeton d'appareil FCM, `null` tant que Firebase n'est pas initialisé ou
   /// que la permission n'a pas été accordée.
   String? get fcmToken => _fcmToken;
+
+  /// L'utilisateur a-t-il accepté les notifications ?
+  ///
+  /// `provisional` compte comme accordé : c'est le mode iOS où les
+  /// notifications arrivent discrètement, sans avoir été demandées — elles
+  /// arrivent bel et bien.
+  bool get isAuthorized =>
+      _authorization == AuthorizationStatus.authorized ||
+      _authorization == AuthorizationStatus.provisional;
   Stream<PushNotification> get notificationStream =>
       _notificationController.stream;
   Stream<String> get tokenRefreshStream => _tokenRefreshController.stream;
 
-  /// Initialise le service de notifications push
-  Future<void> initialize({String? userId}) async {
+  /// Prépare tout ce qui **ne demande rien à l'utilisateur** — à appeler au
+  /// démarrage.
+  ///
+  /// ## Pourquoi ce service était entièrement inerte
+  ///
+  /// `initialize()` n'avait **aucun appelant**. Le fournisseur de `main.dart`
+  /// se contentait de construire l'objet (`create: (_) => …`, et `lazy`), le
+  /// `PushNotificationRouter` écoutait un flux que rien n'alimentait, et
+  /// `AppService._registerPushDeviceBestEffort` sortait dès sa première ligne
+  /// puisque `fcmToken` restait nul. Résultat : aucune permission demandée,
+  /// aucun jeton obtenu, **aucun appareil client enregistré**, et un serveur
+  /// qui poussait vers une liste vide. Toute la chaîne existait et rien ne la
+  /// démarrait — le même défaut que `dely` avait eu, dans l'autre application.
+  ///
+  /// ## Pourquoi c'est coupé en deux
+  ///
+  /// La permission ne se demande pas ici. Sur Android 13+, une demande faite
+  /// au premier lancement — devant un écran d'accueil, avant même que
+  /// l'utilisateur sache ce que l'application fait — se solde par un refus, et
+  /// un refus y est **définitif** : le système ne redemandera plus. Elle est
+  /// donc reportée à [enableForUser], appelée à l'ouverture de session, quand
+  /// « suivre ma commande » veut dire quelque chose.
+  ///
+  /// Ce qui reste ici est tout ce qui doit être en place **avant** le premier
+  /// message : le gestionnaire d'arrière-plan, les canaux Android, et les trois
+  /// écoutes de réception. En particulier [FirebaseMessaging.getInitialMessage],
+  /// qui n'est lisible **qu'une fois** : la différer ferait perdre la
+  /// notification qui vient de lancer l'application.
+  Future<void> prepare() async {
     if (_isInitialized) return;
 
     try {
-      _userId = userId;
-
-      // Initialiser les timezones
       tz.initializeTimeZones();
       tz.setLocalLocation(tz.getLocation('Europe/Paris'));
 
-      // Configuration des notifications locales
       await _initializeLocalNotifications();
 
-      // Push FCM — indépendant de ce qui précède : un échec ici (pas de
-      // projet Firebase configuré, permission refusée) laisse les
-      // notifications locales fonctionnelles.
-      await _initializeFirebaseMessaging();
+      // Push FCM — indépendant de ce qui précède : un échec ici (pas de projet
+      // Firebase configuré, services Google absents) laisse les notifications
+      // locales fonctionnelles.
+      await _ecouterLesMessages();
 
       _isInitialized = true;
       notifyListeners();
-
-      Journal.trace('PushNotificationService: Service initialisé avec succès');
+      Journal.trace('PushNotificationService: prêt (permission non demandée)');
     } catch (e) {
       Journal.trace('PushNotificationService: Erreur d\'initialisation - $e');
     }
   }
 
-  Future<void> _initializeFirebaseMessaging() async {
+  /// Conservée pour les appelants existants : prépare, et demande la
+  /// permission dans la foulée quand un compte est déjà connu.
+  Future<void> initialize({String? userId}) async {
+    await prepare();
+    if (userId != null) await enableForUser(userId);
+  }
+
+  Future<void> _ecouterLesMessages() async {
     try {
       final messaging = FirebaseMessaging.instance;
 
-      // iOS et Android 13+ exigent un consentement explicite ; Android
-      // antérieur le renvoie accordé d'office.
-      final settings = await messaging.requestPermission();
-      if (settings.authorizationStatus == AuthorizationStatus.denied) {
-        Journal.trace('PushNotificationService: notifications push refusées');
-        return;
-      }
-
+      // Enregistré avant toute réception, et **sans condition de permission** :
+      // c'est un point d'entrée de l'isolat d'arrière-plan, pas un affichage.
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+      // Les trois états de l'application, et ils sont bien trois chemins
+      // distincts côté Firebase : n'en traiter que deux laisse un tiers des
+      // ouvertures sans effet.
+      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleOpenedFromMessage);
+
+      // Application **fermée**, lancée par la notification.
+      // `onMessageOpenedApp` ne couvre que l'app déjà vivante en arrière-plan ;
+      // au démarrage à froid, le message déclencheur n'y passe jamais et n'est
+      // lisible qu'ici, une seule fois.
+      final initial = await messaging.getInitialMessage();
+      if (initial != null) {
+        _handleOpenedFromMessage(initial);
+      }
+    } catch (e) {
+      // Notamment sur un appareil sans services Google, ou si le projet
+      // Firebase n'est pas joignable : l'app tourne sans push plutôt que de
+      // refuser de démarrer.
+      Journal.trace('PushNotificationService: FCM indisponible - $e');
+    }
+  }
+
+  /// Demande la permission et obtient le jeton — à l'ouverture de session.
+  ///
+  /// Idempotent par compte : rappelée pour le même utilisateur avec un jeton
+  /// déjà en main, elle ne redemande rien.
+  ///
+  /// Un refus n'est **pas** une erreur : l'application continue, simplement
+  /// sans push. Elle garde son suivi temps réel et son historique
+  /// (`/api/v1/notifications/`), qui ne dépendent ni de FCM ni d'une
+  /// permission système.
+  Future<void> enableForUser(String userId) async {
+    _userId = userId;
+
+    try {
+      final messaging = FirebaseMessaging.instance;
+
+      final settings = await messaging.requestPermission();
+      _authorization = settings.authorizationStatus;
+      Journal.trace('PushNotificationService: permission ${_authorization.name}');
+
+      if (!isAuthorized) return;
 
       _fcmToken = await messaging.getToken();
       Journal.trace(
         'PushNotificationService: jeton FCM ${_fcmToken == null ? 'indisponible' : 'obtenu'}',
       );
 
-      messaging.onTokenRefresh.listen((token) {
+      await _abonnementRotation?.cancel();
+      _abonnementRotation = messaging.onTokenRefresh.listen((token) {
         _fcmToken = token;
         _tokenRefreshController.add(token);
       });
 
-      // Au premier plan, le système n'affiche rien de lui-même sur Android :
-      // on rejoue le message dans une notification locale.
-      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-      FirebaseMessaging.onMessageOpenedApp.listen(_handleOpenedFromMessage);
+      // Le jeton peut arriver après que `AppService` a ouvert la session :
+      // sans cette première émission, l'appareil ne serait enregistré qu'à la
+      // prochaine rotation, c'est-à-dire peut-être jamais.
+      final token = _fcmToken;
+      if (token != null) _tokenRefreshController.add(token);
 
-      // Le troisième cas, et le seul qui manquait : l'application était
-      // **fermée**, et c'est la notification qui l'a lancée.
-      //
-      // `onMessageOpenedApp` ne couvre que l'app déjà vivante en arrière-plan.
-      // Au démarrage à froid, le message qui a servi de déclencheur n'y passe
-      // jamais — il n'est lisible qu'une fois, par `getInitialMessage()`. Sans
-      // cet appel, la notification la plus utile de toutes (« votre commande
-      // arrive ») ouvrait l'application sur l'accueil, comme si l'on avait
-      // touché l'icône.
-      final initial = await messaging.getInitialMessage();
-      if (initial != null) {
-        _handleOpenedFromMessage(initial);
-      }
+      notifyListeners();
     } catch (e) {
-      // Notamment quand aucun projet Firebase réel n'est configuré (voir
-      // `lib/firebase_options.dart`) : l'app tourne sans push plutôt que de
-      // refuser de démarrer.
-      Journal.trace('PushNotificationService: FCM indisponible - $e');
+      Journal.trace('PushNotificationService: activation impossible - $e');
     }
+  }
+
+  /// Retire le jeton de cet appareil côté FCM — à la déconnexion, **après** que
+  /// le serveur l'a détaché du compte.
+  ///
+  /// Sans ce geste, le jeton reste valide : un téléphone partagé continuerait
+  /// de recevoir les notifications du compte précédent si le détachement côté
+  /// serveur avait échoué. `dely` le faisait déjà ; l'app cliente non.
+  Future<void> deleteToken() async {
+    try {
+      await FirebaseMessaging.instance.deleteToken();
+    } catch (e) {
+      Journal.trace('PushNotificationService: retrait du jeton impossible - $e');
+    }
+    _fcmToken = null;
+    _userId = null;
+    await _abonnementRotation?.cancel();
+    _abonnementRotation = null;
+    notifyListeners();
   }
 
   void _handleForegroundMessage(RemoteMessage message) {
@@ -153,7 +236,42 @@ class PushNotificationService extends ChangeNotifier {
     );
   }
 
+  /// La dernière notification ouverte, tant que personne ne l'a traitée.
+  ///
+  /// ## Pourquoi une retenue, et pas seulement un flux
+  ///
+  /// `getInitialMessage()` est lue pendant [prepare], c'est-à-dire **avant
+  /// `runApp`** : à cet instant, `PushNotificationRouter` n'est pas monté et
+  /// n'écoute rien. Un `StreamController.broadcast` jette ce qu'il émet sans
+  /// auditeur — la notification qui vient de lancer l'application serait donc
+  /// perdue, et c'est précisément celle qui compte le plus.
+  ///
+  /// Elle est donc retenue ici, et le routeur la réclame à son montage.
+  PushNotification? _ouvertureEnAttente;
+
+  /// Réclame l'ouverture retenue, et la consomme.
+  PushNotification? consommerOuvertureEnAttente() {
+    final attente = _ouvertureEnAttente;
+    _ouvertureEnAttente = null;
+    return attente;
+  }
+
+  /// Signale qu'une ouverture a été traitée par le flux — pour que le montage
+  /// suivant du routeur ne la rejoue pas.
+  void marquerOuvertureTraitee(String id) {
+    if (_ouvertureEnAttente?.id == id) _ouvertureEnAttente = null;
+  }
+
   void _handleOpenedFromMessage(RemoteMessage message) {
+    _ouvertureEnAttente = PushNotification(
+      id: message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+      title: message.notification?.title ?? '',
+      body: message.notification?.body ?? '',
+      data: Map<String, dynamic>.from(message.data),
+      type: PushNotification._getNotificationType(message.data),
+      timestamp: message.sentTime ?? DateTime.now(),
+    );
+
     _notificationController.add(
       PushNotification(
         // `data` porte de quoi ouvrir le bon écran, pas l'objet métier — il

@@ -10,11 +10,19 @@ from apps.delivery import backoffice, views
 app_name = "delivery"
 
 router = DefaultRouter()
+# `manage/` d'abord, comme partout ailleurs : les préfixes sont essayés dans
+# l'ordre, et une ressource nommée doit passer avant celle qui la capterait.
+router.register(
+    "manage/assignments", backoffice.ManagedAssignmentViewSet, basename="managed-assignment"
+)
 router.register("assignments", views.AssignmentViewSet, basename="assignment")
 router.register("couriers", views.StaffCourierViewSet, basename="courier")
 router.register("shifts", backoffice.CourierShiftViewSet, basename="shift")
 
 urlpatterns = [
+    # La seule route de `delivery` ouverte sans jeton : une candidature se
+    # dépose forcément avant d'avoir un compte.
+    path("apply/", views.CourierApplicationView.as_view(), name="apply"),
     # Le dossier du livreur s'adresse par `me/` et non par son identifiant :
     # il n'a qu'un dossier, et le lui faire retenir n'apporte rien.
     path("me/", views.CourierProfileView.as_view(), name="me"),

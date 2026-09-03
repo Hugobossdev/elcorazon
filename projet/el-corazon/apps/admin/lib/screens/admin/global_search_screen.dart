@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:admin/services/global_search_service.dart';
-import 'package:admin/screens/admin/order_management_screen.dart';
+import 'package:admin/presentation/dialogues/details_commande.dart';
+import 'package:admin/services/order_management_service.dart';
 import 'package:admin/screens/admin/menu_management_screen.dart';
 import 'package:admin/screens/admin/client_management_screen.dart';
 import 'package:admin/screens/admin/driver_management_screen.dart';
@@ -68,8 +70,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                 TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
-                    hintText:
-                        'Rechercher commandes, produits, clients, livreurs...',
+                    hintText: 'Rechercher commandes, produits, clients, livreurs...',
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(
@@ -202,8 +203,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
             Icons.restaurant,
             Colors.orange,
           ),
-          ..._results!.menuItems
-              .map((res) => _buildMenuItemCard(res, theme)),
+          ..._results!.menuItems.map((res) => _buildMenuItemCard(res, theme)),
         ],
         if (_results!.users.isNotEmpty &&
             _selectedCategories.contains(SearchCategory.users)) ...[
@@ -263,16 +263,34 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
         // rend le serveur porte déjà ce qui identifie la ligne (destinataire et
         // statut), et la fiche complète s'ouvre d'un clic.
         subtitle: Text(result.subtitle),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const OrderManagementScreen(),
-            ),
-          );
-        },
+        trailing: const Icon(Icons.chevron_right),
+        // Ouvre **cette** commande, et non la liste de toutes les commandes.
+        // Le résultat cliqué renvoyait vers l'écran de supervision complet :
+        // il fallait y retrouver à la main la ligne qu'on venait de chercher,
+        // ce qui annule l'intérêt d'avoir cherché.
+        onTap: () => _ouvrirLaCommande(result.id),
       ),
     );
+  }
+
+  /// Charge la fiche détaillée puis l'affiche.
+  ///
+  /// La recherche ne rend qu'un identifiant, un titre et un sous-titre — assez
+  /// pour la liste, pas pour une fiche. Le détail se demande au serveur, ce qui
+  /// rend au passage les lignes de la commande.
+  Future<void> _ouvrirLaCommande(String orderId) async {
+    final commande = await context.read<OrderManagementService>().loadDetail(orderId);
+
+    if (!mounted) return;
+    if (commande == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cette commande n’est plus lisible depuis ce compte.'),
+        ),
+      );
+      return;
+    }
+    afficherDetailsCommande(context, commande);
   }
 
   Widget _buildMenuItemCard(GlobalSearchResult result, ThemeData theme) {
@@ -354,5 +372,4 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
         return 'Livreurs';
     }
   }
-
 }

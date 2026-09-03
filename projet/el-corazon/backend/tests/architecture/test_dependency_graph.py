@@ -73,7 +73,22 @@ ALLOWED: dict[str, set[str]] = {
     # positions et l'autre fait sonner un téléphone — les coupler ferait
     # dépendre la sonnerie d'un flux de suivi qui peut être coupé.
     "calls": {"accounts", "delivery", "orders"},
-    "notifications": {"accounts", "delivery", "orders"},
+    # `payments` s'y ajoute pour l'échec d'encaissement — un paiement refusé
+    # était muet, et c'est le seul événement du parcours qui laisse à la fois
+    # le client et l'exploitation sans nouvelle. `restaurants` s'y ajoute pour
+    # savoir **qui prévenir** : une alerte d'exploitation s'adresse au personnel
+    # rattaché à l'établissement concerné (`StaffMembership`), pas à tout le
+    # monde.
+    #
+    # Le même filtre s'écrirait sans import, par la relation inverse
+    # `staff_memberships__…`. C'est écarté : ce serait un couplage réel que ce
+    # test ne verrait pas, et qui casserait en silence le jour où le
+    # `related_name` change. L'arête déclarée est vérifiée ; la traversée
+    # implicite ne l'est pas.
+    #
+    # Le sens reste celui de l'abonné vers l'émetteur — ni `payments` ni
+    # `restaurants` ne connaissent `notifications` — donc pas de cycle.
+    "notifications": {"accounts", "delivery", "orders", "payments", "restaurants"},
     # Comme `notifications` : l'abonné connaît l'émetteur, jamais l'inverse
     # (voir `test_orders_ne_connait_aucun_de_ses_abonnes`). `loyalty` réagit à
     # la livraison par signal et frappe ses codes via `promotions`. `payments`

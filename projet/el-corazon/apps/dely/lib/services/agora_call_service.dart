@@ -196,12 +196,23 @@ class AgoraCallService extends ChangeNotifier {
     }
   }
 
-  /// Rejoint un canal d'appel
+  /// Rejoint un canal d'appel.
+  ///
+  /// [channelId], [uid] et [token] viennent **tous les trois** de
+  /// `GET /calls/{id}/rtc-token/` et ne se fabriquent pas ici : c'est le
+  /// serveur qui dérive le canal, attribue le `uid` et signe le jeton avec un
+  /// certificat qui ne quitte jamais l'infrastructure.
+  ///
+  /// Le jeton était auparavant facultatif, avec pour valeur de repli la chaîne
+  /// vide « pour les tests ». Un repli de ce genre ne se remarque pas : il
+  /// fonctionne tant que le projet Agora n'exige pas de jeton, et cesse de
+  /// fonctionner le jour où on l'active — c'est-à-dire au passage en
+  /// production. Les trois paramètres sont donc requis.
   Future<bool> joinChannel({
     required String channelId,
     required CallType callType,
-    int? uid,
-    String? token, // Token Agora (optionnel pour les tests)
+    required int uid,
+    required String token,
   }) async {
     await _ensureInitialized();
 
@@ -242,11 +253,9 @@ class AgoraCallService extends ChangeNotifier {
 
       // Rejoindre le canal
       await _engine!.joinChannel(
-        token:
-            token ??
-            '', // Utiliser un token vide pour les tests, ou obtenir depuis votre serveur
+        token: token,
         channelId: channelId,
-        uid: uid ?? 0,
+        uid: uid,
         options: channelMediaOptions,
       );
 
@@ -344,18 +353,23 @@ class AgoraCallService extends ChangeNotifier {
     }
   }
 
-  /// Génère un ID de canal unique basé sur l'ID de commande
-  static String generateChannelId(String orderId) {
-    // Utiliser l'ID de commande comme base pour le canal
-    // Format: order_{orderId}
-    return 'order_$orderId';
-  }
-
-  /// Génère un UID unique pour l'utilisateur
-  static int generateUid(String userId) {
-    // Convertir l'ID utilisateur en un entier (hash simple)
-    return userId.hashCode.abs() % 2147483647; // Max UID Agora
-  }
+  // `generateChannelId` et `generateUid` vivaient ici. Elles sont supprimées,
+  // et pas seulement inutilisées :
+  //
+  // * `generateChannelId(orderId)` rendait `order_{id}`, un canal **prévisible
+  //   depuis un identifiant de commande** : qui en connaissait un rejoignait la
+  //   conversation. Le serveur dérive le canal de l'appel (`call-{uuid7}`), ce
+  //   qui le rend imprévisible et différent à chaque rappel ;
+  // * `generateUid(userId)` tronquait un `hashCode` sur 31 bits. Deux
+  //   participants au même `uid` s'expulsent mutuellement du canal Agora, et
+  //   une collision sur un hachage tronqué n'est pas une hypothèse d'école.
+  //   Le serveur attribue `1` à l'appelant et `2` au destinataire — le canal
+  //   n'a jamais que deux occupants, et il est propre à cet appel.
+  //
+  // Les deux valeurs viennent désormais de `GET /calls/{id}/rtc-token/`, avec
+  // le jeton signé. Les laisser en place, même sans appelant, laisserait la
+  // porte ouverte au prochain écran qui chercherait « comment obtenir un
+  // canal ».
 
   /// Nettoie les ressources
   Future<void> cleanup() async {

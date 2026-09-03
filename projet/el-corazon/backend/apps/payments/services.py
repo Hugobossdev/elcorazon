@@ -30,7 +30,10 @@ from apps.payments.models import (
     WebhookEvent,
     Withdrawal,
 )
-from apps.payments.signals import payment_transaction_settled
+from apps.payments.signals import (
+    payment_transaction_failed,
+    payment_transaction_settled,
+)
 from common.exceptions import BusinessRuleViolation, InsufficientBalance
 from common.money import Money
 
@@ -266,6 +269,11 @@ class PaymentService:
             txn.save(update_fields=["failure_reason"])
 
         PaymentService._move(txn, target)
+
+        if target == PaymentStatus.FAILED:
+            # Après `_move`, pour que l'abonné lise un statut déjà écrit —
+            # et dans la transaction, comme son pendant en réussite.
+            payment_transaction_failed.send(sender=Transaction, transaction=txn)
 
         if target == PaymentStatus.COMPLETED:
             if txn.order is not None:

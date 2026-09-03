@@ -49,4 +49,52 @@ extension LectureDossierLivreur on eccore.CourierProfile {
 
   /// Position connue, quand le livreur a émis au moins un relevé.
   bool get aUnePosition => lastLatitude != null && lastLongitude != null;
+
+  /// Depuis quand la position affichée date — ou `null` si aucune n'est connue.
+  ///
+  /// ## Pourquoi le siège en a besoin
+  ///
+  /// La carte de supervision posait un repère de la même façon qu'un relevé
+  /// date de huit secondes ou de onze minutes. Le siège lisait donc comme un
+  /// suivi en direct la dernière position d'un livreur dont le téléphone
+  /// s'était éteint, dont le GPS avait été coupé, ou qui traversait une zone
+  /// sans réseau — et n'appelait pas, puisqu'il croyait savoir où il était.
+  ///
+  /// Une carte qui ment sur sa fraîcheur est pire qu'une carte vide.
+  eccore.FraicheurPosition? get fraicheurPosition {
+    final quand = lastLocationAt;
+    if (!aUnePosition || quand == null) return null;
+    return eccore.FraicheurPosition.depuis(quand);
+  }
+
+  /// « il y a 8 s », « il y a 5 min ». Vide si aucune position n'est connue.
+  String get ageDeLaPosition {
+    final quand = lastLocationAt;
+    if (!aUnePosition || quand == null) return '';
+    return eccore.ageLisible(quand);
+  }
+
+  /// Phrase à afficher sous le statut, sur la carte comme dans la fiche.
+  ///
+  /// Un livreur sans aucun relevé n'est pas un livreur dont la position est
+  /// vieille : le distinguer évite de faire chercher un point qui n'a jamais
+  /// existé.
+  String get libelleDePosition {
+    if (!aUnePosition) return 'Aucune position transmise';
+    final age = ageDeLaPosition;
+    return switch (fraicheurPosition) {
+      eccore.FraicheurPosition.fraiche => 'Position $age',
+      eccore.FraicheurPosition.retardee => 'Dernière position $age',
+      eccore.FraicheurPosition.perdue => 'Position figée — dernière $age',
+      null => 'Position transmise, sans horodatage',
+    };
+  }
+
+  /// Couleur du bandeau de fraîcheur — verte tant que le suivi est en direct.
+  Color get couleurDeFraicheur => switch (fraicheurPosition) {
+        eccore.FraicheurPosition.fraiche => Colors.green,
+        eccore.FraicheurPosition.retardee => Colors.orange,
+        eccore.FraicheurPosition.perdue => Colors.red,
+        null => Colors.grey,
+      };
 }

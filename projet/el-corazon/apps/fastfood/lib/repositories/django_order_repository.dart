@@ -118,6 +118,14 @@ class DjangoOrderRepository implements OrderRepository {
       total: remote.total.toMajorUnits(),
       status: _toLocalStatus(remote.status),
       deliveryAddress: remote.deliveryAddressLine,
+      // Le point figé à la commande, et celui d'où part le repas. L'adaptateur
+      // les jetait tous les deux : l'écran de suivi re-géocodait la ligne
+      // d'adresse à chaque ouverture pour retrouver ce que le serveur venait de
+      // lui dire, et n'avait aucun moyen de placer le restaurant.
+      deliveryLatitude: remote.deliveryLatitude,
+      deliveryLongitude: remote.deliveryLongitude,
+      restaurantLatitude: remote.restaurantLatitude,
+      restaurantLongitude: remote.restaurantLongitude,
       deliveryNotes: remote.deliveryInstructions,
       discount: remote.discount.toMajorUnits(),
       paymentMethod: _toLocalPaymentMethod(remote.paymentMethod),

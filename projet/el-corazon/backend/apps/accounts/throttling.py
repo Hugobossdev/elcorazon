@@ -35,7 +35,7 @@ from rest_framework.views import APIView
 
 from common.throttling import FailClosedOnCacheOutage
 
-__all__ = ["AuthIPThrottle", "AuthIdentifierThrottle"]
+__all__ = ["AuthCodeIssueThrottle", "AuthIPThrottle", "AuthIdentifierThrottle"]
 
 
 class AuthIPThrottle(FailClosedOnCacheOutage, SimpleRateThrottle):
@@ -68,3 +68,21 @@ class AuthIdentifierThrottle(FailClosedOnCacheOutage, SimpleRateThrottle):
         # et le comptage n'a pas besoin de sa valeur en clair.
         digest = hashlib.sha256(identifier.strip().lower().encode()).hexdigest()[:32]
         return self.cache_format % {"scope": self.scope, "ident": digest}
+
+
+class AuthCodeIssueThrottle(AuthIdentifierThrottle):
+    """Émission d'un code de vérification, comptée par adresse visée.
+
+    Distincte de `AuthIdentifierThrottle`, et à l'heure plutôt qu'à la minute,
+    parce que ce qu'elle protège n'est pas le même bien. Les autres compteurs
+    défendent un compte contre la force brute ; celui-ci défend **une boîte de
+    réception** — la sienne ou celle d'autrui — contre le service employé comme
+    catapulte à courriels, et défend au passage la réputation d'expédition du
+    domaine. Un humain qui n'a pas reçu son code en redemande deux ou trois
+    fois, jamais trente.
+
+    Le compteur est indexé sur l'adresse **soumise**, comme son parent : ne
+    compter que les comptes existants dirait lesquels existent.
+    """
+
+    scope = "auth_code"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.orders.models import Order, OrderLine, OrderStatusEvent, PaymentMethod
@@ -17,7 +18,7 @@ from apps.orders.states import ORDER_MACHINE
 from apps.profiles.models import Address
 from apps.promotions.serializers import PromotionSerializer
 from apps.restaurants.models import Restaurant
-from common.serializers import MoneyField
+from common.serializers import LocationField, MoneyField
 
 __all__ = [
     "CancelSerializer",
@@ -68,11 +69,23 @@ class OrderSerializer(serializers.ModelSerializer[Order]):
 
     restaurant = serializers.SlugRelatedField[Restaurant](slug_field="slug", read_only=True)
     restaurant_name = serializers.CharField(source="restaurant.name", read_only=True)
+    # Point d'enlèvement, pour la carte de suivi du client.
+    #
+    # L'écran de suivi montre trois repères — le restaurant, le livreur, le
+    # client — et n'en tenait que deux : la commande ne disait pas d'où part le
+    # repas. L'application le suppléait par une constante écrite en dur
+    # (`AppConstants.restaurantLatitude`), qui désigne le premier établissement
+    # et deviendra fausse au deuxième. La course du livreur porte déjà ce point
+    # (`AssignmentSerializer.pickup_location`) ; le client, lui, ne voit jamais
+    # sa course. C'est donc à la commande de le porter.
+    restaurant_location = LocationField(source="restaurant.location", read_only=True)
     subtotal = MoneyField(read_only=True)
     delivery_fee = MoneyField(read_only=True)
     discount = MoneyField(read_only=True)
     total = MoneyField(read_only=True)
     allowed_transitions = serializers.SerializerMethodField()
+    lines_count = serializers.SerializerMethodField()
+    items_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -81,8 +94,11 @@ class OrderSerializer(serializers.ModelSerializer[Order]):
             "reference",
             "restaurant",
             "restaurant_name",
+            "restaurant_location",
             "status",
             "allowed_transitions",
+            "lines_count",
+            "items_count",
             "subtotal",
             "delivery_fee",
             "discount",
@@ -105,6 +121,43 @@ class OrderSerializer(serializers.ModelSerializer[Order]):
 
     def get_allowed_transitions(self, obj: Order) -> list[str]:
         return sorted(ORDER_MACHINE.targets_from(obj.status))
+
+    @extend_schema_field(serializers.IntegerField)
+    def get_lines_count(self, obj: Order) -> int:
+        """Nombre de **lignes** — trois produits distincts font trois lignes."""
+        return self._compte(obj, "lines_count", lambda lignes: len(lignes))
+
+    @extend_schema_field(serializers.IntegerField)
+    def get_items_count(self, obj: Order) -> int:
+        """Nombre d'**articles** — la somme des quantités.
+
+        Deux burgers, une pizza et trois donuts font six articles et trois
+        lignes. C'est le premier chiffre qui intéresse une cuisine, et le
+        second qui intéresse une facture ; les deux sont rendus, l'appelant
+        choisit celui qu'il affiche.
+        """
+        return self._compte(obj, "items_count", lambda lignes: sum(l.quantity for l in lignes))
+
+    @staticmethod
+    def _compte(obj: Order, annotation: str, depuis_les_lignes: Any) -> int:
+        """Lit l'annotation de la requête, ou retombe sur les lignes chargées.
+
+        **Ces deux compteurs existent parce que la forme de liste ne porte pas
+        `lines`**, et ne doit pas les porter : renvoyer les lignes de vingt
+        commandes pour n'en afficher que le nombre multiplierait par dix le
+        poids de chaque page. Le back-office affichait donc « 0 article » sur
+        toutes les commandes, avec un bandeau « aucun article trouvé » — sur des
+        commandes qui en contenaient.
+
+        L'annotation est posée par les vues (`_avec_compteurs`) : le compte se
+        fait alors en base, en une requête pour toute la page. Le repli n'est
+        utilisé que pour un objet isolé — la réponse d'une transition de statut,
+        par exemple — où il n'y a qu'une commande et où les lignes sont déjà là.
+        """
+        annote = getattr(obj, annotation, None)
+        if annote is not None:
+            return int(annote)
+        return depuis_les_lignes(obj.lines.all())
 
 
 class OrderDetailSerializer(OrderSerializer):

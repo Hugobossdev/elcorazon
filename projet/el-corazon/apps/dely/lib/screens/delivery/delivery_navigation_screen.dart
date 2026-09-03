@@ -12,6 +12,7 @@ import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
 import 'package:elcora_dely/screens/payments/driver_payment_screen.dart';
 import 'package:elcora_dely/screens/communication/chat_screen.dart';
+import 'package:elcora_dely/presentation/etat_compte.dart';
 import 'package:elcora_dely/presentation/messages_erreur.dart';
 
 class DeliveryNavigationScreen extends StatefulWidget {
@@ -62,18 +63,25 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        children: const [
-          DeliveryHomeScreen(),
-          DeliveryOrdersScreen(),
-          AnalyticsScreen(),
-          EarningsScreen(),
+      body: Column(
+        children: [
+          const _BandeauEtatDuDossier(),
+          Expanded(
+            child: PageView(
+              controller: _pageController,
+              onPageChanged: (index) {
+                setState(() {
+                  _currentIndex = index;
+                });
+              },
+              children: const [
+                DeliveryHomeScreen(),
+                DeliveryOrdersScreen(),
+                AnalyticsScreen(),
+                EarningsScreen(),
+              ],
+            ),
+          ),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -411,6 +419,10 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
         final appService = Provider.of<AppService>(context, listen: false);
         await appService.logout();
 
+        // La pile est vidée, mais la destination n'est plus nommée ici : `/`
+        // tombe sur `DriverGate`, qui relit la session et affiche l'écran de
+        // connexion parce qu'il n'y a plus de session — et non parce qu'un
+        // écran l'a décidé.
         if (mounted) {
           unawaited(Navigator.of(context).pushNamedAndRemoveUntil(
             '/',
@@ -552,4 +564,60 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
     );
   }
 
+}
+
+/// Rappel discret de l'état du dossier, au-dessus de l'application.
+///
+/// N'apparaît que pour un dossier **en attente d'instruction** — c'est le seul
+/// état qui laisse entrer tout en empêchant de travailler
+/// ([EtatCompte.meriteUnBandeau]). Les états qui barrent l'accès ne passent
+/// jamais par ici : `DriverGate` les intercepte avant.
+///
+/// Sans lui, un livreur dont le dossier n'est pas encore validé voit une
+/// application complète et une liste de courses vide, sans rien qui explique
+/// pourquoi. Il attend, puis il appelle.
+class _BandeauEtatDuDossier extends StatelessWidget {
+  const _BandeauEtatDuDossier();
+
+  @override
+  Widget build(BuildContext context) {
+    final etat = context.watch<AppService>().etatCompte;
+    if (etat == null || !etat.meriteUnBandeau) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.secondaryContainer,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(etat.icone, size: 20, color: theme.colorScheme.onSecondaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      etat.titre,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: theme.colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                    Text(
+                      etat.explication,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSecondaryContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

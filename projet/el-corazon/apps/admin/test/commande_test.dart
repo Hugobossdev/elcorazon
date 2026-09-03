@@ -65,35 +65,53 @@ void main() {
 
   group('Le statut', () {
     test('chaque valeur du serveur a sa contrepartie', () {
-      expect(commandeDeTest(statut: 'confirmed').statut,
-          StatutCommande.confirmee,);
-      expect(commandeDeTest(statut: 'picked_up').statut,
-          StatutCommande.recuperee,);
-      expect(commandeDeTest(statut: 'on_the_way').statut,
-          StatutCommande.enRoute,);
-      expect(commandeDeTest(statut: 'cancelled').statut,
-          StatutCommande.annulee,);
+      expect(
+        commandeDeTest(statut: 'confirmed').statut,
+        StatutCommande.confirmee,
+      );
+      expect(
+        commandeDeTest(statut: 'picked_up').statut,
+        StatutCommande.recuperee,
+      );
+      expect(
+        commandeDeTest(statut: 'on_the_way').statut,
+        StatutCommande.enRoute,
+      );
+      expect(
+        commandeDeTest(statut: 'cancelled').statut,
+        StatutCommande.annulee,
+      );
     });
 
     test('une valeur inconnue retombe sur « en attente »', () {
-      expect(commandeDeTest(statut: 'quelque_chose_de_neuf').statut,
-          StatutCommande.enAttente,);
+      expect(
+        commandeDeTest(statut: 'quelque_chose_de_neuf').statut,
+        StatutCommande.enAttente,
+      );
     });
   });
 
   group('Le moyen de paiement', () {
     test('chaque moyen connu est traduit', () {
-      expect(commandeDeTest(moyenPaiement: 'cash').moyenPaiement,
-          MoyenPaiement.especes,);
-      expect(commandeDeTest(moyenPaiement: 'card').moyenPaiement,
-          MoyenPaiement.carte,);
-      expect(commandeDeTest(moyenPaiement: 'wallet').moyenPaiement,
-          MoyenPaiement.portefeuille,);
+      expect(
+        commandeDeTest(moyenPaiement: 'cash').moyenPaiement,
+        MoyenPaiement.especes,
+      );
+      expect(
+        commandeDeTest(moyenPaiement: 'card').moyenPaiement,
+        MoyenPaiement.carte,
+      );
+      expect(
+        commandeDeTest(moyenPaiement: 'wallet').moyenPaiement,
+        MoyenPaiement.portefeuille,
+      );
     });
 
     test('un moyen inconnu passe pour du mobile money', () {
-      expect(commandeDeTest(moyenPaiement: 'crypto-monnaie').moyenPaiement,
-          MoyenPaiement.mobileMoney,);
+      expect(
+        commandeDeTest(moyenPaiement: 'crypto-monnaie').moyenPaiement,
+        MoyenPaiement.mobileMoney,
+      );
     });
 
     test('seules les espèces ne sont pas déjà encaissées', () {
@@ -156,11 +174,28 @@ void main() {
   });
 
   group('Le livreur affecté', () {
-    test('n’est jamais connu du back-office', () {
-      // Le sérialiseur de supervision ne le rend pas, et `AssignmentViewSet`
-      // est réservée au livreur lui-même. Ce test dit l'état du contrat, pas
-      // un choix de conception — il tombera le jour où le serveur l'expose.
-      expect(commandeDeTest().livreurAffecte, isNull);
+    test('ne se lit pas sur la commande', () {
+      // Ce groupe vérifiait que `commande.livreurAffecte` rendait `null`, en
+      // annonçant qu'il tomberait « le jour où le serveur l'expose ». Le
+      // serveur l'expose — non pas sur la commande, mais sur la course
+      // (`/delivery/manage/assignments/`), parce qu'`apps.orders` ne dépend pas
+      // d'`apps.delivery` (ADR-002).
+      //
+      // Le getter a donc été retiré plutôt que rempli : le laisser aurait
+      // suggéré que la réponse est ici. Ce que ce test garde, c'est
+      // l'affirmation utile — **rien dans le JSON d'une commande ne nomme un
+      // livreur** — pour qu'un futur champ ajouté au sérialiseur de supervision
+      // soit une décision et non une découverte.
+      //
+      // Le rapprochement commande → livreur est couvert par
+      // `packages/elcorazon_core/test/managed_assignment_repository_test.dart`.
+      final json = commandeJson();
+      expect(
+        json.keys.where(
+          (cle) => cle.contains('courier') || cle.contains('delivery_person'),
+        ),
+        isEmpty,
+      );
     });
   });
 

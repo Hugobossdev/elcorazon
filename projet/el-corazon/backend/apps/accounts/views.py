@@ -7,6 +7,9 @@ le résultat en HTTP. Aucune règle de sécurité n'y est décidée — c'est
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
@@ -19,19 +22,28 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from apps.accounts.models import User
+from apps.accounts.models import User, VerificationPurpose
 from apps.accounts.serializers import (
     ChangePasswordSerializer,
     DeviceSerializer,
     LoginSerializer,
+    PasswordResetConfirmSerializer,
     ProfileUpdateSerializer,
     RefreshSerializer,
     RegisterSerializer,
     TokenPairSerializer,
     UserSerializer,
+    VerificationChallengeSerializer,
+    VerificationRequestSerializer,
+    VerifyCodeSerializer,
 )
-from apps.accounts.services import AuthService, TokenPair
-from apps.accounts.throttling import AuthIdentifierThrottle, AuthIPThrottle
+from apps.accounts.services import (
+    AuthService,
+    TokenPair,
+    VerificationChallenge,
+    VerificationService,
+)
+from apps.accounts.throttling import AuthCodeIssueThrottle, AuthIdentifierThrottle, AuthIPThrottle
 from common.exceptions import BusinessRuleViolation
 from common.permissions import authenticated_user
 
@@ -41,8 +53,12 @@ __all__ = [
     "LoginView",
     "LogoutView",
     "MeView",
+    "PasswordResetConfirmView",
+    "PasswordResetRequestView",
     "RefreshView",
     "RegisterView",
+    "ResendVerificationView",
+    "VerifyAccountView",
 ]
 
 
@@ -55,6 +71,51 @@ def _token_response(
         {"access": tokens.access, "refresh": tokens.refresh, "user": UserSerializer(user).data},
         status=http_status,
     )
+
+
+def _challenge_response(challenge: VerificationChallenge, detail: str) -> Response:
+    """Réponse d'émission de code — **la même**, compte connu ou non.
+
+    202 et non 200 : le serveur a accepté la demande, l'envoi part après le
+    commit, et rien dans cette réponse ne prouve qu'un message a été expédié.
+    """
+    return Response(
+        {
+            "email": challenge.email,
+            "expires_at": challenge.expires_at,
+            "retry_after": challenge.retry_after,
+            "code_length": challenge.code_length,
+            "detail": detail,
+        },
+        status=status.HTTP_202_ACCEPTED,
+    )
+
+
+def _silent_challenge(email: str) -> VerificationChallenge:
+    """Ce qu'on répond quand il n'y a rien à envoyer.
+
+    Adresse inconnue, ou compte déjà vérifié : dans les deux cas aucun courriel
+    ne part, et la réponse doit pourtant être indiscernable de celle d'un envoi
+    réussi. Les durées annoncées sont celles des réglages — les vraies : un
+    `retry_after` nul pour une adresse inconnue et soixante secondes pour une
+    adresse connue transformerait cette route en annuaire d'abonnés.
+    """
+    return VerificationChallenge(
+        email=email,
+        expires_at=timezone.now()
+        + timedelta(seconds=settings.ACCOUNT_VERIFICATION_CODE_TTL_SECONDS),
+        retry_after=settings.ACCOUNT_VERIFICATION_RESEND_COOLDOWN_SECONDS,
+        code_length=settings.ACCOUNT_VERIFICATION_CODE_LENGTH,
+    )
+
+
+#: Phrase unique des deux routes d'émission. Elle ne dit pas « un code a été
+#: envoyé » mais « si un compte existe » : c'est ce qui la rend vraie dans les
+#: deux cas, sans que l'utilisateur légitime y perde quoi que ce soit.
+ENVOI_ANNONCE = (
+    "Si un compte correspond à cette adresse, un code vient d'y être envoyé. "
+    "Pensez à regarder vos courriers indésirables."
+)
 
 
 class RegisterView(APIView):
@@ -96,6 +157,139 @@ class LoginView(APIView):
         user.save(update_fields=["last_seen_at"])
 
         return _token_response(user, AuthService.issue_tokens(user))
+
+
+class VerifyAccountView(APIView):
+    """`/auth/verify/` — présentation du code reçu, et ouverture de session.
+
+    C'est **la** route qui rend son premier couple de jetons à un livreur
+    inscrit par lui-même : `POST /delivery/apply/` n'en rend aucun. La
+    vérification cesse ainsi d'être une formalité que le client pourrait
+    sauter — sans code, il n'y a simplement pas de session à obtenir.
+
+    `AllowAny`, comme la connexion : l'appelant n'a par construction pas encore
+    de jeton. Les deux limiteurs habituels s'appliquent — un code à six
+    chiffres est un secret court, et le compteur d'essais du service en est la
+    seconde ligne (voir `VerificationService.consume`).
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [AuthIPThrottle, AuthIdentifierThrottle]
+
+    @extend_schema(
+        request=VerifyCodeSerializer, responses={200: TokenPairSerializer}, tags=["auth"]
+    )
+    def post(self, request: Request) -> Response:
+        serializer = VerifyCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user, tokens = VerificationService.confirm_account(**serializer.validated_data)
+
+        user.last_seen_at = timezone.now()
+        user.save(update_fields=["last_seen_at"])
+
+        return _token_response(user, tokens)
+
+
+class ResendVerificationView(APIView):
+    """`/auth/verify/resend/` — renvoi du code de vérification.
+
+    Ne renvoie **rien** pour un compte déjà vérifié, et c'est délibéré : le
+    code rendu par `/auth/verify/` ouvre une session, si bien qu'en émettre un
+    pour un compte vérifié reviendrait à ajouter une connexion sans mot de
+    passe à qui sait relever la boîte. Le besoin, lui, est couvert par
+    `/auth/password/reset/`, qui l'assume et révoque les sessions en cours.
+
+    La réponse reste identique dans tous les cas.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [AuthIPThrottle, AuthCodeIssueThrottle]
+
+    @extend_schema(
+        request=VerificationRequestSerializer,
+        responses={202: VerificationChallengeSerializer},
+        tags=["auth"],
+    )
+    def post(self, request: Request) -> Response:
+        serializer = VerificationRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+
+        user = VerificationService.find(email=email)
+        if user is None or user.email_verified_at is not None:
+            return _challenge_response(_silent_challenge(email), ENVOI_ANNONCE)
+
+        challenge = VerificationService.issue(
+            user=user, purpose=VerificationPurpose.ACCOUNT_VERIFICATION
+        )
+        return _challenge_response(challenge, ENVOI_ANNONCE)
+
+
+class PasswordResetRequestView(APIView):
+    """`/auth/password/reset/` — demande d'un code de réinitialisation.
+
+    Ouverte à tous les comptes, vérifiés ou non : ne plus savoir son mot de
+    passe n'a rien à voir avec l'état de la vérification, et le refuser à un
+    compte non vérifié enfermerait dehors quelqu'un qui a raté les deux étapes
+    d'affilée.
+
+    Un compte **désactivé** n'en reçoit pas. Lui rouvrir un mot de passe ne lui
+    rendrait aucun accès — `authenticate` refuse déjà les comptes inactifs —
+    mais lui adresserait un courriel après une fermeture, ce qui se lit comme
+    une erreur de notre part.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [AuthIPThrottle, AuthCodeIssueThrottle]
+
+    @extend_schema(
+        request=VerificationRequestSerializer,
+        responses={202: VerificationChallengeSerializer},
+        tags=["auth"],
+    )
+    def post(self, request: Request) -> Response:
+        serializer = VerificationRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+
+        user = VerificationService.find(email=email)
+        if user is None or not user.is_active:
+            return _challenge_response(_silent_challenge(email), ENVOI_ANNONCE)
+
+        challenge = VerificationService.issue(
+            user=user, purpose=VerificationPurpose.PASSWORD_RESET
+        )
+        return _challenge_response(challenge, ENVOI_ANNONCE)
+
+
+class PasswordResetConfirmView(APIView):
+    """`/auth/password/reset/confirm/` — code + nouveau mot de passe.
+
+    Rend un couple de jetons, comme `/auth/password/change/` et pour la même
+    raison : toutes les sessions viennent d'être révoquées, et renvoyer
+    l'utilisateur vers l'écran de connexion pour qu'il ressaisisse le mot de
+    passe qu'il vient de choisir n'ajouterait aucune sécurité.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [AuthIPThrottle, AuthIdentifierThrottle]
+
+    @extend_schema(
+        request=PasswordResetConfirmSerializer,
+        responses={200: TokenPairSerializer},
+        tags=["auth"],
+    )
+    def post(self, request: Request) -> Response:
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user, tokens = VerificationService.reset_password(**serializer.validated_data)
+
+        user.last_seen_at = timezone.now()
+        user.save(update_fields=["last_seen_at"])
+
+        return _token_response(user, tokens)
 
 
 class RefreshView(TokenRefreshView):

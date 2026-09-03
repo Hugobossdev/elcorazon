@@ -1,5 +1,6 @@
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/delivery/assignment.dart';
+import 'package:elcorazon_core/src/delivery/courier_application.dart';
 import 'package:elcorazon_core/src/delivery/courier_profile.dart';
 
 /// Accès à `/api/v1/delivery/*` du point de vue du **livreur** — voir
@@ -26,6 +27,22 @@ class DeliveryRepository {
   DeliveryRepository({required this.apiClient});
 
   final ApiClient apiClient;
+
+  /// Dépose une candidature de livreur (`POST /delivery/apply/`).
+  ///
+  /// La seule méthode de ce dépôt qui s'appelle **sans session** — on n'a par
+  /// construction pas encore de compte. Elle ne rend aucun jeton : le serveur
+  /// s'y refuse pour que l'écran de saisie du code ne soit pas une étape que
+  /// le client pourrait sauter. La session s'ouvre ensuite par
+  /// `SessionNotifier.verifyAccount`.
+  ///
+  /// Le dossier créé est **en attente** : le candidat pourra se connecter, pas
+  /// accepter de course. C'est `can_accept_orders`, calculé par le serveur, qui
+  /// tranche (L1) — jamais l'application.
+  Future<CourierApplicationReceipt> apply(CourierApplication application) async {
+    final response = await apiClient.post('/delivery/apply/', data: application.toJson());
+    return CourierApplicationReceipt.fromJson(response.data as Map<String, dynamic>);
+  }
 
   /// Le dossier du livreur qui appelle (`/delivery/me/`).
   Future<CourierProfile> me() async {

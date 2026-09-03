@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
-import 'package:admin/widgets/custom_text_field.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:admin/screens/admin/onglet_horaires.dart';
 import 'package:admin/screens/admin/zone_form_dialog.dart';
 import 'package:admin/screens/admin/zone_selection_tab.dart';
 
@@ -27,25 +27,20 @@ class _SettingsScreenState extends State<SettingsScreen>
   // et laissaient croire qu'on venait de changer un prix. Le barème vit dans
   // `DeliveryZoneService`, c'est-à-dire dans la base.
 
-  // Horaires
-  String _openingTime = '08:00';
-  String _closingTime = '22:00';
-  final Map<String, bool> _openingDays = {
-    'Lundi': true,
-    'Mardi': true,
-    'Mercredi': true,
-    'Jeudi': true,
-    'Vendredi': true,
-    'Samedi': true,
-    'Dimanche': false,
-  };
-
-  // API Keys
-  final _googleMapsApiKeyController = TextEditingController();
-
-  // FAQ/CGV
-  final _faqController = TextEditingController();
-  final _cgvController = TextEditingController();
+  // Les horaires ne sont plus tenus ici. Cet onglet portait une heure
+  // d'ouverture, une heure de fermeture et sept interrupteurs, enregistrés
+  // dans les préférences du poste : ils n'atteignaient jamais le serveur,
+  // n'étaient relus par personne — pas même par cet écran — et les
+  // applications client et livreur n'en voyaient rien. Ils vivent dans
+  // `OpeningHoursService`, c'est-à-dire dans la base.
+  //
+  // La clé Google Maps et les contenus FAQ/CGV ont disparu pour la même
+  // raison, sans remplacement : la clé de la carte vient du `.env` de
+  // l'application (`geocoding_service.dart`), et le champ des réglages
+  // n'était lu par aucun code ; quant à la FAQ et aux CGV, le contrat v2 n'a
+  // pas de route pour les porter, et un éditeur qui écrit dans le
+  // `SharedPreferences` d'un poste n'est pas une gestion de contenu — c'est
+  // un bloc-notes qui prétend en être une.
 
   // Auto-logout
   Duration _inactivityTimeout = const Duration(minutes: 30);
@@ -54,38 +49,28 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 4, vsync: this)
+      // Le bouton d'enregistrement ne s'affiche que sur « Sécurité » :
+      // sans cet écouteur, il resterait figé sur l'état du premier onglet.
+      ..addListener(() {
+        if (mounted) setState(() {});
+      });
     _loadSettings();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _googleMapsApiKeyController.dispose();
-    _faqController.dispose();
-    _cgvController.dispose();
     super.dispose();
   }
 
+  /// Les seuls réglages qui restent **locaux au poste**, et qui doivent
+  /// l'être : la déconnexion automatique après inactivité protège l'écran
+  /// laissé ouvert dans une salle, ce qui est une propriété de ce poste et non
+  /// du compte.
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // Charger les horaires
-    _openingTime = prefs.getString('opening_time') ?? '08:00';
-    _closingTime = prefs.getString('closing_time') ?? '22:00';
-    for (final day in _openingDays.keys) {
-      _openingDays[day] = prefs.getBool('opening_day_$day') ?? true;
-    }
-
-    // Charger les API keys
-    _googleMapsApiKeyController.text =
-        prefs.getString('google_maps_api_key') ?? '';
-
-    // Charger FAQ/CGV
-    _faqController.text = prefs.getString('faq_content') ?? '';
-    _cgvController.text = prefs.getString('cgv_content') ?? '';
-
-    // Charger les paramètres d'auto-logout
     final timeoutMinutes = prefs.getInt('inactivity_timeout_minutes') ?? 30;
     _inactivityTimeout = Duration(minutes: timeoutMinutes);
     _autoLogoutEnabled = prefs.getBool('auto_logout_enabled') ?? true;
@@ -96,36 +81,17 @@ class _SettingsScreenState extends State<SettingsScreen>
   Future<void> _saveSettings() async {
     // Capturer les valeurs nécessaires avant les gaps async
     if (!mounted) return;
-    final inverseSurfaceColor =
-        Theme.of(context).colorScheme.inverseSurface;
-    
+    final inverseSurfaceColor = Theme.of(context).colorScheme.inverseSurface;
+
     final prefs = await SharedPreferences.getInstance();
 
-    // Les tarifs ne sont plus enregistrés ici : chaque zone s'écrit sur le
-    // serveur, depuis son propre formulaire, et le bouton global ne peut donc
-    // pas les emporter par mégarde.
-
-    // Sauvegarder les horaires
-    await prefs.setString('opening_time', _openingTime);
-    await prefs.setString('closing_time', _closingTime);
-    for (final entry in _openingDays.entries) {
-      await prefs.setBool('opening_day_${entry.key}', entry.value);
-    }
-
-    // Les clés du prestataire de paiement ne sont plus ici : elles vivent
-    // côté serveur. Les saisir dans l'application revenait à distribuer, dans
-    // chaque poste, de quoi déclencher un remboursement sans permission, sans
-    // rattachement, sans trace et sans plafond.
-    await prefs.setString(
-      'google_maps_api_key',
-      _googleMapsApiKeyController.text,
-    );
-
-    // Sauvegarder FAQ/CGV
-    await prefs.setString('faq_content', _faqController.text);
-    await prefs.setString('cgv_content', _cgvController.text);
-
-    // Sauvegarder les paramètres d'auto-logout
+    // Ce bouton n'enregistre plus que la déconnexion automatique, et son
+    // libellé le dit désormais. Il portait aussi les tarifs, les horaires, une
+    // clé d'API et deux pages de contenu : les tarifs s'écrivent zone par zone
+    // sur le serveur, les horaires plage par plage, et les deux derniers
+    // n'allaient nulle part. Un bouton « Sauvegarder » global au-dessus
+    // d'onglets qui enregistrent chacun de leur côté laisse croire que rien
+    // n'est enregistré tant qu'on ne l'a pas pressé.
     await prefs.setInt(
       'inactivity_timeout_minutes',
       _inactivityTimeout.inMinutes,
@@ -141,7 +107,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     if (mounted && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Paramètres sauvegardés avec succès'),
+          content: const Text('Déconnexion automatique enregistrée'),
           backgroundColor: inverseSurfaceColor,
         ),
       );
@@ -160,8 +126,6 @@ class _SettingsScreenState extends State<SettingsScreen>
             Tab(icon: Icon(Icons.map), text: 'Zones'),
             Tab(icon: Icon(Icons.local_shipping), text: 'Tarifs'),
             Tab(icon: Icon(Icons.access_time), text: 'Horaires'),
-            Tab(icon: Icon(Icons.vpn_key), text: 'API Keys'),
-            Tab(icon: Icon(Icons.help_outline), text: 'FAQ/CGV'),
             Tab(icon: Icon(Icons.security), text: 'Sécurité'),
           ],
         ),
@@ -173,17 +137,21 @@ class _SettingsScreenState extends State<SettingsScreen>
           const ZoneSelectionTab(),
           // Ce que coûte la livraison — le barème de chaque zone.
           _buildDeliveryRatesTab(),
-          _buildOpeningHoursTab(),
-          _buildApiKeysTab(),
-          _buildFaqCgvTab(),
+          const OngletHoraires(),
           _buildSecurityTab(),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _saveSettings,
-        icon: const Icon(Icons.save),
-        label: const Text('Sauvegarder'),
-      ),
+      // Le bouton ne suit plus que l'onglet « Sécurité » : les trois autres
+      // écrivent au serveur, ligne par ligne, au moment du geste. Un bouton
+      // global au-dessus d'eux laissait croire que rien n'était enregistré
+      // avant de l'avoir pressé — et qu'y toucher enregistrait tout.
+      floatingActionButton: _tabController.index == 3
+          ? FloatingActionButton.extended(
+              onPressed: _saveSettings,
+              icon: const Icon(Icons.save),
+              label: const Text('Enregistrer'),
+            )
+          : null,
     );
   }
 
@@ -425,276 +393,6 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
 
-  Widget _buildOpeningHoursTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Horaires d\'ouverture',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 24),
-          // Heures d'ouverture/fermeture
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Heures',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ListTile(
-                          leading: const Icon(Icons.access_time),
-                          title: const Text('Ouverture'),
-                          subtitle: Text(_openingTime),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _selectTime(true),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: ListTile(
-                          leading: const Icon(Icons.access_time),
-                          title: const Text('Fermeture'),
-                          subtitle: Text(_closingTime),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _selectTime(false),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          // Jours d'ouverture
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Jours d\'ouverture',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                  const SizedBox(height: 16),
-                  ..._openingDays.keys.map((day) {
-                    return Container(
-                      constraints: const BoxConstraints(minHeight: 56),
-                      child: SwitchListTile(
-                        title: Text(day),
-                        value: _openingDays[day]!,
-                        onChanged: (value) {
-                          setState(() {
-                            _openingDays[day] = value;
-                          });
-                        },
-                      ),
-                    );
-                  }),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildApiKeysTab() {
-    final scheme = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Clés API',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Configurez les clés API pour les services externes',
-            style: TextStyle(color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 24),
-          // PayDunya
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.payment, color: scheme.tertiary),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'PayDunya',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Les clés marchandes sont détenues par le serveur et ne '
-                    'transitent plus par cette application. Un remboursement '
-                    'passe par une requête authentifiée, soumise à la '
-                    'permission « orders.refund », au périmètre de votre '
-                    "compte et au plafond de l'encaissement d'origine.",
-                    style: TextStyle(color: scheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Google Maps
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.map, color: scheme.primary),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Google Maps',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  CustomTextField(
-                    controller: _googleMapsApiKeyController,
-                    label: 'API Key',
-                    isPassword: true,
-                    prefixIcon: Icons.vpn_key,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFaqCgvTab() {
-    final scheme = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'FAQ et CGV',
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Gérez le contenu statique de l\'application',
-            style: TextStyle(color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 24),
-          // FAQ
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.help_outline),
-                      SizedBox(width: 8),
-                      Text(
-                        'FAQ',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _faqController,
-                    maxLines: 10,
-                    decoration: const InputDecoration(
-                      labelText: 'Contenu FAQ',
-                      border: OutlineInputBorder(),
-                      hintText: 'Entrez le contenu de la FAQ...',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // CGV
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.description),
-                      SizedBox(width: 8),
-                      Text(
-                        'Conditions Générales de Vente',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _cgvController,
-                    maxLines: 10,
-                    decoration: const InputDecoration(
-                      labelText: 'Contenu CGV',
-                      border: OutlineInputBorder(),
-                      hintText: 'Entrez le contenu des CGV...',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildSecurityTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -744,32 +442,6 @@ class _SettingsScreenState extends State<SettingsScreen>
         ],
       ),
     );
-  }
-
-  Future<void> _selectTime(bool isOpening) async {
-    final TimeOfDay? picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(
-        hour: int.parse(
-          (isOpening ? _openingTime : _closingTime).split(':')[0],
-        ),
-        minute: int.parse(
-          (isOpening ? _openingTime : _closingTime).split(':')[1],
-        ),
-      ),
-    );
-
-    if (picked != null) {
-      setState(() {
-        final time =
-            '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-        if (isOpening) {
-          _openingTime = time;
-        } else {
-          _closingTime = time;
-        }
-      });
-    }
   }
 
   Future<void> _selectInactivityTimeout() async {

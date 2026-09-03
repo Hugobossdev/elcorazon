@@ -666,9 +666,12 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       if (!mounted) return;
 
       if (position == null) {
-        _showError(
-          'Autorisez la localisation, ou placez le point sur la carte.',
-        );
+        // La cause exacte, plutôt qu'une phrase qui couvre les quatre : « GPS
+        // désactivé » et « permission refusée définitivement » n'appellent pas
+        // le même geste, et invitait à autoriser une permission déjà accordée
+        // quand c'était le GPS qui était coupé.
+        final etat = _locationService.derniereDisponibilite;
+        _showError('${etat.consigne} Ou placez le point sur la carte.');
         return;
       }
 

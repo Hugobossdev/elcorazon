@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/geocoding_service.dart' as geocoding;
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -58,15 +59,19 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   }
 
   void _startAutoRefresh() {
-    // Actualiser les positions toutes les 10 secondes
+    // Actualiser les positions toutes les 10 secondes.
+    //
+    // Les trois lectures sont rechargées, et non la seule flotte : le
+    // commentaire d'avant annonçait que les commandes se mettaient à jour
+    // « automatiquement via Supabase Realtime », ce qui n'est plus vrai depuis
+    // le passage au backend Django — la carte gardait donc indéfiniment les
+    // commandes du premier chargement, et le `setState` ne redessinait que des
+    // positions de livreurs sur des courses périmées.
     _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (mounted) {
-        // Recharger les données
-        context.read<DriverManagementService>().refresh();
-        // OrderManagementService n'a pas de méthode refresh publique,
-        // mais les données sont mises à jour automatiquement via Supabase Realtime
-        setState(() {}); // Forcer la reconstruction de la carte
-      }
+      if (!mounted) return;
+      unawaited(context.read<DriverManagementService>().refresh());
+      unawaited(context.read<OrderManagementService>().refresh());
+      unawaited(context.read<AssignmentService>().refresh());
     });
   }
 
@@ -93,9 +98,9 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
               minHeight: 48,
             ),
             child: IconButton(
-              icon: Icon(_showOrders
-                  ? Icons.shopping_cart
-                  : Icons.shopping_cart_outlined,),
+              icon: Icon(
+                _showOrders ? Icons.shopping_cart : Icons.shopping_cart_outlined,
+              ),
               onPressed: () {
                 setState(() => _showOrders = !_showOrders);
               },
@@ -186,11 +191,20 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                   runSpacing: 4,
                   children: [
                     _buildLegendItem(
-                        StatutLivreur.disponible, 'Disponible', Colors.green,),
+                      StatutLivreur.disponible,
+                      'Disponible',
+                      Colors.green,
+                    ),
                     _buildLegendItem(
-                        StatutLivreur.horsLigne, 'Hors ligne', Colors.grey,),
+                      StatutLivreur.horsLigne,
+                      'Hors ligne',
+                      Colors.grey,
+                    ),
                     _buildLegendItem(
-                        StatutLivreur.indisponible, 'Indisponible', Colors.red,),
+                      StatutLivreur.indisponible,
+                      'Indisponible',
+                      Colors.red,
+                    ),
                   ],
                 ),
               ],
@@ -199,8 +213,15 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
           const Divider(height: 1),
           // Carte
           Expanded(
-            child: Consumer2<DriverManagementService, OrderManagementService>(
-              builder: (context, driverService, orderService, child) {
+            child: Consumer3<DriverManagementService, OrderManagementService,
+                AssignmentService>(
+              builder: (
+                context,
+                driverService,
+                orderService,
+                assignments,
+                child,
+              ) {
                 final drivers = _showAllDrivers
                     ? driverService.drivers
                     : _selectedDrivers.values.toList();
@@ -239,16 +260,18 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                 // Filtrer les commandes actives
                 final activeOrders = _showOrders
                     ? orderService.allOrders
-                        .where((order) =>
-                            order.statut == StatutCommande.confirmee ||
-                            order.statut == StatutCommande.enPreparation ||
-                            order.statut == StatutCommande.prete ||
-                            order.statut == StatutCommande.recuperee ||
-                            order.statut == StatutCommande.enRoute,)
+                        .where(
+                          (order) =>
+                              order.statut == StatutCommande.confirmee ||
+                              order.statut == StatutCommande.enPreparation ||
+                              order.statut == StatutCommande.prete ||
+                              order.statut == StatutCommande.recuperee ||
+                              order.statut == StatutCommande.enRoute,
+                        )
                         .toList()
                     : <eccore.Order>[];
 
-                return _buildMapView(filteredDrivers, activeOrders);
+                return _buildMapView(filteredDrivers, activeOrders, assignments);
               },
             ),
           ),
@@ -323,8 +346,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                         itemCount: drivers.length,
                         itemBuilder: (context, index) {
                           final driver = drivers[index];
-                          final isSelected =
-                              _selectedDrivers.containsKey(driver.id);
+                          final isSelected = _selectedDrivers.containsKey(driver.id);
 
                           return Card(
                             margin: const EdgeInsets.only(bottom: 8),
@@ -340,7 +362,8 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                               title: Text(
                                 driver.fullName,
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.bold,),
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                               subtitle: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -395,7 +418,11 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  Widget _buildMapView(List<eccore.CourierProfile> drivers, List<eccore.Order> orders) {
+  Widget _buildMapView(
+    List<eccore.CourierProfile> drivers,
+    List<eccore.Order> orders,
+    AssignmentService assignments,
+  ) {
     final Set<Marker> markers = {};
     final Set<Polyline> polylines = {};
 
@@ -408,13 +435,21 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
             position: LatLng(driver.lastLatitude!, driver.lastLongitude!),
             infoWindow: InfoWindow(
               title: driver.fullName,
-              snippet:
-                  '${driver.statut.libelle} - ${driver.vehicleType}',
+              // L'âge du relevé, à côté du statut. Sans lui, le repère d'un
+              // livreur dont le téléphone s'est éteint il y a vingt minutes se
+              // lit exactement comme celui d'un livreur qui roule.
+              snippet: '${driver.statut.libelle} — ${driver.vehicleType}'
+                  '\n${driver.libelleDePosition}',
               onTap: () => _showDriverInfo(driver),
             ),
             icon: BitmapDescriptor.defaultMarkerWithHue(
               _getMarkerHue(driver.statut),
             ),
+            // Un relevé perdu s'efface à moitié : le siège voit d'un coup d'œil
+            // quels points sont encore du direct, sans ouvrir chaque fiche.
+            alpha: driver.fraicheurPosition == eccore.FraicheurPosition.perdue
+                ? 0.45
+                : 1,
           ),
         );
       }
@@ -425,15 +460,19 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
       final geocodingService = geocoding.GeocodingService();
 
       for (final order in orders) {
-        // Si la commande a un livreur assigné et qu'il est en livraison
-        if (order.livreurAffecte != null) {
+        // Si la commande a un livreur assigné et qu'il est en livraison.
+        // Le porteur vient de la course (`/delivery/manage/assignments/`) :
+        // la commande, elle, ne le connaît pas — `apps.orders` ne dépend
+        // pas d'`apps.delivery`.
+        final courierId = assignments.courierIdOf(order.id);
+        if (courierId != null) {
           // La même recherche était écrite trois fois, imbriquée, avant de
           // retomber sur un livreur fictif nommé « Livreur inconnu » dont la
           // position était nulle : le marqueur n'était donc jamais posé. Une
           // recherche qui admet l'absence dit la même chose, en clair.
           eccore.CourierProfile? driver;
           for (final dossier in drivers) {
-            if (dossier.id == order.livreurAffecte) {
+            if (dossier.id == courierId) {
               driver = dossier;
               break;
             }
@@ -472,7 +511,10 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   }
 
   Widget _buildMapWidget(
-      Set<Marker> markers, Set<Polyline> polylines, List<eccore.CourierProfile> drivers,) {
+    Set<Marker> markers,
+    Set<Polyline> polylines,
+    List<eccore.CourierProfile> drivers,
+  ) {
     return Consumer<RestaurantScopeService>(
       builder: (context, scope, child) {
         final etablissement = scope.current;
@@ -567,9 +609,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
         );
 
         // Ajouter itinéraire si demandé
-        if (_showRoutes &&
-            driver.lastLatitude != null &&
-            driver.lastLongitude != null) {
+        if (_showRoutes && driver.lastLatitude != null && driver.lastLongitude != null) {
           final driverLatLng =
               geocoding.LatLng(driver.lastLatitude!, driver.lastLongitude!);
           final directions = await geocodingService.getDirections(
@@ -606,9 +646,8 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   void _fitBounds(List<eccore.CourierProfile> drivers) {
     if (_mapController == null || drivers.isEmpty) return;
 
-    final validDrivers = drivers
-        .where((d) => d.lastLatitude != null && d.lastLongitude != null)
-        .toList();
+    final validDrivers =
+        drivers.where((d) => d.lastLatitude != null && d.lastLongitude != null).toList();
 
     if (validDrivers.isEmpty) return;
 
@@ -649,8 +688,10 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
             _buildInfoRow('Client ID', order.id.substring(0, 8)),
             _buildInfoRow('Adresse', order.adresseComplete),
             _buildInfoRow('Montant', '${order.totalAffiche} CFA'),
-            _buildInfoRow('Date',
-                '${order.passeeLe.day}/${order.passeeLe.month}/${order.passeeLe.year}',),
+            _buildInfoRow(
+              'Date',
+              '${order.passeeLe.day}/${order.passeeLe.month}/${order.passeeLe.year}',
+            ),
           ],
         ),
         actions: [
@@ -727,6 +768,14 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                 'Position',
                 '${driver.lastLatitude!.toStringAsFixed(4)}, ${driver.lastLongitude!.toStringAsFixed(4)}',
               ),
+            // Deux lignes plutôt qu'une : les coordonnées disent *où*, celle-ci
+            // dit *quand* — et c'est la seconde qui décide s'il faut appeler le
+            // livreur.
+            _buildInfoRow(
+              'Fraîcheur',
+              driver.libelleDePosition,
+              couleur: driver.couleurDeFraicheur,
+            ),
             _buildInfoRow('Note', driver.ratingAverage.toStringAsFixed(1)),
             _buildInfoRow('Livraisons', '${driver.deliveriesCompleted}'),
           ],
@@ -758,7 +807,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
+  Widget _buildInfoRow(String label, String value, {Color? couleur}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -771,7 +820,14 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
-          Expanded(child: Text(value)),
+          Expanded(
+            child: Text(
+              value,
+              style: couleur == null
+                  ? null
+                  : TextStyle(color: couleur, fontWeight: FontWeight.w600),
+            ),
+          ),
         ],
       ),
     );
@@ -852,8 +908,10 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Zone:',
-                              style: TextStyle(fontWeight: FontWeight.bold),),
+                          const Text(
+                            'Zone:',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                           const SizedBox(height: 8),
                           Container(
                             constraints: const BoxConstraints(
@@ -867,17 +925,20 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                               ),
                               items: [
                                 const DropdownMenuItem(
-                                    child: Text('Toutes'),),
+                                  child: Text('Toutes'),
+                                ),
                                 ...[
                                   'Zone Centre',
                                   'Zone Nord',
                                   'Zone Sud',
                                   'Zone Est',
                                   'Zone Ouest',
-                                ].map((zone) => DropdownMenuItem(
-                                      value: zone,
-                                      child: Text(zone),
-                                    ),),
+                                ].map(
+                                  (zone) => DropdownMenuItem(
+                                    value: zone,
+                                    child: Text(zone),
+                                  ),
+                                ),
                               ],
                               onChanged: (value) {
                                 setState(() {
@@ -888,8 +949,10 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                             ),
                           ),
                           const SizedBox(height: 24),
-                          const Text('Statut:',
-                              style: TextStyle(fontWeight: FontWeight.bold),),
+                          const Text(
+                            'Statut:',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                           const SizedBox(height: 8),
                           Container(
                             constraints: const BoxConstraints(
@@ -903,20 +966,24 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                               ),
                               items: [
                                 const DropdownMenuItem(
-                                    child: Text('Tous'),),
-                                ...StatutLivreur.values
-                                    .map((status) => DropdownMenuItem(
-                                          value: status,
-                                          child: Row(
-                                            children: [
-                                              Icon(status.icone,
-                                                  size: 18,
-                                                  color: status.couleur,),
-                                              const SizedBox(width: 8),
-                                              Text(status.libelle),
-                                            ],
-                                          ),
-                                        ),),
+                                  child: Text('Tous'),
+                                ),
+                                ...StatutLivreur.values.map(
+                                  (status) => DropdownMenuItem(
+                                    value: status,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          status.icone,
+                                          size: 18,
+                                          color: status.couleur,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(status.libelle),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                               ],
                               onChanged: (value) {
                                 setState(() {

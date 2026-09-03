@@ -47,5 +47,34 @@
 		<true/>
 		<key>UIStatusBarHidden</key>
 		<false/>
+		<!-- Localisation du client.
+		     Aucune clé n'était déclarée, et iOS ne se contente pas de refuser dans
+		     ce cas : `CLLocationManager.requestWhenInUseAuthorization` termine le
+		     processus. Le carnet d'adresses, le choix d'un point sur la carte et le
+		     tri des adresses par distance appellent tous
+		     `Geolocator.getCurrentPosition` — l'application se fermait donc sur
+		     l'écran d'adresse, et App Review rejette de toute façon un binaire qui
+		     lie CoreLocation sans motif déclaré. -->
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>Votre position sert à pré-remplir votre adresse de livraison et à suivre votre commande sur la carte.</string>
+
+		<!-- `NSLocationAlwaysAndWhenInUseUsageDescription` n'a délibérément pas sa
+		     place ici : l'application cliente ne relève la position que pendant
+		     qu'on s'en sert. C'est le livreur qui est suivi en arrière-plan, et lui
+		     seul (`apps/dely/ios/Runner/Info.plist`). Demander l'autorisation
+		     permanente sans en avoir l'usage se paie deux fois : en refus des
+		     clients, et en question d'App Review à laquelle on ne saurait pas
+		     répondre. -->
+
+		<!-- Ouverture de l'itinéraire vers le restaurant et appel du livreur depuis
+		     l'écran de suivi. Sans cette liste, `canLaunchUrl` rend faux pour
+		     chacun de ces schémas et le bouton retombe sur son message d'échec. -->
+		<key>LSApplicationQueriesSchemes</key>
+		<array>
+			<string>tel</string>
+			<string>comgooglemaps</string>
+			<string>maps</string>
+			<string>waze</string>
+		</array>
 	</dict>
 </plist>

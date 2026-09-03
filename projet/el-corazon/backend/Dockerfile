@@ -87,6 +87,18 @@ COPY --chown=corazon:corazon . /app
 # processus n'a aucune raison de pouvoir réécrire son propre code.
 RUN mkdir -p /app/staticfiles && chown corazon:corazon /app/staticfiles
 
+# Même raison pour l'échéancier de beat, et un piège de plus : `beat` écrit son
+# `shelve` dans un **volume nommé**, monté sur un chemin que l'image ne
+# contenait pas. Docker crée alors le point de montage à la volée, et il le crée
+# `root:root` — le processus tourne sous `corazon`, et beat meurt en boucle sur
+# `PermissionError: [Errno 13] … /var/lib/celery/celerybeat-schedule`, en
+# redémarrant indéfiniment parce que `restart: unless-stopped` le relance.
+#
+# Déclarer le répertoire **ici** renverse la mécanique : un volume nommé vide
+# reçoit à son premier montage le contenu et les droits que l'image porte sur ce
+# chemin. Il naît donc `corazon:corazon`, et le reste.
+RUN mkdir -p /var/lib/celery && chown corazon:corazon /var/lib/celery
+
 USER corazon
 
 EXPOSE 8000

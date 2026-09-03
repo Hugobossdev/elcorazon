@@ -106,6 +106,19 @@ class NotificationService extends ChangeNotifier {
       _openedController.stream;
 
   /// À appeler une fois au démarrage, après `Firebase.initializeApp`.
+  ///
+  /// **Ne demande aucune permission.** Elle le faisait, et c'était trop tôt :
+  /// la demande tombait au tout premier lancement, devant l'écran de
+  /// connexion, avant que le livreur ait la moindre idée de ce que
+  /// l'application veut lui envoyer. Sur Android 13+, un refus à ce moment-là
+  /// est **définitif** — le système ne redemandera plus, et le livreur ne
+  /// recevra plus jamais d'offre de course sans passer par les réglages du
+  /// téléphone. Elle est reportée à [enableForUser], à l'ouverture de session.
+  ///
+  /// Ce qui reste ici doit être en place **avant** le premier message : le
+  /// gestionnaire d'arrière-plan, le canal Android, et les trois écoutes —
+  /// dont `getInitialMessage`, qui n'est lisible qu'une fois et porte la
+  /// notification qui vient de lancer l'application.
   Future<void> initialize() async {
     if (_isInitialized) return;
 
@@ -118,9 +131,6 @@ class NotificationService extends ChangeNotifier {
       FirebaseMessaging.onBackgroundMessage(
         _firebaseMessagingBackgroundHandler,
       );
-
-      await _requestPermission(messaging);
-      await _readToken(messaging);
 
       // Premier plan : le système n'affiche rien de lui-même, c'est à nous.
       FirebaseMessaging.onMessage.listen(_onForegroundMessage);
@@ -139,6 +149,26 @@ class NotificationService extends ChangeNotifier {
 
     _isInitialized = true;
     notifyListeners();
+  }
+
+  /// Demande la permission et obtient le jeton — à l'ouverture de session.
+  ///
+  /// C'est le bon moment : le livreur vient de se connecter pour travailler,
+  /// et « recevoir les courses qu'on vous propose » se comprend sans
+  /// explication. Un refus n'empêche rien de fonctionner — la file
+  /// `ws/couriers/me/` continue de porter les offres tant que l'application
+  /// est ouverte ; c'est fermée qu'il ne recevra rien, et [isAuthorized] est là
+  /// pour le lui dire plutôt que de le laisser s'en étonner.
+  Future<void> enableForUser() async {
+    final messaging = _messaging ?? FirebaseMessaging.instance;
+    try {
+      await _requestPermission(messaging);
+      if (!isAuthorized) return;
+      await _readToken(messaging);
+      notifyListeners();
+    } catch (e) {
+      Journal.trace('⚠️ Activation des notifications impossible : $e');
+    }
   }
 
   Future<void> _initializeLocalNotifications() async {
@@ -220,9 +250,29 @@ class NotificationService extends ChangeNotifier {
     _openedController.add(Map<String, dynamic>.from(message.data));
   }
 
+  /// La dernière notification **touchée**, tant que personne ne l'a traitée.
+  ///
+  /// `getInitialMessage()` est lue pendant [initialize], donc avant `runApp` :
+  /// à cet instant aucun widget n'écoute, et un `StreamController.broadcast`
+  /// jette ce qu'il émet sans auditeur. La notification qui vient de lancer
+  /// l'application — celle qui doit ouvrir la course — serait perdue. Elle est
+  /// donc retenue, et le routeur la réclame à son montage.
+  Map<String, dynamic>? _ouvertureEnAttente;
+
+  /// Réclame l'ouverture retenue, et la consomme.
+  Map<String, dynamic>? consommerOuvertureEnAttente() {
+    final attente = _ouvertureEnAttente;
+    _ouvertureEnAttente = null;
+    return attente;
+  }
+
+  void oublierOuvertureEnAttente() => _ouvertureEnAttente = null;
+
   void _onOpened(RemoteMessage message) {
     Journal.trace('📬 Notification ouverte : ${message.data}');
-    _openedController.add(Map<String, dynamic>.from(message.data));
+    final charge = Map<String, dynamic>.from(message.data);
+    _ouvertureEnAttente = charge;
+    _openedController.add(charge);
   }
 
   /// Retire le jeton de cet appareil côté FCM — à la déconnexion, après que le

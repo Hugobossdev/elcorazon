@@ -27,6 +27,7 @@ from apps.accounts.models import UserType
 from apps.carts.services import CartService
 from apps.orders.idempotency import complete, release, reserve
 from apps.orders.models import Order
+from apps.orders.queries import avec_compteurs
 from apps.orders.serializers import (
     CancelSerializer,
     OrderCreateSerializer,
@@ -70,7 +71,10 @@ class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
 
     def get_queryset(self) -> QuerySet[Order]:
         user = authenticated_user(self.request)
-        queryset = Order.objects.select_related("restaurant").order_by("-placed_at")
+        # Mêmes compteurs que la supervision : `OrderSerializer` est partagé, et
+        # sans l'annotation il retomberait sur une requête par commande pour
+        # les compter — l'inverse de ce que ces champs cherchent à éviter.
+        queryset = avec_compteurs(Order.objects.select_related("restaurant").order_by("-placed_at"))
 
         if user.user_type == UserType.COURIER:
             # Le livreur voit les commandes qu'on lui a confiées, et rien

@@ -60,6 +60,7 @@ class CourierProfile {
     this.lastLongitude,
     this.lastLocationAt,
     this.totalEarnings,
+    this.phone = '',
   });
 
   factory CourierProfile.fromJson(Map<String, dynamic> json) {
@@ -69,6 +70,11 @@ class CourierProfile {
       id: json['id'] as String,
       fullName: json['full_name'] as String,
       email: json['email'] as String,
+      // Rendu par `CourierProfileSerializer` au personnel et au titulaire du
+      // dossier — jamais au client, qui joint son livreur par le canal d'appel
+      // sans qu'aucun numéro personnel ne circule. Vide plutôt qu'absent : un
+      // livreur peut ne pas en avoir déclaré.
+      phone: json['phone'] as String? ?? '',
       restaurantSlug: json['restaurant'] as String,
       verificationStatus: json['verification_status'] as String,
       idDocument: json['id_document'] as String?,
@@ -96,6 +102,14 @@ class CourierProfile {
   final String id;
   final String fullName;
   final String email;
+
+  /// Téléphone du livreur — pour le personnel qui doit le joindre quand une
+  /// course coince. Vide s'il n'en a pas déclaré.
+  ///
+  /// Absent de [CourierSummary], qui est ce qu'un **client** voit de son
+  /// livreur : le joindre pendant la course passe par le canal d'appel
+  /// (`apps.calls`), sans qu'aucun numéro personnel ne circule.
+  final String phone;
 
   /// Établissement de rattachement, par son slug.
   final String restaurantSlug;

@@ -25,10 +25,31 @@ services:
     ports:
       - "5433:5432"   # 5433 : le poste a déjà un PostgreSQL 17 sur 5432
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-elcorazon}"]
+      # `-d` en plus de `-U` : sans nom de base, `pg_isready` interroge la base
+      # portant le nom de l'utilisateur. Elle n'existe pas ici, et le serveur
+      # répond quand même « accepting connections » — la sonde passe donc au
+      # vert sur un serveur dont **notre** base serait absente ou en recovery.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-elcorazon} -d ${POSTGRES_DB:-elcorazon}"]
       interval: 5s
       timeout: 3s
       retries: 10
+    # Le délai de grâce, et pourquoi il est long.
+    #
+    # À l'arrêt, l'image PostgreSQL reçoit SIGINT (`STOPSIGNAL` de l'image
+    # amont) : c'est l'arrêt *rapide*, qui coupe les connexions puis écrit un
+    # point de contrôle avant de rendre la main. Ce point de contrôle est ce
+    # qui rend le prochain démarrage propre — sans lui, PostgreSQL rejoue son
+    # WAL et resynchronise tout le répertoire de données.
+    #
+    # Docker n'accorde que **dix secondes** par défaut, puis SIGKILL. Or sur ce
+    # poste, un point de contrôle ordinaire a déjà demandé plus de douze
+    # secondes (journal du 2026-08-31 : 127 tampons, `total=12.451 s`) : le
+    # disque de la machine virtuelle WSL2 est lent, et l'arrêt tombait dans la
+    # fenêtre où le SIGKILL arrive avant la fin de l'écriture.
+    #
+    # Soixante secondes ne ralentissent aucun arrêt qui se passe bien : le
+    # conteneur s'éteint dès que PostgreSQL a terminé.
+    stop_grace_period: 60s
     restart: unless-stopped
 
   redis:
@@ -49,10 +70,26 @@ services:
     build:
       context: .
       target: dev
+    # `exec uvicorn` et non `uvicorn` : sans lui, le shell reste PID 1 et
+    # uvicorn tourne comme son enfant. `sh` ne relaie pas les signaux — le
+    # SIGTERM d'un `docker compose stop` s'arrête donc sur le shell, uvicorn ne
+    # l'apprend jamais, et le délai de grâce expire sur un SIGKILL qui emporte
+    # tout le groupe.
+    #
+    # Ce n'est pas cosmétique : les connexions PostgreSQL sont alors rompues en
+    # vol. Le journal du 2026-08-21 en porte la trace exacte —
+    # `could not send data to client: Broken pipe`, puis `connection to client
+    # lost`, puis `server process (PID 6483) exited with exit code 2`, et
+    # PostgreSQL repart en récupération. `exec` fait d'uvicorn le PID 1 : il
+    # reçoit le signal, ferme ses connexions, et le serveur ne voit qu'une
+    # déconnexion ordinaire.
+    #
+    # `--reload` reste : c'est l'environnement de développement, et le
+    # rechargement à chaud est ce pour quoi le code est monté en volume.
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py ensure_storage_buckets &&
-             uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload"
+             exec uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload"
     env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
@@ -100,7 +137,18 @@ services:
     build:
       context: .
       target: dev
-    command: celery -A config beat --loglevel=info
+    # `--schedule` sur un volume nommé, comme en production.
+    #
+    # Sans lui, l'échéancier s'écrit dans `/app`, c'est-à-dire — le code étant
+    # monté en volume — **dans l'arbre des sources**, sur le disque Windows au
+    # travers de la passerelle de fichiers de WSL2. Trois conséquences : un
+    # `celerybeat-schedule-wal` de 2,6 Mo au milieu du dépôt, une écriture par
+    # tour de boucle sur le montage le plus lent de la pile, et un échéancier
+    # que `git clean` efface. Un volume nommé reste dans la machine virtuelle,
+    # où l'écriture est locale, et survit aux recréations du conteneur.
+    command: >
+      celery -A config beat --loglevel=info
+      --schedule /var/lib/celery/celerybeat-schedule
     env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev
@@ -109,6 +157,7 @@ services:
     volumes:
       - .:/app
       - ./secrets:/run/secrets:ro
+      - beatdata:/var/lib/celery
     # Même motif que le worker, mais `inspect ping` ne conviendrait pas :
     # l'ordonnanceur n'est pas un worker et ne répond pas au protocole de
     # contrôle. Ce qui prouve qu'il tourne, c'est qu'il **écrit** : il
@@ -124,7 +173,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - find /app -maxdepth 1 -name 'celerybeat-schedule*' -newermt '-10 minutes' | grep -q .
+        - find /var/lib/celery -maxdepth 1 -name 'celerybeat-schedule*' -newermt '-10 minutes' | grep -q .
       interval: 60s
       timeout: 10s
       retries: 3
@@ -146,11 +195,24 @@ services:
     image: minio/minio
     command: server /data --console-address ":9001"
     environment:
-      # En dur, et sans détour par `.env` : les variables `S3_*` n'existent
-      # plus. Ce service ne sert qu'à relire des fichiers déjà écrits, sur une
-      # machine de développement, le temps d'une commande.
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      # Lues dans `.env`, et **sans valeur de repli**.
+      #
+      # Elles étaient écrites ici, à `minioadmin:minioadmin`, au motif que ce
+      # service ne sert qu'à relire des fichiers déjà déposés. Deux choses le
+      # démentent : ces fichiers sont les pièces d'identité des livreurs, et
+      # les ports 9000/9001 sont publiés sur toutes les interfaces du poste —
+      # pas seulement sur la boucle locale. MinIO le dit lui-même à chaque
+      # démarrage : « Detected default credentials […] Please change them ».
+      #
+      # `:?` plutôt qu'une valeur par défaut : un identifiant absent doit
+      # arrêter `docker compose up` en nommant la variable, pas retomber en
+      # silence sur celui que tout le monde connaît. Voir `.env.example`.
+      #
+      # Changer ces identifiants ne touche pas aux données : MinIO les lit dans
+      # son environnement, jamais dans le volume. Les fichiers déjà écrits
+      # restent lisibles avec les nouveaux.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?identifiant MinIO manquant — voir .env.example}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?mot de passe MinIO manquant — voir .env.example}
     volumes:
       - miniodata:/data
     ports:
@@ -179,3 +241,6 @@ services:
 volumes:
   pgdata:
   miniodata:
+  # Échéancier de beat. Nommé, et non écrit dans l'arbre des sources — voir le
+  # service `beat`.
+  beatdata:

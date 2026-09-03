@@ -137,11 +137,36 @@ class AppService extends ChangeNotifier {
     // démarrage, avant même de savoir qui est connecté.
     if (next.isLoading) return;
 
+    final etaitConnecte = _currentUser != null;
     final djangoUser = next.value;
     _currentUser = djangoUser;
     unawaited(_followSessionInAddressBook(djangoUser?.id));
     unawaited(_followSessionInCart(djangoUser?.id));
+
+    // Le push suit la **session**, pas un écran : c'est ici que la permission
+    // est demandée, et c'est le seul endroit qui couvre les deux ouvertures —
+    // la connexion et la restauration au démarrage. Un client qui rouvre
+    // l'application sans se reconnecter (le cas courant) doit réenregistrer
+    // son appareil : un jeton qui a tourné pendant que l'application était
+    // fermée n'est annoncé à personne, la rotation ne prévenant que les
+    // applications qui tournent. `/auth/devices/` est un upsert, prévu pour
+    // être rappelé au lancement.
+    if (djangoUser != null && !etaitConnecte) {
+      unawaited(_activerLePushPourLeCompte(djangoUser.id));
+    }
+
     notifyListeners();
+  }
+
+  /// Demande la permission puis enregistre l'appareil, dans cet ordre.
+  ///
+  /// Best-effort de bout en bout : un refus de permission, un appareil sans
+  /// services Google ou un réseau coupé laissent l'application parfaitement
+  /// utilisable. Le suivi temps réel et l'historique
+  /// (`/api/v1/notifications/`) ne dépendent ni de FCM ni d'une permission.
+  Future<void> _activerLePushPourLeCompte(String userId) async {
+    await PushNotificationService().enableForUser(userId);
+    await _registerPushDeviceBestEffort();
   }
 
   /// Identité dont le carnet d'adresses est actuellement ouvert.
@@ -356,6 +381,11 @@ class AppService extends ChangeNotifier {
       // train de fermer. Sans cela, l'appareil resterait rattaché au compte et
       // continuerait de recevoir ses notifications.
       await _unregisterPushDeviceBestEffort();
+      // Puis côté appareil : sans cela le jeton reste valide, et un téléphone
+      // partagé continuerait de recevoir les notifications du compte précédent
+      // si le détachement côté serveur avait échoué. `dely` le faisait déjà ;
+      // l'app cliente ne le faisait pas.
+      await PushNotificationService().deleteToken();
       await _container.read(eccore.sessionProvider.notifier).logout();
       // Ni le panier ni le carnet d'adresses ne sont fermés ici : ils suivent
       // la session, via `_followSessionInCart` et

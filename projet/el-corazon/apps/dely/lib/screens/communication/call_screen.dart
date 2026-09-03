@@ -1,440 +1,368 @@
 import 'dart:async';
+
+import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+
+import 'package:elcora_dely/presentation/messages_erreur.dart';
 import 'package:elcora_dely/services/agora_call_service.dart';
-import 'package:elcora_dely/repositories/django_delivery_repository.dart';
-import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/call_service.dart';
 
-/// Écran d'appel vocal/vidéo
+/// Écran d'appel — le média, une fois que la signalisation a tranché.
+///
+/// ## Ce que cet écran ne fait plus
+///
+/// Il composait le canal et le `uid`, rejoignait Agora avec un jeton vide, et
+/// n'informait le serveur de rien. Il ne fabrique désormais **aucune** de ces
+/// valeurs : [CallService] passe l'appel ou le décroche, obtient le canal, le
+/// `uid` et le jeton du serveur, et cet écran ne fait qu'afficher ce qui se
+/// passe et offrir les gestes.
+///
+/// ## Deux entrées, un seul écran
+///
+/// * **sortant** — [appelEntrant] nul : l'appel est placé au montage
+///   (`POST /calls/orders/{id}/`), et le client voit sa sonnerie arriver ;
+/// * **entrant** — [appelEntrant] renseigné et déjà décroché par le
+///   gestionnaire d'appels entrants, qui a demandé le jeton dans la foulée.
+///
+/// Le raccrochage passe toujours par le service, jamais par un simple
+/// `leaveChannel` : quitter le canal sans le dire au serveur laisserait l'appel
+/// « en cours » côté client, et bloquerait le rappel suivant sur la même
+/// commande (un seul appel actif par commande).
 class CallScreen extends StatefulWidget {
-  final Course order;
-  final CallType callType;
-  final bool isIncoming;
-  final String? callerName;
-
   const CallScreen({
-    required this.order, required this.callType, super.key,
-    this.isIncoming = false,
-    this.callerName,
+    required this.orderId,
+    super.key,
+    this.appelEntrant,
+    this.video = false,
+    this.nomInterlocuteur,
   });
+
+  /// Commande sur laquelle porte l'appel — c'est elle qui désigne l'autre
+  /// partie, côté serveur.
+  final String orderId;
+
+  /// L'appel déjà décroché, quand on arrive par une sonnerie. Nul pour un
+  /// appel sortant, qui reste à placer.
+  final eccore.Call? appelEntrant;
+
+  final bool video;
+
+  /// Nom affiché en attendant que le serveur rende l'appel complet.
+  final String? nomInterlocuteur;
 
   @override
   State<CallScreen> createState() => _CallScreenState();
 }
 
 class _CallScreenState extends State<CallScreen> {
-  final AgoraCallService _agoraService = AgoraCallService();
-  StreamSubscription<CallEvent>? _callEventSubscription;
-  StreamSubscription<int?>? _remoteUidSubscription;
-  
-  bool _isConnecting = true;
-  bool _isCallActive = false;
-  int? _remoteUid;
-  String? _errorMessage;
+  final AgoraCallService _media = AgoraCallService();
+
+  late final CallService _appels = context.read<CallService>();
+  StreamSubscription<CallEvent>? _evenementsMedia;
+  StreamSubscription<eccore.Call>? _changementsDEtat;
+  Timer? _horloge;
+
+  eccore.Call? _appel;
+  bool _enCoursDOuverture = true;
+  bool _distantPresent = false;
+  String? _erreur;
+  Duration _duree = Duration.zero;
 
   @override
   void initState() {
     super.initState();
-    _initializeCall();
+    _appel = widget.appelEntrant;
+    _ecouter();
+    unawaited(_demarrer());
   }
 
   @override
   void dispose() {
-    _callEventSubscription?.cancel();
-    _remoteUidSubscription?.cancel();
+    _evenementsMedia?.cancel();
+    _changementsDEtat?.cancel();
+    _horloge?.cancel();
     super.dispose();
   }
 
-  Future<void> _initializeCall() async {
-    try {
-      // Initialiser Agora si nécessaire
-      if (!_agoraService.isInitialized) {
-        final initialized = await _agoraService.initialize();
-        if (!initialized) {
-          setState(() {
-            _errorMessage = 'Impossible d\'initialiser Agora';
-            _isConnecting = false;
-          });
-          return;
-        }
-      }
-
+  void _ecouter() {
+    _evenementsMedia = _media.callEventStream.listen((event) {
       if (!mounted) return;
-
-      // Générer l'ID de canal et l'UID
-      final channelId = AgoraCallService.generateChannelId(widget.order.orderId);
-      final appService = Provider.of<AppService>(context, listen: false);
-      final currentUser = appService.currentUser;
-      
-      if (currentUser == null) {
-        setState(() {
-          _errorMessage = 'Utilisateur non connecté';
-          _isConnecting = false;
-        });
-        return;
+      switch (event.type) {
+        case CallEventType.userJoined:
+          // L'autre partie est **dans le canal** : c'est le seul moment où la
+          // conversation existe vraiment. Le compteur part d'ici, et non du
+          // décrochage — le serveur, lui, tient sa propre durée.
+          setState(() {
+            _distantPresent = true;
+            _enCoursDOuverture = false;
+          });
+          _demarrerLHorloge();
+        case CallEventType.userLeft:
+          setState(() => _distantPresent = false);
+          unawaited(_raccrocher());
+        case CallEventType.joined:
+          setState(() => _enCoursDOuverture = false);
+        case CallEventType.error:
+          setState(() => _erreur = event.message ?? 'Erreur du canal audio.');
+        case CallEventType.disconnected:
+          setState(() => _erreur = 'Connexion perdue. Reconnexion…');
+        case CallEventType.connected:
+          setState(() => _erreur = null);
+        case CallEventType.left:
+          break;
       }
+    });
 
-      final uid = AgoraCallService.generateUid(currentUser.id);
-
-      // Écouter les événements d'appel
-      _callEventSubscription = _agoraService.callEventStream.listen((event) {
-        _handleCallEvent(event);
-      });
-
-      _remoteUidSubscription = _agoraService.remoteUidStream.listen((uid) {
-        setState(() {
-          _remoteUid = uid;
-          if (uid != null) {
-            _isCallActive = true;
-            _isConnecting = false;
-          }
-        });
-      });
-
-      // Rejoindre le canal
-      final success = await _agoraService.joinChannel(
-        channelId: channelId,
-        callType: widget.callType,
-        uid: uid,
-      );
-
-      if (!success) {
-        setState(() {
-          _errorMessage = 'Impossible de rejoindre l\'appel';
-          _isConnecting = false;
-        });
+    // L'autre partie a refusé ou raccroché : le serveur l'annonce sur la file
+    // personnelle, et c'est le seul moyen de l'apprendre — le canal RTC ne
+    // distingue pas « a refusé » de « n'a jamais rejoint ».
+    _changementsDEtat = _appels.changementsDEtat.listen((appel) {
+      if (!mounted || appel.id != _appel?.id) return;
+      if (!appel.isActive) {
+        _fermer(_libelleDeFin(appel.status));
+      } else {
+        setState(() => _appel = appel);
       }
-    } catch (e) {
+    });
+  }
+
+  Future<void> _demarrer() async {
+    if (widget.appelEntrant != null) {
+      // Déjà décroché et déjà dans le canal : le gestionnaire d'appels
+      // entrants s'en est chargé avant d'ouvrir cet écran.
+      setState(() => _enCoursDOuverture = false);
+      return;
+    }
+
+    try {
+      final appel = await _appels.appeler(orderId: widget.orderId, video: widget.video);
+      if (!mounted) return;
       setState(() {
-        _errorMessage = 'Erreur: $e';
-        _isConnecting = false;
+        _appel = appel;
+        _enCoursDOuverture = false;
+      });
+    } catch (erreur) {
+      if (!mounted) return;
+      // Le `detail` du serveur est la phrase à lire : « Aucune livraison en
+      // cours sur cette commande », « Un appel est déjà en cours ».
+      setState(() {
+        _erreur = messageErreur(erreur);
+        _enCoursDOuverture = false;
       });
     }
   }
 
-  void _handleCallEvent(CallEvent event) {
-    switch (event.type) {
-      case CallEventType.joined:
-        setState(() {
-          _isConnecting = false;
-          _isCallActive = true;
-        });
-        break;
-      case CallEventType.userJoined:
-        setState(() {
-          _isCallActive = true;
-          _isConnecting = false;
-        });
-        break;
-      case CallEventType.userLeft:
-        setState(() {
-          _isCallActive = false;
-        });
-        _endCall();
-        break;
-      case CallEventType.left:
-        Navigator.of(context).pop();
-        break;
-      case CallEventType.disconnected:
-        setState(() {
-          _errorMessage = 'Connexion perdue';
-        });
-        break;
-      case CallEventType.error:
-        setState(() {
-          _errorMessage = event.message ?? 'Erreur inconnue';
-          _isConnecting = false;
-        });
-        break;
-      case CallEventType.connected:
-        setState(() {
-          _isCallActive = true;
-        });
-        break;
-    }
+  void _demarrerLHorloge() {
+    _horloge?.cancel();
+    _horloge = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _duree += const Duration(seconds: 1));
+    });
   }
 
-  Future<void> _endCall() async {
-    await _agoraService.leaveChannel();
-    if (mounted) {
-      Navigator.of(context).pop();
+  String _libelleDeFin(String statut) => switch (statut) {
+    'declined' => 'Appel refusé',
+    'missed' => 'Pas de réponse',
+    _ => 'Appel terminé',
+  };
+
+  Future<void> _raccrocher() async {
+    await _appels.raccrocher();
+    if (mounted) _fermer(null);
+  }
+
+  void _fermer(String? message) {
+    _horloge?.cancel();
+    if (!mounted) return;
+    if (message != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
+    Navigator.of(context).maybePop();
+  }
+
+  String get _nom {
+    final appel = _appel;
+    if (appel == null) return widget.nomInterlocuteur ?? 'Client';
+    final nom = _appels.jeSuisLAppelant ? appel.calleeName : appel.callerName;
+    return nom.isEmpty ? (widget.nomInterlocuteur ?? 'Client') : nom;
+  }
+
+  String get _etatLisible {
+    if (_erreur != null) return 'Échec';
+    if (_distantPresent) return _dureeLisible;
+    if (_enCoursDOuverture) return 'Connexion…';
+    return widget.appelEntrant != null ? 'En communication' : 'Sonne…';
+  }
+
+  String get _dureeLisible {
+    final minutes = _duree.inMinutes.toString().padLeft(2, '0');
+    final secondes = (_duree.inSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$secondes';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // En-tête avec bouton retour
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                    onPressed: _endCall,
+    final media = context.watch<AgoraCallService>();
+    final estVideo = widget.video && media.isVideoEnabled;
+
+    return PopScope(
+      // Le bouton retour du système ne doit pas laisser un appel ouvert
+      // derrière lui : le canal resterait joint, micro compris.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_raccrocher());
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: estVideo && _distantPresent
+                    ? _vueVideo(media)
+                    : _vueAudio(),
+              ),
+              if (_erreur != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                  child: Text(
+                    _erreur!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.orangeAccent),
                   ),
-                  const Spacer(),
-                  if (widget.callType == CallType.video)
-                    IconButton(
-                      icon: const Icon(Icons.switch_camera, color: Colors.white),
-                      onPressed: () => _agoraService.switchCamera(),
-                    ),
-                ],
-              ),
-            ),
-
-            // Contenu principal
-            Expanded(
-              child: Center(
-                child: _buildCallContent(),
-              ),
-            ),
-
-            // Contrôles d'appel
-            if (_isCallActive || _isConnecting)
-              _buildCallControls(),
-          ],
+                ),
+              _controles(media),
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildCallContent() {
-    if (_errorMessage != null) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, color: Colors.red, size: 64),
-          const SizedBox(height: 16),
-          Text(
-            _errorMessage!,
-            style: const TextStyle(color: Colors.white, fontSize: 16),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _endCall,
-            child: const Text('Fermer'),
-          ),
-        ],
-      );
-    }
-
-    if (_isConnecting) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(color: Colors.white),
-          const SizedBox(height: 24),
-          Text(
-            widget.isIncoming ? 'Appel entrant...' : 'Connexion...',
-            style: const TextStyle(color: Colors.white, fontSize: 18),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            widget.callerName ?? 'Client',
-            style: const TextStyle(color: Colors.white70, fontSize: 14),
-          ),
-        ],
-      );
-    }
-
-    // Vue d'appel active
+  Widget _vueAudio() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Avatar ou vidéo
-        if (widget.callType == CallType.video)
-          Expanded(
-            child: _buildVideoView(),
-          )
-        else
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.blue[700],
-            ),
-            child: Center(
-              child: Text(
-                (widget.callerName ?? 'C').substring(0, 1).toUpperCase(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+        CircleAvatar(
+          radius: 56,
+          backgroundColor: Colors.white24,
+          child: Text(
+            _nom.isEmpty ? '?' : _nom.characters.first.toUpperCase(),
+            style: const TextStyle(fontSize: 40, color: Colors.white),
           ),
-
+        ),
         const SizedBox(height: 24),
         Text(
-          widget.callerName ?? 'Client',
+          _nom,
           style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 8),
-        Text(
-          widget.callType == CallType.video ? 'Appel vidéo' : 'Appel vocal',
-          style: const TextStyle(color: Colors.white70, fontSize: 14),
-        ),
-        if (_remoteUid != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            'UID: $_remoteUid',
-            style: const TextStyle(color: Colors.white54, fontSize: 12),
-          ),
-        ],
+        Text(_etatLisible, style: const TextStyle(color: Colors.white70, fontSize: 16)),
       ],
     );
   }
 
-  Widget _buildVideoView() {
+  Widget _vueVideo(AgoraCallService media) {
+    final engine = media.engine;
+    final distant = media.remoteUid;
+    if (engine == null || distant == null) return _vueAudio();
+
     return Stack(
       children: [
-        // Vue distante (plein écran)
-        if (_remoteUid != null && _agoraService.engine != null)
-          AgoraVideoView(
+        Positioned.fill(
+          child: AgoraVideoView(
             controller: VideoViewController.remote(
-              rtcEngine: _agoraService.engine!,
-              canvas: VideoCanvas(uid: _remoteUid),
-              connection: RtcConnection(
-                channelId: _agoraService.currentChannelId ?? '',
-                localUid: _agoraService.localUid ?? 0,
-              ),
-            ),
-          )
-        else
-          Container(
-            color: Colors.black,
-            child: const Center(
-              child: CircularProgressIndicator(color: Colors.white),
+              rtcEngine: engine,
+              canvas: VideoCanvas(uid: distant),
+              connection: RtcConnection(channelId: media.currentChannelId),
             ),
           ),
-
-        // Vue locale (petite fenêtre en haut à droite)
-        if (widget.callType == CallType.video && _agoraService.localUid != null)
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Container(
-              width: 120,
-              height: 160,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: _agoraService.engine != null
-                    ? AgoraVideoView(
-                        controller: VideoViewController(
-                          rtcEngine: _agoraService.engine!,
-                          canvas: const VideoCanvas(uid: 0),
-                        ),
-                      )
-                    : Container(color: Colors.black),
+        ),
+        Positioned(
+          right: 16,
+          top: 16,
+          width: 110,
+          height: 160,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: AgoraVideoView(
+              controller: VideoViewController(
+                rtcEngine: engine,
+                canvas: const VideoCanvas(uid: 0),
               ),
             ),
           ),
+        ),
       ],
     );
   }
 
-  Widget _buildCallControls() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+  Widget _controles(AgoraCallService media) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _bouton(
+          icone: media.isMuted ? Icons.mic_off : Icons.mic,
+          libelle: media.isMuted ? 'Micro coupé' : 'Micro',
+          actif: !media.isMuted,
+          onPressed: media.toggleMute,
+        ),
+        _bouton(
+          icone: media.isSpeakerOn ? Icons.volume_up : Icons.volume_down,
+          libelle: 'Haut-parleur',
+          actif: media.isSpeakerOn,
+          onPressed: media.toggleSpeaker,
+        ),
+        if (widget.video)
+          _bouton(
+            icone: Icons.cameraswitch,
+            libelle: 'Caméra',
+            actif: true,
+            onPressed: media.switchCamera,
+          ),
+        _bouton(
+          icone: Icons.call_end,
+          libelle: 'Raccrocher',
+          actif: true,
+          couleur: Colors.red,
+          onPressed: _raccrocher,
+        ),
+      ],
+    );
+  }
+
+  Widget _bouton({
+    required IconData icone,
+    required String libelle,
+    required bool actif,
+    required Future<void> Function() onPressed,
+    Color? couleur,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Micro
-          _buildControlButton(
-            icon: _agoraService.isMuted ? Icons.mic_off : Icons.mic,
-            color: _agoraService.isMuted ? Colors.red : Colors.white,
-            onPressed: () => _agoraService.toggleMute(),
-          ),
-
-          // Vidéo (si appel vidéo)
-          if (widget.callType == CallType.video)
-            _buildControlButton(
-              icon: _agoraService.isVideoEnabled ? Icons.videocam : Icons.videocam_off,
-              color: _agoraService.isVideoEnabled ? Colors.white : Colors.red,
-              onPressed: () => _agoraService.toggleVideo(),
+          Semantics(
+            button: true,
+            label: libelle,
+            child: CircleAvatar(
+              radius: 28,
+              backgroundColor: couleur ?? (actif ? Colors.white24 : Colors.white10),
+              child: IconButton(
+                icon: Icon(icone, color: Colors.white),
+                onPressed: () => unawaited(onPressed()),
+              ),
             ),
-
-          // Haut-parleur
-          _buildControlButton(
-            icon: _agoraService.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
-            color: _agoraService.isSpeakerOn ? Colors.white : Colors.grey,
-            onPressed: () => _agoraService.toggleSpeaker(),
           ),
-
-          // Raccrocher
-          _buildControlButton(
-            icon: Icons.call_end,
-            color: Colors.red,
-            backgroundColor: Colors.red,
-            onPressed: _endCall,
-            isLarge: true,
-          ),
+          const SizedBox(height: 6),
+          Text(libelle, style: const TextStyle(color: Colors.white60, fontSize: 11)),
         ],
       ),
     );
   }
-
-  Widget _buildControlButton({
-    required IconData icon,
-    required Color color,
-    required VoidCallback onPressed,
-    Color? backgroundColor,
-    bool isLarge = false,
-  }) {
-    return Container(
-      width: isLarge ? 64 : 56,
-      height: isLarge ? 64 : 56,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: backgroundColor ?? Colors.white.withValues(alpha: 0.2),
-      ),
-      child: IconButton(
-        icon: Icon(icon, color: color, size: isLarge ? 32 : 24),
-        onPressed: onPressed,
-      ),
-    );
-  }
 }
-
-// Widget AgoraVideoView
-// Note: Dans agora_rtc_engine 6.3.2+, utilisez VideoViewWidget directement
-// Si VideoViewWidget n'est pas disponible, cette version utilise un placeholder
-// TODO: Vérifier la documentation Agora pour la bonne utilisation de VideoViewWidget
-class AgoraVideoView extends StatelessWidget {
-  final VideoViewController controller;
-
-  const AgoraVideoView({required this.controller, super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    // Pour agora_rtc_engine 6.3.2+, VideoViewWidget devrait être importé automatiquement
-    // Si vous obtenez une erreur, vérifiez votre version d'Agora et la documentation
-    // Documentation: https://docs.agora.io/en/video-calling/get-started/get-started-sdk?platform=flutter
-    
-    // Solution temporaire: utiliser un placeholder
-    // Remplacez ceci par VideoViewWidget(controller: controller) une fois la dépendance correctement configurée
-    return Container(
-      color: Colors.black,
-      child: const Center(
-        child: Icon(Icons.videocam, color: Colors.white, size: 48),
-      ),
-    );
-    
-    // Code correct (à décommenter une fois VideoViewWidget disponible):
-    // return VideoViewWidget(controller: controller);
-  }
-}
-

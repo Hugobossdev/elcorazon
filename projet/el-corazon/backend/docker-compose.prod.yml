@@ -172,7 +172,10 @@ services:
     image: minio/minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      # Sans repli, comme le mot de passe juste en dessous : `minioadmin` est
+      # la moitié connue d'avance du couple, et la laisser par défaut revient
+      # à n'en garder qu'une à deviner.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?identifiant MinIO obligatoire}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?mot de passe MinIO obligatoire}
       MINIO_BROWSER: "off"   # console fermée : ce service ne sert plus qu'à lire
     volumes:

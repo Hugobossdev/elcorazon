@@ -12,9 +12,10 @@ from typing import Any
 
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
 
-from apps.accounts.models import User
+from apps.accounts.models import User, phone_validator
 from apps.delivery.models import (
     Assignment,
     CourierProfile,
@@ -28,12 +29,15 @@ from common.serializers import LocationField, MoneyField
 
 __all__ = [
     "AssignmentSerializer",
+    "CourierApplicationAcceptedSerializer",
     "CourierProfileSerializer",
     "CourierProvisioningSerializer",
     "CourierPublicSerializer",
     "CourierRatingSerializer",
     "CourierRatingWriteSerializer",
+    "CourierSelfApplicationSerializer",
     "CourierShiftSerializer",
+    "CourierUpdateSerializer",
     "DeclineSerializer",
     "DeliveryTransitionSerializer",
     "DocumentsSerializer",
@@ -78,6 +82,15 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
 
     full_name = serializers.CharField(source="user.full_name", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
+    # Le téléphone du livreur, pour le personnel qui doit le joindre quand une
+    # course coince. Il manquait, et son absence se voyait à l'écran : le
+    # formulaire de correction ne pouvait pas préremplir le champ qu'il
+    # proposait de modifier.
+    #
+    # Il n'apparaît **pas** dans `CourierPublicSerializer`, qui est ce qu'un
+    # client voit de son livreur : le joindre pendant la course passe par le
+    # canal d'appel (`apps.calls`), qui ne divulgue aucun numéro personnel.
+    phone = serializers.CharField(source="user.phone", read_only=True)
     restaurant = serializers.SlugRelatedField[Restaurant](slug_field="slug", read_only=True)
     last_location = LocationField(read_only=True)
     total_earnings = MoneyField(read_only=True)
@@ -89,6 +102,7 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
             "id",
             "full_name",
             "email",
+            "phone",
             "restaurant",
             "verification_status",
             "verification_notes",
@@ -189,6 +203,56 @@ class CourierProvisioningSerializer(serializers.Serializer[Any]):
             # `non_field_errors`, où le formulaire ne l'affiche pas.
             raise serializers.ValidationError({"password": list(erreur.messages)}) from erreur
         return attrs
+
+
+class CourierSelfApplicationSerializer(CourierProvisioningSerializer):
+    """Candidature déposée par le livreur lui-même — `POST /delivery/apply/`.
+
+    Le même formulaire que l'embauche, à trois différences près, et chacune
+    tient au fait que **personne du personnel n'est là** pour relire la saisie.
+
+    * **Le téléphone est obligatoire et au format international.** À l'embauche
+      il est relevé d'une carte présentée, et le back-office corrige une
+      coquille en deux clics ; ici il est tapé par un candidat, et c'est le seul
+      moyen de le joindre pour instruire son dossier. `phone_validator` est donc
+      opposé à la saisie, alors que le modèle ne l'applique jamais de lui-même
+      — `save()` n'appelle pas `full_clean()`.
+    * **L'établissement doit être ouvert au public.** La liste où le candidat
+      choisit est celle de `GET /restaurants/`, qui ne rend que les
+      établissements actifs ; accepter les autres permettrait de se rattacher,
+      en tapant un slug, à une adresse fermée ou pas encore ouverte.
+    * **Aucun jeton n'en sort.** Voir `CourierApplicationView`.
+
+    Ce qui **ne** change **pas** : le dossier naît `pending`, les compteurs à
+    zéro, et aucun champ de statut n'est accepté en entrée. Un candidat ne se
+    valide pas lui-même — c'est l'invariant L1, et il est intact.
+    """
+
+    phone = serializers.CharField(max_length=16, validators=[phone_validator])
+    restaurant = serializers.SlugRelatedField[Restaurant](
+        slug_field="slug",
+        queryset=Restaurant.objects.filter(is_active=True),
+        help_text="Établissement auquel vous vous rattachez, par son slug (voir /restaurants/).",
+    )
+
+
+class CourierApplicationAcceptedSerializer(serializers.Serializer[Any]):
+    """Accusé de dépôt d'une candidature.
+
+    Volontairement pauvre. Il ne rend ni jeton, ni dossier : le candidat n'a
+    pas encore de session, et rien de ce qu'il vient d'écrire ne lui apprendrait
+    quoi que ce soit. Ce qu'il lui faut tient en trois choses — où le code est
+    parti, combien de temps il vaut, et à partir de quand un renvoi est
+    possible — plus l'état du dossier, pour que l'écran suivant dise la vérité
+    sur ce qui reste à faire.
+    """
+
+    email = serializers.EmailField(read_only=True)
+    expires_at = serializers.DateTimeField(read_only=True)
+    retry_after = serializers.IntegerField(read_only=True)
+    code_length = serializers.IntegerField(read_only=True)
+    verification_status = serializers.CharField(read_only=True)
+    detail = serializers.CharField(read_only=True)
 
 
 class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
@@ -353,3 +417,126 @@ class CourierShiftSerializer(serializers.ModelSerializer[CourierShift]):
             )
 
         return attrs
+
+
+class CourierUpdateSerializer(serializers.Serializer[Any]):
+    """Correction d'un dossier livreur par le personnel — `PATCH`.
+
+    **Une liste blanche, et rien d'autre.** Ce sérialiseur n'accepte que ce
+    qu'un back-office a de bonnes raisons de corriger : une plaque relevée de
+    travers à l'embauche, un numéro de téléphone qui change, un nom mal
+    orthographié, un livreur qui passe du scooter à la voiture. Tout le reste
+    du dossier lui est fermé, et la fermeture est ici plutôt que dans la vue
+    parce qu'un champ oublié dans une liste noire s'écrit, alors qu'un champ
+    oublié dans une liste blanche ne s'écrit pas.
+
+    Ce qui reste **hors d'atteinte**, et pourquoi :
+
+    * `verification_status`, `verified_by`, `verified_at` — instruire un
+      dossier passe par `verification/`, qui exige `couriers.approve` ou
+      `couriers.suspend` et journalise l'auteur. Les laisser ici ferait de
+      `couriers.write` un droit de valider son propre recrutement ;
+    * les **pièces justificatives** — c'est le livreur qui les dépose, depuis
+      son application, et tout dépôt repasse le dossier en attente (L5) ;
+    * `is_online` — c'est une déclaration du livreur, qui sait s'il roule. Le
+      personnel qui le mettrait « en ligne » à distance le rendrait éligible à
+      des courses qu'il ne verrait pas ;
+    * les **compteurs** (`deliveries_*`, `rating_*`, gains) — ce sont des
+      agrégats de faits, tenus par le serveur. Les rendre modifiables
+      permettrait de fabriquer une réputation ;
+    * `restaurant` — muter un livreur d'un établissement à l'autre le fait
+      sortir du périmètre de qui le mute, qui perd alors le dossier de vue au
+      milieu du geste. C'est un transfert, il mérite sa propre route et sa
+      propre garde ;
+    * `email` — c'est l'identifiant du compte, donc un chemin de reprise par
+      « mot de passe oublié ». Il ne se change pas depuis l'écran d'un tiers.
+
+    Le statut de vérification n'est **pas** remis en attente quand la plaque ou
+    le type de véhicule changent, et c'est délibéré : la correction d'une
+    coquille suspendrait un livreur en pleine tournée. Un vrai changement de
+    véhicule s'accompagne d'une nouvelle carte grise, et c'est ce dépôt-là qui
+    rouvre l'instruction (L5).
+    """
+
+    full_name = serializers.CharField(max_length=150, required=False)
+    phone = serializers.CharField(
+        max_length=16,
+        required=False,
+        allow_blank=True,
+        validators=[phone_validator],
+    )
+    vehicle_type = serializers.ChoiceField(choices=VehicleType.choices, required=False)
+    vehicle_plate = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    national_id_number = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    licence_number = serializers.CharField(max_length=64, required=False, allow_blank=True)
+
+    #: Champs portés par le compte plutôt que par le dossier. La distinction
+    #: n'a pas à remonter jusqu'à l'appelant : il corrige « le livreur ».
+    CHAMPS_DU_COMPTE = ("full_name", "phone")
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Refuse un corps vide.
+
+        DRF l'accepterait et rendrait 200 sans rien écrire — l'écran
+        annoncerait « modifications enregistrées » sur une requête qui n'a rien
+        enregistré.
+        """
+        if not attrs:
+            raise serializers.ValidationError(
+                "Aucun champ modifiable dans cette requête. Les champs acceptés "
+                "sont : nom, téléphone, type de véhicule, plaque, numéro de "
+                "pièce d'identité, numéro de permis."
+            )
+        return attrs
+
+    def validate_phone(self, value: str) -> str:
+        """Unique sur les comptes, comme à l'inscription.
+
+        Vérifié ici pour rendre 400 avec un message lisible : la contrainte
+        d'unicité de la base sortirait en 500. Le numéro vide est permis — il
+        signifie « non renseigné » et n'entre pas dans l'unicité.
+        """
+        numero = value.strip()
+        if not numero:
+            return ""
+
+        occupe = User.objects.filter(phone=numero)
+        if self.instance is not None:
+            occupe = occupe.exclude(pk=self.instance.user_id)
+        if occupe.exists():
+            raise serializers.ValidationError("Ce numéro est déjà associé à un autre compte.")
+        return numero
+
+    def update(self, instance: CourierProfile, validated_data: dict[str, Any]) -> CourierProfile:
+        """Écrit le dossier et le compte, **dans une seule transaction**.
+
+        Sans elle, un numéro de téléphone refusé par la base après qu'une
+        plaque a été écrite laisserait le dossier à moitié corrigé, sans que
+        l'appelant sache laquelle des deux moitiés a pris.
+        """
+        compte = {
+            champ: validated_data.pop(champ)
+            for champ in self.CHAMPS_DU_COMPTE
+            if champ in validated_data
+        }
+
+        with transaction.atomic():
+            if compte:
+                for champ, valeur in compte.items():
+                    # Un téléphone vide vaut `NULL` et non `""` : la colonne est
+                    # `unique`, et deux chaînes vides s'y heurteraient alors que
+                    # deux `NULL` cohabitent.
+                    setattr(
+                        instance.user,
+                        champ,
+                        None if champ == "phone" and not valeur else valeur,
+                    )
+                instance.user.save(update_fields=[*compte, "updated_at"])
+
+            for champ, valeur in validated_data.items():
+                setattr(instance, champ, valeur)
+            if validated_data:
+                instance.save(update_fields=[*validated_data, "updated_at"])
+
+        instance.refresh_from_db()
+        return instance

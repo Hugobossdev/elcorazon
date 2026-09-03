@@ -23,14 +23,14 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from django.db.models import QuerySet
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from apps.delivery.models import CourierShift
-from apps.delivery.serializers import CourierShiftSerializer
+from apps.delivery.models import Assignment, CourierShift
+from apps.delivery.serializers import AssignmentSerializer, CourierShiftSerializer
 from apps.restaurants.scoping import assert_in_scope, is_unscoped, staff_restaurant_ids
-from common.permissions import HasReadWritePermission, authenticated_user
+from common.permissions import HasPermission, HasReadWritePermission, authenticated_user
 
-__all__ = ["CourierShiftViewSet"]
+__all__ = ["CourierShiftViewSet", "ManagedAssignmentViewSet"]
 
 #: Le planning se lit avec la flotte et s'écrit avec elle.
 FLEET_PERMISSION = HasReadWritePermission.of(read="couriers.read", write="couriers.write")
@@ -80,3 +80,56 @@ class CourierShiftViewSet(ModelViewSet[CourierShift]):
         if courier is not None:
             assert_in_scope(authenticated_user(self.request), courier.restaurant_id)
         serializer.save()
+
+
+class ManagedAssignmentViewSet(ReadOnlyModelViewSet[Assignment]):
+    """Courses vues par l'exploitation — **qui porte quoi**.
+
+    Elle manquait, et son absence se voyait à l'écran. `AssignmentSerializer`
+    annonce depuis le début une course « vue par le livreur ou par le
+    personnel », mais aucune route ne la rendait au personnel :
+    `AssignmentViewSet` est sous `IsCourier` et filtre sur le dossier de
+    l'appelant. Le back-office n'avait donc aucun moyen d'apprendre qui
+    transporte une commande — son écran « Livraisons actives » affichait une
+    liste de commandes sans porteur, et le détail d'une commande une ligne
+    « Livreur » vide.
+
+    Pourquoi ici plutôt que sur la commande : `orders` ne peut pas importer
+    `delivery` (ADR-002, graphe vérifié par
+    `tests/architecture/test_dependency_graph.py`). La flèche va dans l'autre
+    sens, et c'est le bon sens — la livraison connaît la commande, la commande
+    ignore qu'on la livre. Ajouter le livreur à `OrderSerializer` aurait
+    inversé cette flèche, et au passage exposé le porteur au client sur la même
+    route.
+
+    Lecture seule, et sous `orders.read` : savoir qui porte une commande fait
+    partie de la superviser. Affecter reste `orders.assign_courier`
+    (`OfferAssignmentView`), annuler une course aussi.
+
+    Le cloisonnement suit celui des commandes — une course hors périmètre est
+    **introuvable**, comme la commande qu'elle porte.
+    """
+
+    serializer_class = AssignmentSerializer
+    permission_classes = (HasPermission.of("orders.read"),)
+
+    # Déclaré pour le générateur de schéma seulement — voir `get_queryset`.
+    queryset = Assignment.objects.none()
+
+    #: `order` en premier : c'est la question que pose l'écran de supervision,
+    #: « qui porte cette commande ». `status` sert la liste des livraisons en
+    #: cours, `courier` l'historique d'un livreur.
+    filterset_fields: ClassVar[dict[str, list[str]]] = {
+        "order": ["exact"],
+        "courier": ["exact"],
+        "status": ["exact"],
+    }
+
+    def get_queryset(self) -> QuerySet[Assignment]:
+        user = authenticated_user(self.request)
+        base = Assignment.objects.select_related(
+            "courier__user", "order__restaurant"
+        ).order_by("-offered_at")
+        if is_unscoped(user):
+            return base
+        return base.filter(order__restaurant_id__in=staff_restaurant_ids(user))

@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/chat_service.dart';
-import 'package:elcora_dely/services/agora_call_service.dart';
+import 'package:elcora_dely/presentation/messages_erreur.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/widgets/loading_widget.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
@@ -196,64 +196,42 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  /// Appelle le client de cette course.
+  ///
+  /// ## Ce que faisait cette méthode
+  ///
+  /// Elle **envoyait un message dans la conversation** — « 📞 Appel vocal en
+  /// cours... » — puis ouvrait un écran qui rejoignait un canal Agora composé
+  /// localement. Le client n'était donc jamais appelé : au mieux il lisait une
+  /// ligne dans le chat, à supposer qu'il ait l'écran ouvert, et le canal que
+  /// le livreur venait de rejoindre n'était celui de personne.
+  ///
+  /// Elle ouvre maintenant un véritable appel : `CallScreen` demande
+  /// `POST /calls/orders/{id}/`, le serveur désigne le destinataire, dérive le
+  /// canal et fait sonner le client sur sa file personnelle.
+  ///
+  /// Aucun message n'est plus posté dans la conversation — l'appel a son propre
+  /// historique (`GET /calls/`), et une ligne de chat n'était pas une trace,
+  /// c'était un ersatz de sonnerie.
   Future<void> _makeCall({bool isVideo = false}) async {
     try {
-      // Initialiser Agora si nécessaire
-      final agoraService = AgoraCallService();
-      if (!agoraService.isInitialized) {
-        final initialized = await agoraService.initialize();
-        if (!initialized) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Impossible d\'initialiser l\'appel'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-          return;
-        }
-      }
-
-      if (!mounted) return;
-
-      // Envoyer une notification d'appel via le chat
-      final appService = Provider.of<AppService>(context, listen: false);
-      final currentUser = appService.currentUser;
-
-      if (currentUser != null) {
-        // Envoyer un message système pour notifier l'appel
-        // Ce message part comme un message ordinaire du livreur : le relais
-        // ne connaît pas de type « système ». La signature laissait croire le
-        // contraire jusqu'au lot 3.
-        await _chatService.sendMessage(
-          orderId: widget.order.orderId,
-          content: isVideo
-              ? '📹 Appel vidéo en cours...'
-              : '📞 Appel vocal en cours...',
-        );
-      }
-
-      // Ouvrir l'écran d'appel
-      if (mounted) {
-        unawaited(Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => CallScreen(
-              order: widget.order,
-              callType: isVideo ? CallType.video : CallType.voice,
-              callerName: widget.order.destinataire.isEmpty
-                  ? 'Client'
-                  : widget.order.destinataire,
-            ),
+      unawaited(Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => CallScreen(
+            orderId: widget.order.orderId,
+            video: isVideo,
+            nomInterlocuteur: widget.order.destinataire.isEmpty
+                ? 'Client'
+                : widget.order.destinataire,
           ),
-        ));
-      }
+        ),
+      ));
     } catch (e) {
       eccore.Journal.trace('Erreur démarrage appel: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: Colors.red,
           ),
         );

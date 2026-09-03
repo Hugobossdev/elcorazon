@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:admin/presentation/export_commandes.dart';
 import 'package:admin/services/client_management_service.dart';
 import 'package:admin/services/app_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -200,7 +201,8 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                   .toList();
                               final totalSpent = orders
                                   .where(
-                                      (o) => o.statut == StatutCommande.livree,)
+                                    (o) => o.statut == StatutCommande.livree,
+                                  )
                                   .fold(0.0, (sum, o) => sum + o.totalAffiche);
 
                               return Card(
@@ -227,8 +229,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                     ),
                                   ),
                                   subtitle: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(client.email),
                                       Text(client.phone ?? '—'),
@@ -318,8 +319,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                                       },
                                     ),
                                   ),
-                                  onTap: () =>
-                                      _showClientDetails(client, appService),
+                                  onTap: () => _showClientDetails(client, appService),
                                 ),
                               );
                             },
@@ -367,58 +367,60 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
       return;
     }
 
-    unawaited(DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Détails du client: ${client.fullName}'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildDetailRow('Email', client.email),
-              _buildDetailRow('Téléphone', client.phone ?? '—'),
-              _buildDetailRow('Total commandes', '${stats.ordersCount}'),
-              _buildDetailRow('Commandes livrées', '${stats.ordersDelivered}'),
-              _buildDetailRow('Commandes annulées', '${stats.ordersCancelled}'),
-              _buildDetailRow(
-                'Total dépensé',
-                PriceFormatter.format(stats.totalSpent.toMajorUnits()),
-              ),
-              _buildDetailRow(
-                'Panier moyen',
-                PriceFormatter.format(stats.averageBasket.toMajorUnits()),
-              ),
-              _buildDetailRow('Points de fidélité', '${stats.loyaltyBalance}'),
-              _buildDetailRow('Adresses enregistrées', '${stats.addressesCount}'),
-              _buildDetailRow(
-                'Membre depuis',
-                '${client.createdAt.day}/${client.createdAt.month}/${client.createdAt.year}',
-              ),
-            ],
+    unawaited(
+      DialogHelper.showSafeDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Détails du client: ${client.fullName}'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildDetailRow('Email', client.email),
+                _buildDetailRow('Téléphone', client.phone ?? '—'),
+                _buildDetailRow('Total commandes', '${stats.ordersCount}'),
+                _buildDetailRow('Commandes livrées', '${stats.ordersDelivered}'),
+                _buildDetailRow('Commandes annulées', '${stats.ordersCancelled}'),
+                _buildDetailRow(
+                  'Total dépensé',
+                  PriceFormatter.format(stats.totalSpent.toMajorUnits()),
+                ),
+                _buildDetailRow(
+                  'Panier moyen',
+                  PriceFormatter.format(stats.averageBasket.toMajorUnits()),
+                ),
+                _buildDetailRow('Points de fidélité', '${stats.loyaltyBalance}'),
+                _buildDetailRow('Adresses enregistrées', '${stats.addressesCount}'),
+                _buildDetailRow(
+                  'Membre depuis',
+                  '${client.createdAt.day}/${client.createdAt.month}/${client.createdAt.year}',
+                ),
+              ],
+            ),
           ),
+          actions: [
+            Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Fermer'),
+              ),
+            ),
+            Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _showClientOrders(client);
+                },
+                child: const Text('Voir commandes'),
+              ),
+            ),
+          ],
         ),
-        actions: [
-          Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fermer'),
-            ),
-          ),
-          Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _showClientOrders(client);
-              },
-              child: const Text('Voir commandes'),
-            ),
-          ),
-        ],
       ),
-    ),);
+    );
   }
 
   Widget _buildDetailRow(String label, String value) {
@@ -446,60 +448,60 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
 
     if (!mounted) return;
 
-    unawaited(DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Historique des commandes: ${client.fullName}'),
-        content: SizedBox(
-          width: double.maxFinite,
-          height: 400,
-          child: orders.isEmpty
-              ? const Center(child: Text('Aucune commande'))
-              : ListView.builder(
-                  itemCount: orders.length,
-                  itemBuilder: (context, index) {
-                    final order = orders[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: Container(
-                        constraints: const BoxConstraints(minHeight: 56),
-                        child: ListTile(
-                          leading: Icon(
-                            _getOrderStatusIcon(order.statut),
-                            color: _getOrderStatusColor(context, order.statut),
-                          ),
-                          title: Text(
-                            'Commande #${order.id.substring(0, 8).toUpperCase()}',
-                          ),
-                          subtitle: Text(
-                            '${PriceFormatter.format(order.totalAffiche)} - ${order.statut.libelle}',
-                          ),
-                          trailing: Text(
-                            '${order.passeeLe.day}/${order.passeeLe.month}/${order.passeeLe.year}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
+    unawaited(
+      DialogHelper.showSafeDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Historique des commandes: ${client.fullName}'),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 400,
+            child: orders.isEmpty
+                ? const Center(child: Text('Aucune commande'))
+                : ListView.builder(
+                    itemCount: orders.length,
+                    itemBuilder: (context, index) {
+                      final order = orders[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: Container(
+                          constraints: const BoxConstraints(minHeight: 56),
+                          child: ListTile(
+                            leading: Icon(
+                              _getOrderStatusIcon(order.statut),
+                              color: _getOrderStatusColor(context, order.statut),
+                            ),
+                            title: Text(
+                              'Commande #${order.id.substring(0, 8).toUpperCase()}',
+                            ),
+                            subtitle: Text(
+                              '${PriceFormatter.format(order.totalAffiche)} - ${order.statut.libelle}',
+                            ),
+                            trailing: Text(
+                              '${order.passeeLe.day}/${order.passeeLe.month}/${order.passeeLe.year}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fermer'),
-            ),
+                      );
+                    },
+                  ),
           ),
-        ],
+          actions: [
+            Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Fermer'),
+              ),
+            ),
+          ],
+        ),
       ),
-    ),);
+    );
   }
 
   IconData _getOrderStatusIcon(StatutCommande status) {
@@ -608,92 +610,106 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
 
     if (!mounted) return;
 
-    unawaited(DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        // Note: on récupère les tokens ici car on est dans le builder du dialog
-        title: Text('Points Fidélité: ${client.fullName}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.stars,
-              size: 64,
-              color: Theme.of(context).colorScheme.tertiary,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '${stats?.loyaltyBalance ?? 0} points',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Cumulés depuis l\'ouverture : ${stats?.loyaltyLifetimeEarned ?? 0}',
-              style: Theme.of(context).textTheme.titleMedium,
+    unawaited(
+      DialogHelper.showSafeDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          // Note: on récupère les tokens ici car on est dans le builder du dialog
+          title: Text('Points Fidélité: ${client.fullName}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.stars,
+                size: 64,
+                color: Theme.of(context).colorScheme.tertiary,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '${stats?.loyaltyBalance ?? 0} points',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Cumulés depuis l\'ouverture : ${stats?.loyaltyLifetimeEarned ?? 0}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Fermer'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fermer'),
-          ),
-        ],
       ),
-    ),);
+    );
   }
 
   Future<void> _exportClients() async {
-    final clientService =
-        Provider.of<ClientManagementService>(context, listen: false);
+    final clientService = Provider.of<ClientManagementService>(context, listen: false);
     final clients = clientService.clients;
 
     final csvBuffer = StringBuffer();
     csvBuffer.writeln('ID,Nom,Email,Téléphone,Actif,Date Création');
+    // Les champs passent par `champCsv` : un nom contenant une virgule ou un
+    // guillemet — « Kodjo "Kojo" Mensah », « Doe, Jane » — décalait toutes les
+    // colonnes suivantes, et un retour à la ligne coupait la fiche en deux.
 
     for (final client in clients) {
       csvBuffer.writeln(
-          '${client.id},"${client.fullName}","${client.email}","${client.phone}",${client.isActive},${client.createdAt.toIso8601String()}',);
+        [
+          client.id,
+          client.fullName,
+          client.email,
+          client.phone ?? '',
+          client.isActive,
+          client.createdAt.toIso8601String(),
+        ].map(champCsv).join(','),
+      );
     }
 
     final csvContent = csvBuffer.toString();
 
-    unawaited(DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Export CSV'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Copiez le contenu CSV ci-dessous:'),
-              const SizedBox(height: 8),
-              Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.outlineVariant,
+    unawaited(
+      DialogHelper.showSafeDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Export CSV'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Copiez le contenu CSV ci-dessous:'),
+                const SizedBox(height: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                    borderRadius: BorderRadius.circular(4),
                   ),
-                  borderRadius: BorderRadius.circular(4),
+                  padding: const EdgeInsets.all(8),
+                  height: 200,
+                  child: SingleChildScrollView(
+                    child: SelectableText(csvContent),
+                  ),
                 ),
-                padding: const EdgeInsets.all(8),
-                height: 200,
-                child: SingleChildScrollView(
-                  child: SelectableText(csvContent),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Fermer'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Fermer'),
-          ),
-        ],
       ),
-    ),);
+    );
   }
 }

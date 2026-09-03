@@ -14,15 +14,16 @@ import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/performance_service.dart';
 import 'package:elcora_dely/services/chat_service.dart';
 import 'package:elcora_dely/services/agora_call_service.dart';
+import 'package:elcora_dely/services/call_service.dart';
 import 'package:elcora_dely/screens/splash_screen.dart';
-import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';
-import 'package:elcora_dely/screens/delivery/delivery_navigation_screen.dart';
+import 'package:elcora_dely/screens/driver_gate.dart';
 import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
 import 'package:elcora_dely/screens/communication/chat_screen.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:elcora_dely/firebase_options.dart';
+import 'package:elcora_dely/config/adresses.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,7 +49,10 @@ void main() async {
   // de données : tout passe par `/api/v1/` et les WebSockets `ws/`.
   final tokenStorage = TokenStorage();
   final apiClient = ApiClient(
-    baseUrl: dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1',
+    // Une seule dérivation pour le REST et le temps réel — voir
+    // `config/adresses.dart`, qui répare au passage un `API_BASE_URL` sans
+    // schéma (la faute qui ne casse *que* les WebSockets, en silence).
+    baseUrl: adresseDeLApi(),
     tokenStorage: tokenStorage,
   );
   final container = ProviderContainer(
@@ -138,6 +142,10 @@ class DeliverApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => PerformanceService()),
         ChangeNotifierProvider(create: (_) => ChatService()),
         ChangeNotifierProvider(create: (_) => AgoraCallService()),
+        // Signalisation des appels — distincte du média ci-dessus. Elle
+        // ouvre `ws/me/` à l'ouverture de session (voir
+        // `AppService._onSessionChanged`), pas au montage d'un écran.
+        ChangeNotifierProvider(create: (_) => CallService(container)),
       ],
       child: MaterialApp(
         title: 'El Corazon Dely',
@@ -152,7 +160,11 @@ class DeliverApp extends StatelessWidget {
         home: SplashScreen(sessionReady: sessionReady),
         debugShowCheckedModeBanner: false,
         routes: {
-          '/delivery-home': (context) => const DeliveryNavigationScreen(),
+          // Toutes les routes protégées passent par la porte, jamais par
+          // l'écran d'accueil directement : c'est elle qui vérifie la session,
+          // la vérification de l'adresse et l'état du dossier, et une route
+          // qui la contournerait rendrait ces contrôles facultatifs.
+          '/delivery-home': (context) => const DriverGate(),
           '/earnings': (context) => const EarningsScreen(),
         },
         onGenerateRoute: (settings) {
@@ -168,8 +180,11 @@ class DeliverApp extends StatelessWidget {
                 builder: (context) => ChatScreen(order: args['order']),
               );
             default:
+              // Route inconnue : la porte, et non l'écran de connexion. Y
+              // renvoyer un livreur déjà connecté lui demanderait de se
+              // reconnecter pour une faute de frappe dans un nom de route.
               return MaterialPageRoute(
-                builder: (context) => const DriverAuthScreen(),
+                builder: (context) => const DriverGate(),
               );
           }
         },

@@ -21,6 +21,32 @@ class Order {
   final double total;
   final OrderStatus status;
   final String deliveryAddress;
+
+  /// Point de livraison, tel que le client l'a posé sur la carte au moment de
+  /// commander (`delivery_location`, obligatoire côté serveur).
+  ///
+  /// ## Ce que son absence coûtait
+  ///
+  /// L'adaptateur les jetait, et l'écran de suivi **re-géocodait
+  /// [deliveryAddress]** pour retrouver le point : un aller vers Google à
+  /// chaque ouverture, pour recalculer une valeur que le serveur avait déjà, et
+  /// qu'il tenait plus juste — c'est la position exacte que le client a
+  /// choisie, pas l'interprétation d'une ligne d'adresse. Quand le géocodage
+  /// échouait (clé absente, quota, libellé imprécis — « en face de la
+  /// pharmacie »), la carte n'avait plus de destination du tout : pas de
+  /// repère client, pas de tracé, pas de distance.
+  ///
+  /// Nuls seulement pour une commande construite localement hors serveur.
+  final double? deliveryLatitude;
+  final double? deliveryLongitude;
+
+  /// Point d'enlèvement — d'où part le repas.
+  ///
+  /// Nuls tant que le serveur ne rend pas `restaurant_location`. La carte
+  /// montre alors deux repères au lieu de trois.
+  final double? restaurantLatitude;
+  final double? restaurantLongitude;
+
   final String? deliveryNotes;
   final String? promoCode;
   final double discount;
@@ -38,6 +64,10 @@ class Order {
     required this.items,
     required this.subtotal,
     required this.total, required this.deliveryAddress, required this.paymentMethod, required this.orderTime, required this.createdAt, this.reference = '', this.deliveryFee = 5.0,
+    this.deliveryLatitude,
+    this.deliveryLongitude,
+    this.restaurantLatitude,
+    this.restaurantLongitude,
     this.status = OrderStatus.pending,
     this.deliveryNotes,
     this.promoCode,
@@ -58,6 +88,10 @@ class Order {
     double? total,
     OrderStatus? status,
     String? deliveryAddress,
+    double? deliveryLatitude,
+    double? deliveryLongitude,
+    double? restaurantLatitude,
+    double? restaurantLongitude,
     String? deliveryNotes,
     String? promoCode,
     double? discount,
@@ -79,6 +113,10 @@ class Order {
       total: total ?? this.total,
       status: status ?? this.status,
       deliveryAddress: deliveryAddress ?? this.deliveryAddress,
+      deliveryLatitude: deliveryLatitude ?? this.deliveryLatitude,
+      deliveryLongitude: deliveryLongitude ?? this.deliveryLongitude,
+      restaurantLatitude: restaurantLatitude ?? this.restaurantLatitude,
+      restaurantLongitude: restaurantLongitude ?? this.restaurantLongitude,
       deliveryNotes: deliveryNotes ?? this.deliveryNotes,
       promoCode: promoCode ?? this.promoCode,
       discount: discount ?? this.discount,

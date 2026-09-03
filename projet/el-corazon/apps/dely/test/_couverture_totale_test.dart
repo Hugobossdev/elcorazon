@@ -6,16 +6,22 @@
 // pourcentage qui en sort ne veut rien dire.
 // ignore_for_file: unused_import
 
+import 'package:elcora_dely/config/adresses.dart';
 import 'package:elcora_dely/config/api_config.dart';
 import 'package:elcora_dely/firebase_options.dart';
 import 'package:elcora_dely/l10n/app_localizations.dart';
 import 'package:elcora_dely/l10n/app_localizations_en.dart';
 import 'package:elcora_dely/l10n/app_localizations_fr.dart';
 import 'package:elcora_dely/main.dart';
+import 'package:elcora_dely/presentation/etat_compte.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/presentation/messages_erreur.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
+import 'package:elcora_dely/screens/auth/account_status_screen.dart';
 import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';
+import 'package:elcora_dely/screens/auth/driver_register_screen.dart';
+import 'package:elcora_dely/screens/auth/forgot_password_screen.dart';
+import 'package:elcora_dely/screens/auth/verification_screen.dart';
 import 'package:elcora_dely/screens/communication/call_screen.dart';
 import 'package:elcora_dely/screens/communication/chat_screen.dart';
 import 'package:elcora_dely/screens/delivery/analytics_screen.dart';
@@ -25,11 +31,13 @@ import 'package:elcora_dely/screens/delivery/delivery_orders_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcora_dely/screens/driver_gate.dart';
 import 'package:elcora_dely/screens/payments/driver_payment_screen.dart';
 import 'package:elcora_dely/screens/payments/earnings_screen.dart';
 import 'package:elcora_dely/screens/splash_screen.dart';
 import 'package:elcora_dely/services/agora_call_service.dart';
 import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/call_service.dart';
 import 'package:elcora_dely/services/chat_service.dart';
 import 'package:elcora_dely/services/directions_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
@@ -39,9 +47,12 @@ import 'package:elcora_dely/services/performance_service.dart';
 import 'package:elcora_dely/services/realtime_tracking_service.dart';
 import 'package:elcora_dely/theme.dart';
 import 'package:elcora_dely/utils/validators.dart';
+import 'package:elcora_dely/widgets/code_input_field.dart';
 import 'package:elcora_dely/widgets/custom_button.dart';
 import 'package:elcora_dely/widgets/custom_text_field.dart';
 import 'package:elcora_dely/widgets/el_corazon_logo.dart';
+import 'package:elcora_dely/widgets/incoming_call_handler.dart';
 import 'package:elcora_dely/widgets/loading_widget.dart';
+import 'package:elcora_dely/widgets/notification_router.dart';
 
 void main() {}

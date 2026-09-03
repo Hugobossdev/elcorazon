@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:io';
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -8,6 +6,7 @@ import 'package:admin/theme/modern_theme.dart';
 // Admin services uniquement
 import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/order_management_service.dart';
+import 'package:admin/services/notification_center_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/analytics_service.dart';
 import 'package:admin/services/role_management_service.dart';
@@ -23,6 +22,9 @@ import 'package:admin/services/gamification_service.dart';
 import 'package:admin/services/driver_schedule_service.dart';
 import 'package:admin/services/driver_document_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/services/assignment_service.dart';
+import 'package:admin/services/dashboard_realtime_service.dart';
+import 'package:admin/services/opening_hours_service.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/screens/admin/admin_navigation_screen.dart';
 import 'package:admin/screens/auth/admin_auth_screen.dart';
@@ -34,8 +36,7 @@ class MyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     return super.createHttpClient(context)
-      ..badCertificateCallback =
-          (X509Certificate cert, String host, int port) => true;
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
   }
 }
 
@@ -71,101 +72,15 @@ void main() async {
     ],
   );
 
-  final adminAuthService = AdminAuthService(container);
-  await adminAuthService.initialize();
-  await _devBypassAuth(adminAuthService);
+  // Restaure la session si un jeton valide est stocké. Sinon, l'écran de
+  // connexion s'ouvre — il n'y a pas d'autre porte.
+  await AdminAuthService(container).initialize();
 
   runApp(
     UncontrolledProviderScope(
       container: container,
       child: AdminApp(container: container),
     ),
-  );
-}
-
-/// Ouvre l'application sans passer par l'écran de connexion.
-///
-/// **Contournement de développement, à retirer.** Deux chemins, dans cet
-/// ordre :
-///
-/// 1. Si le `.env` porte des identifiants, une vraie session est ouverte
-///    contre le serveur : vrai jeton, vraies données, permissions réelles.
-/// 2. Sinon — ou si cette connexion échoue — une session est fabriquée
-///    localement. L'interface s'ouvre en entier, mais **les écrans resteront
-///    vides** : faute de jeton, chaque appel à `/api/v1/` reçoit un 401. C'est
-///    la limite du procédé et non un défaut de réglage. L'authentification
-///    n'est retirée que du côté de l'application ; le serveur, lui, continue
-///    de l'exiger, et c'est très bien ainsi.
-///
-/// `kDebugMode` garde l'ensemble : une compilation `--release` ignore ces deux
-/// chemins et retrouve l'écran de connexion, même si le `.env` embarqué dans
-/// le binaire porte encore des identifiants.
-Future<void> _devBypassAuth(AdminAuthService adminAuthService) async {
-  if (!kDebugMode) return;
-  if (adminAuthService.isAuthenticated) return;
-
-  final email = dotenv.env['DEV_AUTO_LOGIN_EMAIL'] ?? '';
-  final password = dotenv.env['DEV_AUTO_LOGIN_PASSWORD'] ?? '';
-  if (email.isNotEmpty && password.isNotEmpty) {
-    if (await _devAutoLogin(adminAuthService, email, password)) return;
-  }
-
-  Journal.trace(
-    'Authentification contournée : session fabriquée localement, sans jeton. '
-    "Les appels à l'API répondront 401.",
-  );
-  adminAuthService.installDevSession(_devStaffFactice());
-}
-
-/// Vraie ouverture de session à partir des identifiants du `.env`.
-///
-/// Rend `false` sur refus ou sur silence du serveur — l'appelant se rabat
-/// alors sur la session fabriquée, pour que le contournement tienne sa
-/// promesse même backend éteint.
-Future<bool> _devAutoLogin(
-  AdminAuthService adminAuthService,
-  String email,
-  String password,
-) async {
-  Journal.trace('Auto-connexion de développement : $email');
-  try {
-    // Borne dure sur l'attente. `ApiClient` limite l'établissement de la
-    // connexion à 15 s mais pas la réponse : sans cette borne, un serveur qui
-    // accepte la connexion puis se tait laisserait l'application sur son écran
-    // de démarrage, sans fin et sans rien afficher qui l'explique.
-    final ouverte = await adminAuthService
-        .loginAdmin(email, password)
-        .timeout(const Duration(seconds: 20));
-    if (!ouverte) {
-      Journal.trace(
-        "Auto-connexion refusée — identifiants invalides, ou compte qui n'est "
-        'pas du personnel.',
-      );
-    }
-    return ouverte;
-  } on TimeoutException {
-    Journal.trace('Auto-connexion abandonnée : pas de réponse en 20 s.');
-    return false;
-  }
-}
-
-/// Le compte que voit l'interface quand l'authentification est contournée.
-///
-/// Nommé pour ne pas être pris pour une vraie session sur une capture d'écran.
-/// Sa liste de permissions est vide, et cela ne retire rien : aucun écran du
-/// back-office n'appelle `can()`, les permissions ne s'appliquant que côté
-/// serveur (ADR-005) — lequel ne verra jamais ce compte.
-User _devStaffFactice() {
-  final maintenant = DateTime.now();
-  return User(
-    id: '00000000-0000-0000-0000-000000000000',
-    email: 'dev@local',
-    fullName: 'Développement — sans authentification',
-    userType: UserAccountType.staff,
-    isActive: true,
-    permissions: const [],
-    createdAt: maintenant,
-    updatedAt: maintenant,
   );
 }
 
@@ -189,6 +104,27 @@ class AdminApp extends StatelessWidget {
           lazy: false,
         ),
         ChangeNotifierProvider(create: (_) => OrderManagementService()),
+        // Centre de notifications — lit `/api/v1/notifications/`, que le
+        // serveur produit. Le back-office était la seule des trois
+        // applications à ne pas le lire : sa boîte de notifications
+        // recomposait des lignes à partir de la liste de commandes.
+        ChangeNotifierProvider(create: (_) => NotificationCenterService()),
+        // Qui porte quelle commande. Séparé de la supervision des
+        // commandes parce que la réponse vient d'une autre route — le
+        // serveur ne met pas le livreur sur la commande, et ne le fera
+        // pas : `apps.orders` ne dépend pas d'`apps.delivery` (ADR-002).
+        ChangeNotifierProvider(create: (_) => AssignmentService()),
+        // Le canal temps réel du tableau de bord
+        // (`ws/restaurants/{id}/dashboard/`). Il existait côté serveur depuis
+        // l'origine et aucune application ne s'y connectait : la supervision
+        // ne bougeait qu'au clic sur « Recharger ».
+        //
+        // Construit sans attendre qu'un écran le demande (`lazy: false`) : il
+        // observe la session, et se ferme de lui-même à la déconnexion.
+        ChangeNotifierProvider(
+          create: (_) => DashboardRealtimeService(),
+          lazy: false,
+        ),
         ChangeNotifierProvider(create: (_) => DriverManagementService()),
         ChangeNotifierProvider(create: (_) => AnalyticsService()),
         ChangeNotifierProvider(create: (_) => RoleManagementService()),
@@ -212,6 +148,10 @@ class AdminApp extends StatelessWidget {
         // plus bas serait invisible depuis la boîte de dialogue, qui est
         // rattachée au navigateur et non à l'écran qui l'a ouverte.
         ChangeNotifierProvider(create: (_) => DeliveryZoneService()),
+        // Horaires d'ouverture. Ils vivaient dans les préférences du
+        // poste, où rien ne les lisait ; ils sont désormais lus et écrits
+        // sur `/restaurants/manage/hours/`.
+        ChangeNotifierProvider(create: (_) => OpeningHoursService()),
         // Aucun socket ici : la position des livreurs arrive par les canaux
         // WebSocket du serveur (`/ws/*`, Django Channels), dont l'autorisation
         // précède l'acceptation. Le `SocketService` retiré ouvrait une

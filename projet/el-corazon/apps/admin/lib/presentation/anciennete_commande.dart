@@ -23,3 +23,20 @@ String ancienneteCommande(DateTime passeeLe, {DateTime? maintenant}) {
     return '${passeeLe.day}/${passeeLe.month}';
   }
 }
+
+/// L'heure à laquelle la commande a été passée — `18:45`.
+///
+/// Complète [ancienneteCommande] plutôt que de la remplacer : les deux
+/// répondent à des questions différentes. « 3h » dit depuis combien de temps
+/// elle attend, « 18:45 » dit à quel moment du service elle est tombée. Un
+/// opérateur qui reprend un poste a besoin du second ; celui qui surveille un
+/// coup de feu a besoin du premier.
+///
+/// En heure **locale** : l'API horodate en UTC, et « 18:45 » affiché en UTC
+/// décale d'une heure toute lecture faite depuis Lomé.
+String heureCommande(DateTime passeeLe) {
+  final locale = passeeLe.toLocal();
+  final heures = locale.hour.toString().padLeft(2, '0');
+  final minutes = locale.minute.toString().padLeft(2, '0');
+  return '$heures:$minutes';
+}

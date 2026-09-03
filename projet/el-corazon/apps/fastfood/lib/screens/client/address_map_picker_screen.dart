@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/theme.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import 'package:elcora_fast/config/app_constants.dart';
@@ -12,7 +11,7 @@ import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/places_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:elcorazon_core/elcorazon_core.dart' show Journal, LocationAvailability;
 
 /// Résultat de la sélection de position
 class PickedLocation {
@@ -217,19 +216,20 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     // levait une exception, avalée par un `catch` qui recentrait
     // silencieusement sur le restaurant. Le client ne comprenait pas pourquoi
     // le bouton « ma position » ne faisait rien.
-    final granted = await _locationService.requestLocationPermission();
+    //
+    // La cause du refus vient maintenant du service, en un seul aller. Cet
+    // écran rappelait `Geolocator.isLocationServiceEnabled()` derrière un
+    // `false` pour deviner s'il fallait dire « autorisez » ou « activez », et
+    // ne distinguait pas le refus **définitif** — où redemander ne sert plus à
+    // rien : le client réappuyait sur le bouton sans qu'aucune demande ne
+    // s'affiche jamais.
+    final etat = await _locationService.disponibilite();
     if (!mounted) return;
 
-    setState(() => _hasLocationPermission = granted);
+    setState(() => _hasLocationPermission = etat.estDisponible);
 
-    if (!granted) {
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!mounted) return;
-      _showMessage(
-        serviceEnabled
-            ? 'Autorisez la localisation pour utiliser votre position.'
-            : 'Activez la localisation de votre téléphone pour l\'utiliser.',
-      );
+    if (!etat.estDisponible) {
+      _proposerRemede(etat);
       return;
     }
 
@@ -237,7 +237,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     if (!mounted) return;
 
     if (position == null) {
-      _showMessage('Position introuvable pour le moment.');
+      _proposerRemede(_locationService.derniereDisponibilite);
       return;
     }
 
@@ -337,9 +337,43 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     await _resolve(details.location);
   }
 
-  void _showMessage(String message) {
+  void _showMessage(String message, {SnackBarAction? action}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        action: action,
+        // Le temps de lire, et d'atteindre le bouton quand il y en a un : la
+        // durée par défaut (4 s) ne suffit pas à faire les deux.
+        duration: action == null
+            ? const Duration(seconds: 4)
+            : const Duration(seconds: 8),
+      ),
+    );
+  }
+
+  /// Dit ce qui bloque, et propose le seul geste qui débloque.
+  ///
+  /// Un message sans action laissait le client devant une phrase qu'il ne
+  /// pouvait pas suivre : « autorisez la localisation dans les paramètres »
+  /// suppose de quitter l'application, de retrouver sa fiche et la bonne
+  /// rubrique. Le bouton y mène directement.
+  void _proposerRemede(LocationAvailability etat) {
+    final remede = etat.remede;
+    _showMessage(
+      etat.consigne,
+      action: remede.libelle.isEmpty
+          ? null
+          : SnackBarAction(
+              label: remede.libelle,
+              onPressed: () {
+                // Pas de relecture automatique au retour des réglages : le
+                // client peut revenir sans avoir rien changé, et un second
+                // message serait du harcèlement. Il rappuiera sur « ma
+                // position ».
+                unawaited(_locationService.appliquerRemede(remede));
+              },
+            ),
     );
   }
 

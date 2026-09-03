@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'package:elcora_fast/presentation/deplacement_livreur.dart';
 import 'package:elcora_fast/presentation/trajet_livreur.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -42,7 +44,8 @@ class DeliveryTrackingScreen extends StatefulWidget {
   State<DeliveryTrackingScreen> createState() => _DeliveryTrackingScreenState();
 }
 
-class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
+class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
+    with SingleTickerProviderStateMixin {
   Order? _order;
   bool _isLoading = true;
   String? _errorMessage;
@@ -57,6 +60,30 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
   Set<Circle> _circles = {};
   Set<Polyline> _polylines = {};
   LatLng? _deliveryLatLng;
+
+  /// Point d'enlèvement — d'où part le repas. Nul tant que le serveur ne rend
+  /// pas `restaurant_location` : la carte montre alors deux repères au lieu de
+  /// trois, ce qui reste juste.
+  LatLng? _restaurantLatLng;
+
+  /// Position **affichée** du livreur, distincte de [_deliveryLocation], qui
+  /// est la dernière position **relevée**.
+  ///
+  /// Les deux ne coïncident que lorsque le glissement est terminé. Toutes les
+  /// mesures — distance, vitesse, alerte de proximité — portent sur la seconde :
+  /// l'interpolation est un confort d'affichage, elle n'a pas à contaminer ce
+  /// qu'on annonce au client.
+  LatLng? _positionAffichee;
+  AnimationController? _glissement;
+  LatLng? _glissementDepart;
+  LatLng? _glissementArrivee;
+
+  /// Cap issu du **déplacement observé**, quand le relevé n'en porte pas.
+  ///
+  /// `OrderTrackingConsumer` ne relaie ni la vitesse ni le cap : le livreur les
+  /// émet, la diffusion ne les porte pas. Le repère restait donc figé plein
+  /// nord pendant toute la livraison. Le segment entre deux relevés le donne.
+  double? _capObserve;
 
   StreamSubscription<Order>? _orderUpdatesSubscription;
   StreamSubscription<PositionLivreur>? _deliveryLocationSubscription;
@@ -104,6 +131,45 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
   final Map<OrderStatus, DateTime> _statusTimestamps =
       {}; // Horodatage des statuts
 
+  /// Origine et heure du dernier itinéraire demandé à Google.
+  ///
+  /// ## Ce qu'ils empêchent
+  ///
+  /// `_getDirections` était appelé depuis `_updateMapMarkers`, donc **à chaque
+  /// relevé** — un appel Directions toutes les dix secondes, soit de l'ordre de
+  /// 200 par livraison. Le cache du dépôt n'y changeait rien : sa clé contient
+  /// l'origine, qui est justement ce qui bouge. Sur une flotte, cela met le
+  /// projet Google en quota dans la journée, et un quota dépassé ne dégrade pas
+  /// le tracé — il le supprime.
+  ///
+  /// Le tracé, lui, ne change pas utilement tous les dix mètres : c'est la
+  /// **route** qui est affichée, et elle reste la même tant que le livreur la
+  /// suit. On la recalcule quand il s'en est écarté ou que le trafic a eu le
+  /// temps de bouger.
+  LatLng? _origineDuDernierItineraire;
+  DateTime? _heureDuDernierItineraire;
+
+  /// Déplacement à partir duquel l'itinéraire mérite d'être redemandé.
+  static const double _itineraireSiEcartDeMetres = 400;
+
+  /// Âge à partir duquel il mérite d'être redemandé quoi qu'il arrive — le
+  /// trafic a bougé, et une durée d'il y a dix minutes induit en erreur.
+  static const Duration _itinerairePerimeApres = Duration(minutes: 3);
+
+  /// Cadence d'émission attendue du livreur, qui règle la durée du glissement
+  /// du repère. Lue une fois : les deux applications partagent ce réglage
+  /// (`TrackingSettings`), et le suivi n'a pas à le redécouvrir à chaque image.
+  ///
+  /// `dotenv.env` **lève** tant que le fichier n'a pas été chargé, et `main()`
+  /// avale l'échec de `dotenv.load` pour que l'application démarre quand même :
+  /// la garde n'est donc pas théorique. Sans elle, ouvrir le suivi sur un
+  /// appareil dont le `.env` manque ferait tomber l'écran entier pour un
+  /// réglage facultatif.
+  late final eccore.TrackingSettings _cadenceDuLivreur =
+      eccore.TrackingSettings.depuisEnvironnement(
+    dotenv.isInitialized ? dotenv.env : const {},
+  );
+
   @override
   void initState() {
     super.initState();
@@ -117,6 +183,9 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     _deliveryLocationSubscription?.cancel();
     _estimatedTimeUpdateTimer?.cancel();
     _orderRefreshTimer?.cancel();
+    // Un `AnimationController` non libéré retient son ticker : le glissement
+    // continuerait de battre à soixante images par seconde sur un écran fermé.
+    _glissement?.dispose();
     super.dispose();
   }
 
@@ -155,7 +224,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
       // Livreur et dernière position viennent du même appel de suivi.
       if (_order != null) {
-        await _geocodeDeliveryAddress();
+        await _placerLesPointsFixes();
         await _loadTracking();
         _initializeStatusTimestamps();
         // C'est ici que le passage de `pending` à `confirmed` est constaté :
@@ -216,7 +285,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
         });
 
         await _calculateEstimatedDeliveryTime();
-        _updateMapMarkers();
+        _deplacerLeRepereDuLivreur(_deliveryLocation!);
         _checkProximity();
         _calculateDeliveryStats();
       }
@@ -242,14 +311,54 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     }
   }
 
-  Future<void> _geocodeDeliveryAddress() async {
-    if (_order == null || _geocodingService == null) return;
+  /// Place les deux points fixes de la carte : d'où part le repas, où il va.
+  ///
+  /// ## Ce que faisait cette méthode
+  ///
+  /// Elle **géocodait la ligne d'adresse** — un aller vers Google à chaque
+  /// ouverture de l'écran, pour retrouver une valeur que la commande portait
+  /// déjà. Le serveur fige `delivery_location` au moment de commander : c'est
+  /// le point que le client a lui-même posé sur la carte, pas l'interprétation
+  /// d'un libellé. Les deux divergent dès que l'adresse est un repère plutôt
+  /// qu'une voie — « en face de la pharmacie du Grand Marché » —, cas dans
+  /// lequel le géocodage rendait soit un point à quelques rues de là, soit
+  /// rien du tout. Et quand il ne rendait rien, la carte n'avait plus de
+  /// destination : ni repère client, ni tracé, ni distance, ni alerte de
+  /// proximité, sans qu'aucun message ne l'explique.
+  ///
+  /// Le géocodage reste en **repli**, pour les commandes qu'un parcours hors
+  /// ligne a construites sans coordonnées.
+  Future<void> _placerLesPointsFixes() async {
+    final order = _order;
+    if (order == null) return;
+
+    final latitude = order.deliveryLatitude;
+    final longitude = order.deliveryLongitude;
+    final restaurantLat = order.restaurantLatitude;
+    final restaurantLon = order.restaurantLongitude;
+
+    if (latitude != null && longitude != null) {
+      if (!mounted) return;
+      setState(() {
+        _deliveryLatLng = LatLng(latitude, longitude);
+        _restaurantLatLng = restaurantLat == null || restaurantLon == null
+            ? null
+            : LatLng(restaurantLat, restaurantLon);
+      });
+      _updateMapMarkers();
+      return;
+    }
+
+    if (_geocodingService == null) return;
     try {
       final latLng =
-          await _geocodingService!.geocodeAddress(_order!.deliveryAddress);
+          await _geocodingService!.geocodeAddress(order.deliveryAddress);
       if (latLng != null && mounted) {
         setState(() {
           _deliveryLatLng = latLng;
+          _restaurantLatLng = restaurantLat == null || restaurantLon == null
+              ? null
+              : LatLng(restaurantLat, restaurantLon);
         });
         _updateMapMarkers();
       }
@@ -262,6 +371,29 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     if (!mounted) return;
 
     final Set<Marker> markers = {};
+
+    // Marker restaurant (point d'enlèvement) — d'où part le repas.
+    //
+    // La carte n'en montrait pas : le client voyait son adresse et un point
+    // qui s'en approche, sans jamais savoir d'où. C'est pourtant ce qui rend
+    // lisible la première moitié de la course, celle où le livreur s'éloigne
+    // encore de chez lui.
+    if (_restaurantLatLng != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('restaurant'),
+          position: _restaurantLatLng!,
+          infoWindow: InfoWindow(
+            title: _order?.items.isNotEmpty == true
+                ? 'Restaurant'
+                : 'Point de retrait',
+            snippet: 'Votre commande part d’ici',
+          ),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+        ),
+      );
+    }
 
     // Marker client (destination)
     if (_deliveryLatLng != null) {
@@ -278,39 +410,31 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       );
     }
 
-    // Marker livreur avec rotation et informations améliorées
-    if (_deliveryLocation != null) {
-      final driverPos = _deliveryLocation!.point;
-      final heading = _deliveryLocation!.capDegres ?? 0.0;
+    // Marker livreur, posé sur la position **affichée** — celle que le
+    // glissement fait avancer — et non sur le dernier relevé : c'est toute la
+    // différence entre un repère qui progresse et un repère qui saute.
+    final positionAffichee = _positionAffichee;
+    if (_deliveryLocation != null && positionAffichee != null) {
+      final heading = _deliveryLocation!.capDegres ?? _capObserve;
       final speed = _deliveryLocation!.vitesseKmH?.toStringAsFixed(0);
 
       markers.add(
         Marker(
           markerId: const MarkerId('driver'),
-          position: driverPos,
+          position: positionAffichee,
           infoWindow: InfoWindow(
             title: 'Livreur',
             snippet: speed != null ? 'En route • $speed km/h' : 'En route',
           ),
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-          rotation: heading,
+          rotation: heading ?? 0,
           anchor: const Offset(0.5, 0.5),
-          flat: heading > 0, // Marqueur plat si heading disponible
+          // Un repère « plat » suit la rotation de la carte : il n'a de sens
+          // qu'avec un cap. Sans cap, il resterait pointé plein nord en
+          // prétendant indiquer une direction.
+          flat: heading != null,
         ),
       );
-
-      // Update camera if map is ready
-      if (_mapController != null) {
-        if (_deliveryLatLng != null) {
-          // Fit bounds if both exist
-          _fitBounds(driverPos, _deliveryLatLng!);
-          _getDirections(driverPos, _deliveryLatLng!);
-        } else {
-          _mapController!.animateCamera(
-            CameraUpdate.newLatLng(driverPos),
-          );
-        }
-      }
     }
 
     final Set<Circle> circles = {};
@@ -335,8 +459,107 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
     });
   }
 
+  /// Fait glisser le repère du livreur vers son nouveau relevé.
+  ///
+  /// Le premier relevé, et tout écart trop grand pour venir d'un déplacement
+  /// observé, **reposent** le repère au lieu de l'animer : voir
+  /// [sautAuDelaDeMetres]. Faire traverser la ville en ligne droite à un
+  /// livreur qui sort d'un tunnel serait plus faux que le saut qu'on évite.
+  void _deplacerLeRepereDuLivreur(PositionLivreur releve) {
+    final arrivee = releve.point;
+    final depart = _positionAffichee;
+
+    _glissement?.stop();
+
+    if (depart == null) {
+      _positionAffichee = arrivee;
+      _appliquerLaCameraEtLItineraire(arrivee);
+      _updateMapMarkers();
+      return;
+    }
+
+    final distance = _geocodingService?.calculateDistance(depart, arrivee);
+    final duree = distance == null
+        ? Duration.zero
+        : dureeDeGlissement(distance * 1000, cadence: _cadenceDuLivreur.emissionInterval);
+
+    _capObserve = capDuSegment(depart, arrivee) ?? _capObserve;
+
+    if (duree == Duration.zero) {
+      _positionAffichee = arrivee;
+      _appliquerLaCameraEtLItineraire(arrivee);
+      _updateMapMarkers();
+      return;
+    }
+
+    _glissementDepart = depart;
+    _glissementArrivee = arrivee;
+
+    final controleur = _glissement ??= AnimationController(vsync: this)
+      ..addListener(_surAvancementDuGlissement);
+    controleur.duration = duree;
+    controleur.forward(from: 0);
+
+    // La caméra et l'itinéraire visent la position **relevée**, pas
+    // l'intermédiaire : les recalculer à chaque image du glissement ferait
+    // soixante appels par seconde.
+    _appliquerLaCameraEtLItineraire(arrivee);
+  }
+
+  void _surAvancementDuGlissement() {
+    final depart = _glissementDepart;
+    final arrivee = _glissementArrivee;
+    final controleur = _glissement;
+    if (!mounted || depart == null || arrivee == null || controleur == null) {
+      return;
+    }
+
+    _positionAffichee = pointIntermediaire(depart, arrivee, controleur.value);
+    _updateMapMarkers();
+  }
+
+  /// Recadre la carte et redemande l'itinéraire — au plus quand il le faut.
+  void _appliquerLaCameraEtLItineraire(LatLng positionLivreur) {
+    if (_mapController == null) return;
+
+    final destination = _deliveryLatLng;
+    if (destination == null) {
+      _mapController!.animateCamera(CameraUpdate.newLatLng(positionLivreur));
+      return;
+    }
+
+    _fitBounds(positionLivreur, destination);
+    if (_itineraireMeriteUnRecalcul(positionLivreur)) {
+      unawaited(_getDirections(positionLivreur, destination));
+    }
+  }
+
+  /// Le tracé affiché est-il devenu faux au point de valoir un appel Google ?
+  ///
+  /// Deux raisons, dont une seule suffit : le livreur s'est écarté de l'origine
+  /// du tracé actuel, ou ce tracé a vieilli — le trafic n'est plus celui sur
+  /// lequel la durée a été calculée. En dehors de ces deux cas, redemander
+  /// rendrait la même route pour le prix d'une requête.
+  bool _itineraireMeriteUnRecalcul(LatLng origine) {
+    final precedente = _origineDuDernierItineraire;
+    final heure = _heureDuDernierItineraire;
+    if (precedente == null || heure == null) return true;
+
+    if (DateTime.now().difference(heure) >= _itinerairePerimeApres) return true;
+
+    final ecartKm = _geocodingService?.calculateDistance(precedente, origine);
+    if (ecartKm == null) return false;
+    return ecartKm * 1000 >= _itineraireSiEcartDeMetres;
+  }
+
   Future<void> _getDirections(LatLng origin, LatLng destination) async {
     if (_directionsService == null) return;
+
+    // Marqué **avant** l'appel, et non après : deux relevés rapprochés
+    // lanceraient sinon deux requêtes concurrentes, chacune ignorant que
+    // l'autre est en vol.
+    _origineDuDernierItineraire = origin;
+    _heureDuDernierItineraire = DateTime.now();
 
     try {
       final routeInfo = await _directionsService!.getRoute(
@@ -379,6 +602,10 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
       }
     } catch (e) {
       eccore.Journal.trace('⚠️ Error getting directions: $e');
+      // L'échec ne se garde pas : un quota momentané ou une coupure ne doivent
+      // pas interdire la prochaine tentative pendant trois minutes.
+      _origineDuDernierItineraire = null;
+      _heureDuDernierItineraire = null;
     }
   }
 
@@ -574,7 +801,11 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
 
             // Recalculer le temps estimé
             _calculateEstimatedDeliveryTime();
-            _updateMapMarkers();
+            // Glissement plutôt que repose : voir [_deplacerLeRepereDuLivreur].
+            // C'est lui qui rafraîchit les repères, recadre et décide s'il faut
+            // redemander l'itinéraire — `_updateMapMarkers` seul le faisait
+            // pour un appel Google par relevé.
+            _deplacerLeRepereDuLivreur(newLocation);
             _updateLocationHistoryPolyline();
 
             // Vérifier la proximité et calculer les statistiques
@@ -1511,8 +1742,14 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen> {
               // pointaient à 600 km de l'établissement, si bien qu'une
               // commande sans position connue ouvrait la carte sur une autre
               // ville, dans un autre pays.
+              //
+              // Le point du restaurant vient maintenant de la commande quand le
+              // serveur le rend (`restaurant_location`) ; la constante ne sert
+              // plus qu'au tout dernier repli, et désigne le premier
+              // établissement — elle deviendra fausse au deuxième.
               target: _deliveryLocation?.point ??
                   _deliveryLatLng ??
+                  _restaurantLatLng ??
                   const LatLng(
                     AppConstants.restaurantLatitude,
                     AppConstants.restaurantLongitude,

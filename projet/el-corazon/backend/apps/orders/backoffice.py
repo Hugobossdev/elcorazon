@@ -31,7 +31,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from django.db.models import QuerySet
+from django.db.models import Count, QuerySet
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
@@ -41,6 +42,7 @@ from rest_framework.serializers import BaseSerializer
 from rest_framework.viewsets import GenericViewSet
 
 from apps.orders.models import Order
+from apps.orders.queries import avec_compteurs
 from apps.orders.serializers import (
     OrderDetailSerializer,
     OrderSerializer,
@@ -84,19 +86,100 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
         "placed_at": ["gte", "lte"],
     }
 
+    #: Ce sur quoi porte `?search=` — ce qu'un opérateur a sous les yeux quand
+    #: il cherche : la référence que le client lui donne au téléphone, le nom
+    #: ou le numéro du destinataire, l'adresse de livraison.
+    #:
+    #: La recherche est ici plutôt que dans l'application parce qu'elle doit
+    #: composer avec la pagination : filtrer côté écran ne trouve que ce que la
+    #: page courante contenait déjà, et « aucun résultat » y veut alors dire
+    #: « pas sur cette page » — la plus trompeuse des réponses.
+    search_fields: ClassVar[list[str]] = [
+        "reference",
+        "recipient_name",
+        "recipient_phone",
+        "delivery_address_line",
+    ]
+
+    #: L'ordre par défaut reste `-placed_at` (voir `get_queryset`) : ces champs
+    #: ne s'appliquent que si l'appelant demande `?ordering=`.
+    ordering_fields: ClassVar[list[str]] = ["placed_at", "total_minor", "status"]
+
     def get_serializer_class(self) -> type[BaseSerializer[Order]]:
         return OrderDetailSerializer if self.action == "retrieve" else OrderSerializer
 
-    def get_queryset(self) -> QuerySet[Order]:
+    def _perimetre(self) -> QuerySet[Order]:
+        """Les commandes que ce compte a le droit de voir, **sans annotation**.
+
+        Séparé de [get_queryset] parce que `counts` en a besoin nu : une
+        annotation posée avant un `values(...).annotate(...)` entre dans le
+        `GROUP BY` de Django et scinde alors chaque statut en autant de lignes
+        qu'il y a de valeurs annotées distinctes. Le compte de « Prêtes »
+        tombait ainsi à 1 sur deux commandes, parce que leurs `items_count`
+        différaient.
+        """
         user = authenticated_user(self.request)
         queryset = Order.objects.select_related("restaurant", "customer").order_by("-placed_at")
 
-        if not is_unscoped(user):
-            queryset = queryset.filter(restaurant_id__in=staff_restaurant_ids(user))
+        if is_unscoped(user):
+            return queryset
+        return queryset.filter(restaurant_id__in=staff_restaurant_ids(user))
+
+    def get_queryset(self) -> QuerySet[Order]:
+        queryset = avec_compteurs(self._perimetre())
 
         if self.action == "retrieve":
             queryset = queryset.prefetch_related("lines__menu_item", "status_events")
         return queryset
+
+    @extend_schema(
+        responses={200: OpenApiTypes.OBJECT},
+        tags=["orders"],
+        description=(
+            "Nombre de commandes par statut, sur le périmètre du compte et les "
+            "filtres passés en paramètres. Rend un objet `{statut: nombre}`."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="counts", url_name="counts")
+    def counts(self, request: Request) -> Response:
+        """Le compte de chaque statut, **en une requête**.
+
+        Les onglets de la supervision annoncent « En attente (5) ». Les obtenir
+        autrement demanderait une requête paginée par onglet — cinq appels pour
+        cinq nombres, à chaque ouverture de l'écran — ou de charger toutes les
+        commandes pour les compter côté client, ce que la pagination vient
+        précisément d'éviter.
+
+        Le filtrage est celui de la vue : `get_queryset` applique le
+        cloisonnement, et `filter_queryset` la période et la recherche
+        éventuelles. Les compteurs portent donc sur **la même sélection** que la
+        liste — sans quoi un onglet annoncerait douze commandes et en
+        afficherait trois.
+
+        Les statuts absents sont rendus à zéro plutôt qu'omis : l'appelant n'a
+        pas à distinguer « aucune commande » de « clé manquante ».
+        """
+        # Trois précautions, et chacune corrige une erreur de comptage que
+        # Django produit en silence :
+        #
+        # * `_perimetre()` et non `get_queryset()` — une annotation posée avant
+        #   un `values(...).annotate(...)` entre dans le `GROUP BY`, et scinde
+        #   chaque statut en autant de lignes qu'il y a de valeurs distinctes
+        #   (ici `items_count`) ;
+        # * `.order_by()` vide — l'ordre par défaut du modèle est ajouté au
+        #   `GROUP BY` de la même façon. C'est le piège le plus discret des
+        #   deux : le compte tombe sans qu'aucune requête n'échoue ;
+        # * `Count("id")` et non `Count("*")` — sur une jointure, seul le
+        #   comptage d'une colonne de la table de base reste juste.
+        comptes = (
+            self.filter_queryset(self._perimetre())
+            .order_by()
+            .values("status")
+            .annotate(total=Count("id"))
+        )
+        resultat = {statut: 0 for statut in OrderStatus.values}
+        resultat.update({ligne["status"]: ligne["total"] for ligne in comptes})
+        return Response(resultat)
 
     @extend_schema(
         request=StatusTransitionSerializer,

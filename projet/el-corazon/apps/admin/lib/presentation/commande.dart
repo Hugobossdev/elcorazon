@@ -36,8 +36,7 @@ extension CommandeAffichee on eccore.Order {
   ///
   /// Le `null` compte : une chaîne vide affichée sous un intitulé « Note »
   /// laisse croire qu'une note existe et qu'elle est vide.
-  String? get consignes =>
-      deliveryInstructions.isEmpty ? null : deliveryInstructions;
+  String? get consignes => deliveryInstructions.isEmpty ? null : deliveryInstructions;
 
   /// Les montants en unité majeure, pour l'affichage **seulement**.
   ///
@@ -47,25 +46,6 @@ extension CommandeAffichee on eccore.Order {
   double get fraisLivraisonAffiches => deliveryFee.toMajorUnits();
   double get remiseAffichee => discount.toMajorUnits();
   double get totalAffiche => total.toMajorUnits();
-
-  /// Le livreur affecté à cette commande — **le back-office ne le sait pas**.
-  ///
-  /// Toujours `null`, et ce n'est pas un oubli de migration. Le sérialiseur de
-  /// supervision (`OrderSerializer`) ne rend pas le livreur, et
-  /// `AssignmentViewSet`, seule route qui le dise, est réservée au livreur
-  /// lui-même. Rien ne permet aujourd'hui à un compte du personnel d'apprendre
-  /// qui porte une commande.
-  ///
-  /// Le modèle local portait un champ `deliveryPersonId` que `DjangoOrderMapper`
-  /// ne remplissait jamais. Quatre écrans le lisaient, et trois en dépendaient
-  /// pour fonctionner : les statistiques détaillées d'un livreur sont toujours
-  /// vides, la carte ne pose jamais de marqueur de livraison, et le bouton
-  /// d'assignation ne propose jamais de réassigner.
-  ///
-  /// Ce getter existe pour que le manque soit **écrit une fois** plutôt que
-  /// dispersé en quatre `null` silencieux. Le jour où le serveur expose le
-  /// livreur, il y a un seul endroit à changer.
-  String? get livreurAffecte => null;
 
   /// Le moment que l'opérateur appelle « la commande » — celui où elle a été
   /// passée, pas celui où la ligne a été écrite en base.

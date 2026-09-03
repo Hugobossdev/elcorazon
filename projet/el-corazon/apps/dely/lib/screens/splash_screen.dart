@@ -2,8 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
-import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';
-import 'package:elcora_dely/screens/delivery/delivery_navigation_screen.dart';
+import 'package:elcora_dely/screens/driver_gate.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 class SplashScreen extends StatefulWidget {
@@ -102,19 +101,17 @@ class _SplashScreenState extends State<SplashScreen>
     }
   }
 
+  /// Cède la main à [DriverGate], qui décide — et continue de décider.
+  ///
+  /// Cet écran choisissait lui-même entre l'accueil et la connexion. C'était
+  /// un second endroit où lire l'état de la session, donc un second endroit où
+  /// en oublier un cas : le compte non vérifié y entrait comme n'importe quel
+  /// autre. La porte fait cette lecture une fois, et la refait à chaque
+  /// changement — ce qu'une décision prise au démarrage ne peut pas faire.
   void _navigateToNextScreen() {
-    final appService = context.read<AppService>();
-
-    Widget nextScreen;
-    if (appService.currentUser != null && appService.isLoggedIn) {
-      nextScreen = const DeliveryNavigationScreen();
-    } else {
-      nextScreen = const DriverAuthScreen();
-    }
-
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => nextScreen,
+        pageBuilder: (context, animation, secondaryAnimation) => const DriverGate(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },

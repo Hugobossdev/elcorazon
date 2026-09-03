@@ -15,6 +15,7 @@ import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/theme/modern_theme.dart';
 import 'package:admin/screens/admin/advanced_order_management_screen.dart';
 import 'package:admin/screens/admin/analytics_screen.dart';
+import 'package:admin/screens/admin/client_management_screen.dart';
 import 'package:admin/screens/admin/driver_management_screen.dart';
 import 'package:admin/screens/admin/promotions_screen.dart';
 import 'package:admin/screens/admin/send_notification_dialog.dart';
@@ -88,8 +89,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   indicatorColor: scheme.primary,
                   tabs: const [
                     Tab(
-                        icon: Icon(Icons.dashboard_outlined),
-                        text: 'Vue d\'ensemble',),
+                      icon: Icon(Icons.dashboard_outlined),
+                      text: 'Vue d\'ensemble',
+                    ),
                     Tab(icon: Icon(Icons.analytics_outlined), text: 'Analyses'),
                   ],
                 ),
@@ -98,8 +100,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 child: TabBarView(
                   controller: _tabController,
                   children: [
-                    _buildOverviewTab(context, currentUser, allOrders,
-                        menuItems, driverService,),
+                    _buildOverviewTab(
+                      context,
+                      currentUser,
+                      allOrders,
+                      menuItems,
+                      driverService,
+                    ),
                     _buildAnalyticsTab(context, analyticsService),
                   ],
                 ),
@@ -120,15 +127,12 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   ) {
     final todayRevenue = _calculateTodayRevenue(orders);
     final totalOrders = orders.length;
-    final activeDrivers = driverService.drivers
-        .where((d) => d.statut == StatutLivreur.disponible)
-        .length;
+    final activeDrivers =
+        driverService.drivers.where((d) => d.statut == StatutLivreur.disponible).length;
 
     // Calculate additional stats
-    final weekStart =
-        DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
-    final weekOrders =
-        orders.where((o) => o.passeeLe.isAfter(weekStart)).toList();
+    final weekStart = DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
+    final weekOrders = orders.where((o) => o.passeeLe.isAfter(weekStart)).toList();
     final weekRevenue = weekOrders
         .where((order) => order.statut == StatutCommande.livree)
         .fold(0.0, (sum, order) => sum + order.totalAffiche);
@@ -153,6 +157,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               totalOrders,
               activeDrivers,
               _calculateAverageOrderValue(totalOrders, orders),
+              orders,
+              menuItems,
             ),
             const SizedBox(height: 20),
             _buildQuickActions(context),
@@ -185,7 +191,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Widget _buildAnalyticsTab(
-      BuildContext context, AnalyticsService analyticsService,) {
+    BuildContext context,
+    AnalyticsService analyticsService,
+  ) {
     // Déclencher le chargement des données si elles sont vides et qu'on ne charge pas déjà
     // Utiliser addPostFrameCallback pour éviter les updates pendant le build
     if (analyticsService.analyticsData.isEmpty &&
@@ -195,7 +203,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       final startDate = endDate.subtract(const Duration(days: 7));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         analyticsService.loadAnalyticsData(
-            startDate: startDate, endDate: endDate,);
+          startDate: startDate,
+          endDate: endDate,
+        );
       });
     }
 
@@ -226,10 +236,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   ElevatedButton(
                     onPressed: () {
                       final endDate = DateTime.now();
-                      final startDate =
-                          endDate.subtract(const Duration(days: 7));
+                      final startDate = endDate.subtract(const Duration(days: 7));
                       analyticsService.loadAnalyticsData(
-                          startDate: startDate, endDate: endDate,);
+                        startDate: startDate,
+                        endDate: endDate,
+                      );
                     },
                     child: const Text('Réessayer'),
                   ),
@@ -240,13 +251,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             Column(
               children: [
                 _buildRevenueChart(
-                    context, analyticsService.analyticsData['revenue'] ?? {},),
+                  context,
+                  analyticsService.analyticsData['revenue'] ?? {},
+                ),
                 const SizedBox(height: 20),
                 _buildOrdersChart(
-                    context, analyticsService.analyticsData['orders'] ?? {},),
+                  context,
+                  analyticsService.analyticsData['orders'] ?? {},
+                ),
                 const SizedBox(height: 20),
-                _buildCategoryPerformance(context,
-                    analyticsService.analyticsData['categories'] ?? {},),
+                _buildCategoryPerformance(
+                  context,
+                  analyticsService.analyticsData['categories'] ?? {},
+                ),
               ],
             ),
         ],
@@ -316,14 +333,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   color: scheme.onPrimary.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child:
-                    Icon(Icons.restaurant, color: scheme.onPrimary, size: 32),
+                child: Icon(Icons.restaurant, color: scheme.onPrimary, size: 32),
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  /// Le nombre de comptes clients.
+  ///
+  /// Seul chiffre du tableau de bord qui ne se déduit pas des commandes et de
+  /// la carte déjà chargées : il vient de `/analytics/reports/overview/`, où le
+  /// serveur l'agrège. Le compter côté client demanderait de télécharger
+  /// l'annuaire des clients pour en connaître la taille.
+  ///
+  /// Mis en cache par `??=` : le futur n'est créé qu'une fois, et non à chaque
+  /// reconstruction du tableau de bord.
+  Future<Map<String, dynamic>>? _apercuFuture;
+
+  Future<Map<String, dynamic>> _apercu() {
+    _apercuFuture ??= context.read<AnalyticsService>().getGeneralStats();
+    return _apercuFuture!;
   }
 
   Widget _buildKeyMetricsGrid(
@@ -333,6 +365,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     int totalOrders,
     int activeDrivers,
     double averageOrderValue,
+    List<eccore.Order> orders,
+    List<eccore.ManagedMenuItem> menuItems,
   ) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -340,14 +374,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         final scheme = theme.colorScheme;
         final sem = AdminColorTokens.semantic(scheme);
 
+        final enCours = orders.where((o) => o.statut.estEnCours).length;
+        final livrees = orders.where((o) => o.statut == StatutCommande.livree).length;
+        final annulees = orders.where((o) => o.statut == StatutCommande.annulee).length;
+        final disponibles = menuItems.where((item) => item.isAvailable).length;
+
         final crossAxisCount = constraints.maxWidth > 1100
             ? 4
             : constraints.maxWidth > 700
                 ? 2
                 : 1;
         const spacing = 16.0;
-        final width = (constraints.maxWidth - (crossAxisCount - 1) * spacing) /
-            crossAxisCount;
+        final width =
+            (constraints.maxWidth - (crossAxisCount - 1) * spacing) / crossAxisCount;
 
         return Wrap(
           spacing: spacing,
@@ -381,7 +420,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const AdvancedOrderManagementScreen(),),
+                      builder: (_) => const AdvancedOrderManagementScreen(),
+                    ),
                   );
                 },
               ),
@@ -398,7 +438,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const DriverManagementScreen(),),
+                      builder: (_) => const DriverManagementScreen(),
+                    ),
                   );
                 },
               ),
@@ -419,6 +460,93 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                 },
               ),
             ),
+            // Les quatre tuiles qui suivent manquaient. Le tableau de bord
+            // annonçait le chiffre d'affaires, le nombre de commandes, les
+            // livreurs et le panier moyen — mais ni ce qui est en cours de
+            // service, ni ce qui est terminé, ni l'état de la carte, ni le
+            // nombre de clients. C'est-à-dire précisément ce qu'on regarde en
+            // ouvrant l'écran un soir de service.
+            SizedBox(
+              width: width,
+              child: EnhancedStatCard(
+                title: 'Commandes en cours',
+                value: '$enCours',
+                icon: Icons.pending_actions,
+                color: sem.warning,
+                subtitle: 'Ni livrées ni annulées',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdvancedOrderManagementScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+            SizedBox(
+              width: width,
+              child: EnhancedStatCard(
+                title: 'Commandes livrées',
+                value: '$livrees',
+                icon: Icons.check_circle_outline,
+                color: sem.success,
+                subtitle: annulees == 0 ? 'Aucune annulation' : '$annulees annulée(s)',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdvancedOrderManagementScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+            SizedBox(
+              width: width,
+              child: EnhancedStatCard(
+                title: 'Produits',
+                value: '${menuItems.length}',
+                icon: Icons.restaurant_menu,
+                color: scheme.primary,
+                subtitle: '$disponibles disponible(s)',
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const MenuManagementScreen(),
+                    ),
+                  );
+                },
+              ),
+            ),
+            SizedBox(
+              width: width,
+              child: FutureBuilder<Map<String, dynamic>>(
+                future: _apercu(),
+                builder: (context, snapshot) {
+                  final clients = (snapshot.data?['users'] as Map?)?['total'] as int?;
+                  return EnhancedStatCard(
+                    title: 'Clients',
+                    // Un tiret tant que le chiffre n'est pas lu : « 0 clients »
+                    // pendant le chargement est une information fausse, et
+                    // celle-là inquiète.
+                    value: clients?.toString() ?? '—',
+                    icon: Icons.people_outline,
+                    color: scheme.secondary,
+                    subtitle: 'Comptes enregistrés',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ClientManagementScreen(),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
           ],
         );
       },
@@ -435,80 +563,94 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       children: [
         Text(
           'Actions rapides',
-          style:
-              theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
-        LayoutBuilder(builder: (context, constraints) {
-          final crossAxisCount = constraints.maxWidth > 900
-              ? 6
-              : constraints.maxWidth > 600
-                  ? 3
-                  : 2;
-          return GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 1.2,
-            children: [
-              _buildActionButton(
-                  context, 'Promotions', Icons.local_offer, sem.warning, () {
-                Navigator.push(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final crossAxisCount = constraints.maxWidth > 900
+                ? 6
+                : constraints.maxWidth > 600
+                    ? 3
+                    : 2;
+            return GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: crossAxisCount,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.2,
+              children: [
+                _buildActionButton(context, 'Promotions', Icons.local_offer, sem.warning,
+                    () {
+                  Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const PromotionsScreen(),),);
-              }),
-              _buildActionButton(
-                  context, 'Menu', Icons.restaurant_menu, sem.success, () {
-                // Normally handled by navigation, but direct push for quick action
-                Navigator.push(
+                      builder: (_) => const PromotionsScreen(),
+                    ),
+                  );
+                }),
+                _buildActionButton(context, 'Menu', Icons.restaurant_menu, sem.success,
+                    () {
+                  // Normally handled by navigation, but direct push for quick action
+                  Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const MenuManagementScreen(),),);
-              }),
-              _buildActionButton(
-                  context, 'Commandes', Icons.shopping_cart, sem.info, () {
-                // Assuming AdvancedOrderManagementScreen is the main one now
-                // But usually handled by main navigation. We can push or switch tab.
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const AdvancedOrderManagementScreen(),),
-                );
-              }),
-              _buildActionButton(
-                  context, 'Notifications', Icons.send, scheme.tertiary, () {
-                DialogHelper.showSafeDialog(
+                      builder: (_) => const MenuManagementScreen(),
+                    ),
+                  );
+                }),
+                _buildActionButton(context, 'Commandes', Icons.shopping_cart, sem.info,
+                    () {
+                  // Assuming AdvancedOrderManagementScreen is the main one now
+                  // But usually handled by main navigation. We can push or switch tab.
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdvancedOrderManagementScreen(),
+                    ),
+                  );
+                }),
+                _buildActionButton(context, 'Notifications', Icons.send, scheme.tertiary,
+                    () {
+                  DialogHelper.showSafeDialog(
                     context: context,
-                    builder: (_) => const SendNotificationDialog(),);
-              }),
-              _buildActionButton(
-                  context, 'Documents', Icons.verified_user, scheme.secondary,
-                  () {
-                Navigator.push(
+                    builder: (_) => const SendNotificationDialog(),
+                  );
+                }),
+                _buildActionButton(
+                    context, 'Documents', Icons.verified_user, scheme.secondary, () {
+                  Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) =>
-                            const DriverDocumentsDashboardScreen(),),);
-              }),
-              _buildActionButton(
-                  context, 'Livraisons', Icons.local_shipping, sem.danger, () {
-                Navigator.push(
+                      builder: (_) => const DriverDocumentsDashboardScreen(),
+                    ),
+                  );
+                }),
+                _buildActionButton(
+                    context, 'Livraisons', Icons.local_shipping, sem.danger, () {
+                  Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const ActiveDeliveriesScreen(),),);
-              }),
-            ],
-          );
-        },),
+                      builder: (_) => const ActiveDeliveriesScreen(),
+                    ),
+                  );
+                }),
+              ],
+            );
+          },
+        ),
       ],
     );
   }
 
-  Widget _buildActionButton(BuildContext context, String label, IconData icon,
-      Color color, VoidCallback onTap,) {
+  Widget _buildActionButton(
+    BuildContext context,
+    String label,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -555,8 +697,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) =>
-                              const AdvancedOrderManagementScreen(),),
+                        builder: (_) => const AdvancedOrderManagementScreen(),
+                      ),
                     );
                   }, // Navigate to full list
                   child: const Text('Voir tout'),
@@ -566,9 +708,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             const SizedBox(height: 12),
             if (recentOrders.isEmpty)
               const Center(
-                  child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text('Aucune commande récente'),),)
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Aucune commande récente'),
+                ),
+              )
             else
               ListView.separated(
                 shrinkWrap: true,
@@ -588,21 +732,25 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                         decoratif: true,
                       ),
                     ),
-                    title:
-                        Text('CMD #${order.id.substring(0, 8).toUpperCase()}'),
+                    title: Text('CMD #${order.id.substring(0, 8).toUpperCase()}'),
                     subtitle: Text(
-                        '${AdminHelpers.formatRelativeTime(order.passeeLe)} • ${order.lines.length} articles',),
+                      '${AdminHelpers.formatRelativeTime(order.passeeLe)} • ${order.lines.length} articles',
+                    ),
                     trailing: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(formatPrice(order.totalAffiche),
-                            style:
-                                const TextStyle(fontWeight: FontWeight.bold),),
-                        Text(order.statut.libelle,
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: _getStatusColor(order.statut),),),
+                        Text(
+                          formatPrice(order.totalAffiche),
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          order.statut.libelle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _getStatusColor(order.statut),
+                          ),
+                        ),
                       ],
                     ),
                   );
@@ -616,107 +764,114 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   Widget _buildTopSellingItems(BuildContext context) {
     return FutureBuilder<List<Map<String, dynamic>>>(
-        future: _getTopSellingItems(),
-        builder: (context, snapshot) {
-          final theme = Theme.of(context);
-          final scheme = theme.colorScheme;
-          final sem = AdminColorTokens.semantic(scheme);
+      future: _getTopSellingItems(),
+      builder: (context, snapshot) {
+        final theme = Theme.of(context);
+        final scheme = theme.colorScheme;
+        final sem = AdminColorTokens.semantic(scheme);
 
-          // ... rest of the code is same but handling states better
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Card(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Center(child: CircularProgressIndicator()),
-              ),
-            );
-          }
-          final topProducts = snapshot.data ?? [];
-
-          return Card(
-            elevation: 2,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        // ... rest of the code is same but handling states better
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Card(
             child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Top ventes (30 jours)',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  if (snapshot.hasError)
-                    Center(child: Text('Erreur: ${snapshot.error}'))
-                  else if (topProducts.isEmpty)
-                    const Center(child: Text('Aucune donnée'))
-                  else
-                    ...topProducts.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final product = entry.value;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: _getRankColor(index),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Center(
-                                  child: Text('${index + 1}',
-                                      style: TextStyle(
-                                        color: scheme.onPrimary,
-                                        fontWeight: FontWeight.bold,
-                                      ),),),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(product['menu_item_name'] ?? 'Produit',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600,),),
-                                  Text('${product['total_quantity']} vendus',
-                                      style:
-                                          theme.textTheme.bodySmall?.copyWith(
-                                        color: scheme.onSurfaceVariant,
-                                      ),),
-                                ],
-                              ),
-                            ),
-                            Text(
-                                formatPrice((product['total_revenue'] as num)
-                                    .toDouble(),),
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: sem.success,
-                                ),),
-                          ],
-                        ),
-                      );
-                    }),
-                ],
-              ),
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
             ),
           );
-        },);
+        }
+        final topProducts = snapshot.data ?? [];
+
+        return Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Top ventes (30 jours)',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                if (snapshot.hasError)
+                  Center(child: Text('Erreur: ${snapshot.error}'))
+                else if (topProducts.isEmpty)
+                  const Center(child: Text('Aucune donnée'))
+                else
+                  ...topProducts.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final product = entry.value;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: _getRankColor(index),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${index + 1}',
+                                style: TextStyle(
+                                  color: scheme.onPrimary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  product['menu_item_name'] ?? 'Produit',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  '${product['total_quantity']} vendus',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            formatPrice(
+                              (product['total_revenue'] as num).toDouble(),
+                            ),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: sem.success,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   // Cache/Store for top selling items to avoid reload on every build
   Future<List<Map<String, dynamic>>>? _topSellingItemsFuture;
 
   Future<List<Map<String, dynamic>>> _getTopSellingItems() {
-    _topSellingItemsFuture ??= context
-        .read<AnalyticsService>()
-        .getTopSellingItems(
+    _topSellingItemsFuture ??= context.read<AnalyticsService>().getTopSellingItems(
           startDate: DateTime.now().subtract(const Duration(days: 30)),
         );
     return _topSellingItemsFuture!;
@@ -745,9 +900,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final dailyRevenue = data['dailyRevenue'] as Map<String, double>? ?? {};
     if (dailyRevenue.isEmpty) {
       return const Card(
-          child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: Text('Pas de données de revenus')),),);
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(child: Text('Pas de données de revenus')),
+        ),
+      );
     }
 
     final sortedKeys = dailyRevenue.keys.toList()..sort();
@@ -775,21 +932,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               height: 300,
               child: LineChart(
                 LineChartData(
-                  gridData:
-                      const FlGridData(drawVerticalLine: false),
+                  gridData: const FlGridData(drawVerticalLine: false),
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
-                          if (value.toInt() >= 0 &&
-                              value.toInt() < sortedKeys.length) {
-                            final date =
-                                DateTime.parse(sortedKeys[value.toInt()]);
+                          if (value.toInt() >= 0 && value.toInt() < sortedKeys.length) {
+                            final date = DateTime.parse(sortedKeys[value.toInt()]);
                             return Padding(
                               padding: const EdgeInsets.only(top: 8.0),
-                              child: Text('${date.day}/${date.month}',
-                                  style: const TextStyle(fontSize: 10),),
+                              child: Text(
+                                '${date.day}/${date.month}',
+                                style: const TextStyle(fontSize: 10),
+                              ),
                             );
                           }
                           return const SizedBox.shrink();
@@ -798,8 +954,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                       ),
                     ),
                     leftTitles: const AxisTitles(
-                        sideTitles:
-                            SideTitles(showTitles: true, reservedSize: 40),),
+                      sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                    ),
                     topTitles: const AxisTitles(),
                     rightTitles: const AxisTitles(),
                   ),
@@ -812,10 +968,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                       barWidth: 3,
                       isStrokeCapRound: true,
                       belowBarData: BarAreaData(
-                          show: true,
-                          color: Theme.of(context)
-                              .primaryColor
-                              .withValues(alpha: 0.1),),
+                        show: true,
+                        color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+                      ),
                     ),
                   ],
                 ),
@@ -831,9 +986,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     final dailyOrders = data['dailyOrders'] as Map<String, int>? ?? {};
     if (dailyOrders.isEmpty) {
       return const Card(
-          child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: Text('Pas de données de commandes')),),);
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(child: Text('Pas de données de commandes')),
+        ),
+      );
     }
     final sortedKeys = dailyOrders.keys.toList()..sort();
 
@@ -863,14 +1020,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                       sideTitles: SideTitles(
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
-                          if (value.toInt() >= 0 &&
-                              value.toInt() < sortedKeys.length) {
-                            final date =
-                                DateTime.parse(sortedKeys[value.toInt()]);
+                          if (value.toInt() >= 0 && value.toInt() < sortedKeys.length) {
+                            final date = DateTime.parse(sortedKeys[value.toInt()]);
                             return Padding(
                               padding: const EdgeInsets.only(top: 8.0),
-                              child: Text('${date.day}/${date.month}',
-                                  style: const TextStyle(fontSize: 10),),
+                              child: Text(
+                                '${date.day}/${date.month}',
+                                style: const TextStyle(fontSize: 10),
+                              ),
                             );
                           }
                           return const SizedBox.shrink();
@@ -878,8 +1035,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                       ),
                     ),
                     leftTitles: const AxisTitles(
-                        sideTitles:
-                            SideTitles(showTitles: true, reservedSize: 30),),
+                      sideTitles: SideTitles(showTitles: true, reservedSize: 30),
+                    ),
                     topTitles: const AxisTitles(),
                     rightTitles: const AxisTitles(),
                   ),
@@ -893,7 +1050,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                           color: Theme.of(context).colorScheme.primary,
                           width: 16,
                           borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(4),),
+                            top: Radius.circular(4),
+                          ),
                         ),
                       ],
                     );
@@ -908,13 +1066,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   }
 
   Widget _buildCategoryPerformance(
-      BuildContext context, Map<String, dynamic> data,) {
+    BuildContext context,
+    Map<String, dynamic> data,
+  ) {
     final categoryCounts = data['categoryCounts'] as Map<String, int>? ?? {};
     if (categoryCounts.isEmpty) {
       return const Card(
-          child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: Text('Pas de données de catégories')),),);
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(child: Text('Pas de données de catégories')),
+        ),
+      );
     }
 
     final scheme = Theme.of(context).colorScheme;
@@ -979,11 +1141,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                             Container(width: 12, height: 12, color: color),
                             const SizedBox(width: 8),
                             Expanded(
-                                child: Text(entry.key,
-                                    style: const TextStyle(fontSize: 12),),),
-                            Text('${entry.value}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 12,),),
+                              child: Text(
+                                entry.key,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                            Text(
+                              '${entry.value}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
                           ],
                         ),
                       );
@@ -1003,11 +1172,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
   double _calculateTodayRevenue(List<eccore.Order> orders) {
     final now = DateTime.now();
     return orders
-        .where((o) =>
-            o.passeeLe.day == now.day &&
-            o.passeeLe.month == now.month &&
-            o.passeeLe.year == now.year &&
-            o.statut == StatutCommande.livree,)
+        .where(
+          (o) =>
+              o.passeeLe.day == now.day &&
+              o.passeeLe.month == now.month &&
+              o.passeeLe.year == now.year &&
+              o.statut == StatutCommande.livree,
+        )
         .fold(0.0, (sum, o) => sum + o.totalAffiche);
   }
 

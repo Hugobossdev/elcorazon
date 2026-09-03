@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -25,10 +26,34 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
   DateTime _startDate = DateTime.now().subtract(const Duration(days: 7));
   DateTime _endDate = DateTime.now();
 
+  /// Les commandes que ce livreur a portées.
+  ///
+  /// Cet écran filtrait jusqu'ici `allOrders` sur un identifiant de livreur
+  /// posé sur la commande — un champ que le serveur ne rend pas et ne rendra
+  /// pas. La condition était donc toujours fausse : l'historique, les
+  /// graphiques et les trois onglets étaient vides pour **tous** les livreurs,
+  /// et l'écran affichait « aucune course » sur des semaines de travail.
+  ///
+  /// Le rattachement se lit sur les courses (`/delivery/manage/assignments/`),
+  /// chargées une fois à l'ouverture ; les commandes elles-mêmes viennent de la
+  /// supervision, comme avant.
+  Set<String> _commandesPortees = const {};
+  bool _coursesChargees = false;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _chargerLesCourses());
+  }
+
+  Future<void> _chargerLesCourses() async {
+    final courses = await context.read<AssignmentService>().historyOf(widget.driver.id);
+    if (!mounted) return;
+    setState(() {
+      _commandesPortees = {for (final course in courses) course.orderId};
+      _coursesChargees = true;
+    });
   }
 
   @override
@@ -45,9 +70,13 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Historique', style: TextStyle(fontSize: 16)),
-            Text(widget.driver.fullName,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.normal,),),
+            Text(
+              widget.driver.fullName,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.normal,
+              ),
+            ),
           ],
         ),
         bottom: TabBar(
@@ -61,6 +90,13 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
       ),
       body: Consumer2<OrderManagementService, DriverManagementService>(
         builder: (context, orderService, driverService, child) {
+          // Tant que les courses ne sont pas lues, une liste vide voudrait dire
+          // « ce livreur n'a rien fait » — ce qui est faux, et indiscernable de
+          // la vérité une fois affiché.
+          if (!_coursesChargees) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
           final driverOrders = _getDriverOrders(orderService.allOrders);
           final stats = _calculateStats(driverOrders);
 
@@ -132,13 +168,8 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
   }
 
   List<eccore.Order> _getDriverOrders(List<eccore.Order> allOrders) {
-    final driverUserId = widget.driver.id;
-
     return allOrders.where((order) {
-      if (order.livreurAffecte != driverUserId &&
-          order.livreurAffecte != widget.driver.id) {
-        return false;
-      }
+      if (!_commandesPortees.contains(order.id)) return false;
       final orderDate = order.createdAt;
       return orderDate.isAfter(_startDate) &&
           orderDate.isBefore(_endDate.add(const Duration(days: 1)));
@@ -155,12 +186,10 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
       'total_orders': orders.length,
       'completed_orders': completedOrders.length,
       'total_revenue': totalRevenue,
-      'average_order_value': completedOrders.isNotEmpty
-          ? totalRevenue / completedOrders.length
-          : 0.0,
-      'completion_rate': orders.isNotEmpty
-          ? (completedOrders.length / orders.length) * 100
-          : 0.0,
+      'average_order_value':
+          completedOrders.isNotEmpty ? totalRevenue / completedOrders.length : 0.0,
+      'completion_rate':
+          orders.isNotEmpty ? (completedOrders.length / orders.length) * 100 : 0.0,
     };
   }
 
@@ -189,8 +218,10 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
       children: [
         _buildSummaryCard(stats),
         const SizedBox(height: 24),
-        const Text('Commandes des 7 derniers jours',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),),
+        const Text(
+          'Commandes des 7 derniers jours',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 16),
         Container(
           padding: const EdgeInsets.all(16),
@@ -224,17 +255,27 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 _buildSummaryItem(
-                    'Revenu',
-                    PriceFormatter.format(stats['total_revenue'] is num ? (stats['total_revenue'] as num).toDouble() : 0.0),
-                    Icons.monetization_on,
-                    Colors.green,),
-                _buildSummaryItem('Commandes', '${stats['total_orders']}',
-                    Icons.shopping_bag, Colors.blue,),
+                  'Revenu',
+                  PriceFormatter.format(
+                    stats['total_revenue'] is num
+                        ? (stats['total_revenue'] as num).toDouble()
+                        : 0.0,
+                  ),
+                  Icons.monetization_on,
+                  Colors.green,
+                ),
                 _buildSummaryItem(
-                    'Taux Succès',
-                    '${(stats['completion_rate'] as double).toInt()}%',
-                    Icons.check_circle,
-                    Colors.orange,),
+                  'Commandes',
+                  '${stats['total_orders']}',
+                  Icons.shopping_bag,
+                  Colors.blue,
+                ),
+                _buildSummaryItem(
+                  'Taux Succès',
+                  '${(stats['completion_rate'] as double).toInt()}%',
+                  Icons.check_circle,
+                  Colors.orange,
+                ),
               ],
             ),
           ],
@@ -244,7 +285,11 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
   }
 
   Widget _buildSummaryItem(
-      String label, String value, IconData icon, Color color,) {
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+  ) {
     return Column(
       children: [
         Container(
@@ -256,8 +301,10 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
           child: Icon(icon, color: color, size: 20),
         ),
         const SizedBox(height: 8),
-        Text(value,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
         Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       ],
     );
@@ -282,16 +329,14 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
             side: BorderSide(color: Colors.grey[200]!),
           ),
           child: ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             leading: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: Colors.blue[50],
                 borderRadius: BorderRadius.circular(8),
               ),
-              child:
-                  Icon(Icons.local_shipping_outlined, color: Colors.blue[700]),
+              child: Icon(Icons.local_shipping_outlined, color: Colors.blue[700]),
             ),
             title: Text(
               '#${order.id.substring(0, 6).toUpperCase()}',
@@ -305,7 +350,9 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
                 Text(
                   PriceFormatter.format(order.totalAffiche),
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16,),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                 ),
                 Text(
                   order.statut.libelle,
@@ -336,8 +383,7 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
       final end = start.add(const Duration(days: 6));
 
       final count = orders.where((o) {
-        return o.createdAt
-                .isAfter(start.subtract(const Duration(seconds: 1))) &&
+        return o.createdAt.isAfter(start.subtract(const Duration(seconds: 1))) &&
             o.createdAt.isBefore(end.add(const Duration(seconds: 1)));
       }).length;
       weeklyData[i] = count.toDouble();
@@ -353,14 +399,13 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Performance Mensuelle (Courses / Semaine)',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),),
+                  const Text(
+                    'Performance Mensuelle (Courses / Semaine)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 20),
                   CustomBarChart(
-                    data: weeklyData.every((v) => v == 0)
-                        ? [0, 0, 0, 0]
-                        : weeklyData,
+                    data: weeklyData.every((v) => v == 0) ? [0, 0, 0, 0] : weeklyData,
                     labels: weeklyLabels,
                     color: Colors.purple,
                   ),
@@ -368,8 +413,11 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
                     const Padding(
                       padding: EdgeInsets.only(top: 8.0),
                       child: Center(
-                          child: Text('Pas assez de données',
-                              style: TextStyle(color: Colors.grey),),),
+                        child: Text(
+                          'Pas assez de données',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
                     ),
                 ],
               ),

@@ -239,6 +239,32 @@ c'est justement l'occasion actée par ADR-009 de lever les trois travers de l'an
       périmètre. Le compte naît `courier` + dossier `pending` : embaucher ne vaut pas valider, aucune
       pièce n'ayant encore été lue. `registerDriver*` peut donc quitter `dely` et son code Supabase
       être retiré (l'accès avait déjà disparu de l'écran de connexion).
+- [x] **Revenu sur la décision du 2026-07-29 : la candidature spontanée existe** (2026-09-02).
+      Le provisioning par le personnel reste, et reste la voie de l'embauche ; s'y **ajoute**
+      `POST /api/v1/delivery/apply/`, ouverte sans jeton, qui appelle le *même*
+      `CourierService.provision`. Ce qui avait motivé le refus tient toujours — personne ne
+      s'attribue un rattachement à soi-même — et c'est précisément ce que le dossier `pending`
+      règle : le candidat choisit un établissement **ouvert au public** (`GET /restaurants/`),
+      et cela ne lui donne rien tant qu'El Corazón n'a pas instruit son dossier. L1 est intact,
+      `can_accept_orders` exigeant toujours `approved`.
+
+      Deux garde-fous propres à cette porte, parce qu'aucun membre du personnel n'est là pour
+      relire la saisie : le téléphone est **obligatoire et E.164** (`phone_validator` opposé au
+      formulaire, ce que le modèle ne fait pas de lui-même), et la route **ne rend aucun jeton**.
+      La session s'obtient au coup d'après, contre le code reçu par courriel
+      (`POST /api/v1/auth/verify/`) — sans quoi l'écran de saisie du code serait une étape que le
+      client mobile pourrait sauter.
+- [x] **Vérification de compte et mot de passe oublié** (2026-09-02) — `apps.accounts` porte
+      désormais un `VerificationCode` (empreinte seulement, jamais le code en clair), un seul code
+      vivant par motif, un compteur d'essais, et quatre routes : `auth/verify/`,
+      `auth/verify/resend/`, `auth/password/reset/`, `auth/password/reset/confirm/`.
+
+      **Le canal est le courriel, et lui seul.** `EMAIL_BACKEND` existe des deux côtés (console en
+      développement, SMTP en production) ; aucun opérateur SMS n'est configuré ni facturé. Un
+      écran « vérifiez votre numéro » devant un code que personne ne recevrait serait pire que
+      l'absence de la fonctionnalité. La vérification **du téléphone** (`phone_verified_at`, qui
+      existe en base et reste nul) demande un opérateur SMS : c'est le seul point du parcours qui
+      reste bloqué, et il l'est par une dépendance externe, pas par le code.
 
 ### 3.3 Migration domaine par domaine
 
@@ -530,6 +556,31 @@ le parcours manuellement.
       - **Nouveau canal `ws/me/`** (`UserFeedConsumer`), seul canal du projet non rattaché à une
         ressource : un appel entrant doit joindre son destinataire où qu'il soit dans l'app, ce
         qu'un canal par commande ne permet pas.
+      - **Côté Flutter, seule l'app cliente avait été branchée** — constaté et corrigé le
+        2026-09-02. `dely` gardait un `CallScreen` qui n'appelait personne : il composait le canal
+        (`order_{orderId}`), dérivait son `uid` d'un `hashCode`, rejoignait Agora avec un **jeton
+        vide**, et prévenait le client en lui **envoyant un message dans la conversation**
+        (« 📞 Appel vocal en cours… »). Aucun `Call` n'était créé, donc rien ne sonnait jamais
+        chez le client ; et le canal que le livreur rejoignait n'était celui de personne, les
+        deux applications ne dérivant pas le même nom. La fonctionnalité était construite à
+        moitié, et les deux moitiés ne se rencontraient pas.
+
+        `dely` porte désormais un `CallService` de signalisation (distinct d'`AgoraCallService`,
+        qui reste le média), ouvre `ws/me/` **à l'ouverture de session** — comme la file des
+        courses et l'émission de position, parce qu'un appel entrant doit joindre le livreur où
+        qu'il soit dans l'app — et un `IncomingCallHandler` monté par `DriverGate` fait sonner
+        par-dessus n'importe quel écran, murs de compte compris. `generateChannelId` et
+        `generateUid` sont **supprimées** plutôt que laissées sans appelant, et `joinChannel`
+        exige désormais son jeton : il était facultatif « pour les tests », un repli qui
+        fonctionne tant que le projet Agora n'exige pas de jeton et cesse de fonctionner le jour
+        où on l'active — c'est-à-dire au passage en production.
+
+        Deux défauts trouvés en chemin et corrigés : `CallRepository` n'avait pas de lecture
+        unitaire, si bien que la relecture sur sonnerie paginait l'**historique entier**
+        (`getById` ajouté, 10 tests) ; et `dely` recopiait à trois endroits la dérivation de
+        `API_BASE_URL` sans la réparation de schéma que l'app cliente porte depuis le lot 3 — un
+        `.env` sans `http://` produisait `ws:///ws/me/`, qui casse **les quatre** canaux temps
+        réel en silence pendant que le REST continue de marcher (`config/adresses.dart`, 7 tests).
       **Reste un lien vers l'ancien backend Node**, sans rapport avec Supabase :
       `geocoding_service`, `directions_service`, `places_service` et `paydunya_service` passent
       par un mandataire HTTP (`ApiConfig.backendUrl`, renommé `LEGACY_PROXY_URL`) — **sur le web
@@ -757,11 +808,14 @@ le parcours manuellement.
   `/social/groups/`), ce qui reste est la réécriture Flutter de `group_order_screen.dart` et du
   branchement des groupes, plus les écarts de périmètre listés au §3.3.
 - [x] 3.3 — Migration `dely` — auth, courses (`delivery`), émission de position et file
-  `ws/couriers/me/`, jeton FCM. **Reste** : brancher l'onboarding livreur sur
-  `POST /delivery/couriers/` — l'endpoint de provisioning existe maintenant, mais le geste est
-  réservé au personnel (§3.2), donc c'est un écran de back-office à construire, pas un écran
-  d'inscription dans `dely`. Plus les domaines que `dely` partage avec `fastfood` sans écran migré
-  (portefeuille, promotions, social).
+  `ws/couriers/me/`, jeton FCM. **Onboarding livreur fait** (2026-09-02) : candidature
+  (`POST /delivery/apply/`), code par courriel, session contre le code, mot de passe oublié, et
+  une porte unique — `DriverGate` — qui décide en continu ce que le compte peut atteindre. Le
+  provisioning par le personnel reste en place à côté ; les deux passent par le même service et
+  produisent le même dossier `pending`. **Reste** : le dépôt des pièces justificatives depuis
+  `dely` (`POST /delivery/me/` existe, aucun écran ne l'appelle — un candidat ne peut donc pas
+  compléter son dossier lui-même), et les domaines que `dely` partage avec `fastfood` sans écran
+  migré (portefeuille, promotions, social).
 - [x] 3.3 — Migration `admin` — auth et permissions, catalogue, commandes, flotte, clients,
   rôles, promotions, analytics, campagnes, fidélisation, zones, planning et dossiers livreurs,
   recherche transverse, paiements et remboursements. Neuf trous de sécurité fermés (§3.3), sept

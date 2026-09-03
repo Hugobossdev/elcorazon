@@ -2,8 +2,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_dely/presentation/etat_compte.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
+import 'package:elcora_dely/services/call_service.dart';
 import 'package:elcora_dely/services/location_service.dart';
 import 'package:elcora_dely/services/notification_service.dart';
 import 'package:elcora_dely/services/realtime_tracking_service.dart';
@@ -101,6 +103,11 @@ class AppService extends ChangeNotifier {
   NotificationService get notificationService => _notificationService;
   RealtimeTrackingService get trackingService => RealtimeTrackingService();
 
+  /// Signalisation des appels. Construit sur le même conteneur Riverpod que le
+  /// reste — il est unique par application, et `CallService` en tient une seule
+  /// instance.
+  CallService get callService => CallService(_container);
+
   @override
   void dispose() {
     _sessionSubscription.close();
@@ -121,7 +128,19 @@ class AppService extends ChangeNotifier {
     // écran : un livreur connecté reste joignable et reste suivi même quand il
     // n'a aucune carte ouverte.
     if (_currentUser != null && !wasConnected) {
+      // Ouvre la file des courses — **pas** le GPS. Le suivi de position est
+      // adossé à la course, pas à la session : voir [_accorderLeSuiviALaCourse].
       unawaited(trackingService.startCourierSession());
+      // La file personnelle (`ws/me/`) s'ouvre ici et pas dans un widget : un
+      // appel entrant doit joindre le livreur où qu'il soit dans
+      // l'application, et une file accrochée au montage d'un écran se
+      // refermerait au premier changement d'onglet.
+      unawaited(callService.demarrer(userId: _currentUser!.id));
+      // La permission de notification se demande **ici**, et pas au démarrage :
+      // un livreur qui vient de se connecter pour travailler comprend sans
+      // explication pourquoi on veut le joindre. Devant l'écran de connexion,
+      // il refuse — et sur Android 13+ ce refus est définitif.
+      unawaited(_notificationService.enableForUser());
       // À **chaque** ouverture de session, connexion comme restauration au
       // démarrage. L'enregistrement n'était fait qu'après `loginDriver` : un
       // livreur qui rouvrait l'application sans se reconnecter — le cas
@@ -134,6 +153,9 @@ class AppService extends ChangeNotifier {
       _coursesByOrderId.clear();
       _courierProfile = null;
       unawaited(trackingService.stopCourierSession());
+      // Referme la file **et raccroche** : un canal RTC laissé ouvert après une
+      // déconnexion garderait le micro allumé sur un compte qui n'est plus là.
+      unawaited(callService.arreter());
     }
 
     notifyListeners();
@@ -311,6 +333,10 @@ class AppService extends ChangeNotifier {
         ..clear()
         ..addEntries(courses.map((course) => MapEntry(course.orderId, course)));
       _syncOrdersFromCourses();
+      // Le remplacement peut faire **disparaître** la course active — un
+      // collègue l'a reprise, le siège l'a réaffectée. Sans cette relecture, le
+      // GPS continuerait de tourner pour une course qui n'est plus la sienne.
+      _accorderLeSuiviALaCourse();
 
       // Le dossier porte l'éligibilité (L1) et les compteurs officiels : il ne
       // se déduit pas des courses, il se lit.
@@ -342,7 +368,29 @@ class AppService extends ChangeNotifier {
   void _rememberCourse(Course course) {
     _coursesByOrderId[course.orderId] = course;
     _syncOrdersFromCourses();
+    _accorderLeSuiviALaCourse();
     notifyListeners();
+  }
+
+  /// Allume le suivi GPS quand une course est en cours, l'éteint sinon.
+  ///
+  /// Appelée à chaque évolution de la liste des courses — acceptation,
+  /// enlèvement, mise en route, livraison, annulation, réaffectation, et le
+  /// rechargement complet qui suit une reconnexion. C'est le seul endroit qui
+  /// décide, et il n'a qu'une règle : [activeCourse].
+  ///
+  /// Sans elle, le GPS tournait de la connexion à la déconnexion. Un livreur
+  /// qui ouvre son application le matin et attend sa première course consommait
+  /// alors autant de batterie qu'en pleine tournée, pour des relevés que le
+  /// serveur n'a nulle part où écrire : un relevé appartient à une course
+  /// (L3), et sans course active `updateDeliveryLocation` rendait la main sans
+  /// rien envoyer.
+  ///
+  /// Le service est idempotent : la rappeler sans changement ne rouvre rien.
+  void _accorderLeSuiviALaCourse() {
+    unawaited(
+      trackingService.suivreLaCourse(enCours: activeCourse != null),
+    );
   }
 
   /// La course désignée par une commande, ou une erreur explicite.
@@ -393,6 +441,16 @@ class AppService extends ChangeNotifier {
   /// L1 — l'éligibilité est décidée par le serveur : être « en ligne » ne
   /// suffit pas si le dossier n'est pas validé. Ne jamais la recomposer ici.
   bool get canAcceptOrders => _courierProfile?.canAcceptOrders ?? false;
+
+  /// Où en est le compte — compte actif, adresse vérifiée, dossier instruit.
+  ///
+  /// Nul tant que personne n'est connecté. La lecture des trois sources vit
+  /// dans [EtatCompte], et nulle part ailleurs : chaque écran qui la
+  /// recomposerait en oublierait un terme.
+  EtatCompte? get etatCompte {
+    final compte = _currentUser;
+    return compte == null ? null : EtatCompte.depuis(compte, _courierProfile);
+  }
 
   List<Course> get courses => _coursesByOrderId.values.toList();
 
@@ -495,6 +553,101 @@ class AppService extends ChangeNotifier {
       // l'unique phrase utile.
       rethrow;
     }
+  }
+
+  // ------------------------------------------------- création de compte
+  //
+  // Le parcours complet tient en trois appels, dans cet ordre, et l'ordre
+  // n'est pas une convention d'écran : il est imposé par le serveur.
+  //
+  //   deposerCandidature()  → compte + dossier en attente, **aucun jeton**
+  //   verifierCompte()      → la session, contre le code reçu
+  //   (instruction du dossier par El Corazón)  → les courses
+  //
+  // Un livreur ne passe **jamais** par `sessionProvider.register()` : cette
+  // route ne crée que des comptes clients, imposé serveur.
+
+  /// Les établissements auxquels un candidat peut se rattacher.
+  ///
+  /// Route publique — appelée avant même qu'un compte existe. La liste ne
+  /// contient que les établissements ouverts, qui sont exactement ceux que le
+  /// serveur acceptera dans la candidature.
+  Future<List<eccore.RestaurantOption>> etablissementsOuverts() {
+    return eccore.RestaurantDirectoryRepository(
+      apiClient: _container.read(eccore.apiClientProvider),
+    ).list();
+  }
+
+  /// Dépose une candidature de livreur (`POST /delivery/apply/`).
+  ///
+  /// Ne connecte personne, et c'est voulu : l'accusé rendu porte de quoi
+  /// animer l'écran du code — où il est parti, jusqu'à quand il vaut, à partir
+  /// de quand un renvoi est accepté — mais aucun jeton.
+  Future<eccore.CourierApplicationReceipt> deposerCandidature(
+    eccore.CourierApplication candidature,
+  ) {
+    return _delivery.apply(candidature);
+  }
+
+  /// Présente le code reçu et ouvre la session (`POST /auth/verify/`).
+  ///
+  /// Passe par `sessionProvider` et non par le dépôt directement : c'est là que
+  /// vit la garde de rôle, et un compte client qui saisirait son code ici doit
+  /// être refusé aussi sûrement qu'à la connexion.
+  Future<void> verifierCompte({required String email, required String code}) async {
+    await _container.read(eccore.sessionProvider.notifier).verifyAccount(
+      email: email,
+      code: code,
+    );
+    notifyListeners();
+  }
+
+  /// Redemande un code de vérification.
+  ///
+  /// Le serveur répond 202 même pour une adresse inconnue : ne jamais en
+  /// déduire qu'un compte existe. Le délai rendu (`retryAfter`) est celui du
+  /// serveur — c'est lui que le compte à rebours doit suivre.
+  Future<eccore.VerificationChallenge> renvoyerCodeDeVerification(String email) {
+    return _container.read(eccore.authRepositoryProvider).resendVerificationCode(email);
+  }
+
+  /// Demande un code de réinitialisation de mot de passe.
+  Future<eccore.VerificationChallenge> demanderReinitialisation(String email) {
+    return _container.read(eccore.authRepositoryProvider).requestPasswordReset(email);
+  }
+
+  /// Repose le mot de passe avec le code reçu, et ouvre la session.
+  ///
+  /// Toutes les sessions ouvertes ailleurs viennent d'être révoquées côté
+  /// serveur ; celle-ci est la seule qui vaille.
+  Future<void> reinitialiserMotDePasse({
+    required String email,
+    required String code,
+    required String nouveauMotDePasse,
+  }) async {
+    await _container.read(eccore.sessionProvider.notifier).resetPassword(
+      email: email,
+      code: code,
+      newPassword: nouveauMotDePasse,
+    );
+    notifyListeners();
+  }
+
+  /// Relit le dossier livreur seul (`GET /delivery/me/`).
+  ///
+  /// Sert aux écrans qui attendent une décision d'El Corazón : un dossier passé
+  /// de « en attente » à « validé » pendant que l'application tourne ne
+  /// s'annonce par aucun événement, et recharger toutes les courses pour lire
+  /// un seul champ serait disproportionné.
+  Future<void> rechargerDossier() async {
+    _courierProfile = await _delivery.profile();
+    notifyListeners();
+  }
+
+  /// Relit le compte lui-même (`GET /auth/me/`), sans toucher aux jetons.
+  Future<void> rechargerCompte() async {
+    await _container.read(eccore.sessionProvider.notifier).reload();
+    notifyListeners();
   }
 
   /// Met à jour son propre nom et son téléphone (`PATCH /auth/me/`).

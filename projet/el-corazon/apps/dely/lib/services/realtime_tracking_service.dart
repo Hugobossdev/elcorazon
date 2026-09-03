@@ -2,10 +2,13 @@ import 'dart:async';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart'
+    show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
+import 'package:elcora_dely/config/adresses.dart';
 
 /// Transport temps réel du livreur (Phase 6) — remplace intégralement
 /// `SupabaseRealtimeService`, supprimé avec cette tranche.
@@ -26,35 +29,47 @@ import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 /// Ce service ne connaît ni les courses ni les repositories : il transporte.
 /// [bind] lui fournit les deux gestes qui demandent cette connaissance, et que
 /// seul `AppService` peut rendre.
-class RealtimeTrackingService extends ChangeNotifier {
+class RealtimeTrackingService extends ChangeNotifier
+    with WidgetsBindingObserver {
   static final RealtimeTrackingService _instance =
       RealtimeTrackingService._internal();
   factory RealtimeTrackingService() => _instance;
   RealtimeTrackingService._internal();
 
-  /// Intervalle minimal entre deux relevés envoyés au serveur.
+  /// Cadence d'émission, de filtrage et de reprise.
   ///
-  /// Le serveur n'en retient de toute façon qu'un toutes les
-  /// `TRACKING_MIN_WRITE_SECONDS` (30 s) ou tous les
-  /// `TRACKING_MIN_WRITE_METERS` (100 m) — voir `apps/tracking/services.py`.
-  /// Émettre plus vite consomme du réseau et de la batterie pour des relevés
-  /// que le serveur écarte, et rapproche du quota (`429`).
-  static const _emissionMinimumInterval = Duration(seconds: 10);
+  /// Ces trois nombres étaient des constantes privées de cette classe : justes,
+  /// mais impossibles à corriger sans republier l'application du livreur — or
+  /// c'est précisément le genre de valeur qu'on ajuste à la lecture du terrain.
+  /// Ils vivent maintenant dans `TrackingSettings` (socle), se lisent depuis
+  /// l'environnement, et sont bornés par ce que le serveur accepte.
+  ///
+  /// Relus paresseusement : `dotenv` peut ne pas être chargé quand ce singleton
+  /// est construit, et une lecture faite trop tôt figerait les valeurs par
+  /// défaut pour toute la session.
+  eccore.TrackingSettings? _reglagesLus;
 
-  /// Déplacement à partir duquel le système réveille l'application.
-  ///
-  /// Sous le seuil serveur (100 m) à dessein : un relevé à 25 m arrivé juste
-  /// après les 30 s d'attente est écrit, alors qu'un filtre à 100 m ferait
-  /// perdre les déplacements lents — un livreur dans les embouteillages.
-  static const _distanceFilterMeters = 25;
+  eccore.TrackingSettings get reglages {
+    final dejaLus = _reglagesLus;
+    if (dejaLus != null) return dejaLus;
 
-  /// Battement pour un livreur immobile.
-  ///
-  /// Le flux de position ne dit rien tant que rien ne bouge : sans ce
-  /// battement, un livreur arrêté à un feu ou attendant au restaurant
-  /// disparaîtrait de la carte du client, qui verrait sa dernière position
-  /// vieillir sans savoir si le suivi fonctionne encore.
-  static const _heartbeatInterval = Duration(seconds: 30);
+    // `dotenv.env` **lève** tant que le fichier n'a pas été chargé — et il
+    // peut ne jamais l'être : `main()` avale l'échec de `dotenv.load` pour que
+    // l'application démarre quand même sur un `.env` manquant. Sans cette
+    // garde, chaque relevé de position faisait alors remonter un
+    // `NotInitializedError` au fond d'un écouteur asynchrone, et le suivi ne
+    // démarrait pas — pour un fichier de configuration facultatif.
+    final lus = eccore.TrackingSettings.depuisEnvironnement(
+      dotenv.isInitialized ? dotenv.env : const {},
+    );
+    final avertissement = lus.avertissement;
+    if (avertissement != null) {
+      // Journalisé, pas appliqué : un `.env` douteux ne doit pas couper le
+      // suivi, il doit se voir.
+      eccore.Journal.trace('⚠️ Réglage de suivi : $avertissement');
+    }
+    return _reglagesLus = lus;
+  }
 
   // --- file des courses proposées (ws/couriers/me/)
   eccore.RealtimeChannel? _feedChannel;
@@ -113,6 +128,38 @@ class RealtimeTrackingService extends ChangeNotifier {
   DateTime? _lastEmissionAt;
   Position? _currentPosition;
 
+  /// Le livreur a-t-il une course **en cours** ?
+  ///
+  /// ## Pourquoi le suivi ne suit plus la session
+  ///
+  /// Il la suivait : ouvrir l'application allumait le GPS jusqu'à la
+  /// déconnexion. Trois choses en découlaient, toutes fausses.
+  ///
+  /// * **La batterie.** Un flux haute précision tourne alors pendant les
+  ///   heures où le livreur attend une course. C'est le poste de dépense le
+  ///   plus lourd d'un téléphone, et il ne servait à personne : hors course, le
+  ///   serveur n'a aucune affectation à laquelle rattacher un relevé (L3), et
+  ///   `updateDeliveryLocation` rendait la main sans rien envoyer.
+  /// * **La promesse faite au livreur.** `Info.plist` lui annonce que sa
+  ///   position « n'est pas relevée entre deux courses » ; le code relevait.
+  ///   Une déclaration de confidentialité qui ne décrit pas le code est un
+  ///   motif de rejet App Store, et surtout ce n'est pas vrai.
+  /// * **La notification permanente.** Le service de premier plan Android
+  ///   affichait « Course en cours » à un livreur qui n'en avait aucune.
+  ///
+  /// La porte est donc la course, et `AppService` la tient : il est le seul à
+  /// savoir qu'une affectation est acceptée et pas encore livrée.
+  bool _courseEnCours = false;
+
+  /// Reprise du suivi quand l'obstacle a disparu.
+  ///
+  /// L'obstacle était constaté **une fois**, au démarrage : un livreur qui
+  /// accepte une course GPS éteint, puis le rallume, restait hors suivi pour
+  /// toute la course — rien ne relisait la condition. Le client voyait sa
+  /// dernière position vieillir sans explication, et le livreur un bandeau
+  /// qu'aucun de ses gestes ne faisait disparaître.
+  Timer? _reprisePositionTimer;
+
   /// Pourquoi le suivi ne tourne pas, s'il ne tourne pas. `null` quand tout va
   /// bien.
   ///
@@ -166,31 +213,26 @@ class RealtimeTrackingService extends ChangeNotifier {
     _reportPosition = reportPosition;
   }
 
-  String _wsUrl(String path) {
-    final apiBaseUrl =
-        dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:8000/api/v1';
-    final apiUri = Uri.parse(apiBaseUrl);
-    final scheme = apiUri.scheme == 'https' ? 'wss' : 'ws';
-    return Uri(
-      scheme: scheme,
-      host: apiUri.host,
-      port: apiUri.port,
-      path: path,
-    ).toString();
-  }
+  String _wsUrl(String path) => adresseWebSocket(path);
 
   // ------------------------------------------------- session du livreur
 
-  /// Ouvre la file des courses et démarre l'émission de position.
+  /// Ouvre la file des courses.
   ///
-  /// Les deux vivent le temps de la session, pas le temps d'un écran : un
-  /// livreur qui quitte la carte reste suivi et reste joignable. C'est
-  /// précisément ce que l'émission portée par l'écran de suivi ne garantissait
-  /// pas — fermer l'écran suffisait à disparaître.
+  /// Elle vit le temps de la session, pas le temps d'un écran : un livreur qui
+  /// quitte la carte reste joignable. C'est précisément ce qu'une file portée
+  /// par un écran ne garantissait pas — le fermer suffisait à ne plus recevoir
+  /// de course.
+  ///
+  /// **N'allume pas le GPS.** Le suivi de position, lui, est adossé à la
+  /// course : voir [_courseEnCours] et [suivreLaCourse].
   Future<void> startCourierSession() async {
     _sessionOpen = true;
+    // L'observateur de cycle de vie relit l'obstacle au retour au premier plan :
+    // c'est là que le livreur revient d'un aller dans les réglages du système,
+    // et le seul moment où l'on sait qu'il a peut-être changé quelque chose.
+    WidgetsBinding.instance.addObserver(this);
     await _connectCourierFeed();
-    await _startPositionEmission();
     notifyListeners();
   }
 
@@ -198,17 +240,13 @@ class RealtimeTrackingService extends ChangeNotifier {
   /// compte n'est plus celui d'un livreur.
   Future<void> stopCourierSession() async {
     _sessionOpen = false;
+    WidgetsBinding.instance.removeObserver(this);
     _feedReconnectTimer?.cancel();
     _feedReconnectTimer = null;
     _feedReconnectAttempts = 0;
 
-    await _positionSubscription?.cancel();
-    _positionSubscription = null;
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = null;
-    _lastEmissionAt = null;
-    _currentPosition = null;
-    _trackingUnavailableReason = null;
+    await _arreterEmission();
+    _courseEnCours = false;
 
     await _feedSubscription?.cancel();
     await _feedChannel?.close();
@@ -217,6 +255,64 @@ class RealtimeTrackingService extends ChangeNotifier {
     _isFeedConnected = false;
 
     notifyListeners();
+  }
+
+  /// Ouvre ou ferme le suivi selon qu'une course est en cours.
+  ///
+  /// Appelée par `AppService` à chaque fois que l'état des courses bouge —
+  /// acceptation, enlèvement, livraison, annulation, réaffectation,
+  /// rechargement de la liste. Idempotente : la rappeler avec la même valeur ne
+  /// rouvre pas le flux, ce qui compte parce qu'elle est appelée souvent et
+  /// qu'un flux réouvert redemande une fixation au capteur.
+  ///
+  /// C'est cette porte, et non un `if` dans l'émission, qui réalise le cycle :
+  ///
+  ///     course acceptée → suivi actif → livrée/annulée → suivi arrêté
+  Future<void> suivreLaCourse({required bool enCours}) async {
+    if (_courseEnCours == enCours) return;
+    _courseEnCours = enCours;
+
+    if (!enCours) {
+      eccore.Journal.trace('📍 Plus de course en cours — suivi arrêté.');
+      await _arreterEmission();
+      notifyListeners();
+      return;
+    }
+
+    eccore.Journal.trace('📍 Course en cours — suivi démarré.');
+    await _startPositionEmission();
+  }
+
+  /// Coupe le flux, le battement et la reprise, et oublie la dernière position.
+  ///
+  /// La position est oubliée délibérément : la garder ferait repartir le
+  /// battement sur un relevé vieux d'une course, et `currentPosition`
+  /// annoncerait « ici » un endroit que le livreur a quitté.
+  Future<void> _arreterEmission() async {
+    await _positionSubscription?.cancel();
+    _positionSubscription = null;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    _reprisePositionTimer?.cancel();
+    _reprisePositionTimer = null;
+    _lastEmissionAt = null;
+    _currentPosition = null;
+    _trackingUnavailableReason = null;
+  }
+
+  /// Relit l'obstacle au retour au premier plan.
+  ///
+  /// Le livreur revient des réglages du système — GPS rallumé, permission
+  /// accordée — et rien ne le constatait : l'obstacle avait été lu une fois,
+  /// au démarrage du suivi. Il restait affiché sur un téléphone où il n'existait
+  /// plus.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (!_sessionOpen || !_courseEnCours) return;
+    if (_positionSubscription != null) return;
+
+    unawaited(_startPositionEmission());
   }
 
   Future<void> _connectCourierFeed() async {
@@ -297,11 +393,22 @@ class RealtimeTrackingService extends ChangeNotifier {
     await _positionSubscription?.cancel();
     _positionSubscription = null;
     _heartbeatTimer?.cancel();
+    _reprisePositionTimer?.cancel();
+    _reprisePositionTimer = null;
+
+    // Garde de dernier recours : le flux ne s'ouvre que pour une course. Sans
+    // elle, une reprise programmée juste avant la livraison rallumerait le GPS
+    // après l'arrêt.
+    if (!_sessionOpen || !_courseEnCours) return;
 
     final obstacle = await _locationObstacle();
     if (obstacle != null) {
       _trackingUnavailableReason = obstacle;
       eccore.Journal.trace('⚠️ Suivi impossible : $obstacle');
+      // Reprogrammée, et non abandonnée : le livreur peut rallumer son GPS ou
+      // accorder la permission pendant la course, et le suivi doit repartir
+      // sans qu'il ait à quitter puis rouvrir l'application.
+      _programmerLaReprise();
       notifyListeners();
       return;
     }
@@ -319,17 +426,49 @@ class RealtimeTrackingService extends ChangeNotifier {
         // resterait vrai sur un abonnement mort.
         _trackingUnavailableReason = 'Position indisponible : $error';
         eccore.Journal.trace('⚠️ Flux de position interrompu : $error');
+        // Un flux mort ne se rouvre pas tout seul. Le laisser en l'état était
+        // le pire des cas : le livreur restait « en course », la carte du
+        // client figée, et rien n'annonçait la panne côté serveur.
+        unawaited(_positionSubscription?.cancel());
+        _positionSubscription = null;
+        _programmerLaReprise();
         notifyListeners();
       },
     );
 
-    // Battement pour le livreur immobile — voir [_heartbeatInterval].
-    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
+    // Battement pour le livreur immobile — voir [reglages.heartbeatInterval].
+    _heartbeatTimer = Timer.periodic(reglages.heartbeatInterval, (_) {
       final position = _currentPosition;
       if (position != null) unawaited(_emitPosition(position));
     });
 
     notifyListeners();
+  }
+
+  /// Traduction du cran de précision partagé vers l'énumération du greffon.
+  ///
+  /// `TrackingAccuracy` n'en compte que trois là où `geolocator` en propose
+  /// six : le suivi n'a pas besoin des autres, et les offrir inviterait à un
+  /// réglage dont personne ne saurait dire l'effet.
+  LocationAccuracy get _precision => switch (reglages.accuracy) {
+        eccore.TrackingAccuracy.basse => LocationAccuracy.low,
+        eccore.TrackingAccuracy.moyenne => LocationAccuracy.medium,
+        eccore.TrackingAccuracy.haute => LocationAccuracy.high,
+      };
+
+  /// Reprogramme une tentative d'ouverture du flux de position.
+  ///
+  /// Cadence unique et non exponentielle, contrairement à la reprise de la file
+  /// des courses : ici, ce qu'on attend est un geste de l'utilisateur — rallumer
+  /// le GPS, accorder la permission —, pas le rétablissement d'un serveur qu'on
+  /// martèlerait. Espacer n'apporterait rien et retarderait la reprise du seul
+  /// moment qui compte.
+  void _programmerLaReprise() {
+    _reprisePositionTimer?.cancel();
+    _reprisePositionTimer = Timer(reglages.retryInterval, () {
+      if (!_sessionOpen || !_courseEnCours) return;
+      unawaited(_startPositionEmission());
+    });
   }
 
   /// Réglages du flux, par plateforme.
@@ -339,9 +478,9 @@ class RealtimeTrackingService extends ChangeNotifier {
   LocationSettings get _locationSettings {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return AndroidSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: _distanceFilterMeters,
-        intervalDuration: _emissionMinimumInterval,
+        accuracy: _precision,
+        distanceFilter: reglages.distanceFilterMeters,
+        intervalDuration: reglages.emissionInterval,
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationTitle: 'Course en cours',
           notificationText: 'Votre position est partagée avec le client.',
@@ -363,15 +502,15 @@ class RealtimeTrackingService extends ChangeNotifier {
       // restaurant. L'indicateur, lui, est demandé explicitement : le livreur
       // doit voir que sa position part.
       return AppleSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: _distanceFilterMeters,
+        accuracy: _precision,
+        distanceFilter: reglages.distanceFilterMeters,
         showBackgroundLocationIndicator: true,
         activityType: ActivityType.automotiveNavigation,
       );
     }
-    return const LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: _distanceFilterMeters,
+    return LocationSettings(
+      accuracy: _precision,
+      distanceFilter: reglages.distanceFilterMeters,
     );
   }
 
@@ -399,7 +538,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   }
 
   /// Remet un relevé à `AppService`, au plus une fois par
-  /// [_emissionMinimumInterval].
+  /// [reglages.emissionInterval].
   ///
   /// Rien n'est relancé en cas d'échec : un relevé perdu n'a aucune valeur,
   /// c'est le suivant qui compte. Une file de relevés en attente ferait
@@ -408,7 +547,7 @@ class RealtimeTrackingService extends ChangeNotifier {
   Future<void> _emitPosition(Position position) async {
     final derniere = _lastEmissionAt;
     if (derniere != null &&
-        DateTime.now().difference(derniere) < _emissionMinimumInterval) {
+        DateTime.now().difference(derniere) < reglages.emissionInterval) {
       return;
     }
     _lastEmissionAt = DateTime.now();

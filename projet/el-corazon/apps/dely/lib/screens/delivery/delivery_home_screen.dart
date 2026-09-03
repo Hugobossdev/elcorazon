@@ -287,12 +287,13 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                             child: const Text('Réessayer'),
                           ),
                           TextButton(
-                            onPressed: () {
-                              appService.logout();
-                              Navigator.of(context).pushReplacementNamed(
-                                '/login',
-                              ); // Ou votre route de login
-                            },
+                            // Pas de navigation à la suite : `DriverGate`
+                            // écoute la session et remplace l'écran de
+                            // lui-même. La ligne qui était ici poussait
+                            // `/login`, une route qui n'a jamais existé — elle
+                            // tombait dans le cas par défaut d'`onGenerateRoute`
+                            // et ne marchait que par accident.
+                            onPressed: () => unawaited(appService.logout()),
                             child: const Text('Se déconnecter'),
                           ),
                         ],

@@ -60,6 +60,66 @@ class Validators {
     }
     return null;
   }
+
+  // ------------------------------------------------- création de compte
+  //
+  // Les trois validateurs ci-dessous doublent une règle que le serveur applique
+  // de toute façon — c'est lui qui décide, et ces contrôles ne le remplacent
+  // pas. Ils existent pour que le refus arrive **avant** l'aller-retour : sur
+  // un réseau lent, découvrir au bout de huit secondes qu'il manquait un « + »
+  // au numéro fait abandonner le formulaire.
+
+  /// Le format E.164 exigé par le serveur (`phone_validator`).
+  ///
+  /// `+22890123456` : un « + », un premier chiffre non nul, et de huit à
+  /// quinze chiffres en tout. Le numéro local togolais seul — `90123456` — est
+  /// refusé, ici comme là-bas : sans indicatif, deux pays ont le même numéro.
+  static final RegExp _e164Regex = RegExp(r'^\+[1-9]\d{7,14}$');
+
+  static String? validatePhoneE164(String? value) {
+    final numero = value?.replaceAll(RegExp(r'[\s-]'), '') ?? '';
+    if (numero.isEmpty) {
+      return 'Veuillez entrer votre numéro de téléphone';
+    }
+    if (!numero.startsWith('+')) {
+      return 'Ajoutez l\'indicatif du pays, par exemple +228';
+    }
+    if (!_e164Regex.hasMatch(numero)) {
+      return 'Numéro invalide. Format attendu : +22890123456';
+    }
+    return null;
+  }
+
+  /// Ce que Django refuse à coup sûr — longueur, et mot de passe tout en
+  /// chiffres.
+  ///
+  /// Volontairement en deçà de ses validateurs : la liste des mots de passe
+  /// courants et la comparaison au nom du compte vivent côté serveur, et les
+  /// recopier ici produirait deux jeux de règles qui divergeraient. Ce qui est
+  /// vérifié ici est ce qui se vérifie sans rien connaître d'autre.
+  static String? validateStrongPassword(String? value) {
+    final motDePasse = value ?? '';
+    if (motDePasse.isEmpty) {
+      return 'Veuillez choisir un mot de passe';
+    }
+    if (motDePasse.length < 8) {
+      return 'Le mot de passe doit contenir au moins 8 caractères';
+    }
+    if (RegExp(r'^\d+$').hasMatch(motDePasse)) {
+      return 'Un mot de passe uniquement composé de chiffres est trop facile à deviner';
+    }
+    return null;
+  }
+
+  static String? validatePasswordConfirmation(String? value, String motDePasse) {
+    if (value == null || value.isEmpty) {
+      return 'Confirmez votre mot de passe';
+    }
+    if (value != motDePasse) {
+      return 'Les deux mots de passe ne correspondent pas';
+    }
+    return null;
+  }
 }
 
 

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/order_management_service.dart';
+import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/statut_commande.dart';
+import 'package:admin/presentation/statut_livreur.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/screens/admin/driver_map_screen.dart';
 import 'package:admin/ui/ui.dart';
@@ -30,18 +32,22 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
   Future<void> _refreshData() async {
     final orderService = context.read<OrderManagementService>();
     final driverService = context.read<DriverManagementService>();
+    // Les courses en un appel, et non une requête par ligne affichée : c'est
+    // ce que rend `activeByOrder()`.
+    final assignments = context.read<AssignmentService>();
 
     await Future.wait([
       orderService.refresh(),
       driverService.refresh(),
+      assignments.refresh(),
     ]);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Consumer2<OrderManagementService, DriverManagementService>(
-        builder: (context, orderService, driverService, child) {
+      body: Consumer3<OrderManagementService, DriverManagementService, AssignmentService>(
+        builder: (context, orderService, driverService, assignments, child) {
           if (orderService.isLoading && orderService.allOrders.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -79,7 +85,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                             final order = activeOrders[index];
                             final driver = _livreurDe(
                               driverService,
-                              order.livreurAffecte,
+                              assignments.courierIdOf(order.id),
                             );
 
                             return _buildDeliveryCard(context, order, driver);
@@ -136,8 +142,9 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                     backgroundColor: sem.success.withValues(alpha: 0.10),
                     selectedColor: sem.success.withValues(alpha: 0.20),
                     onSelected: (selected) {
-                      setState(() =>
-                          _statusFilter = selected ? StatutCommande.prete : null,);
+                      setState(
+                        () => _statusFilter = selected ? StatutCommande.prete : null,
+                      );
                     },
                   ),
                   FilterChip(
@@ -146,8 +153,9 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                     backgroundColor: sem.info.withValues(alpha: 0.10),
                     selectedColor: sem.info.withValues(alpha: 0.20),
                     onSelected: (selected) {
-                      setState(() => _statusFilter =
-                          selected ? StatutCommande.enRoute : null,);
+                      setState(
+                        () => _statusFilter = selected ? StatutCommande.enRoute : null,
+                      );
                     },
                   ),
                 ],
@@ -159,7 +167,11 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
     );
   }
 
-  Widget _buildDeliveryCard(BuildContext context, eccore.Order order, eccore.CourierProfile? driver) {
+  Widget _buildDeliveryCard(
+    BuildContext context,
+    eccore.Order order,
+    eccore.CourierProfile? driver,
+  ) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final statusColor = _getStatusColor(context, order.statut);
@@ -177,13 +189,11 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
               children: [
                 // Badge de statut
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border:
-                        Border.all(color: statusColor.withValues(alpha: 0.3)),
+                    border: Border.all(color: statusColor.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -281,14 +291,42 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                           fontSize: 12,
                         ),
                       ),
+                      // Depuis quand ce livreur n'a plus rien transmis.
+                      //
+                      // C'est la seule information de cette carte qui distingue
+                      // « la livraison avance » de « on ne sait plus où elle
+                      // en est » : le statut, lui, reste `en_route` aussi
+                      // longtemps que personne ne le change, y compris quand le
+                      // téléphone du livreur est éteint depuis vingt minutes.
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.circle,
+                            size: 8,
+                            color: driver.couleurDeFraicheur,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            driver.libelleDePosition,
+                            style: TextStyle(
+                              color: driver.couleurDeFraicheur,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ] else
                   Expanded(
                     child: Row(
                       children: [
-                        Icon(Icons.warning_amber_rounded,
-                            color: scheme.tertiary, size: 20,),
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          color: scheme.tertiary,
+                          size: 20,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           'Aucun livreur assigné',
@@ -408,7 +446,9 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
   }
 
   Future<void> _showAssignDriverDialog(
-      BuildContext context, eccore.Order order,) async {
+    BuildContext context,
+    eccore.Order order,
+  ) async {
     final driverService = context.read<DriverManagementService>();
     final orderService = context.read<OrderManagementService>();
     final availableDrivers = driverService.getAvailableDrivers();
@@ -449,10 +489,11 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                          content: Text('Livreur ${driver.fullName} assigné'),),
+                        content: Text('Livreur ${driver.fullName} assigné'),
+                      ),
                     );
                   }
-                                },
+                },
               );
             },
           ),

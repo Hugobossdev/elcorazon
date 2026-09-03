@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import 'package:elcora_fast/services/app_service.dart';
 
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/services/push_notification_service.dart';
@@ -40,11 +43,29 @@ class PushNotificationRouter extends StatefulWidget {
 class _PushNotificationRouterState extends State<PushNotificationRouter> {
   StreamSubscription<PushNotification>? _abonnement;
 
+  /// L'intention gardée quand la notification arrive avant la session.
+  ///
+  /// Au démarrage à froid, la notification est lue **avant `runApp`** et la
+  /// session n'est pas encore restaurée. Naviguer tout de suite enverrait vers
+  /// un écran protégé un utilisateur que l'application ne connaît pas encore.
+  /// On garde donc l'intention et on la rejoue dès qu'une session s'ouvre —
+  /// ce que demande le contrat des notifications : authentifier d'abord,
+  /// naviguer ensuite.
+  PushNotification? _enAttenteDeSession;
+
   @override
   void initState() {
     super.initState();
-    _abonnement =
-        PushNotificationService().notificationStream.listen(_ouvrir);
+    final service = PushNotificationService();
+    _abonnement = service.notificationStream.listen(_ouvrir);
+
+    // Réclamer l'ouverture retenue pendant `prepare()`, quand ce widget
+    // n'existait pas encore. Après l'abonnement, pour qu'une notification
+    // déjà passée par le flux ne soit pas rejouée.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final attente = service.consommerOuvertureEnAttente();
+      if (attente != null) _ouvrir(attente);
+    });
   }
 
   @override
@@ -55,6 +76,14 @@ class _PushNotificationRouterState extends State<PushNotificationRouter> {
 
   void _ouvrir(PushNotification notification) {
     if (!mounted) return;
+    PushNotificationService().marquerOuvertureTraitee(notification.id);
+
+    // Pas de session : on retient plutôt que d'envoyer vers un écran que le
+    // serveur refusera de toute façon.
+    if (!context.read<AppService>().isLoggedIn) {
+      _enAttenteDeSession = notification;
+      return;
+    }
 
     // Le contrat des notifications est explicite : la charge utile porte de
     // quoi **ouvrir un écran**, jamais l'objet métier — il aura changé d'ici
@@ -88,5 +117,20 @@ class _PushNotificationRouterState extends State<PushNotificationRouter> {
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) {
+    // `watch` et non `read` : c'est ce qui reconstruit ce widget quand la
+    // session s'ouvre, et donc ce qui rejoue l'intention gardée. Sans lui,
+    // une notification reçue avant la connexion resterait en attente pour
+    // toujours.
+    final connecte = context.watch<AppService>().isLoggedIn;
+    final attente = _enAttenteDeSession;
+
+    if (connecte && attente != null) {
+      _enAttenteDeSession = null;
+      // Après la frame : naviguer pendant un `build` est interdit.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _ouvrir(attente));
+    }
+
+    return widget.child;
+  }
 }

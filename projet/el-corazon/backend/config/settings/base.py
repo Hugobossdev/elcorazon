@@ -280,7 +280,24 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "common.pagination.StandardPagination",
     "PAGE_SIZE": 20,
-    "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"],
+    # Les trois, et pas seulement le premier.
+    #
+    # `search_fields` et `ordering_fields` étaient déclarés sur six vues —
+    # clients, rôles, catalogue de supervision, promotions — **sans que les
+    # backends correspondants soient montés**. DRF ignore alors silencieusement
+    # `?search=` et `?ordering=` : la liste revient entière, en 200, et rien ne
+    # signale que le filtre n'a pas été appliqué. Le champ de recherche des
+    # clients du back-office rendait ainsi tous les clients, quelle que soit la
+    # saisie.
+    #
+    # C'est la panne la plus discrète de cette famille : une déclaration inerte
+    # se relit comme une fonctionnalité, et le seul symptôme est un résultat
+    # trop large — qu'on prend pour un jeu de données de test.
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+        "rest_framework.filters.OrderingFilter",
+    ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "common.exceptions.problem_detail_handler",
     # Limitation appliquée **partout** par défaut. Ne la déclarer que sur
@@ -308,6 +325,10 @@ REST_FRAMEWORK = {
         # T1 — force brute, par adresse puis par identifiant tenté.
         "auth_ip": "20/min",
         "auth_identifier": "5/min",
+        # Émission d'un code de vérification : chaque appel réussi expédie un
+        # courriel. Le quota borne l'usage du service comme catapulte à
+        # courriels vers une adresse qu'on ne possède pas.
+        "auth_code": "5/hour",
         # Le prestataire de paiement, qui peut légitimement grouper ses envois.
         "webhook": "60/min",
         # Opérations coûteuses ou abusables. Les quotas sont volontairement bas :
@@ -418,6 +439,47 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "sub",
     "TOKEN_TYPE_CLAIM": "typ",
 }
+
+# --------------------------------------------------------------- courriel
+#
+# L'expéditeur des messages transactionnels — aujourd'hui les codes de
+# vérification de compte et de réinitialisation de mot de passe.
+#
+# Une valeur de repli est posée ici, contrairement aux identifiants SMTP que
+# `prod.py` exige : sans elle, Django expédie depuis `webmaster@localhost`, une
+# adresse qu'aucun relais n'accepte et qui ferait échouer l'envoi loin de sa
+# cause. `prod.py` la remplace par l'adresse réellement déclarée au domaine.
+DEFAULT_FROM_EMAIL: str = config("DEFAULT_FROM_EMAIL", default="El Corazón <no-reply@localhost>")
+
+# ------------------------------------------------- vérification de compte
+#
+# Le code à usage unique envoyé par courriel : durée de vie, délai entre deux
+# envois, nombre d'essais avant fermeture. Trois réglages, parce que les trois
+# se règlent en exploitation — un opérateur de messagerie lent demande une
+# fenêtre plus large, une campagne d'essais en force demande un compteur plus
+# serré — et qu'aucun ne doit se changer par redéploiement.
+#
+# Six chiffres et non quatre : quatre, c'est dix mille possibilités, que le
+# compteur d'essais seul ne suffit pas à défendre quand l'attaquant dispose de
+# plusieurs comptes cibles.
+ACCOUNT_VERIFICATION_CODE_LENGTH: int = config(
+    "ACCOUNT_VERIFICATION_CODE_LENGTH", default=6, cast=int
+)
+# Dix minutes : assez pour aller chercher un courriel sur un réseau lent, trop
+# peu pour qu'un code oublié dans une boîte partagée reste opposable.
+ACCOUNT_VERIFICATION_CODE_TTL_SECONDS: int = config(
+    "ACCOUNT_VERIFICATION_CODE_TTL_SECONDS", default=600, cast=int
+)
+# Délai minimal entre deux envois. C'est aussi la valeur que le client reçoit
+# pour animer son compte à rebours : le serveur en est la source, sinon deux
+# applications afficheraient deux durées et l'une des deux mentirait.
+ACCOUNT_VERIFICATION_RESEND_COOLDOWN_SECONDS: int = config(
+    "ACCOUNT_VERIFICATION_RESEND_COOLDOWN_SECONDS", default=60, cast=int
+)
+# Essais autorisés sur un même code avant sa fermeture définitive.
+ACCOUNT_VERIFICATION_MAX_ATTEMPTS: int = config(
+    "ACCOUNT_VERIFICATION_MAX_ATTEMPTS", default=5, cast=int
+)
 
 # --------------------------------------------------------------- stockage
 #

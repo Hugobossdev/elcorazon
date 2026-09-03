@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/directions_service.dart';
+import 'package:elcora_dely/services/realtime_tracking_service.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/widgets/loading_widget.dart';
@@ -43,14 +43,34 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   /// continuait de viser le restaurant après la récupération.
   late Course _course;
 
-  bool _isTracking = false;
+  /// La caméra suit-elle le livreur ?
+  ///
+  /// Ce bouton s'appelait « démarrer / arrêter le suivi » et n'arrêtait rien de
+  /// tel : l'émission vers le serveur vit dans `RealtimeTrackingService`, pour
+  /// toute la course, et fermer ce flux-ci ne la touchait pas. Le livreur
+  /// croyait donc pouvoir couper son suivi d'un geste — il ne coupait que le
+  /// recentrage de sa propre carte. Le bouton dit maintenant ce qu'il fait.
+  bool _cameraSuitLeLivreur = true;
   bool _isUpdatingStatus = false;
   bool _isLoading = true;
   bool _isCalculatingRoute = false;
   String _estimatedTime = 'Calcul en cours...';
   double _estimatedDistance = 0.0;
 
-  StreamSubscription<Position>? _positionSubscription;
+  /// Le transport temps réel, seul détenteur du flux de position.
+  ///
+  /// ## Pourquoi cet écran n'ouvre plus le sien
+  ///
+  /// Il ouvrait un **second** `Geolocator.getPositionStream` en parallèle de
+  /// celui du service, uniquement pour bouger un repère sur sa carte. Deux flux
+  /// haute précision sur le même appareil, c'est deux fois la dépense du poste
+  /// le plus lourd d'un téléphone, pour une donnée que le premier avait déjà et
+  /// publie (`currentPosition`, avec notification). Le second n'apportait qu'une
+  /// occasion de diverger : ses réglages n'étaient pas ceux du suivi — filtre à
+  /// 10 m au lieu du réglage partagé, aucune déclaration d'arrière-plan — et il
+  /// s'arrêtait à la fermeture de l'écran alors que le vrai suivi continuait.
+  final RealtimeTrackingService _tracking = RealtimeTrackingService();
+
   final DirectionsService _directionsService = DirectionsService();
   
   // Dernière position pour éviter trop de recalculs
@@ -83,142 +103,73 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
 
   @override
   void dispose() {
-    _stopTracking();
+    _tracking.removeListener(_surNouvellePosition);
     super.dispose();
   }
 
+  /// Prend la position que le service tient déjà, et suit ses mises à jour.
+  ///
+  /// L'écran relevait lui-même un premier point puis ouvrait son propre flux.
+  /// Les deux gestes doublaient ce que `RealtimeTrackingService` fait pour la
+  /// course entière, avec deux conséquences : la dépense d'un second capteur
+  /// haute précision, et une carte qui pouvait afficher une position pendant
+  /// que le vrai suivi était en panne — le livreur se croyait suivi.
   Future<void> _initializeTracking() async {
     if (!mounted) return;
 
-    try {
-      // Get current driver location with timeout
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception('Timeout: Impossible de récupérer la position');
-        },
+    _tracking.addListener(_surNouvellePosition);
+
+    final connue = _tracking.currentPosition;
+    if (connue != null) {
+      _driverLocation = LatLng(connue.latitude, connue.longitude);
+    }
+
+    // Les deux points de la course sont déjà connus (voir `initState`) : ils
+    // viennent de l'affectation, que le serveur rend avec `pickup_location` et
+    // `delivery_location`, tous deux obligatoires.
+    //
+    // Cet écran géocodait à la place la **chaîne** d'adresse de livraison, et
+    // retombait, quand le géocodage échouait, sur `LatLng(5.3599, -4.0083)` —
+    // Abidjan, sous un commentaire annonçant Lomé. Le restaurant, lui, était un
+    // point écrit en dur, le même pour tous les établissements. Un livreur
+    // pouvait donc être guidé vers un autre pays sans qu'aucune erreur ne
+    // s'affiche.
+    _updateMarkers();
+    if (_driverLocation != null) await _calculateRoute();
+
+    if (mounted) setState(() => _isLoading = false);
+  }
+
+  /// Une position vient d'arriver — ou le suivi vient de s'interrompre.
+  ///
+  /// Le service notifie aussi quand il **cesse** de suivre : la position
+  /// redevient nulle, et le repère doit alors rester là où il était plutôt que
+  /// de disparaître. C'est la dernière position connue, et le bandeau au-dessus
+  /// de la carte dit qu'elle ne bouge plus.
+  void _surNouvellePosition() {
+    if (!mounted) return;
+
+    final position = _tracking.currentPosition;
+    if (position == null) {
+      // Rafraîchit le bandeau d'obstacle sans toucher au repère.
+      setState(() {});
+      return;
+    }
+
+    _driverLocation = LatLng(position.latitude, position.longitude);
+    _updateMarkers();
+
+    if (_cameraSuitLeLivreur) {
+      unawaited(
+        _mapController
+                ?.animateCamera(CameraUpdate.newLatLng(_driverLocation!))
+                .catchError((Object e) => Journal.trace('Camera: $e')) ??
+            Future<void>.value(),
       );
-
-      if (!mounted) return;
-
-      _driverLocation = LatLng(position.latitude, position.longitude);
-
-      // Les deux points sont déjà connus (voir `initState`) : ils viennent de
-      // l'affectation, que le serveur rend avec `pickup_location` et
-      // `delivery_location`, tous deux obligatoires.
-      //
-      // Cet écran géocodait à la place la **chaîne** d'adresse de livraison,
-      // et retombait, quand le géocodage échouait, sur `LatLng(5.3599,
-      // -4.0083)` — Abidjan, sous un commentaire annonçant Lomé. Le
-      // restaurant, lui, était un point écrit en dur, le même pour tous les
-      // établissements. Un livreur pouvait donc être guidé vers un autre pays
-      // sans qu'aucune erreur ne s'affiche.
-
-      // Start tracking
-      if (mounted) {
-        await _startTracking();
-      }
-
-      // Calculate route and ETA
-      if (mounted) {
-        await _calculateRoute();
-      }
-
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur d\'initialisation: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     }
-  }
 
-  Future<void> _startTracking() async {
-    if (_isTracking || !mounted) return;
-
-    setState(() => _isTracking = true);
-
-    // Start position stream
-    final positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // Update every 10 meters
-      ),
-    );
-
-    _positionSubscription = positionStream.listen(
-      (Position position) async {
-        if (!mounted) return;
-
-        _driverLocation = LatLng(position.latitude, position.longitude);
-
-        // Update map
-        if (_mapController != null && mounted) {
-          try {
-            await _mapController!.animateCamera(
-              CameraUpdate.newLatLng(_driverLocation!),
-            );
-          } catch (e) {
-            Journal.trace('Error updating camera: $e');
-          }
-        }
-
-        // Update markers
-        if (mounted) {
-          _updateMarkers();
-        }
-
-        // L'émission vers le backend n'est plus faite ici : `AppService` la
-        // tient pour toute la session (`RealtimeTrackingService`), si bien que
-        // fermer cet écran ne fait plus disparaître le livreur du suivi. Ce
-        // flux-ci ne sert donc plus qu'à la carte et à l'itinéraire.
-
-        // Recalculate route if needed (throttle to avoid too many calculations)
-        if (mounted) {
-          await _calculateRoute();
-        }
-
-        if (mounted) {
-          setState(() {});
-        }
-      },
-      onError: (error) {
-        Journal.trace('Error in position stream: $error');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Erreur de localisation: $error'),
-              backgroundColor: Colors.orange,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      },
-    );
-  }
-
-  void _stopTracking() {
-    _positionSubscription?.cancel();
-    _positionSubscription = null;
-    
-    if (mounted) {
-      setState(() => _isTracking = false);
-    }
+    unawaited(_calculateRoute());
+    setState(() {});
   }
 
   Future<void> _calculateRoute() async {
@@ -484,8 +435,11 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       );
 
       // La course est close : il n'y a plus rien à suivre sur cette carte.
+      //
+      // Le suivi GPS, lui, s'arrête tout seul : `AppService` referme la porte
+      // dès qu'aucune course n'est active (`suivreLaCourse`). Le faire aussi
+      // ici laisserait croire que c'est cet écran qui en décide.
       if (_course.prochaineEtape == null) {
-        _stopTracking();
         Navigator.pop(context);
       } else {
         // La destination vient peut-être de changer (restaurant -> client) :
@@ -553,6 +507,53 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
     return confirme ?? false;
   }
 
+  /// Voyant d'état du suivi, et ce qui le bloque le cas échéant.
+  ///
+  /// L'obstacle vient du service : c'est lui qui a essayé d'ouvrir le flux et
+  /// qui sait pourquoi il n'y est pas arrivé. L'afficher ici est le seul moyen
+  /// pour le livreur d'apprendre qu'il n'est pas suivi autrement que par le
+  /// reproche d'un client.
+  Widget _voyantDeSuivi() {
+    final obstacle = _tracking.trackingUnavailableReason;
+    final actif = _tracking.isTrackingLocation && obstacle == null;
+    final couleur = actif
+        ? Colors.green
+        : (obstacle == null ? Colors.grey : Colors.orange);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 12,
+              height: 12,
+              decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                actif ? 'Suivi actif' : 'Suivi interrompu',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: couleur,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        if (obstacle != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            obstacle,
+            style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -562,9 +563,17 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            onPressed: _isTracking ? _stopTracking : _startTracking,
-            icon: Icon(_isTracking ? Icons.pause : Icons.play_arrow),
-            tooltip: _isTracking ? 'Arrêter le suivi' : 'Démarrer le suivi',
+            onPressed: () => setState(
+              () => _cameraSuitLeLivreur = !_cameraSuitLeLivreur,
+            ),
+            icon: Icon(
+              _cameraSuitLeLivreur
+                  ? Icons.my_location
+                  : Icons.location_searching,
+            ),
+            tooltip: _cameraSuitLeLivreur
+                ? 'La carte suit votre position'
+                : 'Recentrer sur votre position',
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
@@ -655,30 +664,14 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Order info
-                        Row(
-                          children: [
-                            Container(
-                              width: 12,
-                              height: 12,
-                              decoration: BoxDecoration(
-                                color: _isTracking ? Colors.green : Colors.grey,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _isTracking ? 'Suivi actif' : 'Suivi arrêté',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: _isTracking ? Colors.green : Colors.grey,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
+                        // État **réel** du suivi, lu sur le service qui
+                        // l'assure. Ce voyant reflétait jusqu'ici l'ouverture
+                        // du flux de cet écran : il passait au vert dès que la
+                        // carte s'affichait, y compris quand le suivi
+                        // n'émettait rien vers le serveur — GPS coupé,
+                        // permission refusée. Le livreur lisait « suivi actif »
+                        // pendant que le client voyait un point immobile.
+                        _voyantDeSuivi(),
                         const SizedBox(height: 16),
 
                         // ETA and distance

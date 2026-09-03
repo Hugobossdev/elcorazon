@@ -24,12 +24,18 @@ class DriverManagementService extends ChangeNotifier {
       eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient);
   List<eccore.CourierProfile> _drivers = [];
   bool _isLoading = false;
+
+  /// Dernier refus du serveur, tel qu'il l'a formulé. `null` quand tout va
+  /// bien. Les écrans d'écriture l'affichent — un formulaire qui échoue sans
+  /// dire pourquoi se remplit une seconde fois à l'identique.
+  String? _error;
   StatutLivreur? _statusFilter;
   String? _sortOption;
   String _searchQuery = '';
 
   List<eccore.CourierProfile> get drivers => _drivers;
   bool get isLoading => _isLoading;
+  String? get error => _error;
 
   /// Liste filtrée et triée des livreurs
   List<eccore.CourierProfile> get filteredDrivers {
@@ -93,8 +99,7 @@ class DriverManagementService extends ChangeNotifier {
 
     try {
       final remote = await _couriers.list();
-      _drivers = remote
-        ..sort((a, b) => a.fullName.compareTo(b.fullName));
+      _drivers = remote..sort((a, b) => a.fullName.compareTo(b.fullName));
       eccore.Journal.trace('DriverManagementService: ${_drivers.length} livreur(s)');
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('DriverManagementService: chargement impossible — ${e.code}');
@@ -130,12 +135,65 @@ class DriverManagementService extends ChangeNotifier {
         phone: phone,
         vehiclePlate: vehiclePlate,
       );
-      _drivers = [..._drivers, created]
-        ..sort((a, b) => a.fullName.compareTo(b.fullName));
+      _drivers = [..._drivers, created]..sort((a, b) => a.fullName.compareTo(b.fullName));
       notifyListeners();
       return true;
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('DriverManagementService: embauche refusée — ${e.code}');
+      return false;
+    }
+  }
+
+  /// Corrige le dossier d'un livreur — permission `couriers.write`.
+  ///
+  /// Ce geste **n'existait pas** : `StaffCourierViewSet` était en création et
+  /// lecture seule, si bien qu'une plaque relevée de travers à l'embauche ou un
+  /// numéro qui change n'avait pour seule issue que d'ouvrir un second compte —
+  /// c'est-à-dire de dédoubler un livreur et de scinder ses compteurs.
+  ///
+  /// Le serveur n'accepte qu'une **liste blanche** : identité de contact et
+  /// véhicule. Le statut du dossier, les pièces, la disponibilité, les
+  /// compteurs, l'établissement et l'adresse électronique lui sont fermés — ce
+  /// service ne peut donc pas les proposer, quoi qu'un écran lui passe.
+  ///
+  /// Les champs laissés à `null` ne sont pas envoyés, donc pas touchés.
+  Future<bool> updateDriver({
+    required String driverId,
+    String? fullName,
+    String? phone,
+    String? vehicleType,
+    String? vehiclePlate,
+    String? nationalIdNumber,
+    String? licenceNumber,
+  }) async {
+    try {
+      final maj = await _couriers.update(
+        courierId: driverId,
+        fullName: fullName,
+        phone: phone,
+        vehicleType: vehicleType,
+        vehiclePlate: vehiclePlate,
+        nationalIdNumber: nationalIdNumber,
+        licenceNumber: licenceNumber,
+      );
+      final index = _drivers.indexWhere((driver) => driver.id == driverId);
+      if (index != -1) {
+        // La réponse porte le dossier complet : on remplace la ligne plutôt
+        // que d'y recopier les champs saisis, ce qui laisserait diverger
+        // l'affichage de ce que le serveur a réellement retenu.
+        _drivers[index] = maj;
+        _drivers.sort((a, b) => a.fullName.compareTo(b.fullName));
+      }
+      _error = null;
+      notifyListeners();
+      return true;
+    } on eccore.ApiException catch (e) {
+      // Le message du serveur est conservé tel quel : il dit lequel des champs
+      // est refusé et pourquoi — « ce numéro est déjà associé à un autre
+      // compte » se corrige, « une erreur est survenue » non.
+      _error = e.detail;
+      eccore.Journal.trace('DriverManagementService: correction refusée — ${e.code}');
+      notifyListeners();
       return false;
     }
   }
@@ -186,7 +244,9 @@ class DriverManagementService extends ChangeNotifier {
       final remote = await _couriers.availableFor(orderId);
       return remote;
     } on eccore.ApiException catch (e) {
-      eccore.Journal.trace('DriverManagementService: éligibles indisponibles — ${e.code}');
+      eccore.Journal.trace(
+          'DriverManagementService: éligibles indisponibles — ${e.code}',
+          );
       return [];
     }
   }
@@ -195,8 +255,7 @@ class DriverManagementService extends ChangeNotifier {
   List<eccore.CourierProfile> getAvailableDrivers() {
     return _drivers
         .where(
-          (driver) =>
-              driver.statut == StatutLivreur.disponible && driver.estValide,
+          (driver) => driver.statut == StatutLivreur.disponible && driver.estValide,
         )
         .toList();
   }
@@ -299,8 +358,7 @@ class DriverManagementService extends ChangeNotifier {
         _drivers.where((d) => d.statut == StatutLivreur.horsLigne).length;
 
     final averageRating = _drivers.isNotEmpty
-        ? _drivers.map((d) => d.ratingAverage).reduce((a, b) => a + b) /
-            _drivers.length
+        ? _drivers.map((d) => d.ratingAverage).reduce((a, b) => a + b) / _drivers.length
         : 0.0;
 
     final totalDeliveries = _drivers.fold(
@@ -357,7 +415,9 @@ class DriverManagementService extends ChangeNotifier {
         'verification_status': courier.verificationStatus,
       };
     } on eccore.ApiException catch (e) {
-      eccore.Journal.trace('DriverManagementService: statistiques indisponibles — ${e.code}');
+      eccore.Journal.trace(
+        'DriverManagementService: statistiques indisponibles — ${e.code}',
+      );
       return {};
     }
   }

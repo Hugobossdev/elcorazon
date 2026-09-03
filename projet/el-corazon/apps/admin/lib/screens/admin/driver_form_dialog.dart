@@ -4,6 +4,7 @@ import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/statut_livreur.dart';
+import 'package:admin/ui/ui.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/custom_text_field.dart';
 
@@ -35,16 +36,30 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
 
   StatutLivreur _selectedStatus = StatutLivreur.disponible;
   String? _selectedVehicleType;
-  List<String> _selectedZones = [];
   bool _isLoading = false;
 
-  final List<String> _availableZones = [
-    'Zone Centre',
-    'Zone Nord',
-    'Zone Sud',
-    'Zone Est',
-    'Zone Ouest',
-  ];
+  /// Motif exigé quand on retire quelqu'un du service.
+  ///
+  /// Suspendre n'est pas corriger : c'est une décision qui prive quelqu'un de
+  /// son travail, et le livreur doit savoir pourquoi. Le serveur la range sur
+  /// une route distincte, sous une permission distincte.
+  final _suspensionController = TextEditingController();
+
+  /// Le statut du dossier à l'ouverture, pour savoir s'il a changé.
+  ///
+  /// Sans lui, enregistrer une correction de plaque rejouerait une
+  /// « validation » du dossier à chaque fois — geste qui demande
+  /// `couriers.approve` et qui n'a rien à voir avec ce que l'opérateur a
+  /// demandé.
+  StatutLivreur? _statutInitial;
+
+  // Le bloc « Zones assignées » a été retiré. Il proposait cinq zones écrites
+  // dans le code — « Zone Centre », « Zone Nord »… — que rien n'envoyait au
+  // serveur et que rien ne relisait : `CourierProfile` n'a pas de zone, et le
+  // rattachement d'un livreur se fait à un **établissement**. C'était un
+  // contrôle décoratif, du même genre que le filtre par zone de l'ancien écran
+  // des commandes. Les vraies zones de livraison vivent dans
+  // `DeliveryZoneService`, et servent aux barèmes.
 
   @override
   void initState() {
@@ -58,11 +73,15 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
     final driver = widget.driver!;
     _nameController.text = driver.fullName;
     _emailController.text = driver.email;
-    _vehicleNumberController.text =
-        driver.vehiclePlate;
+    // Le téléphone n'était pas prérempli : le formulaire proposait de modifier
+    // un champ dont il n'affichait pas la valeur courante, et l'enregistrer
+    // sans y toucher l'aurait effacé. Il est rendu par le serveur depuis que
+    // `CourierProfileSerializer` le porte.
+    _phoneController.text = driver.phone;
+    _vehicleNumberController.text = driver.vehiclePlate;
     _selectedStatus = driver.statut;
+    _statutInitial = driver.statut;
     _selectedVehicleType = driver.vehicleType;
-    _selectedZones = <String>[]; // assignedZones n'est pas défini
   }
 
   @override
@@ -72,6 +91,7 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
     _phoneController.dispose();
     _vehicleNumberController.dispose();
     _passwordController.dispose();
+    _suspensionController.dispose();
     super.dispose();
   }
 
@@ -102,9 +122,7 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                   children: [
                     Expanded(
                       child: Text(
-                        widget.driver == null
-                            ? 'Nouveau Livreur'
-                            : 'Modifier le Livreur',
+                        widget.driver == null ? 'Nouveau Livreur' : 'Modifier le Livreur',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -138,10 +156,9 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                         // Informations de base
                         Text(
                           'Informations personnelles',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                         const SizedBox(height: 16),
 
@@ -189,10 +206,9 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                         // Informations du véhicule
                         Text(
                           'Informations du véhicule',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                         const SizedBox(height: 16),
 
@@ -210,9 +226,9 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                             initialValue: _selectedVehicleType,
                             items: [
                               const DropdownMenuItem(
-                                  child: Text('Sélectionner un type'),),
-                              ...['Moto', 'Vélo', 'Voiture', 'Scooter']
-                                  .map((type) {
+                                child: Text('Sélectionner un type'),
+                              ),
+                              ...['Moto', 'Vélo', 'Voiture', 'Scooter'].map((type) {
                                 return DropdownMenuItem<String>(
                                   value: type,
                                   child: Row(
@@ -243,10 +259,9 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                         // Statut
                         Text(
                           'Statut',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                         const SizedBox(height: 16),
 
@@ -283,70 +298,30 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                         ),
                         const SizedBox(height: 24),
 
-                        // Zones assignées
-                        Text(
-                          'Zones de livraison',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: _availableZones.map((zone) {
-                            final isSelected = _selectedZones.contains(zone);
-                            // IMPORTANT: Envelopper FilterChip dans un Container avec des contraintes
-                            // pour éviter l'erreur "Cannot hit test a render box with no size"
-                            return Container(
-                              constraints: const BoxConstraints(
-                                minHeight: 32,
-                              ),
-                              child: FilterChip(
-                                label: Text(zone),
-                                selected: isSelected,
-                                onSelected: (selected) {
-                                  setState(() {
-                                    if (selected) {
-                                      _selectedZones.add(zone);
-                                    } else {
-                                      _selectedZones.remove(zone);
-                                    }
-                                  });
-                                },
-                                selectedColor: Theme.of(context)
-                                    .colorScheme
-                                    .primary
-                                    .withValues(alpha: 0.2),
-                                checkmarkColor:
-                                    Theme.of(context).colorScheme.primary,
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: 16),
-
-                        if (_selectedZones.isNotEmpty)
-                          Text(
-                            'Zones sélectionnées: ${_selectedZones.join(', ')}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
+                        // Le champ de motif n'apparaît que pour une
+                        // suspension : c'est le seul geste de cet écran
+                        // qui prive quelqu'un de son travail, et le
+                        // livreur doit pouvoir savoir pourquoi.
+                        if (widget.driver != null &&
+                            _selectedStatus == StatutLivreur.indisponible &&
+                            _statutInitial != StatutLivreur.indisponible) ...[
+                          CustomTextField(
+                            controller: _suspensionController,
+                            label: 'Motif de la suspension',
+                            prefixIcon: Icons.report_outlined,
+                            validator: (valeur) => (valeur ?? '').trim().length < 3
+                                ? 'Indiquez le motif : il est rendu au livreur.'
+                                : null,
                           ),
-                        const SizedBox(height: 24),
+                          const SizedBox(height: 24),
+                        ],
 
                         // Préférences
                         Text(
                           'Préférences',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                         const SizedBox(height: 16),
 
@@ -496,39 +471,74 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
           vehiclePlate: _vehicleNumberController.text.trim(),
         );
       } else {
-        // Le contrat v2 n'a pas de route « modifier un livreur » : le livreur
-        // tient son propre dossier (`/delivery/me/`), et le personnel en
-        // **instruit le statut**. Retirer quelqu'un du service ou l'y remettre
-        // sont les deux seuls gestes que l'exploitation exerce sur un dossier,
-        // et ils demandent des permissions distinctes.
-        success = await driverService.setVerification(
-          widget.driver!.id,
-          _selectedStatus == StatutLivreur.indisponible ? 'suspended' : 'approved',
+        // **Une vraie modification, enfin.**
+        //
+        // Cette branche envoyait `setVerification` — c'est-à-dire qu'elle
+        // instruisait le statut du dossier et **jetait tout ce que l'opérateur
+        // venait de saisir** : nom, téléphone, véhicule, plaque. Puis elle
+        // annonçait « Livreur modifié avec succès ». Le formulaire était un
+        // décor ; le seul effet réel était un changement de statut que rien à
+        // l'écran ne présentait comme tel.
+        //
+        // La route existe maintenant (`PATCH /delivery/couriers/{id}/`), avec
+        // sa liste blanche côté serveur. Le statut, lui, garde sa route : il
+        // demande `couriers.approve`/`couriers.suspend`, et le confondre avec
+        // une correction de plaque donnerait le droit de suspendre à qui n'a
+        // que celui de corriger.
+        success = await driverService.updateDriver(
+          driverId: widget.driver!.id,
+          fullName: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          vehicleType: _selectedVehicleType,
+          vehiclePlate: _vehicleNumberController.text.trim(),
         );
+
+        // Le statut du dossier suit **sa** route, et seulement s'il a changé.
+        // Deux gestes, deux permissions : corriger une plaque demande
+        // `couriers.write`, suspendre demande `couriers.suspend`. Les fondre
+        // en un seul appel donnerait le second à quiconque a le premier.
+        if (success && _selectedStatus != _statutInitial) {
+          final suspend = _selectedStatus == StatutLivreur.indisponible;
+          success = suspend
+              ? await driverService.suspendDriver(
+                  widget.driver!.id,
+                  _suspensionController.text.trim(),
+                )
+              : await driverService.reactivateDriver(widget.driver!.id);
+        }
       }
 
-      if (success && mounted) {
-        Navigator.of(context).pop();
+      if (!mounted) return;
+
+      if (success) {
+        Navigator.of(context).pop(true);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               widget.driver == null
-                  ? 'Livreur créé avec succès'
-                  : 'Livreur modifié avec succès',
+                  ? 'Livreur embauché.'
+                  : 'Dossier de ${_nameController.text.trim()} mis à jour.',
             ),
-            backgroundColor: Colors.green,
+            backgroundColor:
+                AdminColorTokens.semantic(Theme.of(context).colorScheme).success,
           ),
         );
+        return;
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: $e'),
-            backgroundColor: Colors.red,
+
+      // Le refus du serveur, tel qu'il l'a formulé : il dit lequel des champs
+      // est en cause. « Une erreur est survenue » ferait ressaisir à
+      // l'identique.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            driverService.error ??
+                (widget.driver == null ? 'Embauche refusée.' : 'Modification refusée.'),
           ),
-        );
-      }
+          backgroundColor:
+              AdminColorTokens.semantic(Theme.of(context).colorScheme).danger,
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

@@ -226,6 +226,18 @@ Future<void> _initializeEssentialServices() async {
 
   await FormValidationService().initialize();
 
+  // Notifications push — **cet appel manquait**, et son absence rendait toute
+  // la chaîne inerte : pas de gestionnaire d'arrière-plan, pas de canal
+  // Android, aucune des trois écoutes de réception, donc aucun jeton et aucun
+  // appareil enregistré côté serveur. Le serveur poussait vers une liste vide.
+  //
+  // `prepare()` et non `initialize()` : la permission n'est pas demandée ici.
+  // Elle l'est à l'ouverture de session (`AppService._onSessionChanged`), quand
+  // « suivre ma commande » veut dire quelque chose — sur Android 13+, une
+  // demande faite devant l'écran d'accueil se solde par un refus, et un refus
+  // y est définitif.
+  await PushNotificationService().prepare();
+
   // `_initializeDatabaseAsync()` a été retiré, avec `database/init_database.dart`.
   // L'application n'a plus de base locale à préparer depuis le retrait de
   // Supabase, et le code ne le faisait plus depuis longtemps : il posait un

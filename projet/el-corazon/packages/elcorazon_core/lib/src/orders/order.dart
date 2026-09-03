@@ -150,6 +150,8 @@ class Order {
     required this.placedAt,
     required this.createdAt,
     required this.updatedAt,
+    this.linesCount = 0,
+    this.itemsCount = 0,
     this.estimatedDeliveryAt,
     this.deliveredAt,
     this.cancelledAt,
@@ -157,10 +159,16 @@ class Order {
     this.deliveryInstructions = '',
     this.lines = const [],
     this.statusEvents = const [],
+    this.restaurantLatitude,
+    this.restaurantLongitude,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
     final location = json['delivery_location'] as Map<String, dynamic>;
+    // Optionnel, contrairement à `delivery_location` : un serveur antérieur à
+    // ce champ rend une commande sans lui, et une carte à deux repères vaut
+    // mieux qu'un écran de suivi qui refuse de s'ouvrir.
+    final pickup = json['restaurant_location'] as Map<String, dynamic>?;
     return Order(
       id: json['id'] as String,
       reference: json['reference'] as String,
@@ -179,8 +187,19 @@ class Order {
       deliveryLandmark: json['delivery_landmark'] as String? ?? '',
       deliveryLatitude: (location['lat'] as num).toDouble(),
       deliveryLongitude: (location['lon'] as num).toDouble(),
+      restaurantLatitude:
+          pickup == null ? null : (pickup['lat'] as num).toDouble(),
+      restaurantLongitude:
+          pickup == null ? null : (pickup['lon'] as num).toDouble(),
       recipientName: json['recipient_name'] as String,
       recipientPhone: json['recipient_phone'] as String,
+      // Comptés **par le serveur**, et présents sur les deux formes.
+      //
+      // C'est ce qui permet à une liste d'annoncer « 6 articles » sans porter
+      // les lignes : `OrderSerializer` ne les rend pas, et les compter à
+      // partir de `lines` donnait donc zéro sur toutes les commandes.
+      linesCount: json['lines_count'] as int? ?? 0,
+      itemsCount: json['items_count'] as int? ?? 0,
       placedAt: DateTime.parse(json['placed_at'] as String),
       estimatedDeliveryAt: _parseDate(json['estimated_delivery_at']),
       deliveredAt: _parseDate(json['delivered_at']),
@@ -203,6 +222,16 @@ class Order {
   final String restaurantSlug;
   final String restaurantName;
 
+  /// Point d'enlèvement — `Restaurant.location`, miroir de
+  /// `OrderSerializer.restaurant_location`.
+  ///
+  /// Nul quand le serveur ne le rend pas encore. L'écran de suivi montre alors
+  /// deux repères au lieu de trois, ce qui reste juste ; le suppléer par une
+  /// constante d'application désignerait le premier établissement et
+  /// deviendrait faux au deuxième.
+  final double? restaurantLatitude;
+  final double? restaurantLongitude;
+
   /// `pending` | `confirmed` | ... (`OrderStatus` côté serveur, ADR-010).
   final String status;
   final List<String> allowedTransitions;
@@ -219,6 +248,21 @@ class Order {
   final double deliveryLongitude;
   final String recipientName;
   final String recipientPhone;
+
+  /// Nombre de **lignes** — trois produits distincts font trois lignes.
+  ///
+  /// Rendu sur la forme liste comme sur la forme détail : c'est une valeur
+  /// calculée en base, pas une longueur de tableau. Compter [lines] à la
+  /// place donne zéro partout où le serveur ne rend pas les lignes, ce qui est
+  /// le cas de toutes les listes.
+  final int linesCount;
+
+  /// Nombre d'**articles** — la somme des quantités.
+  ///
+  /// Deux burgers, une pizza et trois donuts font six articles et trois
+  /// lignes. C'est ce chiffre qu'affiche une carte de commande, et [linesCount]
+  /// qu'affiche une facture.
+  final int itemsCount;
   final DateTime placedAt;
   final DateTime? estimatedDeliveryAt;
   final DateTime? deliveredAt;

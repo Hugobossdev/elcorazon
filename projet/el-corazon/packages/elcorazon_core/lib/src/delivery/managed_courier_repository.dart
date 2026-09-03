@@ -82,6 +82,49 @@ class ManagedCourierRepository {
     return CourierProfile.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// Corrige un dossier — `PATCH /delivery/couriers/{id}/`,
+  /// permission `couriers.write`.
+  ///
+  /// Ce que le serveur accepte est une **liste blanche** : identité de contact
+  /// et véhicule. Le statut du dossier, les pièces, `is_online`, les compteurs,
+  /// l'établissement et l'adresse électronique n'en font pas partie —
+  /// respectivement parce qu'ils relèvent de [setVerification], du livreur
+  /// lui-même, d'une déclaration de celui qui roule, d'agrégats de faits, d'un
+  /// transfert qui mérite sa propre garde, et parce qu'une adresse est un
+  /// chemin de reprise de compte.
+  ///
+  /// Les champs omis ne sont pas touchés : c'est un `PATCH`, et le serveur
+  /// refuse `PUT` pour cette raison même — un remplacement complet écraserait
+  /// par un défaut le premier champ que l'appelant oublierait.
+  ///
+  /// Une requête sans aucun champ sort en 400 plutôt qu'en 200 : l'écran
+  /// annoncerait sinon « enregistré » sur une requête qui n'a rien enregistré.
+  Future<CourierProfile> update({
+    required String courierId,
+    String? fullName,
+    String? phone,
+    String? vehicleType,
+    String? vehiclePlate,
+    String? nationalIdNumber,
+    String? licenceNumber,
+  }) async {
+    final response = await apiClient.patch(
+      '/delivery/couriers/$courierId/',
+      data: {
+        if (fullName != null) 'full_name': fullName,
+        if (phone != null) 'phone': phone,
+        if (vehicleType != null) 'vehicle_type': vehicleType,
+        if (vehiclePlate != null) 'vehicle_plate': vehiclePlate,
+        if (nationalIdNumber != null) 'national_id_number': nationalIdNumber,
+        if (licenceNumber != null) 'licence_number': licenceNumber,
+      },
+    );
+    // La réponse porte le dossier **complet** : l'écran remplace sa ligne avec
+    // ce qu'il reçoit, et une réponse partielle lui ferait perdre les compteurs
+    // qu'il affichait.
+    return CourierProfile.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// Instruit ou suspend un dossier.
   ///
   /// **Deux permissions distinctes derrière une seule route** :

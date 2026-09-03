@@ -44,6 +44,20 @@ ROUTES_PUBLIQUES: set[str] = {
     "v1:accounts:register",
     "v1:accounts:login",
     "v1:accounts:token-refresh",
+    # Vérification de compte et mot de passe oublié. Ouvertes pour la même
+    # raison, poussée un cran plus loin : elles s'empruntent précisément quand
+    # on n'a *pas* de session — et, pour la réinitialisation, quand on n'a même
+    # plus le mot de passe qui en donnerait une. Le justificatif y est le code
+    # reçu par courriel, à usage unique, borné en durée et en essais.
+    "v1:accounts:verify",
+    "v1:accounts:verify-resend",
+    "v1:accounts:password-reset",
+    "v1:accounts:password-reset-confirm",
+    # Candidature spontanée de livreur. Elle crée un compte de type livreur et
+    # un dossier **en attente** — jamais validé, jamais éligible aux courses
+    # (L1) — et ne rend aucun jeton : la session s'obtient au coup d'après, par
+    # `accounts:verify`, code en main.
+    "v1:delivery:apply",
     # Découverte — avant l'inscription.
     "v1:geography:country-list",
     "v1:geography:country-detail",

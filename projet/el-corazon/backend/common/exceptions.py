@@ -11,6 +11,7 @@ from typing import Any
 
 from django.core.exceptions import PermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.http import Http404
 from rest_framework import status
 from rest_framework.response import Response
@@ -40,6 +41,31 @@ ERROR_BASE_URI = "https://api.elcorazon.app/errors"
 #: refus se produit.
 RESERVED_MEMBERS = frozenset({"code", "detail", "errors", "headers", "status", "title", "type"})
 
+#: Contraintes d'unicité dont le heurt se dit au client, et comment le lui dire.
+#:
+#: Une contrainte absente de cette table n'est pas une omission : elle produit un
+#: refus générique. C'est délibéré — voir `_integrity_problem`.
+#:
+#: La clé est le nom de la contrainte PostgreSQL, pas un fragment de message : il
+#: est stable, il vient du catalogue système, et il ne dépend ni de la langue du
+#: serveur ni de la version de psycopg.
+UNIQUE_CONSTRAINT_PROBLEMS: dict[str, tuple[str, str, str]] = {
+    # (code stable, message affichable, champ concerné)
+    "accounts_user_phone_key": (
+        "phone_already_exists",
+        "Ce numéro de téléphone est déjà utilisé.",
+        "phone",
+    ),
+    "accounts_user_email_key": (
+        "email_already_exists",
+        "Cette adresse e-mail est déjà utilisée.",
+        "email",
+    ),
+}
+
+#: `unique_violation` — le seul SQLSTATE que cette traduction prétende couvrir.
+_UNIQUE_VIOLATION = "23505"
+
 
 class BusinessRuleViolation(Exception):
     """Règle métier non respectée.
@@ -49,7 +75,12 @@ class BusinessRuleViolation(Exception):
     """
 
     code = "business_rule_violation"
-    status_code = status.HTTP_409_CONFLICT
+    # Annoté `int` et non laissé au type inféré : les stubs de DRF donnent à
+    # `HTTP_409_CONFLICT` le type `Literal[409]`, ce dont le vérificateur déduit
+    # qu'aucune sous-classe ne peut annoncer un autre statut. Or c'est
+    # précisément ce que fait `InvalidVerificationCode` (400) — la famille
+    # partage la forme de l'erreur, pas son code.
+    status_code: int = status.HTTP_409_CONFLICT
     title = "Opération impossible dans l'état actuel"
 
     def __init__(self, detail: str, **extra: Any) -> None:
@@ -137,6 +168,73 @@ def _problem(
     return response
 
 
+def _integrity_problem(exc: IntegrityError) -> Response | None:
+    """Traduit un heurt de contrainte en refus lisible, ou rend `None`.
+
+    ## Pourquoi ce filet existe alors que les serializers valident déjà
+
+    `RegisterSerializer.validate_phone` interroge la base avant d'écrire. Entre
+    cette lecture et l'`INSERT`, une seconde inscription portant le même numéro
+    peut s'intercaler : les deux passent la validation, la seconde heurte
+    `accounts_user_phone_key`. La fenêtre est étroite, mais c'est exactement
+    celle qu'ouvre un client mobile qui réémet sa requête sur un réseau lent.
+
+    Sans ce filet, ce heurt remonte en **500** : le client lit une panne
+    serveur là où il y a un refus parfaitement légitime, et n'a aucun moyen de
+    savoir qu'il lui suffit de changer de numéro. La contrainte, elle, reste :
+    c'est elle qui garantit l'unicité, et aucune validation applicative ne peut
+    s'y substituer.
+
+    ## Ce qu'il ne traduit pas, et pourquoi
+
+    Seules les violations d'unicité **nommées** dans
+    [`UNIQUE_CONSTRAINT_PROBLEMS`] deviennent un refus qualifié. Une unicité
+    inconnue devient un refus générique. Tout le reste — clé étrangère, `NOT
+    NULL`, `CHECK` — rend `None` et redevient un 500 journalisé : ce sont des
+    défauts de notre côté, et les habiller en 4xx les ferait disparaître des
+    alertes tout en laissant croire au client qu'il a mal demandé.
+
+    ## Rien du message d'origine ne sort
+
+    `str(exc)` porte l'instruction SQL entière et le `DETAIL` de PostgreSQL,
+    valeur heurtée comprise — `Key (phone)=(+228…) already exists`. Le renvoyer
+    divulguerait le numéro d'un autre compte à qui tente une inscription, et le
+    schéma des tables à tout le monde. Seuls le nom de la contrainte et le
+    SQLSTATE sont lus ; le texte affiché vient de la table ci-dessus.
+    """
+    # `psycopg` expose le diagnostic structuré du serveur sur la cause de
+    # l'exception Django. L'analyse du message est volontairement écartée : elle
+    # dépendrait de la langue du serveur et du pilote.
+    diagnostic = getattr(getattr(exc, "__cause__", None), "diag", None)
+    if diagnostic is None:
+        return None
+
+    if getattr(diagnostic, "sqlstate", None) != _UNIQUE_VIOLATION:
+        return None
+
+    constraint = getattr(diagnostic, "constraint_name", None) or ""
+    known = UNIQUE_CONSTRAINT_PROBLEMS.get(constraint)
+    if known is None:
+        return _problem(
+            code="resource_already_exists",
+            title="Ressource déjà existante",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Une ressource portant ces valeurs existe déjà.",
+        )
+
+    code, message, field = known
+    return _problem(
+        code=code,
+        title="Ressource déjà existante",
+        status_code=status.HTTP_409_CONFLICT,
+        detail=message,
+        # Le champ fautif est nommé sous la même forme qu'une erreur de
+        # validation, pour que le client le surligne sans distinguer les deux
+        # chemins — celui du serializer et celui de la course.
+        errors={field: [message]},
+    )
+
+
 def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
     """Gestionnaire d'exceptions DRF (`EXCEPTION_HANDLER`).
 
@@ -185,6 +283,15 @@ def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response 
             title="Accès refusé",
             status_code=status.HTTP_403_FORBIDDEN,
         )
+
+    if isinstance(exc, IntegrityError):
+        # Après le métier et la validation : une règle qui sait se dire le fait
+        # mieux que la contrainte qui la garde. Ce filet ne se déclenche que
+        # lorsque personne n'a vu venir le heurt.
+        problem = _integrity_problem(exc)
+        if problem is not None:
+            return problem
+        return None  # défaut serveur : 500 journalisé, jamais détaillé
 
     response = drf_exception_handler(exc, context)
     if response is None:

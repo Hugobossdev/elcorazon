@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Any
+from uuid import UUID
 
 from django.db import models, transaction
 from django.utils import timezone
@@ -27,8 +28,9 @@ from apps.notifications.models import (
     Notification,
     NotificationKind,
 )
+from apps.restaurants.models import StaffMembership
 
-__all__ = ["MARKETING_KINDS", "notify", "recipients_of", "send_campaign"]
+__all__ = ["MARKETING_KINDS", "notify", "recipients_of", "send_campaign", "staff_to_alert"]
 
 #: Catégories soumises au consentement de l'utilisateur.
 #:
@@ -71,6 +73,50 @@ def notify(
         transaction.on_commit(lambda: _dispatch(notification.pk))
 
     return notification
+
+
+def staff_to_alert(*, restaurant_id: UUID, permission: str) -> models.QuerySet[User]:
+    """Le personnel d'un établissement habilité à voir ce dont on l'alerte.
+
+    ## Les deux filtres, et pourquoi aucun ne suffit seul
+
+    * **le rattachement** (`StaffMembership`) dit *sur quoi* : sans lui, un
+      opérateur de Kara serait réveillé par les commandes de Lomé, qu'il ne
+      peut ni voir ni traiter ;
+    * **la permission** dit *ce qu'on a le droit de faire* (ADR-005) : alerter
+      d'une commande quelqu'un à qui l'API la refusera ensuite en 403 produit
+      une notification qui ne mène nulle part.
+
+    C'est la même paire que les vues du back-office opposent — `assert_in_scope`
+    et `HasPermission` — appliquée ici pour décider **qui prévenir** plutôt que
+    qui laisser entrer. Les recomposer autrement ferait diverger les deux
+    lectures, et la notification finirait par désigner une population que
+    l'écran n'accepte pas.
+
+    Les superutilisateurs sont joints quel que soit leur rattachement : ils
+    n'en ont pas, et ils sont précisément ceux qu'on veut prévenir d'un
+    incident.
+
+    ## Pourquoi `StaffMembership` est importé plutôt que traversé
+
+    Le même filtre s'écrit sans import, par la relation inverse
+    (`staff_memberships__restaurant_id`) — le nom vient du `related_name` que
+    `restaurants` déclare. C'est écarté délibérément : ce serait un couplage
+    **réel** que le test d'architecture ne verrait pas, et qui casserait en
+    silence, à l'exécution, le jour où ce `related_name` change. L'arête est
+    donc déclarée (`notifications → restaurants`, voir `ALLOWED`) et le modèle
+    importé, pour que la dépendance soit vérifiée au lieu d'être devinée.
+    """
+    rattaches = StaffMembership.objects.filter(restaurant_id=restaurant_id).values("user_id")
+
+    habilites = User.objects.filter(user_type=UserType.STAFF, is_active=True).filter(
+        models.Q(is_superuser=True)
+        | models.Q(roles__permissions__contains=[permission], pk__in=rattaches)
+    )
+    # `distinct` : un membre du personnel portant deux rôles qui accordent tous
+    # deux la permission sortirait deux fois de la jointure, et recevrait deux
+    # notifications identiques pour un seul événement.
+    return habilites.distinct()
 
 
 def _accepts_marketing(user: User) -> bool:
