@@ -119,8 +119,20 @@ class TestQuiEstPrevenu:
     ) -> None:
         """Sans `distinct`, la jointure le rendrait deux fois — et il recevrait
         deux notifications pour un seul événement."""
+        # `orders.update_status` et non `orders.write` : cette seconde n'existe
+        # pas au registre (`apps/accounts/permissions.py`), et
+        # `validate_permissions` refuse toute permission hors registre — le rôle
+        # ne pouvait donc pas être créé, et le test échouait à sa deuxième ligne
+        # sans jamais atteindre ce qu'il vérifie.
+        #
+        # Ce que le test exerce est le `distinct` de `staff_to_alert` : il suffit
+        # que le second rôle porte lui aussi la permission interrogée
+        # (`orders.read`) pour que la jointure rende le membre deux fois.
         operateur.roles.add(
-            Role.objects.create(name="Superviseur", permissions=["orders.read", "orders.write"])
+            Role.objects.create(
+                name="Superviseur",
+                permissions=["orders.read", "orders.update_status"],
+            )
         )
 
         prevenus = list(staff_to_alert(restaurant_id=restaurant.pk, permission="orders.read"))

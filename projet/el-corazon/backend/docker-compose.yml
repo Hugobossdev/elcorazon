@@ -86,10 +86,44 @@ services:
     #
     # `--reload` reste : c'est l'environnement de développement, et le
     # rechargement à chaud est ce pour quoi le code est monté en volume.
+    #
+    # `--reload-dir` en revanche est **nécessaire**, et son absence coûtait
+    # cher. Sans lui, WatchFiles surveille tout `/app` — `tests/`, `docs/`,
+    # `pyproject.toml`, les `.pyc`. Or un rechargement n'est pas gratuit ici :
+    # le code est monté depuis Windows à travers la couche de partage de
+    # Docker Desktop, et réimporter les vingt-cinq applications Django par ce
+    # chemin prend **de 50 secondes à 6 minutes**. Le journal du conteneur en
+    # garde deux exemples, tous deux déclenchés par un fichier de test :
+    #
+    #     12:13:54 detected changes in 'tests/accounts/test_verification.py'
+    #     12:14:45 Started server process          → 51 s
+    #     12:23:22 detected changes in 'tests/notifications/test_receivers.py'
+    #     12:29:28 Started server process          → 6 min 06 s
+    #
+    # Et pendant tout ce temps le port **reste ouvert** : c'est le processus
+    # superviseur d'uvicorn qui détient la socket d'écoute, pas l'ouvrier. Le
+    # noyau accepte donc la connexion, la requête part, et rien ne répond
+    # jamais. Un client ne voit pas « serveur éteint » — il voit un silence,
+    # qu'il finit par abandonner sur son propre délai. C'est très exactement le
+    # `connectionTimeout` de 15 s que l'application cliente rapportait au
+    # démarrage, et la raison pour laquelle relancer l'écran suffisait à le
+    # faire disparaître.
+    #
+    # Écrire un test ne doit pas fermer l'API pendant six minutes : la liste
+    # ci-dessous est celle du code réellement servi.
+    #
+    # L'invocation d'uvicorn tient sur **une seule ligne**, et il faut qu'elle y
+    # reste : dans un scalaire replié (`>`), une ligne plus indentée que les
+    # autres conserve son retour à la ligne au lieu d'être repliée. Couper la
+    # commande pour la lisibilité a exactement cet effet — le shell exécute
+    # `exec uvicorn … --port 8000`, sans les options suivantes, puis n'atteint
+    # jamais la ligne d'après puisque `exec` l'a remplacé. Le serveur démarre,
+    # répond, et n'a simplement plus de rechargement à chaud : rien dans le
+    # journal ne le dit, sinon l'absence de « Started reloader process ».
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py ensure_storage_buckets &&
-             exec uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload"
+             exec uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload --reload-dir apps --reload-dir config --reload-dir common"
     env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.dev

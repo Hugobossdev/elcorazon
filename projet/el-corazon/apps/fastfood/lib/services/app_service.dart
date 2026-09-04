@@ -232,14 +232,41 @@ class AppService extends ChangeNotifier {
   /// `UserSerializer` — domaine pas encore migré. Ils gardent leur valeur par
   /// défaut tant que la fidélité n'a pas son tour ; ce n'est pas un oubli.
 
-  Future<void> initialize() async {
+  /// Verrou de ré-entrance de [initialize].
+  ///
+  /// Deux appelants la déclenchaient au démarrage, sans se connaître :
+  /// `ServiceInitializationWidget` (posé dans `MaterialApp.builder`) et
+  /// `SplashScreen` (première route). Le catalogue partait donc **deux fois**,
+  /// et le journal montrait la seconde salve enchaîner sur la première comme
+  /// si l'application se relançait. Ce n'était pas un rechargement : c'était le
+  /// second appelant.
+  ///
+  /// Le doublon lui-même est supprimé — `ServiceInitializationWidget`
+  /// n'initialise plus `AppService` — mais le verrou reste : il y a d'autres
+  /// entrées (le tirer-pour-rafraîchir, une reprise de session) et rien ne
+  /// garantit qu'elles ne se croiseront jamais. `??=` fait partager le même
+  /// futur aux appels concurrents ; il est libéré à la fin, si bien qu'un
+  /// rafraîchissement **ultérieur** rejoue bien un vrai chargement.
+  Future<void>? _ouvertureEnCours;
+
+  Future<void> initialize() {
+    return _ouvertureEnCours ??= _ouvrir().whenComplete(() {
+      _ouvertureEnCours = null;
+    });
+  }
+
+  Future<void> _ouvrir() async {
     try {
       // Mesurer le temps d'initialisation pour le monitoring
       final stopwatch = Stopwatch()..start();
 
-      // Charger les catégories d'abord, puis les items (pour l'association)
-      await _loadMenuCategories();
+      // Les catégories et les articles ne se conditionnent plus l'un l'autre :
+      // le contrat porte `category` et `category_name` sur l'article, et plus
+      // rien ici ne recolle les deux. Les enchaîner coûtait la somme de leurs
+      // deux latences — et, quand le serveur ne répondait pas, la somme de
+      // leurs deux délais d'abandon : 15 s + 15 s, d'où les 32,5 s mesurées.
       await Future.wait([
+        _loadMenuCategories(),
         _loadMenuItems(),
         _loadUserSession(),
       ]);
@@ -524,8 +551,10 @@ class AppService extends ChangeNotifier {
   /// elle, un cache vide écrit par une tentative malheureuse restait en place
   /// jusqu'à son expiration, et réessayer ne rapportait rien.
   Future<void> rechargerLeCatalogue() async {
-    await _loadMenuCategories();
-    await _loadMenuItems(forcerLeReseau: true);
+    await Future.wait([
+      _loadMenuCategories(forcerLeReseau: true),
+      _loadMenuItems(forcerLeReseau: true),
+    ]);
   }
 
   Future<void> _loadMenuItems({bool forcerLeReseau = false}) async {
@@ -548,20 +577,42 @@ class AppService extends ChangeNotifier {
     } catch (e) {
       eccore.Journal.trace('❌ Error loading menu items: $e');
       _errorHandler.logError('Erreur lors du chargement du menu', details: e);
-      // La liste est vidée comme avant — un catalogue à moitié lu vaut moins
-      // que pas de catalogue — mais la raison est désormais conservée, pour que
-      // l'écran dise « la carte n'a pas pu être chargée » plutôt que « aucun
-      // plat ne correspond à vos filtres ».
+
+      // Le cache hors ligne était **écrit à chaque succès et relu par
+      // personne** : `loadCachedMenuItems` n'avait aucun appelant dans toute
+      // l'application. Une carte parfaitement conservée de la veille était
+      // ainsi jetée au premier serveur muet, et l'écran affichait un catalogue
+      // vide alors qu'il avait de quoi le remplir. C'est ici qu'elle sert.
+      final replis = await _offlineSyncService.loadCachedMenuItems();
+      if (replis != null && replis.isNotEmpty) {
+        _menuItems = replis;
+        _erreurCatalogue = null;
+        eccore.Journal.trace(
+          '📦 Carte servie depuis le cache local (${replis.length} articles) '
+          '— le serveur n’a pas répondu.',
+        );
+        notifyListeners();
+        return;
+      }
+
+      // Faute de cache, la liste est vidée comme avant — un catalogue à moitié
+      // lu vaut moins que pas de catalogue — mais la raison est désormais
+      // conservée, pour que l'écran dise « la carte n'a pas pu être chargée »
+      // plutôt que « aucun plat ne correspond à vos filtres ».
       _menuItems = [];
       _erreurCatalogue = 'La carte n’a pas pu être chargée.';
       notifyListeners();
     }
   }
 
-  Future<void> _loadMenuCategories() async {
+  Future<void> _loadMenuCategories({bool forcerLeReseau = false}) async {
     try {
-      // Utiliser le nouveau service de cache intelligent
-      _menuCategories = await _menuItemCache.getCategories();
+      // Le cache des catégories vaut 10 minutes. Sans ce court-circuit, le
+      // bouton « réessayer » de l'écran du menu et le tirer-pour-rafraîchir
+      // relisaient ce cache — donc, après un échec, le vide qu'il venait d'y
+      // écrire — au lieu d'interroger le serveur.
+      _menuCategories =
+          await _menuItemCache.getCategories(forceRefresh: forcerLeReseau);
 
       // Le catalogue public ne rend que les catégories actives — le filtre
       // `isActive` du modèle local portait sur un champ que le serveur
@@ -590,6 +641,24 @@ class AppService extends ChangeNotifier {
         'Erreur lors du chargement des catégories',
         details: e,
       );
+
+      // Même repli que pour les articles, et pour la même raison : le cache
+      // était rempli sans jamais être relu.
+      final replis = await _offlineSyncService.loadCachedCategories();
+      if (replis != null && replis.isNotEmpty) {
+        _menuCategories = replis;
+        _menuCategoryDisplayNames = replis
+            .map((c) => c.name)
+            .where((nom) => nom.isNotEmpty)
+            .toList();
+        eccore.Journal.trace(
+          '📦 Catégories servies depuis le cache local (${replis.length}) '
+          '— le serveur n’a pas répondu.',
+        );
+        notifyListeners();
+        return;
+      }
+
       _menuCategories = [];
       _menuCategoryDisplayNames = [];
       notifyListeners();

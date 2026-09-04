@@ -15,6 +15,7 @@ from apps.catalog.models import MenuItem, Option
 from common.serializers import MoneyField
 
 __all__ = [
+    "CartLineUpdateSerializer",
     "CartLineWriteSerializer",
     "CartSerializer",
     "PricedLineSerializer",
@@ -81,3 +82,33 @@ class CartLineWriteSerializer(serializers.Serializer[Any]):
 
 class QuantitySerializer(serializers.Serializer[Any]):
     quantity = serializers.IntegerField(min_value=1, max_value=99)
+
+
+class CartLineUpdateSerializer(serializers.Serializer[Any]):
+    """Modification d'une ligne déjà au panier.
+
+    Les trois champs sont facultatifs **et distincts d'un champ vide** : ne pas
+    envoyer `options` laisse la personnalisation en place — c'est le cas du
+    bouton « + » du panier, qui ne connaît que la quantité — quand envoyer une
+    liste vide retire tous les choix. Les confondre aurait rendu impossible
+    l'un des deux gestes, et `required=False` seul ne les distingue pas : c'est
+    `validated_data` qui porte la présence de la clé.
+
+    Ni prix ni libellé ici non plus : la ligne modifiée est revalorisée au
+    catalogue comme les autres (C1).
+    """
+
+    quantity = serializers.IntegerField(min_value=1, max_value=99, required=False)
+    options = serializers.PrimaryKeyRelatedField(
+        queryset=Option.objects.all(), many=True, required=False
+    )
+    notes = serializers.CharField(
+        max_length=500, required=False, allow_blank=True, trim_whitespace=True
+    )
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if not attrs:
+            raise serializers.ValidationError(
+                "Indiquez au moins la quantité, les options ou la note à modifier."
+            )
+        return attrs

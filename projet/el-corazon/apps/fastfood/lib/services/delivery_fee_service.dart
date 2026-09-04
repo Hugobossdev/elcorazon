@@ -30,8 +30,13 @@ class DeliveryFeeService extends ChangeNotifier {
   factory DeliveryFeeService() => _instance;
   DeliveryFeeService._internal();
 
-  final eccore.OrderRepository _orders = eccore.OrderRepository(apiClient: apiClient);
-  final eccore.GeographyRepository _geography =
+  /// Construits au premier devis — même raison que dans `CartService` :
+  /// `apiClient` lit le conteneur Riverpod monté par `main()`, et l'évaluer
+  /// dans l'initialiseur de champ rendait ce service, et tout service qui le
+  /// tient, inconstructible hors de l'application lancée.
+  late final eccore.OrderRepository _orders =
+      eccore.OrderRepository(apiClient: apiClient);
+  late final eccore.GeographyRepository _geography =
       eccore.GeographyRepository(apiClient: apiClient);
 
   eccore.OrderQuote? _lastQuote;

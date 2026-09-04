@@ -148,6 +148,8 @@ class MenuService extends ChangeNotifier {
     bool isAvailable = true,
     bool isPopular = false,
     int sortOrder = 0,
+    bool tracksStock = false,
+    int? stockQuantity,
   }) async {
     try {
       final etablissement = await _scope.requireSlug();
@@ -167,6 +169,8 @@ class MenuService extends ChangeNotifier {
         isPopular: isPopular,
         dietaryTags: dietaryTags,
         sortOrder: sortOrder,
+        tracksStock: tracksStock,
+        stockQuantity: stockQuantity,
       );
     } on eccore.ApiException catch (e) {
       _error = e.detail;
@@ -187,6 +191,8 @@ class MenuService extends ChangeNotifier {
     bool isAvailable = true,
     bool isPopular = false,
     int sortOrder = 0,
+    bool? tracksStock,
+    int? stockQuantity,
   }) async {
     try {
       await _catalog.updateMenuItem(
@@ -199,6 +205,8 @@ class MenuService extends ChangeNotifier {
         isPopular: isPopular,
         dietaryTags: dietaryTags,
         sortOrder: sortOrder,
+        tracksStock: tracksStock,
+        stockQuantity: stockQuantity,
       );
       return true;
     } on eccore.ApiException catch (e) {

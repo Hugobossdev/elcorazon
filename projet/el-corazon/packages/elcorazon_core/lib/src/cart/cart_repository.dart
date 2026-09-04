@@ -53,6 +53,36 @@ class CartRepository {
     return Cart.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// Rejoue la personnalisation d'une ligne déjà au panier
+  /// (`CartService.update_line` côté serveur).
+  ///
+  /// Ne pas transmettre [optionIds] laisse la personnalisation en place — c'est
+  /// ce que fait [setQuantity], qui ne connaît pas les options de la ligne.
+  /// Transmettre une liste **vide** retire au contraire tous les choix : le
+  /// serveur distingue la clé absente de la clé vide, et confondre les deux
+  /// rendait l'un des deux gestes inexprimable.
+  ///
+  /// Les options repassent par la validation du serveur : appartenance à
+  /// l'article, disponibilité, bornes du groupe. Le prix n'est pas transmis et
+  /// ne l'est jamais — il se relit au catalogue (invariant C1).
+  Future<Cart> updateLine({
+    required String restaurantSlug,
+    required String lineId,
+    List<String>? optionIds,
+    int? quantity,
+    String? notes,
+  }) async {
+    final response = await apiClient.patch(
+      '/carts/$restaurantSlug/lines/$lineId/',
+      data: {
+        if (optionIds != null) 'options': optionIds,
+        if (quantity != null) 'quantity': quantity,
+        if (notes != null) 'notes': notes,
+      },
+    );
+    return Cart.fromJson(response.data as Map<String, dynamic>);
+  }
+
   Future<Cart> removeLine({required String restaurantSlug, required String lineId}) async {
     final response = await apiClient.delete('/carts/$restaurantSlug/lines/$lineId/');
     return Cart.fromJson(response.data as Map<String, dynamic>);

@@ -13,13 +13,28 @@ import 'package:elcorazon_core/src/network/api_exception.dart';
 /// serveur (rotation + liste noire, ADR-004) — un deuxième appel concurrent
 /// avec le même jeton échouerait sinon systématiquement.
 class ApiClient {
+  /// Délai d'abandon, identique pour l'établissement de la connexion, l'envoi
+  /// et la réception.
+  ///
+  /// Seul `connectTimeout` était renseigné. Sur mobile et bureau, une réponse
+  /// commencée puis interrompue en vol n'avait donc **aucune** limite : la
+  /// requête restait suspendue indéfiniment, et l'écran avec elle. Sur le web
+  /// l'effet était différent mais l'omission tout aussi réelle — l'adaptateur
+  /// navigateur règle `xhr.timeout` sur `connectTimeout + receiveTimeout`,
+  /// soit 15 s + 0.
+  ///
+  /// La valeur ne change pas : 15 s reste 15 s. Un catalogue met moins d'une
+  /// seconde ; ce délai n'est pas là pour couvrir une lenteur ordinaire mais
+  /// pour renoncer devant un serveur qui ne répondra pas.
+  static const _delai = Duration(seconds: 15);
+
   /// [testAdapter] n'a qu'un usage : simuler le serveur dans les tests (voir
   /// `test/api_client_test.dart`), en particulier pour vérifier que deux 401
   /// concurrents ne déclenchent bien qu'un seul appel de rafraîchissement.
   /// Ne jamais le renseigner en dehors des tests.
   ApiClient({required String baseUrl, required this.tokenStorage, HttpClientAdapter? testAdapter})
-    : dio = Dio(BaseOptions(baseUrl: baseUrl, connectTimeout: const Duration(seconds: 15))),
-      _refreshDio = Dio(BaseOptions(baseUrl: baseUrl, connectTimeout: const Duration(seconds: 15))) {
+    : dio = Dio(BaseOptions(baseUrl: baseUrl, connectTimeout: _delai, receiveTimeout: _delai, sendTimeout: _delai)),
+      _refreshDio = Dio(BaseOptions(baseUrl: baseUrl, connectTimeout: _delai, receiveTimeout: _delai, sendTimeout: _delai)) {
     if (testAdapter != null) {
       dio.httpClientAdapter = testAdapter;
       _refreshDio.httpClientAdapter = testAdapter;

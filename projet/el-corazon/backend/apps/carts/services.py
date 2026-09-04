@@ -200,6 +200,17 @@ def validate_selection(menu_item: MenuItem, options: Sequence[Option]) -> None:
                 f"L'option « {option.name} » n'appartient pas à cet article.",
                 option_id=str(option.pk),
             )
+        # Refus **à l'écriture**, et non seulement au moment de commander.
+        # `_unavailability` marque déjà la ligne dont une option s'est éteinte
+        # après coup — c'est le cas qu'on ne peut pas empêcher. Retenir une
+        # option déjà indisponible, en revanche, se refuse tout de suite :
+        # l'accepter laissait composer un panier qui ne pouvait plus être
+        # commandé, et le client ne l'apprenait qu'à la validation.
+        if not option.is_available:
+            raise BusinessRuleViolation(
+                f"L'option « {option.name} » n'est pas disponible.",
+                option_id=str(option.pk),
+            )
 
     for group in groups.values():
         retenues = [option for option in options if option.group_id == group.pk]
@@ -302,10 +313,24 @@ class CartService:
 
     @staticmethod
     def _identical_line(
-        cart: Cart, menu_item: MenuItem, options: Sequence[Option], notes: str
+        cart: Cart,
+        menu_item: MenuItem,
+        options: Sequence[Option],
+        notes: str,
+        exclude: uuid.UUID | None = None,
     ) -> CartLine | None:
+        """Ligne du panier qui porte exactement ce choix, s'il en existe une.
+
+        `exclude` écarte la ligne qu'on est en train de réécrire : sans lui,
+        une modification se trouverait elle-même — ses options venant d'être
+        enregistrées — et se fusionnerait avec elle-même, doublant sa quantité
+        avant de se supprimer.
+        """
         wanted = {option.pk for option in options}
-        for line in cart.lines.filter(menu_item=menu_item, notes=notes).prefetch_related("options"):
+        candidates = cart.lines.filter(menu_item=menu_item, notes=notes)
+        if exclude is not None:
+            candidates = candidates.exclude(pk=exclude)
+        for line in candidates.prefetch_related("options"):
             if {selection.option_id for selection in line.options.all()} == wanted:
                 return line
         return None
@@ -314,6 +339,58 @@ class CartService:
     def set_quantity(line: CartLine, quantity: int) -> CartLine:
         line.quantity = quantity
         line.save(update_fields=["quantity", "updated_at"])
+        return line
+
+    @staticmethod
+    @transaction.atomic
+    def update_line(
+        *,
+        line: CartLine,
+        options: Sequence[Option],
+        quantity: int | None = None,
+        notes: str | None = None,
+    ) -> CartLine:
+        """Rejoue la personnalisation d'une ligne déjà au panier.
+
+        Le client rouvre le configurateur depuis le panier, change la cuisson,
+        enregistre : c'est **cette** ligne qui est réécrite, pas une nouvelle.
+        Faire supprimer puis rajouter par le client aurait le même effet nominal
+        mais perdrait la ligne si le second appel échouait — et le panier ne
+        garde aucune trace permettant de la reconstituer.
+
+        Les options repassent par `validate_selection` : une ligne modifiée est
+        une ligne nouvellement composée, et rien ne garantit que le catalogue
+        n'a pas bougé depuis l'ajout. Le prix, lui, n'est pas touché — il n'est
+        stocké nulle part (C1) et se relit à la lecture suivante.
+
+        Si la modification rend cette ligne identique à une autre du même
+        panier, les deux fusionnent : c'est la règle de `add_line`, et deux
+        lignes que rien ne distingue plus n'ont pas de raison de rester deux.
+        """
+        menu_item = line.menu_item
+        CartService._assert_belongs_to_cart(line.cart, menu_item)
+        validate_selection(menu_item, options)
+
+        if quantity is not None:
+            line.quantity = quantity
+        if notes is not None:
+            line.notes = notes
+        line.save(update_fields=["quantity", "notes", "updated_at"])
+
+        line.options.all().delete()
+        CartLineOption.objects.bulk_create(
+            CartLineOption(line=line, option=option) for option in options
+        )
+
+        jumelle = CartService._identical_line(
+            line.cart, menu_item, options, line.notes, exclude=line.pk
+        )
+        if jumelle is not None:
+            jumelle.quantity += line.quantity
+            jumelle.save(update_fields=["quantity", "updated_at"])
+            line.delete()
+            return jumelle
+
         return line
 
     @staticmethod

@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
@@ -91,11 +91,38 @@ class TestEmission:
 
         L'empreinte est produite par le jeu de hacheurs des mots de passe : elle
         porte l'algorithme en préfixe, et ne ressemble en rien à six chiffres.
+
+        Ce test exigeait le préfixe `pbkdf2_`. Il vérifiait donc **l'identité du
+        hacheur**, qui est un réglage d'environnement — `config/settings/test.py`
+        impose MD5 pour la vitesse de la suite — et non la propriété de
+        sécurité. Il échouait pour cette seule raison, sur un code parfaitement
+        protégé en production, où aucun réglage ne redéfinit `PASSWORD_HASHERS`
+        et où le défaut de Django reste PBKDF2.
+
+        Ce qui compte, et qui est vrai sous n'importe quel hacheur : le code émis
+        n'est pas récupérable depuis la ligne, et il reste vérifiable.
         """
         record = VerificationCode.objects.get(user=compte)
 
+        # Ni le code lui-même, ni six chiffres sous une autre forme.
         assert not record.code_hash.isdigit()
-        assert record.code_hash.startswith("pbkdf2_")
+        assert len(record.code_hash) > 6
+
+        # L'empreinte porte son algorithme en préfixe, quel qu'il soit — c'est
+        # ce qui la distingue d'une valeur écrite en clair.
+        assert "$" in record.code_hash
+
+        # Et elle reste une empreinte vérifiable : elle valide le code qu'elle
+        # protège et rejette tout autre. Sans cette paire, une colonne remplie
+        # d'une constante passerait les assertions ci-dessus.
+        #
+        # La valeur est reposée plutôt que lue : le code réel n'est lisible
+        # nulle part, ce que ce test vérifie précisément.
+        valeur = code_connu(compte, VerificationPurpose.ACCOUNT_VERIFICATION)
+        record.refresh_from_db()
+        assert record.code_hash != valeur
+        assert check_password(valeur, record.code_hash)
+        assert not check_password("000000", record.code_hash)
 
     def test_un_renvoi_immediat_ne_reexpedie_rien(self, compte: User) -> None:
         """Le délai de garde vit dans le service, pas seulement dans le

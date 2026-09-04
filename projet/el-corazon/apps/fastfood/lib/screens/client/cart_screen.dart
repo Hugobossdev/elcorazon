@@ -1,5 +1,9 @@
+import 'dart:async';
+
+import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/cart_item.dart' as cart_item;
 import 'package:elcora_fast/navigation/navigation_service.dart';
+import 'package:elcora_fast/screens/client/enhanced_item_customization_screen.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
@@ -11,6 +15,7 @@ import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/widgets/loading_widget.dart';
 import 'package:elcora_fast/widgets/menu_item_card.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -82,6 +87,9 @@ class CartScreen extends StatelessWidget {
                     index,
                     cartService,
                   ),
+                  onEdit: cartService.items[index].personnalisable
+                      ? () => _modifierLigne(context, cartService.items[index])
+                      : null,
                 ),
               Center(
                 child: TextButton.icon(
@@ -128,6 +136,60 @@ class CartScreen extends StatelessWidget {
   void _changerQuantite(CartService cartService, int index, int quantite) {
     if (quantite < 1) return;
     cartService.updateItemQuantity(index, quantite);
+  }
+
+  /// Rouvre le configurateur sur une ligne du panier.
+  ///
+  /// L'article complet est relu au catalogue : la ligne du panier ne porte que
+  /// son identifiant, son libellé et son prix, quand le configurateur a besoin
+  /// des groupes d'options — que seule la **fiche** de l'article publie
+  /// (`MenuItemDetailSerializer` ; la liste les omet délibérément). Sans cette
+  /// lecture, l'écran s'ouvrirait sur un article sans option et effacerait en
+  /// enregistrant les choix qu'il n'aurait pas su afficher.
+  Future<void> _modifierLigne(
+    BuildContext context,
+    cart_item.CartItem ligne,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      ),
+    );
+
+    eccore.MenuItem? article;
+    try {
+      article = await eccore.CatalogRepository(apiClient: apiClient)
+          .getMenuItem(ligne.menuItemId);
+    } catch (e) {
+      eccore.Journal.trace('⚠️ Fiche de ${ligne.menuItemId} illisible : $e');
+    }
+
+    if (navigator.canPop()) navigator.pop(); // referme l'attente
+
+    if (article == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Impossible d’ouvrir la personnalisation de cet article.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    await navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => EnhancedItemCustomizationScreen(
+          item: article!,
+          ligneDuPanier: ligne,
+        ),
+      ),
+    );
   }
 
   Future<void> _commander(BuildContext context) async {

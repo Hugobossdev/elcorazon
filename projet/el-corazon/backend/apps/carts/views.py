@@ -21,9 +21,9 @@ from rest_framework.viewsets import GenericViewSet
 
 from apps.carts.models import Cart, CartLine
 from apps.carts.serializers import (
+    CartLineUpdateSerializer,
     CartLineWriteSerializer,
     CartSerializer,
-    QuantitySerializer,
 )
 from apps.carts.services import CartService, price_cart
 from apps.restaurants.models import Restaurant
@@ -102,21 +102,46 @@ class CartViewSet(GenericViewSet[Cart]):
         return self._rendered(slug, status.HTTP_201_CREATED)
 
     @extend_schema(
-        request=QuantitySerializer,
+        request=CartLineUpdateSerializer,
         responses={200: CartSerializer},
         parameters=[LINE_ID],
         tags=["carts"],
     )
     @action(detail=True, methods=["patch"], url_path=r"lines/(?P<line_id>[^/.]+)")
-    def set_quantity(self, request: Request, slug: str, line_id: str) -> Response:
-        serializer = QuantitySerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+    def update_line(self, request: Request, slug: str, line_id: str) -> Response:
+        """Change la quantité d'une ligne, sa personnalisation, ou les deux.
 
-        CartService.set_quantity(self._line(slug, line_id), serializer.validated_data["quantity"])
+        Une modification de personnalisation passe par le service, qui
+        revalide les options contre le catalogue et refusionne la ligne si elle
+        devient identique à une autre. La quantité seule emprunte le chemin
+        court : elle ne touche à rien qui demande à être revalidé, et le
+        bouton « + » du panier ne connaît pas les options de la ligne — les
+        exiger l'obligerait à les relire avant chaque incrément.
+        """
+        serializer = CartLineUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        donnees = serializer.validated_data
+
+        line = self._line(slug, line_id)
+
+        if "options" in donnees:
+            CartService.update_line(
+                line=line,
+                options=donnees["options"],
+                quantity=donnees.get("quantity"),
+                notes=donnees.get("notes"),
+            )
+        else:
+            if "notes" in donnees:
+                line.notes = donnees["notes"]
+                line.save(update_fields=["notes", "updated_at"])
+            if "quantity" in donnees:
+                CartService.set_quantity(line, donnees["quantity"])
+
         return self._rendered(slug)
 
     @extend_schema(responses={200: CartSerializer}, parameters=[LINE_ID], tags=["carts"])
-    @set_quantity.mapping.delete
+    @update_line.mapping.delete
     def remove_line(self, request: Request, slug: str, line_id: str) -> Response:
         self._line(slug, line_id).delete()
         return self._rendered(slug)

@@ -1096,6 +1096,11 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
           'Heure': deliverySlot['timeDisplay'],
           'Type': 'Gâteau prêt',
         },
+        // Créneau et date ne sont pas des groupes d'options du catalogue : le
+        // configurateur générique les effacerait en réécrivant la ligne à
+        // partir des seuls libellés de groupes. Le panier ne lui propose donc
+        // pas « Modifier », et renvoie ici pour changer la livraison.
+        compositionLibre: true,
       );
 
       if (!mounted) return;
@@ -1280,6 +1285,11 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
         _customCakeItem!,
         customizations: customizationsMap,
         optionIds: selectedOptionIds,
+        // Message, date et créneau accompagnent ici les options du catalogue :
+        // le configurateur générique ne saurait rejouer que les secondes, et
+        // perdrait les premières en enregistrant. La retouche d'un gâteau
+        // repasse par cet écran.
+        compositionLibre: true,
       );
 
       if (!mounted) return;

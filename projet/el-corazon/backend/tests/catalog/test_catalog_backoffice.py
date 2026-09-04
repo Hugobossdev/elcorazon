@@ -317,3 +317,44 @@ class TestInventaire:
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_le_suivi_et_le_stock_s_ecrivent_avec_l_article(
+        self, redacteur: APIClient, menu_item: MenuItem
+    ) -> None:
+        """L'écran d'exploitation les envoie avec le reste de la fiche.
+
+        Le modèle les portait depuis l'origine et la commande s'en servait pour
+        refuser une rupture sous verrou, mais aucun écran ne les écrivait : la
+        rupture ne pouvait s'annoncer qu'en retirant l'article de la carte.
+        """
+        response = redacteur.patch(
+            reverse("v1:catalog:managed-item-detail", args=[menu_item.pk]),
+            {"tracks_stock": True, "stock_quantity": 8},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        menu_item.refresh_from_db()
+        assert menu_item.tracks_stock is True
+        assert menu_item.stock_quantity == 8
+
+    def test_un_article_se_cree_avec_son_stock(
+        self, redacteur: APIClient, restaurant: Restaurant, category: Category
+    ) -> None:
+        response = redacteur.post(
+            reverse("v1:catalog:managed-item-list"),
+            {
+                "restaurant": restaurant.slug,
+                "category": str(category.pk),
+                "name": "Bouteille importée",
+                "slug": "bouteille-importee",
+                "price": {"amount": "2500", "currency": XOF},
+                "tracks_stock": True,
+                "stock_quantity": 24,
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["tracks_stock"] is True
+        assert response.data["stock_quantity"] == 24

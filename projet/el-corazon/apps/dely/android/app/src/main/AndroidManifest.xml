@@ -29,6 +29,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
 
+    <!-- Le suivi demande explicitement un verrou de reveil
+         (`ForegroundNotificationConfig.enableWakeLock: true` dans
+         `RealtimeTrackingService`), et `GeolocatorLocationService.obtainWakeLocks`
+         appelle `PowerManager.newWakeLock(...).acquire()`. Sans ce verrou, Doze
+         suspend le processus entre deux releves des que l'ecran est eteint : le
+         battement du livreur immobile cesse, et le client voit sa position
+         vieillir sans explication.
+
+         Elle etait bien presente dans l'APK, mais apportee par la fusion depuis
+         `firebase_messaging` — donc par coincidence. Retirer un jour les
+         notifications poussees aurait emporte le verrou avec elles, et degrade
+         le suivi en arriere-plan sans qu'aucun changement ne le laisse prevoir.
+         Ce qu'on demande, on le declare. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
     <!-- Android 13+. Sans elle, la notification de course proposee est
          silencieusement supprimee par le systeme. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>

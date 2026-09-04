@@ -32,6 +32,20 @@ class CustomizationOption {
   /// (`OptionGroup.min_select`) — le même que `validate_selection` revalide.
   final int minSelections;
 
+  /// L'établissement sert-il encore cette option (`Option.is_available`).
+  ///
+  /// Les options indisponibles étaient **écartées à la lecture** du catalogue.
+  /// Trois conséquences, toutes mauvaises : le client ne comprenait pas
+  /// pourquoi le fromage d'hier avait disparu ; un groupe dont toutes les
+  /// options étaient épuisées s'effaçait entièrement, y compris obligatoire,
+  /// et la ligne partait alors sans le choix que le serveur exige, refusée en
+  /// 409 ; et le catalogue les publie précisément pour qu'elles soient
+  /// montrées — `MenuItemViewSet` le dit en toutes lettres, « les masquer
+  /// ferait croire à un menu qui change de forme d'une minute à l'autre ».
+  ///
+  /// Elles sont donc affichées, marquées, et non sélectionnables.
+  final bool isAvailable;
+
   CustomizationOption({
     required this.id,
     required this.name,
@@ -45,6 +59,7 @@ class CustomizationOption {
     this.allergens,
     this.isRemote = false,
     this.minSelections = 0,
+    this.isAvailable = true,
   });
 
   /// Depuis le contrat Django (`OptionSerializer` dans son groupe).
@@ -64,6 +79,7 @@ class CustomizationOption {
       maxQuantity: group.maxSelect,
       minSelections: group.minSelect,
       isRemote: true,
+      isAvailable: option.isAvailable,
     );
   }
 
@@ -80,6 +96,7 @@ class CustomizationOption {
     List<String>? allergens,
     bool? isRemote,
     int? minSelections,
+    bool? isAvailable,
   }) {
     return CustomizationOption(
       id: id ?? this.id,
@@ -95,6 +112,7 @@ class CustomizationOption {
           (this.allergens != null ? List<String>.from(this.allergens!) : null),
       isRemote: isRemote ?? this.isRemote,
       minSelections: minSelections ?? this.minSelections,
+      isAvailable: isAvailable ?? this.isAvailable,
     );
   }
 }
@@ -266,10 +284,15 @@ class CustomizationService extends ChangeNotifier {
       final item = await eccore.CatalogRepository(apiClient: apiClient)
           .getMenuItem(menuItemId);
 
+      // Les indisponibles sont **gardées**, et marquées : voir
+      // [CustomizationOption.isAvailable]. Les écarter faisait disparaître le
+      // groupe entier quand toutes ses options l'étaient, y compris un groupe
+      // obligatoire — la ligne partait alors sans choix, et le serveur la
+      // refusait en 409 sans que l'écran ait rien pu montrer.
       final options = [
         for (final group in item.optionGroups)
           for (final option in group.options)
-            if (option.isAvailable) CustomizationOption.fromRemote(option, group),
+            CustomizationOption.fromRemote(option, group),
       ];
 
       _itemOptions[menuItemId] = options;
@@ -343,12 +366,25 @@ class CustomizationService extends ChangeNotifier {
     return categorized;
   }
 
-  // Start customizing an item session
+  /// Ouvre une session de composition pour un article.
+  ///
+  /// [optionsInitiales] rejoue une personnalisation déjà composée — celle
+  /// d'une ligne du panier qu'on rouvre pour la modifier. Sans elle, « Modifier »
+  /// rendait un écran vierge, où le client devait tout resaisir et où les
+  /// choix qu'il ne retouchait pas étaient silencieusement perdus.
+  ///
+  /// Les identifiants sont replacés dans le groupe auquel le **catalogue**
+  /// les rattache, et non dans celui que la ligne du panier annonçait : entre
+  /// l'ajout et la modification, l'exploitation a pu déplacer une option. Ceux
+  /// qui ne correspondent plus à rien — option retirée du catalogue — sont
+  /// écartés, et ceux dont l'option n'est plus disponible aussi : les garder
+  /// ferait échouer l'enregistrement sur un choix que le client n'a pas refait.
   Future<void> startCustomization(
     String sessionId,
     String menuItemId,
-    String menuItemName,
-  ) async {
+    String menuItemName, {
+    List<String> optionsInitiales = const [],
+  }) async {
     // S'assurer que le service est initialisé
     if (!_isInitialized) {
       await initialize();
@@ -374,7 +410,9 @@ class CustomizationService extends ChangeNotifier {
     // cumulaient — une sélection que le serveur refuse ensuite. La contrainte
     // décide désormais, qu'elle vienne du groupe ou de la table locale.
     for (final option in options) {
-      if (option.isDefault) {
+      // Une option retenue d'office mais épuisée composerait d'emblée une
+      // ligne que le serveur refuse — et le client n'aurait rien fait pour.
+      if (option.isDefault && option.isAvailable) {
         final category = option.category;
         final constraint = constraintFor(menuItemId, category);
 
@@ -392,6 +430,28 @@ class CustomizationService extends ChangeNotifier {
 
         defaultQuantities[option.id] = 1;
       }
+    }
+
+    // Une composition rejouée remplace les choix par défaut : ce sont ceux du
+    // client, et lui superposer les présélections du catalogue ajouterait des
+    // options qu'il avait précisément retirées.
+    if (optionsInitiales.isNotEmpty) {
+      final reprises = <String, List<String>>{};
+      final quantitesReprises = <String, int>{};
+
+      for (final optionId in optionsInitiales) {
+        final option = _findOptionById(menuItemId, optionId);
+        if (option == null || !option.isAvailable) continue;
+        (reprises[option.category] ??= <String>[]).add(option.id);
+        quantitesReprises[option.id] = 1;
+      }
+
+      defaultSelections
+        ..clear()
+        ..addAll(reprises);
+      defaultQuantities
+        ..clear()
+        ..addAll(quantitesReprises);
     }
 
     eccore.Journal.trace('🎂 Sélections par défaut: $defaultSelections');
@@ -427,6 +487,13 @@ class CustomizationService extends ChangeNotifier {
     };
 
     if (isSelected) {
+      // Une option que l'établissement ne sert plus ne se retient pas, même si
+      // l'écran la propose encore : elle est désormais affichée pour être lue,
+      // pas pour être cochée, et le serveur la refuse de toute façon depuis
+      // que `validate_selection` contrôle la disponibilité à l'écriture.
+      final option = _findOptionById(customization.menuItemId, optionId);
+      if (option != null && !option.isAvailable) return;
+
       // `..add` sans garde retenait deux fois la même option — comptée deux
       // fois dans le total, et envoyée en double au serveur.
       final retenues = newSelections[category] ?? <String>[];

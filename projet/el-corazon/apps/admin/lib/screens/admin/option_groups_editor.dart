@@ -107,6 +107,15 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                             return ListTile(
                               dense: true,
                               title: Text(option.name),
+                              // L'indisponibilité se lit dans la liste : sans
+                              // elle, il fallait ouvrir chaque option pour
+                              // savoir laquelle était éteinte.
+                              subtitle: option.isAvailable
+                                  ? null
+                                  : const Text(
+                                      'Indisponible',
+                                      style: TextStyle(color: Colors.orange),
+                                    ),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -211,9 +220,13 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                     // Provisoire : le serveur attribue l'identifiant définitif
                     // à l'enregistrement.
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
-                    name: nameController.text,
-                    minSelect: int.parse(minController.text),
-                    maxSelect: int.parse(maxController.text),
+                    name: nameController.text.trim(),
+                    // Un champ vidé levait une `FormatException` qui refermait
+                    // l'écran sans créer le groupe. Les bornes retombent sur
+                    // « exactement un choix », la forme la plus courante et
+                    // celle que le serveur accepte toujours.
+                    minSelect: _borneSaisie(minController.text, defaut: 0),
+                    maxSelect: _borneSaisie(maxController.text, defaut: 1),
                     isRequired: isRequired,
                     sortOrder: _groups.length,
                     options: const [],
@@ -285,11 +298,21 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                 child: const Text('Annuler'),),
             FilledButton(
               onPressed: () {
+                if (nameController.text.trim().isEmpty) return;
                 this.setState(() {
                   _groups[index] = group.copyWith(
-                    name: nameController.text,
-                    minSelect: int.parse(minController.text),
-                    maxSelect: int.parse(maxController.text),
+                    name: nameController.text.trim(),
+                    // Les bornes existantes servent de repli : une saisie
+                    // effacée ne doit pas redéfinir le groupe, et `int.parse`
+                    // levait ici la même `FormatException` qu'à la création.
+                    minSelect: _borneSaisie(
+                      minController.text,
+                      defaut: group.minSelect,
+                    ),
+                    maxSelect: _borneSaisie(
+                      maxController.text,
+                      defaut: group.maxSelect,
+                    ),
                     isRequired: isRequired,
                   );
                 });
@@ -342,17 +365,22 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
               child: const Text('Annuler'),),
           FilledButton(
             onPressed: () {
-              if (nameController.text.isEmpty) return;
+              if (nameController.text.trim().isEmpty) return;
+              // Les francs CFA n'ont pas de décimale : l'unité mineure est le
+              // franc. La saisie est relue avant d'entrer dans `setState` —
+              // `double.parse` à nu y levait une `FormatException` sur un champ
+              // vidé, et l'écran se refermait sans rien enregistrer.
+              final prix = _prixSaisi(priceController.text);
+              if (prix == null) return;
+
               setState(() {
                 final group = _groups[groupIndex];
                 final newOptions = List<eccore.Option>.from(group.options)
                   ..add(eccore.Option(
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
-                    name: nameController.text,
-                    // Les francs CFA n'ont pas de décimale : l'unité mineure
-                    // est le franc.
+                    name: nameController.text.trim(),
                     priceDelta: eccore.Money(
-                      amountMinor: double.parse(priceController.text).round(),
+                      amountMinor: prix,
                       currency: 'XOF',
                     ),
                     isDefault: false,
@@ -375,54 +403,111 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
     final group = _groups[groupIndex];
     final option = group.options[optionIndex];
     final nameController = TextEditingController(text: option.name);
-    final priceController =
-        TextEditingController(text: option.priceDelta.toString());
+    // `Money.toString()` rend « 1000 XOF » : le champ se pré-remplissait donc
+    // avec une chaîne que sa propre relecture (`double.parse`) refusait, et
+    // « Sauvegarder » levait une `FormatException` — modifier le prix d'une
+    // option était impossible sans vider le champ à la main.
+    final priceController = TextEditingController(
+      text: _saisiePrix(option.priceDelta),
+    );
+    bool isAvailable = option.isAvailable;
 
     DialogHelper.showSafeDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Modifier le Choix'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: 'Nom'),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: priceController,
-              decoration: const InputDecoration(
-                  labelText: 'Prix Supplémentaire (FCFA)',),
-              keyboardType: TextInputType.number,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Modifier le Choix'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Nom'),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: priceController,
+                decoration: const InputDecoration(
+                    labelText: 'Prix Supplémentaire (FCFA)',),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 8),
+              // La disponibilité se pilote depuis ici : elle était figée à
+              // « vrai » à la création et jamais rendue modifiable, si bien
+              // qu'une rupture de fromage obligeait à supprimer l'option — et
+              // à la ressaisir le lendemain. L'éteindre la laisse visible au
+              // client, marquée « Indisponible » et non sélectionnable.
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Disponible'),
+                subtitle: Text(
+                  isAvailable
+                      ? 'Proposée aux clients'
+                      : 'Affichée mais non commandable',
+                ),
+                value: isAvailable,
+                onChanged: (val) => setDialogState(() => isAvailable = val),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Annuler'),),
+            FilledButton(
+              onPressed: () {
+                if (nameController.text.trim().isEmpty) return;
+                final prix = _prixSaisi(priceController.text);
+                if (prix == null) return;
+
+                setState(() {
+                  final newOptions = List<eccore.Option>.from(group.options);
+                  newOptions[optionIndex] = option.copyWith(
+                    name: nameController.text.trim(),
+                    priceDelta: eccore.Money(
+                      amountMinor: prix,
+                      currency: 'XOF',
+                    ),
+                    isAvailable: isAvailable,
+                  );
+                  _groups[groupIndex] = group.copyWith(options: newOptions);
+                });
+                widget.onChanged(_groups);
+                Navigator.pop(context);
+              },
+              child: const Text('Sauvegarder'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Annuler'),),
-          FilledButton(
-            onPressed: () {
-              setState(() {
-                final newOptions = List<eccore.Option>.from(group.options);
-                newOptions[optionIndex] = option.copyWith(
-                  name: nameController.text,
-                  priceDelta: eccore.Money(
-                    amountMinor: double.parse(priceController.text).round(),
-                    currency: 'XOF',
-                  ),
-                );
-                _groups[groupIndex] = group.copyWith(options: newOptions);
-              });
-              widget.onChanged(_groups);
-              Navigator.pop(context);
-            },
-            child: const Text('Sauvegarder'),
-          ),
-        ],
       ),
     );
+  }
+
+  /// Ce qu'on inscrit dans le champ « prix » pour un montant existant.
+  ///
+  /// Les francs CFA n'ont pas de décimale : l'unité mineure **est** le franc,
+  /// et le champ se relit donc tel quel.
+  static String _saisiePrix(eccore.Money montant) => '${montant.amountMinor}';
+
+  /// Le montant saisi, en unités mineures — `null` si la saisie n'en est pas un.
+  ///
+  /// Les dialogues appelaient `double.parse` à nu : un champ vide, un espace ou
+  /// une virgule décimale levaient une `FormatException` qui remontait jusqu'au
+  /// gestionnaire d'appui, fermant l'écran sans rien enregistrer et sans dire
+  /// pourquoi. Rendre `null` laisse le bouton sans effet, ce qui est le
+  /// comportement déjà retenu pour un nom vide.
+  static int? _prixSaisi(String saisie) {
+    final normalise = saisie.trim().replaceAll(',', '.');
+    if (normalise.isEmpty) return null;
+    final valeur = double.tryParse(normalise);
+    return valeur?.round();
+  }
+
+  /// Une borne de groupe saisie, ou [defaut] si la saisie n'en est pas une.
+  static int _borneSaisie(String saisie, {required int defaut}) {
+    final valeur = int.tryParse(saisie.trim());
+    if (valeur == null || valeur < 0) return defaut;
+    return valeur;
   }
 
   void _deleteOption(int groupIndex, int optionIndex) {

@@ -1,3 +1,4 @@
+import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:elcora_fast/presentation/tarification.dart';
 import 'package:elcora_fast/services/cart_service.dart';
@@ -50,11 +51,25 @@ class EnhancedItemCustomizationScreen extends StatefulWidget {
     Map<String, dynamic> customizations,
   )? onAddToCart;
 
+  /// Ligne du panier qu'on rouvre pour la modifier — nul à l'ajout.
+  ///
+  /// Sa présence change trois choses et rien d'autre : les choix de la ligne
+  /// sont rejoués à l'ouverture, le bouton enregistre au lieu d'ajouter, et
+  /// c'est cette ligne qui est réécrite plutôt qu'une nouvelle empilée à côté.
+  /// Le reste de l'écran — groupes, bornes, prix — est le même, et doit
+  /// l'être : composer et recomposer sont le même geste, et deux écrans qui
+  /// prétendraient le rendre finiraient par ne plus appliquer les mêmes règles.
+  final CartItem? ligneDuPanier;
+
   const EnhancedItemCustomizationScreen({
     required this.item,
     this.onAddToCart,
+    this.ligneDuPanier,
     super.key,
   });
+
+  /// Vrai quand l'écran modifie une ligne existante.
+  bool get enModification => ligneDuPanier != null;
 
   @override
   State<EnhancedItemCustomizationScreen> createState() =>
@@ -79,6 +94,17 @@ class _EnhancedItemCustomizationScreenState
     super.initState();
     _sessionId = DateTime.now().millisecondsSinceEpoch.toString();
     _menuItemId = widget.item.id;
+
+    // Une modification reprend la ligne où elle en est — quantité et note
+    // comprises. Repartir de 1 et d'un champ vide ferait perdre au client, en
+    // ouvrant l'écran, ce qu'il n'avait pas l'intention de toucher.
+    final ligne = widget.ligneDuPanier;
+    if (ligne != null) {
+      _quantity = ligne.quantity;
+      final note = ligne.customizations['note'];
+      if (note != null) _instructionsController.text = note.toString();
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeCustomization();
     });
@@ -95,6 +121,7 @@ class _EnhancedItemCustomizationScreenState
       _sessionId,
       _menuItemId,
       widget.item.name,
+      optionsInitiales: widget.ligneDuPanier?.selectedOptionIds ?? const [],
     );
 
     // Aucune présélection ici : `startCustomization` retient déjà les options
@@ -572,7 +599,7 @@ class _EnhancedItemCustomizationScreenState
     return OptionGroupCard(
       title: famille.titre,
       isRequired: famille.requis,
-      constraintLabel: famille.libelleContrainte,
+      constraintLabel: famille.badge(retenues.length),
       error: (manque && _reclames.contains(famille.cle))
           ? famille.reproche
           : null,
@@ -580,13 +607,24 @@ class _EnhancedItemCustomizationScreenState
         for (var i = 0; i < options.length; i++)
           OptionRow(
             label: options[i].name,
-            subtitle: options[i].description,
+            // « Indisponible » prime sur la description : c'est ce qui
+            // explique la ligne grisée, et le seul des deux qui change ce que
+            // le client peut faire.
+            subtitle: options[i].isAvailable
+                ? options[i].description
+                : 'Indisponible',
             selected: retenues.contains(options[i].id),
             multiple: !famille.unique,
             priceDelta: _libelleEcart(options[i], famille),
             showDivider: i < options.length - 1,
-            onChanged: (coche) =>
-                _basculer(service, famille, options[i].id, coche),
+            // Épuisée : montrée, jamais cochable. La masquer ferait croire à
+            // un menu qui change de forme d'une minute à l'autre, et
+            // effacerait un groupe entier — obligatoire compris — dès que
+            // toutes ses options le seraient.
+            enabled: options[i].isAvailable,
+            onChanged: options[i].isAvailable
+                ? (coche) => _basculer(service, famille, options[i].id, coche)
+                : null,
           ),
       ],
     );
@@ -764,11 +802,15 @@ class _EnhancedItemCustomizationScreenState
                 ? 'Plat indisponible'
                 : _optionsIncertaines(service)
                     ? 'Options indisponibles'
-                    : 'Ajouter au panier',
+                    : widget.enModification
+                        ? 'Enregistrer les modifications'
+                        : 'Ajouter au panier',
             emphasis: ActionEmphasis.gradient,
-            icon: widget.item.isAvailable
-                ? Icons.shopping_cart_rounded
-                : Icons.no_meals_rounded,
+            icon: !widget.item.isAvailable
+                ? Icons.no_meals_rounded
+                : widget.enModification
+                    ? Icons.check_rounded
+                    : Icons.shopping_cart_rounded,
             // Le bouton reste **actif** même quand un choix manque : c'est en
             // appuyant qu'on apprend ce qui manque, et les groupes concernés
             // se signalent alors en rouge. Un bouton grisé ne dit jamais
@@ -862,8 +904,39 @@ class _EnhancedItemCustomizationScreenState
         if (instructions.isNotEmpty) 'note': instructions,
       };
 
-      if (widget.onAddToCart != null) {
+      final ligne = widget.ligneDuPanier;
+      final String annonce;
+
+      if (ligne != null) {
+        // La position est relevée **maintenant**, pas à l'ouverture : l'écran
+        // se superpose au panier, et une synchronisation survenue entre-temps
+        // a pu réordonner les lignes. Écrire sur l'index d'ouverture
+        // réécrirait alors la ligne voisine.
+        final index = cartService.indexOfCartItem(ligne.id);
+        if (index < 0) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Cette ligne n’est plus dans votre panier.'),
+              ),
+            );
+            Navigator.of(context).pop();
+          }
+          return;
+        }
+
+        cartService.updateItemCustomizations(
+          index,
+          customizations: customizationsMap,
+          optionIds: optionIds,
+          optionsSupplement: supplement,
+          quantity: _quantity,
+        );
+        annonce = '${widget.item.name} mis à jour';
+      } else if (widget.onAddToCart != null) {
         widget.onAddToCart!(widget.item, _quantity, customizationsMap);
+        annonce =
+            '$_quantity × ${widget.item.name} ajouté${_quantity > 1 ? 's' : ''} au panier';
       } else {
         cartService.addItem(
           widget.item,
@@ -872,14 +945,14 @@ class _EnhancedItemCustomizationScreenState
           optionIds: optionIds,
           optionsSupplement: supplement,
         );
+        annonce =
+            '$_quantity × ${widget.item.name} ajouté${_quantity > 1 ? 's' : ''} au panier';
       }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              '$_quantity × ${widget.item.name} ajouté${_quantity > 1 ? 's' : ''} au panier',
-            ),
+            content: Text(annonce),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -937,6 +1010,19 @@ class _Famille {
     if (requis) return 'Au moins $minimum';
     if (maximum > 1) return 'Jusqu’à $maximum';
     return 'Facultatif';
+  }
+
+  /// Le badge, une fois [retenues] choix faits.
+  ///
+  /// Un groupe à plusieurs choix passe au décompte — « 2/3 » — dès la première
+  /// sélection : « Jusqu'à 3 » dit ce qui est permis, pas ce qu'il reste, et
+  /// c'est la seconde question qu'on se pose une fois qu'on a commencé. Un
+  /// groupe à choix unique n'y gagnerait rien : « 1/1 » n'apprend rien que la
+  /// puce cochée ne montre déjà.
+  String badge(int retenues) {
+    if (unique || maximum <= 1) return libelleContrainte;
+    if (retenues == 0) return libelleContrainte;
+    return '$retenues/$maximum';
   }
 
   /// Reproche affiché quand la borne basse n'est pas atteinte.

@@ -51,7 +51,7 @@ def lines_url(restaurant: Restaurant) -> str:
 
 
 def line_url(restaurant: Restaurant, line_id: str) -> str:
-    return reverse("v1:carts:cart-set-quantity", args=[restaurant.slug, line_id])
+    return reverse("v1:carts:cart-update-line", args=[restaurant.slug, line_id])
 
 
 class TestOuverture:

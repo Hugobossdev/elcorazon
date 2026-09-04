@@ -121,6 +121,8 @@ class ManagedCatalogRepository {
     bool isPopular = false,
     bool vipExclusive = false,
     int sortOrder = 0,
+    bool tracksStock = false,
+    int? stockQuantity,
   }) async {
     final response = await apiClient.post(
       '/catalog/manage/items/',
@@ -140,6 +142,8 @@ class ManagedCatalogRepository {
         'is_popular': isPopular,
         'vip_exclusive': vipExclusive,
         'sort_order': sortOrder,
+        'tracks_stock': tracksStock,
+        if (stockQuantity != null) 'stock_quantity': stockQuantity,
       },
     );
     return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
@@ -160,6 +164,8 @@ class ManagedCatalogRepository {
     bool? isPopular,
     bool? vipExclusive,
     int? sortOrder,
+    bool? tracksStock,
+    int? stockQuantity,
   }) async {
     final response = await apiClient.patch(
       '/catalog/manage/items/$menuItemId/',
@@ -177,7 +183,26 @@ class ManagedCatalogRepository {
         if (isPopular != null) 'is_popular': isPopular,
         if (vipExclusive != null) 'vip_exclusive': vipExclusive,
         if (sortOrder != null) 'sort_order': sortOrder,
+        if (tracksStock != null) 'tracks_stock': tracksStock,
+        if (stockQuantity != null) 'stock_quantity': stockQuantity,
       },
+    );
+    return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Fixe le stock restant d'un article — `POST .../items/{id}/stock/`.
+  ///
+  /// Distincte de [updateMenuItem], comme côté serveur : l'inventaire est le
+  /// geste le plus fréquent de la journée, il se confie à un poste qui n'a pas
+  /// à toucher aux prix, et il apparaît sous son propre nom au journal d'accès
+  /// plutôt que noyé dans « modification d'article ».
+  Future<ManagedMenuItem> setStock({
+    required String menuItemId,
+    required int stockQuantity,
+  }) async {
+    final response = await apiClient.post(
+      '/catalog/manage/items/$menuItemId/stock/',
+      data: {'stock_quantity': stockQuantity},
     );
     return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
   }

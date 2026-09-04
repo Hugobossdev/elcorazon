@@ -45,7 +45,16 @@ class CartService extends ChangeNotifier {
   /// avant de laisser chiffrer ou commander.
   Future<void>? _pendingCartSync;
 
-  final eccore.CartRepository _cartRepository = eccore.CartRepository(apiClient: apiClient);
+  /// Construit à la **première** écriture distante, et non à la construction du
+  /// service.
+  ///
+  /// `apiClient` lit le conteneur Riverpod monté par `main()` : l'évaluer dans
+  /// l'initialiseur de champ faisait échouer toute construction du service hors
+  /// de l'application lancée — donc toute vérification du panier autrement
+  /// qu'en démarrant l'app. Le panier local, lui, n'a besoin d'aucun réseau :
+  /// composer, chiffrer et fusionner des lignes se tiennent sans session.
+  late final eccore.CartRepository _cartRepository =
+      eccore.CartRepository(apiClient: apiClient);
   final OfflineSyncService _offlineSyncService = OfflineSyncService();
   final DeliveryFeeService _deliveryFeeService = DeliveryFeeService();
 
@@ -211,12 +220,28 @@ class CartService extends ChangeNotifier {
     return (ajoutes: ajoutes, indisponibles: tri.indisponibles);
   }
 
+  /// Compteur de lignes, pour que deux ajouts rapprochés ne se confondent pas.
+  ///
+  /// L'identifiant était `'<article>_<millisecondes>'`. Deux lignes du même
+  /// article ajoutées dans la **même milliseconde** — deux appuis rapides, ou
+  /// la reprise d'une commande passée, qui les ajoute en boucle — recevaient
+  /// donc le même identifiant. `removeItemByCartItemId` en retirait alors deux
+  /// pour un, et la modification d'une ligne cherchait sa jumelle en croyant
+  /// s'être trouvée elle-même.
+  static int _compteurDeLignes = 0;
+
+  static String _nouvelIdentifiantDeLigne(String menuItemId) {
+    return '${menuItemId}_${DateTime.now().millisecondsSinceEpoch}'
+        '_${_compteurDeLignes++}';
+  }
+
   void addItem(
     eccore.MenuItem menuItem, {
     int quantity = 1,
     Map<String, dynamic>? customizations,
     List<String> optionIds = const [],
     double optionsSupplement = 0.0,
+    bool compositionLibre = false,
   }) {
     if (quantity <= 0) {
       eccore.Journal.trace('⚠️ La quantité doit être supérieure à 0');
@@ -249,7 +274,7 @@ class CartService extends ChangeNotifier {
       );
     } else {
       final newItem = CartItem(
-        id: '${menuItem.id}_${DateTime.now().millisecondsSinceEpoch}',
+        id: _nouvelIdentifiantDeLigne(menuItem.id),
         menuItemId: menuItem.id,
         name: menuItem.name,
         price: menuItem.prixAffiche,
@@ -258,6 +283,7 @@ class CartService extends ChangeNotifier {
         customizations: normalizedCustomizations,
         selectedOptionIds: normalizedOptionIds,
         supplementOptions: optionsSupplement,
+        compositionLibre: compositionLibre,
       );
 
       _items.add(newItem);
@@ -333,22 +359,94 @@ class CartService extends ChangeNotifier {
     }
   }
 
-  /// Met à jour les customizations d'un article
+  /// Rejoue la personnalisation d'une ligne déjà au panier.
+  ///
+  /// La méthode n'écrivait que [CartItem.customizations] — les **libellés
+  /// d'affichage** — en laissant [CartItem.selectedOptionIds] et
+  /// [CartItem.supplementOptions] intacts. Une ligne modifiée annonçait donc
+  /// « XL, Bacon » tout en emportant au serveur les identifiants de l'ancien
+  /// choix, et en affichant l'ancien supplément : les trois faces d'une même
+  /// ligne racontaient trois choses différentes. Elle n'avait aucun appelant,
+  /// ce qui est la seule raison pour laquelle cela ne s'était jamais vu.
+  ///
+  /// Les trois partent donc ensemble, avec la quantité — c'est ce que le
+  /// configurateur rend quand on le rouvre depuis le panier.
+  ///
+  /// Si la ligne modifiée devient identique à une autre — même article, mêmes
+  /// options, mêmes libellés — les deux fusionnent, comme le font [addItem] ici
+  /// et `CartService.update_line` côté serveur. Laisser deux lignes que plus
+  /// rien ne distingue obligerait le client à comprendre pourquoi son panier
+  /// affiche deux fois la même chose.
   void updateItemCustomizations(
-    int index,
+    int index, {
     Map<String, dynamic>? customizations,
-  ) {
+    List<String>? optionIds,
+    double? optionsSupplement,
+    int? quantity,
+  }) {
     if (index < 0 || index >= _items.length) {
       eccore.Journal.trace('⚠️ Index invalide pour updateItemCustomizations: $index');
       return;
     }
 
-    final normalizedCustomizations = _normalizeCustomizations(customizations);
-    _items[index] =
-        _items[index].copyWith(customizations: normalizedCustomizations);
-    eccore.Journal.trace('✅ Customizations mises à jour pour: ${_items[index].name}');
+    final ancienne = _items[index];
+    final normalizedCustomizations = customizations == null
+        ? ancienne.customizations
+        : _normalizeCustomizations(customizations);
+    final normalizedOptionIds = optionIds == null
+        ? ancienne.selectedOptionIds
+        : (List<String>.from(optionIds)..sort());
+    final nouvelleQuantite = (quantity ?? ancienne.quantity).clamp(1, 999);
+
+    final modifiee = ancienne.copyWith(
+      customizations: normalizedCustomizations,
+      selectedOptionIds: normalizedOptionIds,
+      supplementOptions: optionsSupplement ?? ancienne.supplementOptions,
+      quantity: nouvelleQuantite,
+    );
+
+    // La ligne réécrite est écartée **par sa position** et non par son
+    // identifiant : c'est la position que l'appelant a donnée, et elle reste
+    // juste quand bien même deux lignes porteraient le même identifiant.
+    var jumelle = -1;
+    for (var i = 0; i < _items.length; i++) {
+      if (i == index) continue;
+      final item = _items[i];
+      if (item.menuItemId == modifiee.menuItemId &&
+          _mapsEqual(item.customizations, modifiee.customizations) &&
+          _listsEqual(item.selectedOptionIds, modifiee.selectedOptionIds)) {
+        jumelle = i;
+        break;
+      }
+    }
+
+    if (jumelle >= 0) {
+      final fusionnee = _items[jumelle];
+      _items[jumelle] = fusionnee.copyWith(
+        quantity: (fusionnee.quantity + modifiee.quantity).clamp(1, 999),
+      );
+      _items.removeAt(index);
+      eccore.Journal.trace(
+        '✅ Ligne modifiée fusionnée avec une ligne identique : ${modifiee.name}',
+      );
+    } else {
+      _items[index] = modifiee;
+      eccore.Journal.trace('✅ Personnalisation mise à jour : ${modifiee.name}');
+    }
+
     notifyListeners();
     _persistChanges();
+  }
+
+  /// Position d'une ligne par son identifiant de panier, −1 si elle n'y est
+  /// plus.
+  ///
+  /// L'écran de personnalisation est ouvert par-dessus le panier : entre son
+  /// ouverture et son enregistrement, une synchronisation serveur a pu
+  /// réordonner les lignes. Enregistrer sur l'index relevé à l'ouverture
+  /// écrirait alors sur la ligne du voisin.
+  int indexOfCartItem(String cartItemId) {
+    return _items.indexWhere((item) => item.id == cartItemId);
   }
 
   /// Vide complètement le panier

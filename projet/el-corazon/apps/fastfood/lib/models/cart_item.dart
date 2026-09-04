@@ -34,6 +34,16 @@ class CartItem {
   /// éviter. Le montrer d'emblée vaut mieux que de le découvrir à l'addition.
   final double supplementOptions;
 
+  /// La ligne a été composée hors des groupes d'options du catalogue — c'est
+  /// le cas des gâteaux, dont l'écran dédié écrit des clés libres
+  /// (« Livraison », « Heure », « Type ») que nul `OptionGroup` ne porte.
+  ///
+  /// Elle n'est donc pas rejouable par le configurateur générique : celui-ci
+  /// recompose [customizations] à partir des seuls libellés de groupes, et
+  /// effacerait en enregistrant tout ce que l'écran des gâteaux y avait mis.
+  /// Le panier ne lui propose donc pas « Modifier ».
+  final bool compositionLibre;
+
   CartItem({
     required this.id,
     required this.menuItemId,
@@ -44,7 +54,14 @@ class CartItem {
     this.customizations = const {},
     this.selectedOptionIds = const [],
     this.supplementOptions = 0.0,
+    this.compositionLibre = false,
   });
+
+  /// Vrai quand le configurateur générique peut rouvrir cette ligne.
+  ///
+  /// Une ligne du catalogue l'est toujours, même sans option retenue : c'est
+  /// précisément par là qu'on ajoute le fromage oublié au moment de l'ajout.
+  bool get personnalisable => !compositionLibre && menuItemId.isNotEmpty;
 
   /// Prix d'un exemplaire, suppléments d'options compris.
   double get prixUnitaire => prixUnitairePersonnalise(
@@ -107,6 +124,7 @@ class CartItem {
     Map<String, dynamic>? customizations,
     List<String>? selectedOptionIds,
     double? supplementOptions,
+    bool? compositionLibre,
   }) {
     return CartItem(
       id: id ?? this.id,
@@ -118,6 +136,7 @@ class CartItem {
       customizations: customizations ?? this.customizations,
       selectedOptionIds: selectedOptionIds ?? this.selectedOptionIds,
       supplementOptions: supplementOptions ?? this.supplementOptions,
+      compositionLibre: compositionLibre ?? this.compositionLibre,
     );
   }
 
@@ -133,6 +152,7 @@ class CartItem {
       'customizations': customizations,
       'selected_option_ids': selectedOptionIds,
       'options_supplement': supplementOptions,
+      'composition_libre': compositionLibre,
     };
   }
 
@@ -154,6 +174,7 @@ class CartItem {
           .map((id) => id.toString())
           .toList(),
       supplementOptions: (map['options_supplement'] as num?)?.toDouble() ?? 0.0,
+      compositionLibre: map['composition_libre'] as bool? ?? false,
     );
   }
 
@@ -174,7 +195,8 @@ class CartItem {
         other.imageUrl == imageUrl &&
         other.customizations.toString() == customizations.toString() &&
         other.selectedOptionIds.toString() == selectedOptionIds.toString() &&
-        other.supplementOptions == supplementOptions;
+        other.supplementOptions == supplementOptions &&
+        other.compositionLibre == compositionLibre;
   }
 
   @override
@@ -187,6 +209,7 @@ class CartItem {
         imageUrl.hashCode ^
         customizations.hashCode ^
         selectedOptionIds.hashCode ^
-        supplementOptions.hashCode;
+        supplementOptions.hashCode ^
+        compositionLibre.hashCode;
   }
 }

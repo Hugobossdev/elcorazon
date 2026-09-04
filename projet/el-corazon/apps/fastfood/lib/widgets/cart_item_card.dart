@@ -38,10 +38,16 @@ class CartItemCard extends StatelessWidget {
   final VoidCallback onRemove;
   final ValueChanged<int> onQuantityChanged;
 
+  /// Rouvre le configurateur sur cette ligne. Nul quand la ligne n'est pas
+  /// modifiable — une composition faite hors catalogue n'a pas de groupes
+  /// d'options à rejouer, et le bouton mènerait à un écran vide.
+  final VoidCallback? onEdit;
+
   const CartItemCard({
     required this.item,
     required this.onRemove,
     required this.onQuantityChanged,
+    this.onEdit,
     super.key,
   });
 
@@ -57,11 +63,12 @@ class CartItemCard extends StatelessWidget {
   /// message, contact. L'afficher deux fois repoussait l'essentiel au-delà des
   /// deux lignes visibles. Elle n'est donc montrée que lorsqu'elle est seule à
   /// porter l'information.
-  static String _describe(Map<String, dynamic> customization) {
-    final entries = customization.entries.where(
-      (entry) => entry.key != 'note' || customization.length == 1,
-    );
-    return entries.map((entry) => '${entry.key}: ${entry.value}').join(', ');
+  static List<String> _describe(Map<String, dynamic> customization) {
+    return [
+      for (final entry in customization.entries)
+        if (entry.key != 'note' || customization.length == 1)
+          '${entry.key} : ${entry.value}',
+    ];
   }
 
   @override
@@ -70,7 +77,7 @@ class CartItemCard extends StatelessWidget {
     final personnalisation = item.customization;
     final resume = (personnalisation != null && personnalisation.isNotEmpty)
         ? _describe(personnalisation)
-        : '';
+        : const <String>[];
 
     return Container(
       margin: const EdgeInsets.only(bottom: DesignConstants.spacingM),
@@ -115,10 +122,34 @@ class CartItemCard extends StatelessWidget {
                 ),
                 if (resume.isNotEmpty) ...[
                   const SizedBox(height: 2),
+                  // Un groupe par ligne — « Taille : XL », « Suppléments :
+                  // Fromage, Bacon ». Tout enfiler sur une seule ligne
+                  // n'entrait pas dans les deux lignes visibles dès qu'un
+                  // second groupe s'en mêlait, et le client ne relisait donc
+                  // jamais que le premier de ses choix.
+                  for (final ligne in resume)
+                    Text(
+                      ligne,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+                if (onEdit != null) ...[
+                  const SizedBox(height: 2),
+                  _Modifier(onTap: onEdit!, nom: item.name),
+                ],
+                // Le prix unitaire n'apparaît que lorsqu'il diffère du total :
+                // sur une ligne à un exemplaire, il répéterait la même somme
+                // deux fois. Dès qu'il y en a plusieurs, il est ce qui rend le
+                // total vérifiable — « 6 500 × 2 » se relit, « 13 000 » se
+                // subit.
+                if (item.quantity > 1) ...[
+                  const SizedBox(height: 2),
                   Text(
-                    resume,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                    '${PriceFormatter.format(item.prixUnitaire)} l’unité',
                     style: AppTypography.bodyMd(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -154,6 +185,50 @@ class CartItemCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Rouvre la personnalisation de la ligne.
+///
+/// Un lien plutôt qu'un bouton plein : la maquette pose ici une action
+/// secondaire, et un second bouton d'emphase égale à côté du sélecteur de
+/// quantité ferait de chaque ligne du panier une petite barre d'outils.
+class _Modifier extends StatelessWidget {
+  const _Modifier({required this.onTap, required this.nom});
+
+  final VoidCallback onTap;
+  final String nom;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Semantics(
+      button: true,
+      label: 'Modifier la personnalisation de $nom',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: DesignConstants.borderRadiusSmall,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.tune_rounded,
+                size: 14,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'Modifier',
+                style: AppTypography.labelLg(color: theme.colorScheme.primary),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

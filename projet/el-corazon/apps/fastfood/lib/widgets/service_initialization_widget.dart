@@ -29,45 +29,43 @@ class _ServiceInitializationWidgetState
     extends State<ServiceInitializationWidget> {
   bool _isInitializing = false;
   bool _isInitialized = false;
-  String _currentStep = '';
-  double _progress = 0.0;
 
   @override
   void initState() {
     super.initState();
     if (widget.initializeOnStartup) {
-      _initializeServices();
+      // Après la première image, et non pendant `initState` : ce widget est
+      // posé dans `MaterialApp.builder`, donc au-dessus du `Navigator`.
+      // Démarrer avant que l'arbre ne soit monté revenait à retarder
+      // l'affichage de la première route.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _initializeServices());
     }
   }
 
   Future<void> _initializeServices() async {
     if (_isInitialized || _isInitializing) return;
-
-    setState(() {
-      _isInitializing = true;
-      _progress = 0.0;
-    });
+    _isInitializing = true;
 
     try {
       final serviceInitializer = ServiceInitializer();
 
-      // Étape 1: Services essentiels seulement (les autres seront lazy)
-      setState(() {
-        _currentStep = 'Initialisation des services essentiels...';
-        _progress = 0.2;
-      });
-      // Initialiser seulement les services essentiels
-      // Les autres services seront initialisés à la demande (lazy)
+      // Services périphériques seulement. `AppService` n'est **pas** dans la
+      // liste, et son absence est le correctif : il y était, alors que
+      // `SplashScreen` l'initialise déjà. Les deux appelants ne se
+      // connaissaient pas, et le catalogue partait donc deux fois à chaque
+      // démarrage — la seconde salve, dans le journal, ressemblait à un
+      // rechargement spontané.
+      //
+      // C'est le splash qui a raison des deux : lui attend `sessionReadyFuture`
+      // avant d'initialiser. L'appel qui se trouvait ici partait sans, si bien
+      // que `_loadUserSession()` lisait un `_currentUser` encore nul et sautait
+      // le chargement des commandes d'un client pourtant connecté.
       await _initializeCoreServicesOnly(context);
 
-      // Étape 2: Services utilisateur si connecté
+      // Services utilisateur si une session est ouverte.
       if (!mounted || !context.mounted) return;
       final appService = Provider.of<AppService>(context, listen: false);
       if (appService.isLoggedIn && appService.currentUser != null) {
-        setState(() {
-          _currentStep = 'Configuration des services utilisateur...';
-          _progress = 0.8;
-        });
         if (!mounted || !context.mounted) return;
         await serviceInitializer.initializeUserServices(
           context,
@@ -75,16 +73,7 @@ class _ServiceInitializationWidgetState
         );
       }
 
-      // Étape 3: Finalisation
-      setState(() {
-        _currentStep = 'Finalisation...';
-        _progress = 1.0;
-      });
-
-      setState(() {
-        _isInitialized = true;
-        _isInitializing = false;
-      });
+      _isInitialized = true;
     } catch (e) {
       final translatedError = ErrorHandlerService.translateError(e);
       ErrorHandlerService().logError(
@@ -92,69 +81,30 @@ class _ServiceInitializationWidgetState
         code: 'INIT_ERROR',
         details: e,
       );
-      setState(() {
-        _isInitializing = false;
-        _currentStep = translatedError;
-      });
+    } finally {
+      _isInitializing = false;
     }
   }
 
+  /// L'arbre passe **toujours**, sans attendre.
+  ///
+  /// Ce `build` rendait un `Scaffold` de chargement plein écran tant que
+  /// l'initialisation courait, à la place de `widget.child` — c'est-à-dire à la
+  /// place du `Navigator` tout entier. Tant qu'un service tardait, l'application
+  /// n'avait aucune interface : ni le splash, ni rien. Avec un backend muet,
+  /// cela faisait plus de trente secondes de rond blanc, et la première route
+  /// n'était montée qu'ensuite.
+  ///
+  /// Ces services ne conditionnent aucune première image : le carnet, les
+  /// notifications et la position se signalent par `notifyListeners()` quand ils
+  /// sont prêts, et les écrans qui en dépendent les écoutent déjà. L'écran
+  /// d'ouverture, lui, existe précisément pour couvrir ce temps-là.
   @override
-  Widget build(BuildContext context) {
-    if (!widget.initializeOnStartup || _isInitialized) {
-      return widget.child;
-    }
+  Widget build(BuildContext context) => widget.child;
 
-    if (_isInitializing) {
-      return _buildInitializationScreen();
-    }
-
-    return widget.child;
-  }
-
-  Widget _buildInitializationScreen() {
-    return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.primary,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              _currentStep,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: 200,
-              child: LinearProgressIndicator(
-                value: _progress,
-                backgroundColor: Colors.white.withValues(alpha: 0.3),
-                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Initialise seulement les services essentiels (optimisation lazy)
+  /// Initialise les services périphériques (hors `AppService`, voir plus haut).
   Future<void> _initializeCoreServicesOnly(BuildContext context) async {
     try {
-      // Services essentiels seulement
-      if (!mounted || !context.mounted) return;
-      await ServiceInitializationHelper.initializeIfNeeded<AppService>(
-        context: context,
-        initializer: (service) => service.initialize(),
-      );
       if (!mounted || !context.mounted) return;
       await ServiceInitializationHelper.initializeIfNeeded<LocationService>(
         context: context,
@@ -172,7 +122,7 @@ class _ServiceInitializationWidgetState
       );
     } catch (e) {
       ErrorHandlerService().logError(
-        'Erreur lors de l\'initialisation des services essentiels',
+        "Erreur lors de l'initialisation des services essentiels",
         code: 'CORE_INIT_ERROR',
         details: e,
       );

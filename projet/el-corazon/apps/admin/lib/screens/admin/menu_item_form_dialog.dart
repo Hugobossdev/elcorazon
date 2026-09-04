@@ -32,9 +32,11 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
   late TextEditingController _descriptionController;
   late TextEditingController _priceController;
   late TextEditingController _imageUrlController;
+  late TextEditingController _stockController;
 
   String? _selectedCategoryId;
   bool _isAvailable = true;
+  bool _tracksStock = false;
   bool _isPopular = false;
   bool _isVegetarian = false;
   bool _isVegan = false;
@@ -190,9 +192,12 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
     _descriptionController = TextEditingController(text: item?.description);
     _priceController = TextEditingController(text: item?.price.toMajorUnits().toStringAsFixed(0));
     _imageUrlController = TextEditingController(text: item?.image);
+    _stockController =
+        TextEditingController(text: '${item?.stockQuantity ?? 0}');
 
     _selectedCategoryId = item?.categoryId;
     _isAvailable = item?.isAvailable ?? true;
+    _tracksStock = item?.tracksStock ?? false;
     _isPopular = item?.isPopular ?? false;
     _isVegetarian = item?.estVegetarien ?? false;
     _isVegan = item?.estVegan ?? false;
@@ -205,6 +210,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
     _descriptionController.dispose();
     _priceController.dispose();
     _imageUrlController.dispose();
+    _stockController.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -447,8 +453,57 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
               ),
             ],
           ),
+          const SizedBox(height: 24),
+          _sectionStock(),
         ],
       ),
+    );
+  }
+
+  /// Suivi du stock.
+  ///
+  /// Le serveur porte `tracks_stock` et `stock_quantity` depuis l'origine, et
+  /// s'en sert pour refuser une commande sous verrou — mais aucun écran ne les
+  /// écrivait : la rupture ne pouvait s'annoncer qu'en décochant « Disponible »,
+  /// ce qui retire l'article de la carte au lieu d'en compter les dernières
+  /// parts.
+  ///
+  /// Les deux champs vont ensemble : un compteur sans suivi n'a pas de sens, et
+  /// le second est donc masqué tant que le premier est éteint.
+  Widget _sectionStock() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Stock', style: TextStyle(fontWeight: FontWeight.bold)),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Suivre le stock'),
+          subtitle: Text(
+            _tracksStock
+                ? 'Chaque commande décompte les parts restantes.'
+                : 'L’article reste commandable sans limite de quantité.',
+          ),
+          value: _tracksStock,
+          onChanged: (val) => setState(() => _tracksStock = val),
+        ),
+        if (_tracksStock)
+          TextFormField(
+            controller: _stockController,
+            decoration: const InputDecoration(
+              labelText: 'Parts restantes',
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: TextInputType.number,
+            validator: (value) {
+              if (!_tracksStock) return null;
+              final quantite = int.tryParse((value ?? '').trim());
+              if (quantite == null || quantite < 0) {
+                return 'Indiquez un nombre de parts (0 pour épuisé).';
+              }
+              return null;
+            },
+          ),
+      ],
     );
   }
 
@@ -608,6 +663,10 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           description: _descriptionController.text,
           isAvailable: _isAvailable,
           isPopular: _isPopular,
+          tracksStock: _tracksStock,
+          stockQuantity: _tracksStock
+              ? int.tryParse(_stockController.text.trim())
+              : null,
         );
         success = createdItem != null;
 
@@ -658,6 +717,13 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           isAvailable: _isAvailable,
           isPopular: _isPopular,
           sortOrder: existant.sortOrder,
+          tracksStock: _tracksStock,
+          // Le compteur ne part que si le suivi est actif : l'éteindre laisse
+          // la dernière valeur en base sans effet, et la rallumer la retrouve
+          // plutôt que de repartir de zéro.
+          stockQuantity: _tracksStock
+              ? int.tryParse(_stockController.text.trim())
+              : null,
         );
         if (success) {
           await _syncOptionGroups(menuService, existant.id);

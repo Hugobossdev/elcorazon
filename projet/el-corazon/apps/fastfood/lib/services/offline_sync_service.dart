@@ -39,7 +39,11 @@ class OfflineSyncService extends ChangeNotifier {
   DateTime? _menuCacheTime;
   static const Duration _cacheValidityDuration = Duration(hours: 24);
 
-  final eccore.CartRepository _cartRepository =
+  /// Construit à la première écriture distante — même raison que dans
+  /// `CartService` : `apiClient` lit le conteneur Riverpod monté par `main()`,
+  /// et l'évaluer dans l'initialiseur de champ rendait ce service — donc tout
+  /// service qui le tient — inconstructible hors de l'application lancée.
+  late final eccore.CartRepository _cartRepository =
       eccore.CartRepository(apiClient: apiClient);
 
   // Getters
@@ -54,6 +58,68 @@ class OfflineSyncService extends ChangeNotifier {
 
   /// Vérifie si la base de données est disponible
   bool get _isDatabaseAvailable => _database != null && !kIsWeb;
+
+  // Clés du catalogue conservé sur disque.
+  static const _cleMenuCache = 'catalogue_articles';
+  static const _cleCategoriesCache = 'catalogue_categories';
+  static const _cleCatalogueDate = 'catalogue_date';
+
+  /// Les préférences, ouvertes à la demande.
+  ///
+  /// `initialize()` les ouvrait déjà — mais `initialize()` n'est appelée que
+  /// par `ServiceInitializer.initializeAllServices`, qui ne figure dans aucun
+  /// chemin de démarrage : au lancement réel, `_prefs` restait nul. Le
+  /// catalogue mis « en cache » ne quittait donc jamais la mémoire vive, et
+  /// disparaissait avec l'onglet. Les méthodes de cache ouvrent désormais le
+  /// stockage elles-mêmes.
+  Future<SharedPreferences?> _preferences() async {
+    try {
+      return _prefs ??= await SharedPreferences.getInstance();
+    } catch (e) {
+      eccore.Journal.trace('⚠️ OfflineSyncService: préférences indisponibles - $e');
+      return null;
+    }
+  }
+
+  /// Écrit le catalogue sur disque. Sans effet si le stockage est refusé —
+  /// c'est un confort de démarrage, jamais une condition de fonctionnement.
+  Future<void> _conserverSurDisque(String cle, List<Object?> encodables) async {
+    final prefs = await _preferences();
+    if (prefs == null) return;
+    try {
+      await prefs.setString(cle, json.encode(encodables));
+      await prefs.setInt(
+        _cleCatalogueDate,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } catch (e) {
+      eccore.Journal.trace('⚠️ OfflineSyncService: écriture du cache $cle - $e');
+    }
+  }
+
+  /// Relit le catalogue depuis le disque, ou `null` s'il est absent ou périmé.
+  Future<List<Map<String, dynamic>>?> _relireDuDisque(String cle) async {
+    final prefs = await _preferences();
+    if (prefs == null) return null;
+    try {
+      final brut = prefs.getString(cle);
+      if (brut == null || brut.isEmpty) return null;
+
+      final ecritLe = prefs.getInt(_cleCatalogueDate);
+      if (ecritLe != null) {
+        final age = DateTime.now().difference(
+          DateTime.fromMillisecondsSinceEpoch(ecritLe),
+        );
+        if (age > _cacheValidityDuration) return null;
+      }
+
+      return (json.decode(brut) as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+    } catch (e) {
+      eccore.Journal.trace('⚠️ OfflineSyncService: lecture du cache $cle - $e');
+      return null;
+    }
+  }
 
   /// Initialise le service de synchronisation hors ligne
   Future<void> initialize() async {
@@ -506,9 +572,14 @@ class OfflineSyncService extends ChangeNotifier {
       _cachedMenuItems = items;
       _menuCacheTime = DateTime.now();
       
-      // Sur web, utiliser seulement le cache en mémoire
+      // Pas de SQLite sur le web : le catalogue va dans les préférences, qui
+      // elles survivent au rechargement de l'onglet.
       if (!_isDatabaseAvailable) {
-        eccore.Journal.trace('✅ OfflineSyncService: Menu mis en cache (mémoire uniquement) - ${items.length} items');
+        await _conserverSurDisque(
+          _cleMenuCache,
+          items.map((item) => item.toJson()).toList(),
+        );
+        eccore.Journal.trace('✅ OfflineSyncService: Menu mis en cache - ${items.length} items');
         return;
       }
       
@@ -544,7 +615,8 @@ class OfflineSyncService extends ChangeNotifier {
 
   /// Charge le menu depuis le cache local
   Future<List<eccore.MenuItem>?> loadCachedMenuItems() async {
-    // Sur web, retourner le cache en mémoire si disponible
+    // Mémoire d'abord, disque ensuite : le premier démarrage d'un onglet n'a
+    // rien en mémoire, et c'est précisément là que le repli compte.
     if (!_isDatabaseAvailable) {
       if (_cachedMenuItems != null && _menuCacheTime != null) {
         final cacheAge = DateTime.now().difference(_menuCacheTime!);
@@ -553,7 +625,19 @@ class OfflineSyncService extends ChangeNotifier {
           return _cachedMenuItems;
         }
       }
-      return null;
+
+      final conserves = await _relireDuDisque(_cleMenuCache);
+      if (conserves == null || conserves.isEmpty) return null;
+      try {
+        final items = conserves.map(eccore.MenuItem.fromJson).toList();
+        _cachedMenuItems = items;
+        _menuCacheTime = DateTime.now();
+        eccore.Journal.trace('✅ OfflineSyncService: Menu relu sur disque - ${items.length} items');
+        return items;
+      } catch (e) {
+        eccore.Journal.trace('❌ OfflineSyncService: cache menu illisible - $e');
+        return null;
+      }
     }
 
     try {
@@ -596,10 +680,14 @@ class OfflineSyncService extends ChangeNotifier {
 
   /// Cache les catégories localement
   Future<void> cacheCategories(List<eccore.Category> categories) async {
-    // Sur web, utiliser seulement le cache en mémoire
+    // Idem : sur le web les catégories vont dans les préférences.
     if (!_isDatabaseAvailable) {
       _cachedCategories = categories;
-      eccore.Journal.trace('✅ OfflineSyncService: Catégories mises en cache (mémoire uniquement) - ${categories.length} catégories');
+      await _conserverSurDisque(
+        _cleCategoriesCache,
+        categories.map((c) => c.toJson()).toList(),
+      );
+      eccore.Journal.trace('✅ OfflineSyncService: Catégories mises en cache - ${categories.length} catégories');
       return;
     }
 
@@ -685,13 +773,23 @@ class OfflineSyncService extends ChangeNotifier {
 
   /// Charge les catégories depuis le cache local
   Future<List<eccore.Category>?> loadCachedCategories() async {
-    // Sur web, retourner le cache en mémoire si disponible
     if (!_isDatabaseAvailable) {
       if (_cachedCategories != null) {
         eccore.Journal.trace('✅ OfflineSyncService: Catégories chargées depuis le cache mémoire - ${_cachedCategories!.length} catégories');
         return _cachedCategories;
       }
-      return null;
+
+      final conservees = await _relireDuDisque(_cleCategoriesCache);
+      if (conservees == null || conservees.isEmpty) return null;
+      try {
+        final categories = conservees.map(eccore.Category.fromJson).toList();
+        _cachedCategories = categories;
+        eccore.Journal.trace('✅ OfflineSyncService: Catégories relues sur disque - ${categories.length}');
+        return categories;
+      } catch (e) {
+        eccore.Journal.trace('❌ OfflineSyncService: cache catégories illisible - $e');
+        return null;
+      }
     }
 
     try {

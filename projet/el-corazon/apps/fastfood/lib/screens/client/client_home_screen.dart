@@ -116,7 +116,12 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
         child: SlideTransition(
           position: _montee,
           child: RefreshIndicator(
-            onRefresh: () => context.read<AppService>().initialize(),
+            // `rechargerLeCatalogue()` et non `initialize()` : le geste veut
+            // des données fraîches, or `initialize()` passe par le cache
+            // mémoire, valable 5 minutes pour les articles et 10 pour les
+            // catégories. Tirer la liste pendant ce délai ne rapportait donc
+            // rien et n'émettait aucune requête.
+            onRefresh: () => context.read<AppService>().rechargerLeCatalogue(),
             child: CustomScrollView(
               slivers: [
                 // Compense la barre translucide, qui recouvre le haut du

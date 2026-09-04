@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/main.dart' show sessionReadyFuture;
 import 'package:elcora_fast/services/app_service.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/services/error_handler_service.dart';
 import 'package:elcora_fast/services/performance_service.dart';
 import 'package:elcora_fast/services/onboarding_service.dart';
@@ -112,6 +113,14 @@ class _SplashScreenState extends State<SplashScreen>
     }
   }
 
+  /// Au-delà, l'interface s'ouvre sans attendre le catalogue.
+  ///
+  /// Six secondes : au-dessus de tout chargement normal — le catalogue complet
+  /// (catégories + trois pages d'articles) tient en moins d'une seconde contre
+  /// un serveur en bon état — et bien en dessous des 15 s au bout desquelles
+  /// une requête sans réponse est abandonnée.
+  static const _plafondOuverture = Duration(seconds: 6);
+
   /// Initialize app services with performance monitoring
   Future<void> _initializeAppWithPerformance() async {
     final performanceService = context.read<PerformanceService>();
@@ -127,7 +136,26 @@ class _SplashScreenState extends State<SplashScreen>
         if (!mounted) return;
 
         final appService = context.read<AppService>();
-        await appService.initialize();
+
+        // Plafonné, et le futur n'est **pas** annulé pour autant : il continue
+        // en arrière-plan et l'écran se peuplera par `notifyListeners()` quand
+        // le catalogue arrivera. Sans ce plafond, un serveur qui accepte la
+        // connexion sans jamais répondre — ce que fait le serveur de
+        // développement pendant tout un rechargement à chaud — retenait
+        // l'ouverture pour la durée entière de ses délais d'abandon.
+        //
+        // Ce n'est pas un délai réseau relevé : le délai d'abandon des
+        // requêtes reste à 15 s (`ApiClient`). C'est la promesse faite à
+        // l'utilisateur — l'application s'ouvre, avec ce qu'elle a.
+        await appService.initialize().timeout(
+          _plafondOuverture,
+          onTimeout: () {
+            eccore.Journal.trace(
+              '⏱️ Catalogue toujours en route après ${_plafondOuverture.inSeconds}s '
+              '— ouverture de l’interface sans l’attendre.',
+            );
+          },
+        );
       });
     } catch (e) {
       errorHandler.logError('Failed to initialize app', details: e.toString());
