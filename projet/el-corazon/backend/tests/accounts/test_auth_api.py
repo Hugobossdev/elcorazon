@@ -346,6 +346,37 @@ class TestAppareils:
         assert Device.objects.get(token="fcm-partage").user == autre
         assert Device.objects.count() == 1
 
+    def test_un_navigateur_s_enregistre_comme_appareil_web(self, registered: User) -> None:
+        """Le Web est une plateforme à part entière du contrat.
+
+        L'application cliente déduisait la plateforme de `defaultTargetPlatform`,
+        qui rend le système **hôte** dans un navigateur : un jeton FCM Web
+        partait donc étiqueté « android ». Le serveur l'acceptait sans broncher —
+        c'est un choix valide — et l'appareil se retrouvait rangé sous une
+        plateforme dont il n'a ni le format de jeton ni le mode de livraison.
+        """
+        client = authenticated(APIClient(), registered)
+
+        response = client.post(
+            reverse("v1:accounts:devices"),
+            {"token": "fcm-web-abc", "platform": "web"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert Device.objects.get(token="fcm-web-abc").platform == "web"
+
+    def test_une_plateforme_inconnue_est_refusee(self, registered: User) -> None:
+        client = authenticated(APIClient(), registered)
+
+        response = client.post(
+            reverse("v1:accounts:devices"),
+            {"token": "fcm-x", "platform": "navigateur"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
     def test_le_retrait_est_scope_a_l_utilisateur(self, registered: User) -> None:
         """Personne ne désabonne l'appareil d'autrui en devinant son jeton."""
         autre = User.objects.create_user(

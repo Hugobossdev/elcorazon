@@ -64,6 +64,14 @@ dependencies:
   path: any
   timezone: any
 
+  # Notifications de premier plan sur le Web : `flutter_local_notifications`
+  # n'a pas d'implémentation Web (son `show()` sort sur `kIsWeb`), et le
+  # service worker ne couvre que l'arrière-plan. L'affichage passe donc par
+  # `ServiceWorkerRegistration.showNotification`, importé sous condition dans
+  # `lib/services/push/`. Déjà tiré transitivement par `firebase_*_web` ;
+  # déclaré ici parce qu'on l'importe directement.
+  web: ^1.1.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

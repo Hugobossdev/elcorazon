@@ -351,11 +351,19 @@ class AppService extends ChangeNotifier {
     try {
       await _container.read(eccore.authRepositoryProvider).registerDevice(
         token: token,
-        platform: switch (defaultTargetPlatform) {
-          TargetPlatform.iOS => 'ios',
-          TargetPlatform.android => 'android',
-          _ => 'web',
-        },
+        // `kIsWeb` **avant** `defaultTargetPlatform`, et non l'inverse : dans
+        // un navigateur, `defaultTargetPlatform` rend le système **hôte** —
+        // `TargetPlatform.android` pour Chrome sur Android, `iOS` pour Safari
+        // sur iPhone. Un jeton FCM Web partait donc au serveur étiqueté
+        // « android », et l'appareil était rangé sous une plateforme dont il
+        // n'a ni le format de jeton ni le mode de livraison.
+        platform: kIsWeb
+            ? 'web'
+            : switch (defaultTargetPlatform) {
+                TargetPlatform.iOS => 'ios',
+                TargetPlatform.android => 'android',
+                _ => 'web',
+              },
       );
     } catch (e) {
       eccore.Journal.trace('⚠️ Échec de l\'enregistrement du jeton FCM: $e');

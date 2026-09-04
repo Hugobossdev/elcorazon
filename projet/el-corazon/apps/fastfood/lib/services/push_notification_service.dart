@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:elcora_fast/models/order.dart';
+import 'package:elcora_fast/services/push/notification_navigateur.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Reçoit les messages quand l'app est fermée ou en arrière-plan. Doit être
@@ -129,6 +131,45 @@ class PushNotificationService extends ChangeNotifier {
     if (userId != null) await enableForUser(userId);
   }
 
+  /// Clé VAPID publique du projet Firebase — `FCM_VAPID_PUBLIC_KEY` dans
+  /// `.env`, et **uniquement** la clé publique.
+  ///
+  /// C'est le « certificat Web Push » de la console Firebase (Paramètres du
+  /// projet → Cloud Messaging). Elle est publique par construction : le
+  /// navigateur la transmet au service de push pour lier l'abonnement au
+  /// projet. La moitié privée reste chez Google et n'a rien à faire ici.
+  ///
+  /// Absente, `getToken()` retombe sur la paire de clés par défaut du SDK JS,
+  /// ce qui fonctionne mais lie les abonnements à une clé qui n'est pas celle
+  /// du projet. Ce n'est donc pas bloquant, et son absence ne doit pas
+  /// empêcher le Web de recevoir — d'où le `null` plutôt qu'une exception.
+  ///
+  /// Nulle hors Web : Android et iOS n'utilisent pas de clé VAPID, et en
+  /// passer une à `getToken()` y est sans effet.
+  String? get _cleVapid {
+    if (!kIsWeb) return null;
+
+    // `dotenv.maybeGet` traverse le getter `env`, qui **lève**
+    // `NotInitializedError` quand le fichier n'a pas pu être chargé. Sans cette
+    // garde, un `.env` absent ne priverait pas seulement de la clé VAPID : il
+    // ferait échouer `enableForUser` tout entier, dont le `catch` est déjà
+    // celui qui masquait le défaut du service worker. Une clé facultative ne
+    // doit pas pouvoir emporter les notifications.
+    if (!dotenv.isInitialized) return null;
+
+    final cle = dotenv.maybeGet('FCM_VAPID_PUBLIC_KEY')?.trim();
+    return (cle == null || cle.isEmpty) ? null : cle;
+  }
+
+  /// Ce qu'un journal a le droit de dire d'un jeton d'appareil.
+  ///
+  /// Un jeton FCM permet d'envoyer des notifications à cet appareil : entier
+  /// dans une console de développement, il finit dans une capture d'écran ou un
+  /// rapport de bogue. Les huit derniers caractères suffisent à le reconnaître
+  /// — c'est déjà la convention du serveur (`FcmSender`, `fcm.py`).
+  static String _jetonAbrege(String token) =>
+      token.length <= 8 ? 'reçu' : 'reçu (…${token.substring(token.length - 8)})';
+
   Future<void> _ecouterLesMessages() async {
     try {
       final messaging = FirebaseMessaging.instance;
@@ -176,13 +217,25 @@ class PushNotificationService extends ChangeNotifier {
 
       final settings = await messaging.requestPermission();
       _authorization = settings.authorizationStatus;
-      Journal.trace('PushNotificationService: permission ${_authorization.name}');
+      Journal.trace('FCM · permission : ${_authorization.name}');
 
       if (!isAuthorized) return;
 
-      _fcmToken = await messaging.getToken();
+      // Sur le Web, `getToken()` commence par faire enregistrer au SDK JS le
+      // service worker `/firebase-messaging-sw.js`. Tant que ce fichier
+      // n'existait pas, l'appel échouait en
+      // `failed-service-worker-registration` et l'on n'obtenait jamais de
+      // jeton — c'est le défaut que `web/firebase-messaging-sw.js` corrige.
+      _fcmToken = await messaging.getToken(vapidKey: _cleVapid);
+
+      if (kIsWeb) {
+        Journal.trace(
+          'FCM · service worker : ${await etatDuServiceWorkerPush()}'
+          '${_cleVapid == null ? ' · clé VAPID : par défaut du SDK' : ' · clé VAPID : projet'}',
+        );
+      }
       Journal.trace(
-        'PushNotificationService: jeton FCM ${_fcmToken == null ? 'indisponible' : 'obtenu'}',
+        'FCM · jeton : ${_fcmToken == null ? 'indisponible' : _jetonAbrege(_fcmToken!)}',
       );
 
       await _abonnementRotation?.cancel();
@@ -199,7 +252,18 @@ class PushNotificationService extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      Journal.trace('PushNotificationService: activation impossible - $e');
+      // Le message brut ne disait pas *quelle* étape avait cédé. Sur le Web,
+      // `failed-service-worker-registration` en est presque toujours la cause,
+      // et il vaut mieux nommer le fichier manquant que laisser chercher.
+      Journal.trace('FCM · activation impossible : $e');
+      if (kIsWeb) {
+        Journal.trace(
+          'FCM · service worker : ${await etatDuServiceWorkerPush()} — '
+          'vérifiez que /firebase-messaging-sw.js est servi en JavaScript '
+          '(un 200 en text/html signifie que le fichier est absent et que le '
+          'serveur a répondu index.html à sa place).',
+        );
+      }
     }
   }
 
@@ -226,10 +290,34 @@ class PushNotificationService extends ChangeNotifier {
     final notification = message.notification;
     if (notification == null) return;
 
+    final titre = notification.title ?? 'El Corazón';
+    final corps = notification.body ?? '';
+
+    // Le Web ne passe pas par `flutter_local_notifications` : le greffon n'a
+    // pas d'implémentation Web et son `show()` commence par
+    // `if (kIsWeb) return;`. Un message reçu onglet ouvert n'affichait donc
+    // **rien** — sans erreur, ce qui le rendait invisible aux tests. Le service
+    // worker ne rattrape pas ce cas : il ne voit que l'arrière-plan.
+    if (kIsWeb) {
+      unawaited(
+        afficherNotificationNavigateur(
+          titre: titre,
+          corps: corps,
+          etiquette: message.data['order']?.toString() ??
+              message.data['kind']?.toString(),
+        ).then((affichee) {
+          if (!affichee) {
+            Journal.trace('FCM · premier plan : affichage navigateur refusé');
+          }
+        }),
+      );
+      return;
+    }
+
     unawaited(
       _showLocalNotification(
-        title: notification.title ?? 'El Corazón',
-        body: notification.body ?? '',
+        title: titre,
+        body: corps,
         payload: json.encode(message.data),
         channelId: _channelForKind(message.data['kind']?.toString()),
       ),
