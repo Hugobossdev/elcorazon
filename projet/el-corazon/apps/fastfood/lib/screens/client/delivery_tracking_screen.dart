@@ -30,6 +30,7 @@ import 'package:elcora_fast/presentation/suivi_commande.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Écran de suivi de livraison en temps réel
 class DeliveryTrackingScreen extends StatefulWidget {
@@ -1811,6 +1812,19 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
 
   // ---------------------------------------------------------------- la carte
 
+  /// Position de l'établissement courant, quand l'annuaire a répondu.
+  ///
+  /// Dernier repli de la caméra, **après** ce que porte la commande : une
+  /// commande en cours désigne son propre restaurant, qui n'est pas forcément
+  /// celui qu'on parcourt en ce moment.
+  LatLng? get _repliDuRestaurant {
+    final contexte = RestaurantContextService();
+    final latitude = contexte.latitude;
+    final longitude = contexte.longitude;
+    if (latitude == null || longitude == null) return null;
+    return LatLng(latitude, longitude);
+  }
+
   Widget _buildMapWidget({bool fullScreen = false}) {
     // Un `Builder` pour capturer les erreurs de rendu de la carte.
     return Builder(
@@ -1823,17 +1837,18 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
               // commande sans position connue ouvrait la carte sur une autre
               // ville, dans un autre pays.
               //
-              // Le point du restaurant vient maintenant de la commande quand le
-              // serveur le rend (`restaurant_location`) ; la constante ne sert
-              // plus qu'au tout dernier repli, et désigne le premier
-              // établissement — elle deviendra fausse au deuxième.
+              // Le point du restaurant vient de la commande elle-même
+              // (`restaurant_location`), et le dernier repli de l'établissement
+              // courant — plus d'une constante qui désignait le premier et
+              // devenait fausse au deuxième. Nul quand rien n'est connu : la
+              // carte s'ouvre alors sur le point nul le temps que le premier
+              // relevé arrive, ce qui est visible et bref, là où une
+              // coordonnée inventée est durable et silencieuse.
               target: _deliveryLocation?.point ??
                   _deliveryLatLng ??
                   _restaurantLatLng ??
-                  const LatLng(
-                    AppConstants.restaurantLatitude,
-                    AppConstants.restaurantLongitude,
-                  ),
+                  _repliDuRestaurant ??
+                  const LatLng(0, 0),
               zoom: 15,
             ),
             onMapCreated: (controller) {

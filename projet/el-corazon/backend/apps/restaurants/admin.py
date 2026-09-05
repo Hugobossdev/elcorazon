@@ -39,13 +39,16 @@ class StaffMembershipInline(admin.TabularInline):
 
 @admin.register(Restaurant)
 class RestaurantAdmin(admin.ModelAdmin):
-    list_display = ("name", "city", "currency", "is_active", "accepts_orders")
-    list_filter = ("is_active", "accepts_orders", "zone__city")
+    list_display = ("name", "city", "currency", "status", "accepts_orders")
+    list_filter = ("status", "accepts_orders", "zone__city")
     search_fields = ("name", "slug", "address")
     prepopulated_fields = {"slug": ("name",)}
     list_select_related = ("zone__city__country",)
     inlines = (OpeningHoursInline, StaffMembershipInline)
-    readonly_fields = ("currency", "created_at", "updated_at")
+    # `is_active` est dérivé de `status` (voir `Restaurant.save`) : le laisser
+    # modifiable offrirait deux leviers de publication, dont l'un serait
+    # silencieusement annulé par le prochain enregistrement.
+    readonly_fields = ("currency", "is_active", "created_at", "updated_at")
 
     fieldsets = (
         ("Établissement", {"fields": ("name", "slug", "description", "cover_image")}),
@@ -54,13 +57,20 @@ class RestaurantAdmin(admin.ModelAdmin):
         (
             "Exploitation",
             {
-                "fields": ("is_active", "accepts_orders", "default_preparation_minutes"),
+                "fields": (
+                    "status",
+                    "is_active",
+                    "accepts_orders",
+                    "default_preparation_minutes",
+                ),
                 "description": (
-                    "Deux drapeaux distincts, et il faut qu'ils le restent : "
-                    "« actif » dit si l'établissement existe, « accepte les commandes » "
-                    "s'il peut en prendre là, maintenant. Les confondre obligerait à "
-                    "faire disparaître un restaurant de l'application pour arrêter les "
-                    "commandes une heure."
+                    "Le statut porte tout le cycle de vie, du brouillon à la "
+                    "suspension ; « publié » n'en est que le reflet, calculé, et "
+                    "reste donc en lecture seule. « Accepte les commandes » est "
+                    "d'une autre nature : il dit si l'établissement peut en prendre "
+                    "là, maintenant. Les confondre obligerait à dépublier un "
+                    "restaurant — donc à le faire disparaître de l'application — "
+                    "pour arrêter les commandes une heure."
                 ),
             },
         ),

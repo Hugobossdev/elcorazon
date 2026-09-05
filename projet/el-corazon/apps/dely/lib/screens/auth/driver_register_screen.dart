@@ -52,7 +52,7 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
   final _confirmation = TextEditingController();
   final _plaque = TextEditingController();
 
-  List<eccore.RestaurantOption>? _etablissements;
+  List<eccore.Restaurant>? _etablissements;
   String? _etablissementChoisi;
   String _vehicule = _vehicules.first.$1;
 
@@ -344,7 +344,7 @@ class _SelecteurEtablissement extends StatelessWidget {
     required this.onRetry,
   });
 
-  final List<eccore.RestaurantOption>? etablissements;
+  final List<eccore.Restaurant>? etablissements;
   final String? choisi;
   final bool enChargement;
   final String? erreur;
@@ -382,7 +382,7 @@ class _SelecteurEtablissement extends StatelessWidget {
       );
     }
 
-    final options = etablissements ?? const <eccore.RestaurantOption>[];
+    final options = etablissements ?? const <eccore.Restaurant>[];
     if (options.isEmpty) {
       return const _Avertissement(
         texte: 'Aucun établissement n\'accepte de candidature pour le moment. '

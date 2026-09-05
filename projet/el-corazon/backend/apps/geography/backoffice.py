@@ -69,6 +69,14 @@ class ManagedCountryViewSet(_SiegeViewSet[Country]):
     quoi = "L'ouverture d'un pays"
     serializer_class = ManagedCountrySerializer
     queryset = Country.objects.order_by("name")
+    # Adressé par son code ISO, comme la route publique — et comme le reste du
+    # back-office adresse ses ressources par leur clé fonctionnelle (un
+    # établissement par son slug, une ville par le code de son pays). La vue
+    # attendait une clé primaire, seule de son espèce : `PATCH
+    # /geography/manage/countries/CI/` sortait donc en 404, et fermer un marché
+    # supposait de connaître l'UUID d'un pays — que rien, dans aucune des trois
+    # applications, ne transporte.
+    lookup_field = "iso_code"
     filterset_fields: ClassVar[dict[str, list[str]]] = {"is_active": ["exact"]}
     search_fields: ClassVar[list[str]] = ["name", "iso_code"]
 

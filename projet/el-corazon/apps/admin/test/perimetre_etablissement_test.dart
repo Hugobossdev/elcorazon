@@ -19,6 +19,7 @@ void main() {
     String name = 'El Corazón',
     double latitude = 6.1319,
     double longitude = 1.2255,
+    eccore.RestaurantLifecycle status = eccore.RestaurantLifecycle.active,
   }) {
     return eccore.ManagedRestaurant(
       id: 'rest-$slug',
@@ -30,7 +31,10 @@ void main() {
       longitude: longitude,
       currency: 'XOF',
       timezone: 'Africa/Lome',
-      isActive: true,
+      status: status,
+      // Projection de `status` côté serveur : un établissement en service est
+      // publié, et lui seul.
+      isActive: status.isPublished,
       acceptsOrders: true,
       defaultPreparationMinutes: 20,
     );

@@ -12,7 +12,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.geography.models import DeliveryZone
-from apps.restaurants.models import OpeningHours, Restaurant, Weekday
+from apps.restaurants.models import OpeningHours, Restaurant, RestaurantStatus, Weekday
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
 
@@ -46,7 +46,9 @@ class TestListe:
     def test_un_etablissement_inactif_disparait(
         self, client: APIClient, restaurant: Restaurant
     ) -> None:
-        Restaurant.objects.filter(pk=restaurant.pk).update(is_active=False)
+        Restaurant.objects.filter(pk=restaurant.pk).update(
+            status=RestaurantStatus.INACTIVE, is_active=False
+        )
 
         assert client.get(reverse("v1:restaurants:restaurant-list")).data["count"] == 0
 
@@ -70,7 +72,13 @@ class TestListe:
 class TestProximite:
     @pytest.fixture
     def deux_etablissements(self, zone: DeliveryZone, restaurant: Restaurant) -> Restaurant:
-        """Un second établissement environ 2 km à l'est du premier."""
+        """Un second établissement environ 2 km à l'est du premier.
+
+        `status` est explicite : le défaut du modèle est « brouillon », et la
+        liste publique ne rend que ce qui est en service. Sans lui, ce décor
+        produirait une liste d'un seul élément et le tri par distance n'aurait
+        rien à trier.
+        """
         return Restaurant.objects.create(
             name="El Corazón Est",
             slug="el-corazon-est",
@@ -78,6 +86,7 @@ class TestProximite:
             address="Est de Lomé",
             location=Point(1.2455, 6.1319, srid=4326),
             phone="+22890000001",
+            status=RestaurantStatus.ACTIVE,
         )
 
     def test_le_tri_par_distance_est_fait_par_postgis(

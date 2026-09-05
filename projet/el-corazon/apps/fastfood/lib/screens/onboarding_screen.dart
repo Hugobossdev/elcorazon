@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/screens/client/main_navigation_screen.dart';
 import 'package:elcora_fast/services/onboarding_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Présentation d'ouverture, au tout premier lancement.
 ///
@@ -239,7 +239,7 @@ class _PageAccueil extends StatelessWidget {
         ),
       ),
       titre: 'Le goût du soin,\nla vitesse en prime.',
-      texte: 'La cuisine de ${AppConstants.defaultCityName} grillée au feu '
+      texte: 'La cuisine de ${RestaurantContextService().cityName ?? 'chez nous'} grillée au feu '
           'de bois, livrée chaude jusque chez vous.',
     );
   }

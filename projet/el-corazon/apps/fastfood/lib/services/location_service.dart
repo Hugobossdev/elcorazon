@@ -1,5 +1,5 @@
 import 'package:elcorazon_core/elcorazon_core.dart'
-    show Journal, LocationAvailability, LocationRemede;
+    show Journal, LocationAvailability, LocationRemede, PositionSimulee;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -123,6 +123,19 @@ class LocationService extends ChangeNotifier {
   /// Position actuelle, ou `null` — la cause est alors dans
   /// [derniereDisponibilite].
   Future<Position?> getCurrentLocation() async {
+    // Position simulée — **mode debug uniquement** (`PositionSimulee.estActive`
+    // vaut toujours `false` en production, ce qui laisse le compilateur retirer
+    // cette branche). Elle passe avant la disponibilité : le simulateur sert
+    // précisément quand le capteur ne peut pas répondre — développement à
+    // 600 km de l'établissement, émulateur sans GPS.
+    final simulee = _positionSimulee();
+    if (simulee != null) {
+      _currentPosition = simulee;
+      _derniereDisponibilite = LocationAvailability.disponible;
+      notifyListeners();
+      return simulee;
+    }
+
     final etat = await disponibilite();
     if (!etat.estDisponible) return null;
 
@@ -163,6 +176,29 @@ class LocationService extends ChangeNotifier {
       case LocationRemede.patienter:
         return false;
     }
+  }
+
+  /// Relevé simulé, converti à la forme qu'attendent les écrans.
+  ///
+  /// `Position` a des champs obligatoires que la simulation n'a pas de sens à
+  /// inventer : la précision est annoncée parfaite (`accuracy: 0`) plutôt que
+  /// tirée au hasard, et l'horodatage est celui de la lecture. Rien de tout
+  /// cela n'est lu ailleurs qu'à l'affichage.
+  Position? _positionSimulee() {
+    final point = PositionSimulee().point;
+    if (point == null) return null;
+    return Position(
+      latitude: point.latitude,
+      longitude: point.longitude,
+      timestamp: DateTime.now(),
+      accuracy: 0,
+      altitude: 0,
+      altitudeAccuracy: 0,
+      heading: 0,
+      headingAccuracy: 0,
+      speed: 0,
+      speedAccuracy: 0,
+    );
   }
 
   /// Distance en mètres entre deux points, sur l'ellipsoïde.

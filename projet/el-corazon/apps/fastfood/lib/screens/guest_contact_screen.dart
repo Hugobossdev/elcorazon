@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/theme.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Les moyens de joindre l'établissement, pour un visiteur non connecté.
 ///
@@ -27,10 +28,22 @@ import 'package:elcora_fast/theme.dart';
 class GuestContactScreen extends StatelessWidget {
   const GuestContactScreen({super.key});
 
-  /// Ce que Google Maps doit chercher. La ville vient du réglage commun :
-  /// l'établissement n'en a qu'une, et elle est à Lomé.
-  static const String _businessAddress =
-      'El Corazón, ${AppConstants.defaultCityName}';
+  /// Ce que Google Maps doit chercher.
+  ///
+  /// Le nom et la ville viennent de l'établissement courant, et non d'une
+  /// constante : elle annonçait Lomé quel que soit le restaurant, si bien qu'un
+  /// visiteur d'Abidjan ouvrait un itinéraire vers un autre pays.
+  ///
+  /// Calculé à la lecture — donc plus `const` : l'annuaire peut n'avoir pas
+  /// encore répondu au premier affichage, et une constante figerait la valeur
+  /// vide.
+  String get _businessAddress {
+    final contexte = RestaurantContextService();
+    final morceaux = [contexte.name, contexte.cityName]
+        .whereType<String>()
+        .where((morceau) => morceau.isNotEmpty);
+    return morceaux.isEmpty ? 'El Corazón' : morceaux.join(', ');
+  }
 
   Future<void> _openAddressInMaps(BuildContext context, String address) async {
     try {

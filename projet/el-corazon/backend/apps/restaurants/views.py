@@ -62,7 +62,24 @@ class RestaurantViewSet(ReadOnlyModelViewSet[Restaurant]):
 
     def get_queryset(self) -> QuerySet[Restaurant]:
         queryset = (
-            Restaurant.objects.filter(is_active=True)
+            # `is_active` est la projection de `status == "active"` (voir
+            # `Restaurant.save`) : seul un établissement mis en service sort
+            # ici. Un brouillon, une fiche en cours de configuration ou un
+            # établissement suspendu restent invisibles du public.
+            #
+            # La cascade sur la zone, la ville et le pays manquait : fermer un
+            # marché depuis le back-office retirait ses villes de
+            # `GET /geography/cities/` — `CityViewSet` la fait — mais laissait
+            # ses restaurants dans `GET /restaurants/`. L'application cliente
+            # affichait donc un établissement d'un pays fermé, dont la ville
+            # n'existait plus pour elle : la fiche s'ouvrait, la commande
+            # échouait plus loin, sans que rien n'explique pourquoi.
+            Restaurant.objects.filter(
+                is_active=True,
+                zone__is_active=True,
+                zone__city__is_active=True,
+                zone__city__country__is_active=True,
+            )
             .select_related("zone__city__country")
             # `is_open` interroge les plages de chaque établissement : sans ce
             # préchargement, une page de vingt restaurants ferait vingt

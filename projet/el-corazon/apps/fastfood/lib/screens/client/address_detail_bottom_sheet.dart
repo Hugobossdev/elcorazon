@@ -15,6 +15,7 @@ import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/places_service.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Feuille de saisie d'une adresse — création si [address] est nul, édition
 /// sinon.
@@ -78,10 +79,12 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     if (widget.address != null) {
       _loadExistingAddress();
     } else {
-      // La ville pré-remplie était « Abidjan », alors que le serveur n'accepte
-      // que la ville de `AppConstants.citySlug` : toute adresse créée par
-      // défaut décrivait un autre pays que celui où l'on livre.
-      _cityController.text = AppConstants.defaultCityName;
+      // La ville pré-remplie était « Abidjan », alors que le serveur ne
+      // rattache une adresse qu'à la ville de l'établissement : toute adresse
+      // créée par défaut décrivait un autre pays que celui où l'on livre.
+      // Elle vient maintenant du restaurant courant, et suit donc le second
+      // établissement le jour où il ouvre.
+      _cityController.text = RestaurantContextService().cityName ?? '';
     }
   }
 
@@ -310,7 +313,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                   child: CustomTextField(
                     controller: _cityController,
                     label: 'Ville',
-                    hint: AppConstants.defaultCityName,
+                    hint: RestaurantContextService().cityName ?? 'Ville',
                     validator: (value) =>
                         value?.isEmpty == true ? 'Ville requise' : null,
                   ),
@@ -718,8 +721,10 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       return;
     }
 
-    const configuree = AppConstants.defaultCityName;
-    if (formatted.toLowerCase().contains(configuree.toLowerCase())) {
+    final configuree = RestaurantContextService().cityName;
+    if (configuree != null &&
+        configuree.isNotEmpty &&
+        formatted.toLowerCase().contains(configuree.toLowerCase())) {
       _cityController.text = configuree;
     }
   }
@@ -779,17 +784,30 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     final token = ++_searchToken;
     setState(() => _isSearching = true);
 
+    // Position de l'établissement, quand l'annuaire a répondu. Elle **biaise**
+    // les résultats sans les borner : une rue homonyme de la ville du
+    // restaurant passe devant. Nulle, l'autocomplétion fonctionne sans
+    // préférence géographique — ce qui vaut mieux qu'un biais vers une ville
+    // où l'on ne livre pas.
+    final contexte = RestaurantContextService();
+    final latitude = contexte.latitude;
+    final longitude = contexte.longitude;
+    final biais = (latitude == null || longitude == null)
+        ? null
+        : LatLng(latitude, longitude);
+
     try {
       final suggestions = await _placesService.autocomplete(
         query,
         language: 'fr',
         // `country:ci` bornait la recherche à la Côte d'Ivoire : un client de
         // Lomé ne recevait jamais la moindre suggestion.
-        countryCode: AppConstants.countryCode,
-        locationBias: const LatLng(
-          AppConstants.restaurantLatitude,
-          AppConstants.restaurantLongitude,
-        ),
+        // `country:ci` bornait la recherche à la Côte d'Ivoire quel que soit
+        // l'établissement ; le pays vient désormais du restaurant courant. Nul
+        // tant que l'annuaire n'a pas répondu — la recherche est alors
+        // mondiale, ce qui est préférable à un pays inventé.
+        countryCode: contexte.countryCode,
+        locationBias: biais,
         radiusMeters: AppConstants.placesBiasRadiusMeters,
       );
 

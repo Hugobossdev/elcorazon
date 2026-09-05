@@ -1,5 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart'
     show Journal, LocationAvailability, LocationRemede;
+import 'package:elcora_dely/utils/position_simulee_geolocator.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -75,6 +76,17 @@ class LocationService extends ChangeNotifier {
   /// Position actuelle, ou `null` — la cause est alors dans
   /// [derniereDisponibilite].
   Future<Position?> getCurrentLocation() async {
+    // Position simulée — **mode debug uniquement**. Voir `PositionSimulee` :
+    // hors debug, `point` répond toujours `null` et cette branche disparaît du
+    // binaire.
+    final simulee = positionSimuleeOuNull();
+    if (simulee != null) {
+      _currentPosition = simulee;
+      _derniereDisponibilite = LocationAvailability.disponible;
+      notifyListeners();
+      return simulee;
+    }
+
     final etat = await disponibilite();
     if (!etat.estDisponible) return null;
 

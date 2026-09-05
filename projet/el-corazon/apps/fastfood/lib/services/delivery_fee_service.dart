@@ -1,9 +1,9 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/presentation/frais_de_livraison.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Frais de livraison — **demandés au serveur**, jamais calculés ici.
 ///
@@ -86,7 +86,7 @@ class DeliveryFeeService extends ChangeNotifier {
   /// n'est choisie.
   Future<eccore.OrderQuote> quoteOrder({String? addressId, String promoCode = ''}) async {
     final quote = await _orders.preview(
-      restaurantSlug: AppConstants.restaurantSlug,
+      restaurantSlug: await RestaurantContextService().exigerSlug(),
       addressId: addressId,
       promoCode: promoCode,
     );

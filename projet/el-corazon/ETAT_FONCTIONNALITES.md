@@ -1,6 +1,6 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Dernière révision** : 5 août 2026
+**Dernière révision** : 4 septembre 2026
 
 > ⚠️ **Inventaire fonctionnel daté.** Le corps de ce document a été écrit en
 > décembre 2024, quand les trois applications parlaient directement à Supabase.
@@ -37,6 +37,42 @@ document par document des dossiers livreurs, les dates d'expiration de pièces,
 les prévisions de vente et le « risque d'attrition » calculés dans le
 navigateur, et l'auto-inscription des livreurs (un livreur s'embauche, il ne
 s'inscrit pas).
+
+## 🌍 Multi-établissement (4 septembre 2026)
+
+**Ajouter un restaurant ne demande plus de toucher au code.** L'architecture
+multi-pays existait entière côté serveur depuis l'ADR-006 (`Country → City →
+DeliveryZone → Restaurant`) ; ce qui manquait, c'est ce qui la rendait
+utilisable.
+
+- **El Corazón Admin provisionne le réseau.** Un écran « Réseau » ouvre un
+  marché, une ville, une zone de livraison et un établissement. Les routes
+  existaient des deux côtés et aucune application ne les appelait : ouvrir une
+  ville passait obligatoirement par `django-admin`.
+- **Un établissement neuf n'est pas public.** Il naît en brouillon et suit un
+  cycle de vie explicite — brouillon, en configuration, prêt, en service,
+  suspendu. La mise en service est **refusée** tant qu'il manque des horaires,
+  une carte, du personnel ou un livreur approuvé, et le refus dit lequel.
+  Auparavant, une fiche à peine créée apparaissait dans l'application cliente,
+  vide.
+- **El Cora Fast lit l'établissement au lieu de le connaître.** Six constantes
+  décrivaient le restaurant de Lomé — slug, position, ville, pays — et étaient
+  lues à une trentaine d'endroits : catalogue, panier, commande, recherche,
+  adresses, cartes. Elles ont été retirées ; le panier local est désormais
+  discriminé par établissement, sans quoi changer de restaurant aurait ressorti
+  les lignes de l'ancien sous le nouveau nom.
+- **Un sélecteur d'établissement apparaît quand il y en a plusieurs.** Le
+  périmètre était lu depuis longtemps mais aucun écran ne le montrait : un
+  compte supervisant deux restaurants travaillait sur le premier par ordre
+  alphabétique, sans le savoir.
+- **Fermer un marché retire ce qu'il contient**, jusqu'aux établissements. La
+  cascade s'arrêtait aux villes.
+- **El Corazón Dely n'a rien demandé** : il choisissait déjà son établissement à
+  l'inscription et lisait le point de retrait sur la commande.
+- **Test GPS à distance** : une couche de simulation, active en mode debug
+  seulement, rejoue une position ou un trajet. Le développement se fait à 600 km
+  de l'établissement, ce qui rendait invérifiables la couverture d'une adresse,
+  le franchissement d'une zone et l'arrivée d'un livreur.
 
 ## 🔄 Deuxième vague (3 août 2026)
 

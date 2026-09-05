@@ -759,6 +759,54 @@ le parcours manuellement.
       - **Corrigé au passage** : `DeliveryZone.fromJson` lisait `max_distance_km` comme un nombre
         alors qu'un `DecimalField` de DRF voyage en chaîne (plantait à la première zone reçue), et
         prenait la ville imbriquée de la route publique pour un identifiant.
+- [x] **Multi-établissement rendu opérationnel de bout en bout** (2026-09-04). L'architecture
+      multi-pays existait *entière* côté serveur depuis l'ADR-006 — `Country → City →
+      DeliveryZone → Restaurant`, avec les routes d'administration correspondantes. Ce qui
+      manquait n'était pas l'architecture mais ce qui la rendait utilisable :
+      - **Aucun écran n'appelait ces routes.** Ouvrir un marché, une ville ou un établissement
+        passait obligatoirement par `django-admin`. `ManagedRestaurantRepository` était en
+        lecture seule, `ManagedGeographyRepository` ne connaissait pas les pays, et
+        `DeliveryZoneService` ne savait pas créer de zone — or `Restaurant.zone` est une clé
+        étrangère non nulle, si bien qu'aucun établissement n'était créable ailleurs qu'en base.
+        Ajoutés : écran « Réseau » (marchés, villes, établissements), formulaires, écran de
+        provisionnement qui **route vers les écrans existants** plutôt que de les dupliquer.
+      - **`RestaurantScopeService.hasChoice` n'était consommé nulle part.** Documenté depuis
+        l'origine comme « la condition d'affichage d'un sélecteur », ce sélecteur n'existait pas :
+        un compte supervisant deux établissements travaillait silencieusement sur le premier par
+        ordre alphabétique — catalogue, horaires, livreurs et carte de supervision écrivaient
+        tous sur l'un pendant qu'on croyait configurer l'autre.
+      - **`fastfood` portait six constantes d'établissement** — slug, latitude, longitude, slug
+        de la ville, nom de la ville, code du pays — lues à une trentaine d'endroits. Chacune
+        était juste pour un seul restaurant et fausse pour tous les autres : ouvrir un deuxième
+        établissement demandait de modifier le code, de recompiler et de republier l'application
+        sur deux magasins. Elles sont **retirées**, pas remplacées par d'autres valeurs :
+        `RestaurantContextService` demande au serveur ce que le serveur sait, et une écriture
+        sans établissement résolu échoue franchement (`AucunEtablissement`) au lieu de partir
+        sur un restaurant deviné.
+      - **Le panier local n'était pas discriminé par établissement** (`cart_items_<userId>`) :
+        changer de restaurant aurait ressorti, sous le nouveau nom, les lignes de l'ancien — des
+        plats absents de la carte affichée, à des prix qui ne sont pas les siens, que la première
+        synchronisation aurait poussés sur le serveur du nouvel établissement.
+      - **`is_active` valait `true` par défaut** : une fiche créée apparaissait immédiatement
+        dans l'application cliente, vide. Un cycle de vie explicite le remplace (voir
+        `03-modele-de-donnees.md`), et la mise en service est gardée par la complétude.
+      - **La cascade géographique manquait** : `CityViewSet` retirait les villes d'un pays fermé,
+        `RestaurantViewSet` laissait ses restaurants. L'application affichait un établissement
+        d'un marché fermé, dont la ville n'existait plus pour elle.
+      - **`ManagedCountryViewSet` attendait un UUID** là où tout le reste du back-office adresse
+        par clé fonctionnelle : `PATCH /geography/manage/countries/CI/` sortait en 404, et fermer
+        un marché supposait un identifiant qu'aucune des trois applications ne transporte.
+      - **`ApiException` perdait les membres d'extension RFC 9457.** Le serveur en pose depuis
+        l'origine — `allowed_transitions`, `verification_status`, `missing` — et le client n'en
+        lisait aucun : une erreur qui disait précisément quoi faire arrivait à l'écran comme une
+        phrase générique.
+      - **Simulation de position ajoutée** (`PositionSimulee`, mode debug uniquement) : le
+        développement se fait à 600 km de l'établissement, ce qui rendait invérifiables la
+        couverture d'une adresse, le franchissement d'une zone et l'arrivée d'un livreur. Elle
+        rejoue un trajet interpolé **dans le temps**, et `dely` l'écoute par le même chemin de
+        code qu'un capteur réel, émission au serveur comprise.
+      `dely` n'a demandé aucun travail : il choisissait déjà son établissement à l'inscription et
+      lisait le point de retrait sur la commande (`restaurant_location`).
 - [x] **Faux suivi de livraison retiré des trois applications** (2026-08-05). Les trois
       `location_service.dart` portaient le même `startDeliveryTracking` : une minuterie locale qui
       faisait passer une commande de « en préparation » à « livré avec succès » en quarante

@@ -380,6 +380,7 @@ SPECTACULAR_SETTINGS = {
     # collisionnent tous sous le même nom générique.
     "ENUM_NAME_OVERRIDES": {
         "OrderStatusEnum": "apps.orders.states.OrderStatus.choices",
+        "RestaurantStatusEnum": "apps.restaurants.states.RestaurantStatus.choices",
         "PaymentStatusEnum": "apps.payments.models.PaymentStatus.choices",
         "PaymentMethodEnum": "apps.orders.models.PaymentMethod.choices",
         "PaymentProviderEnum": "apps.payments.models.PaymentProvider.choices",

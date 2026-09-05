@@ -4,9 +4,9 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show adresseWebSocket, apiClient;
 import 'package:elcora_fast/models/order.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Commande de groupe, contre `/api/v1/group-carts/` (Phase 6).
 ///
@@ -83,7 +83,7 @@ class GroupCartService extends ChangeNotifier {
   Future<eccore.GroupCart?> open({String title = '', int? windowMinutes}) async {
     try {
       final cart = await _repository.open(
-        restaurantSlug: AppConstants.restaurantSlug,
+        restaurantSlug: await RestaurantContextService().exigerSlug(),
         title: title,
         windowMinutes: windowMinutes,
       );

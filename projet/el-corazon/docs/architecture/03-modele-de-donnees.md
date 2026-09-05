@@ -96,17 +96,47 @@ polygone tout en étant trop loin du restaurant.
 ```
 Restaurant    id, name, slug✦, description, zone→, address,
               location:point(geography), phone, email, cover_image,
-              is_active, accepts_orders, default_preparation_minutes
-              index GiST sur location
+              status, is_active⁂, accepts_orders, default_preparation_minutes
+              index GiST sur location, index sur status
 OpeningHours  id, restaurant→, weekday, opens_at, closes_at
               unique(restaurant, weekday, opens_at)
 ```
 
-`is_active` et `accepts_orders` sont volontairement distincts. Le premier est
-structurel — l'établissement existe-t-il ? — le second conjoncturel : un coup de
-feu en cuisine, une panne de four. Les confondre obligerait à désactiver un
-restaurant pour suspendre les commandes une heure, ce qui le ferait disparaître
-de l'application.
+`status` porte le cycle de vie complet de l'établissement (ADR-010,
+`apps/restaurants/states.py`) :
+
+```
+brouillon → en configuration → prêt → en service ⇄ suspendu
+```
+
+C'est la **seule colonne d'état qu'on écrit**. Un établissement naît en
+brouillon : `is_active` valait auparavant `True` par défaut, si bien qu'une
+fiche créée depuis le back-office apparaissait immédiatement dans l'application
+cliente — sans carte, sans horaires, sans livreur.
+
+⁂ `is_active` est **dérivé** de `status` par `Restaurant.save()` : c'est la
+projection booléenne « publié ou non ». Il reste en colonne parce que huit
+requêtes de production le filtrent — panier, commande, catalogue, candidature
+livreur — et qu'un `status="active"` recopié à ces huit endroits serait la même
+règle écrite huit fois. L'écrire à la main est sans effet durable, et l'API le
+rend en lecture seule.
+
+`accepts_orders` reste d'une autre nature, et il faut qu'il le reste :
+conjoncturel — un coup de feu en cuisine, une panne de four. Le confondre avec
+la publication obligerait à dépublier un restaurant pour suspendre les commandes
+une heure, ce qui le ferait disparaître de l'application au lieu de l'y montrer
+débordé.
+
+**La mise en service est gardée par la complétude.** `Restaurant.transition_to`
+refuse `active` tant que `configuration_gaps()` n'est pas vide, et rend la liste
+de ce qui manque dans le corps d'erreur (`incomplete_configuration`, RFC 9457).
+Les exigences propres à `restaurants` — position dans la zone, horaires,
+personnel — sont vérifiées sur place ; celles du catalogue et de la flotte
+arrivent par le registre `apps/restaurants/readiness.py`, auquel `catalog` et
+`delivery` s'abonnent au `ready()` de leur application. L'arête va de l'abonné
+vers l'émetteur, comme pour les signaux de `loyalty` : elle est déclarée dans le
+graphe de l'ADR-002 et vérifiée en CI, ce qu'une traversée par relation inverse
+ne serait pas.
 
 `Weekday` est aligné sur `date.weekday()` (lundi = 0), ce qui supprime la
 conversion manuelle qui est la source classique du décalage d'un jour.

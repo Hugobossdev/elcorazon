@@ -1,16 +1,21 @@
+import 'package:elcora_fast/services/restaurant_context_service.dart';
+
+/// Constantes de l'application cliente.
+///
+/// ## Ce qui n'y est plus
+///
+/// Six constantes décrivaient l'établissement : son slug, sa latitude, sa
+/// longitude, le slug de sa ville, le nom de cette ville et le code de son
+/// pays. Elles étaient lues à une trentaine d'endroits — catalogue, panier,
+/// commande, recherche, adresses, cartes — et chacune était juste pour un seul
+/// restaurant et fausse pour tous les autres : ouvrir un deuxième établissement
+/// aurait demandé de modifier ce fichier, de recompiler et de republier
+/// l'application sur deux magasins.
+///
+/// Elles ont été retirées, pas remplacées par d'autres valeurs : ce que le
+/// serveur sait, le client le demande (`RestaurantContextService`). Ce qui
+/// reste ici ne décrit aucun établissement en particulier.
 class AppConstants {
-  // Position de l'établissement (Lomé, Togo) — sert **uniquement** à centrer
-  // une carte. Aucun prix n'en découle : les frais de livraison viennent du
-  // serveur, qui mesure la distance depuis la position réelle du restaurant en
-  // base et applique le barème de la zone d'arrivée.
-  static const double restaurantLatitude = 6.1375;
-  static const double restaurantLongitude = 1.2123;
-
-  // Slug du restaurant côté backend Django (Phase 6) — un seul établissement
-  // actif en base aujourd'hui (`restaurants_restaurant`), donc pas de
-  // sélecteur à construire.
-  static const String restaurantSlug = 'el-corazon-lome';
-
   /// Slug de l'article « gâteau sur mesure » au catalogue.
   ///
   /// L'atelier le cherchait par son **nom**, avec un `contains` sur
@@ -20,20 +25,18 @@ class AppConstants {
   /// back-office, et ne dépend d'aucun libellé d'affichage.
   static const String gateauSurMesureSlug = 'gateau-personnalise';
 
-  // Slug de la ville côté backend Django (Phase 6) — une seule ville en base
-  // aujourd'hui, cohérent avec `restaurantSlug`.
-  static const String citySlug = 'lome';
-
-  // Nom affiché de cette ville, et pays où la recherche de lieux est restreinte.
-  //
-  // Les écrans d'adresse pré-remplissaient « Abidjan » et bornaient
-  // l'autocomplétion Google à `country:ci` : un client de Lomé ne recevait
-  // aucune suggestion, et la ville enregistrée désignait un autre pays que
-  // celui de la seule `City` que le serveur accepte (`citySlug`).
-  static const String defaultCityName = 'Lomé';
-
   /// Code pays ISO 3166-1 alpha-2, en minuscules — attendu ainsi par le
   /// paramètre `components=country:xx` de Google Places.
+  ///
+  /// **Repli seulement.** Le pays réel vient de l'établissement courant
+  /// (`RestaurantContextService.countryCode`), qui le tient du serveur. Cette
+  /// valeur ne sert plus qu'au premier affichage d'un champ téléphonique, avant
+  /// que l'annuaire ait répondu : un sélecteur d'indicatif doit bien s'ouvrir
+  /// sur quelque chose, et le marché historique est le moins mauvais des
+  /// choix — il n'engage rien, l'utilisateur pouvant en changer.
+  ///
+  /// Aucune requête ne la lit : le catalogue, le panier, la commande, les
+  /// adresses et l'autocomplétion passent tous par le contexte.
   static const String countryCode = 'tg';
 
   /// Rayon, en mètres, dans lequel la recherche de lieux privilégie les
@@ -44,11 +47,17 @@ class AppConstants {
   /// Indicatif téléphonique par défaut des champs de saisie, au format
   /// attendu par `IntlPhoneField` (ISO 3166-1 alpha-2, en **majuscules**).
   ///
-  /// Dérivé de [countryCode] plutôt qu'écrit à côté : l'inscription proposait
-  /// le Togo, la modification du profil la Côte d'Ivoire, et un même client
-  /// enregistrait donc deux numéros de pays différents selon l'écran par
-  /// lequel il passait.
-  static String get phoneCountryCode => countryCode.toUpperCase();
+  /// Dérivé du pays plutôt qu'écrit à côté : l'inscription proposait le Togo,
+  /// la modification du profil la Côte d'Ivoire, et un même client enregistrait
+  /// donc deux numéros de pays différents selon l'écran par lequel il passait.
+  ///
+  /// Le pays de l'établissement courant l'emporte quand il est connu ; à
+  /// défaut, [countryCode]. Le repli est ici acceptable là où il ne le serait
+  /// pas ailleurs : un indicatif proposé n'est qu'une suggestion, que le client
+  /// corrige d'un geste, alors qu'un slug de restaurant deviné envoie une
+  /// commande au mauvais endroit sans que personne ne le voie.
+  static String get phoneCountryCode =>
+      (RestaurantContextService().countryCode ?? countryCode).toUpperCase();
 
   /// Exemple montré en filigrane d'un champ téléphone. Suit le pays ci-dessus.
   static const String phoneHint = '+228 90 00 00 00';
@@ -77,5 +86,12 @@ class AppConstants {
 
   // App Info
   static const String appName = 'Elcora Fast';
+
+  /// Symbole de repli pour un montant dont on ne connaît pas encore la devise.
+  ///
+  /// La devise réelle est portée par chaque montant (`Money`, ADR-007) et par
+  /// l'établissement courant (`RestaurantContextService.currency`) : elle est
+  /// héritée du pays et diffère d'un marché à l'autre. Cette constante n'est
+  /// qu'un libellé de secours, jamais une unité de calcul.
   static const String currency = 'FCFA';
 }

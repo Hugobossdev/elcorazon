@@ -1,9 +1,9 @@
 import 'package:elcora_fast/navigation/navigation_service.dart';
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -143,7 +143,7 @@ class _GuestWelcomeScreenState extends State<GuestWelcomeScreen>
                           ),
                           const SizedBox(height: DesignConstants.spacingS),
                           Text(
-                            'Le cœur de la cuisine de ${AppConstants.defaultCityName}.',
+                            _sousTitreDAccueil(),
                             textAlign: TextAlign.center,
                             style:
                                 AppTypography.headlineMd(color: Colors.white),
@@ -189,4 +189,17 @@ class _GuestWelcomeScreenState extends State<GuestWelcomeScreen>
       ),
     );
   }
+}
+
+/// « Le cœur de la cuisine de Lomé. » — ou une phrase qui tient sans la ville.
+///
+/// La ville venait d'une constante, qui annonçait Lomé à un visiteur d'Abidjan.
+/// Elle vient maintenant de l'établissement courant, et l'accroche se replie
+/// sur une formulation générale tant que l'annuaire n'a pas répondu — plutôt
+/// que d'annoncer une ville où l'on ne livre pas.
+String _sousTitreDAccueil() {
+  final ville = RestaurantContextService().cityName;
+  return (ville == null || ville.isEmpty)
+      ? 'Le cœur de la cuisine grillée au feu de bois.'
+      : 'Le cœur de la cuisine de $ville.';
 }

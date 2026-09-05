@@ -18,7 +18,7 @@ Map<String, dynamic> _restaurantJson({
   String slug = 'el-corazon-lome',
   double lat = 6.1319,
   double lon = 1.2255,
-  bool isActive = true,
+  String status = 'active',
   bool acceptsOrders = true,
 }) {
   return {
@@ -34,7 +34,14 @@ Map<String, dynamic> _restaurantJson({
     'cover_image': null,
     'currency': 'XOF',
     'timezone': 'Africa/Lome',
-    'is_active': isActive,
+    'city': 'Lomé',
+    'city_slug': 'lome',
+    'country': 'TG',
+    'zone_name': 'Lomé — centre',
+    'status': status,
+    'configuration_gaps': <String>[],
+    // Projection de `status` côté serveur, jamais envoyée en écriture.
+    'is_active': status == 'active',
     'accepts_orders': acceptsOrders,
     'default_preparation_minutes': 20,
     'created_at': '2026-07-31T10:00:00Z',
@@ -75,7 +82,7 @@ class _FakeServer implements HttpClientAdapter {
             _restaurantJson(
               id: 'rest-$page',
               slug: page == 1 ? 'el-corazon-lome' : 'el-corazon-kara',
-              isActive: page == 1,
+              status: page == 1 ? 'active' : 'inactive',
             ),
           ],
         }),
@@ -139,6 +146,9 @@ void main() {
         'el-corazon-kara',
       ]);
       expect(etablissements.last.isActive, isFalse);
+      // Et son état le dit en clair : « suspendu », et non un booléen faux
+      // qui pourrait aussi bien signifier « brouillon ».
+      expect(etablissements.last.status, RestaurantLifecycle.inactive);
     });
 
     test('list suit la pagination jusqu’au bout', () async {

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -10,6 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elcora_fast/models/cart_item.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Service complet de synchronisation hors ligne avec stockage persistant
 class OfflineSyncService extends ChangeNotifier {
@@ -447,10 +447,15 @@ class OfflineSyncService extends ChangeNotifier {
           // des **choix** du client, pas des montants. Les taire ferait
           // repartir un gâteau sur mesure composé hors ligne avec sa seule
           // recette de base.
-          await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
+          // Un seul appel au contexte pour toute la reprise : le demander
+          // ligne par ligne rouvrirait la question au milieu d'une
+          // réécriture, et un changement d'établissement entre deux lignes
+          // enverrait la moitié du panier ailleurs.
+          final etablissement = await RestaurantContextService().exigerSlug();
+          await _cartRepository.clear(restaurantSlug: etablissement);
           for (final item in items) {
             await _cartRepository.addLine(
-              restaurantSlug: AppConstants.restaurantSlug,
+              restaurantSlug: etablissement,
               menuItemId: item.menuItemId,
               quantity: item.quantity,
               optionIds: item.selectedOptionIds,

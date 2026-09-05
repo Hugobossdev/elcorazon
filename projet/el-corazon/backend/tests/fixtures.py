@@ -19,7 +19,7 @@ from apps.delivery.states import VerificationStatus
 from apps.geography.models import City, Country, DeliveryZone
 from apps.orders.models import Order, PaymentMethod
 from apps.profiles.models import Address
-from apps.restaurants.models import Restaurant
+from apps.restaurants.models import Restaurant, RestaurantStatus
 from common.money import Money
 
 LOME = Point(1.2255, 6.1319, srid=4326)
@@ -54,6 +54,14 @@ def zone(city: City) -> DeliveryZone:
 
 @pytest.fixture
 def restaurant(zone: DeliveryZone) -> Restaurant:
+    """Établissement **en service**.
+
+    `status` est posé explicitement depuis que le cycle de vie existe : le
+    défaut du modèle est « brouillon », ce qui est le bon défaut pour une
+    création par l'API — on ne publie pas ce qu'on vient de saisir — mais pas
+    pour un décor de test, dont la quasi-totalité suppose un restaurant qui
+    prend des commandes.
+    """
     return Restaurant.objects.create(
         name="El Corazón",
         slug="el-corazon-lome",
@@ -61,6 +69,7 @@ def restaurant(zone: DeliveryZone) -> Restaurant:
         address="Lomé",
         location=LOME,
         phone="+22890000000",
+        status=RestaurantStatus.ACTIVE,
     )
 
 

@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.catalog.models import Category, MenuItem, Option, OptionGroup
-from apps.restaurants.models import Restaurant
+from apps.restaurants.models import Restaurant, RestaurantStatus
 from common.money import Money
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
@@ -84,7 +84,9 @@ class TestArticles:
     def test_un_article_d_un_restaurant_inactif_disparait(
         self, client: APIClient, menu_item: MenuItem, restaurant: Restaurant
     ) -> None:
-        Restaurant.objects.filter(pk=restaurant.pk).update(is_active=False)
+        Restaurant.objects.filter(pk=restaurant.pk).update(
+            status=RestaurantStatus.INACTIVE, is_active=False
+        )
 
         assert client.get(reverse("v1:catalog:item-list")).data["count"] == 0
 

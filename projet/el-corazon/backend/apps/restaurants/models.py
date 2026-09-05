@@ -9,6 +9,7 @@ l'ouverture d'un second établissement indolore.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from django.contrib.gis.db import models as gis
@@ -16,10 +17,48 @@ from django.db import models
 
 from apps.accounts.models import User
 from apps.geography.models import DeliveryZone
+from apps.restaurants.readiness import gaps_from_registry
+from apps.restaurants.states import RESTAURANT_MACHINE, RestaurantStatus
+from common.exceptions import BusinessRuleViolation
 from common.models import TimeStampedModel, UUIDModel
 from common.storage import banners
 
-__all__ = ["OpeningHours", "Restaurant", "StaffMembership", "Weekday"]
+__all__ = [
+    "IncompleteConfiguration",
+    "OpeningHours",
+    "Restaurant",
+    "RestaurantStatus",
+    "StaffMembership",
+    "Weekday",
+]
+
+
+class IncompleteConfiguration(BusinessRuleViolation):
+    """Mise en service demandée sur un établissement incomplet.
+
+    Distincte d'`IllegalTransition` : l'enchaînement est légitime — on a bien le
+    droit de passer de « prêt » à « en service » —, c'est le contenu qui ne
+    l'est pas encore. Les confondre ferait répondre « transition refusée » à
+    quelqu'un dont le seul tort est de n'avoir pas encore saisi ses horaires.
+
+    Hérite de `BusinessRuleViolation` pour que le gestionnaire d'exceptions du
+    socle la rende en 409 RFC 9457 sans le connaître : `common` ne peut pas
+    importer `apps.restaurants` (ADR-002), et une branche de plus dans son
+    `problem_detail_handler` aurait inversé le graphe.
+
+    `missing` et non `manques` : les membres du corps d'erreur voyagent jusqu'au
+    client Flutter, où le reste du contrat est en anglais.
+    """
+
+    code = "incomplete_configuration"
+    title = "Établissement incomplet"
+
+    def __init__(self, manques: list[str]) -> None:
+        self.manques = manques
+        super().__init__(
+            "Cet établissement ne peut pas être mis en service : " + " ".join(manques),
+            missing=manques,
+        )
 
 
 class Restaurant(UUIDModel, TimeStampedModel):
@@ -43,11 +82,26 @@ class Restaurant(UUIDModel, TimeStampedModel):
         upload_to="restaurants/", storage=banners, null=True, blank=True
     )
 
-    # `is_active` est structurel — l'établissement existe-t-il ? —, tandis que
-    # `accepts_orders` est conjoncturel : un coup de feu en cuisine, une panne
-    # de four. Les confondre obligerait à désactiver un restaurant pour arrêter
-    # les commandes une heure, ce qui le ferait disparaître de l'application.
-    is_active = models.BooleanField(default=True)
+    # Cycle de vie complet, du brouillon à la suspension — voir
+    # `apps.restaurants.states`. C'est la **seule** colonne d'état qu'on écrit.
+    status = models.CharField(
+        max_length=16,
+        choices=RestaurantStatus.choices,
+        default=RestaurantStatus.DRAFT,
+        help_text="Un établissement n'est visible du public qu'en service.",
+    )
+
+    # **Dérivé de `status` par `save()`**, jamais saisi : c'est la projection
+    # booléenne « publié ou non ». Elle reste en colonne parce que huit requêtes
+    # de production la filtrent — panier, commande, catalogue, candidature
+    # livreur — et qu'un `status="active"` recopié à ces huit endroits serait la
+    # même règle écrite huit fois, donc huit occasions de la corriger à moitié.
+    #
+    # `accepts_orders`, lui, reste conjoncturel : un coup de feu en cuisine, une
+    # panne de four. Le confondre avec la publication obligerait à dépublier un
+    # restaurant pour arrêter les commandes une heure, ce qui le ferait
+    # disparaître de l'application au lieu de l'y montrer débordé.
+    is_active = models.BooleanField(default=False)
     accepts_orders = models.BooleanField(default=True)
 
     default_preparation_minutes = models.PositiveSmallIntegerField(default=20)
@@ -75,10 +129,91 @@ class Restaurant(UUIDModel, TimeStampedModel):
         indexes = [
             gis.Index(fields=["location"]),
             models.Index(fields=["zone", "is_active"]),
+            models.Index(fields=["status"], name="restaurants_status_idx"),
         ]
 
     def __str__(self) -> str:
         return self.name
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Maintient `is_active` aligné sur `status`.
+
+        La dérivation est faite ici et non dans un sérialiseur parce qu'elle
+        doit tenir pour **toute** écriture : back-office, `django-admin`,
+        commande de peuplement, correction en `shell`. Placée dans une seule
+        couche d'entrée, elle laisserait les autres produire des lignes où un
+        établissement suspendu reste publié.
+
+        `update_fields` est complété quand la valeur change, sans quoi un
+        `save(update_fields=["status"])` — la forme qu'écrit naturellement une
+        transition — écrirait le nouvel état sans son reflet booléen, et la
+        ligne resterait visible du public.
+        """
+        publie = self.status == RestaurantStatus.ACTIVE
+        if self.is_active != publie:
+            self.is_active = publie
+            champs = kwargs.get("update_fields")
+            if champs is not None:
+                kwargs["update_fields"] = {*champs, "is_active"}
+        super().save(*args, **kwargs)
+
+    # ------------------------------------------------------- cycle de vie
+
+    def configuration_gaps(self) -> list[str]:
+        """Ce qui manque encore pour ouvrir au public, en clair.
+
+        Rend une liste de phrases et non un booléen : « ce restaurant n'est pas
+        prêt » n'apprend rien à qui vient de remplir un formulaire de dix
+        champs. La liste dit quel écran ouvrir ensuite, et c'est elle que le
+        back-office affiche sous la fiche.
+
+        Ce que cette méthode vérifie elle-même est ce que `restaurants`
+        possède : la position, la zone, les horaires, le personnel. La carte et
+        la flotte vivent ailleurs et s'annoncent par le registre — voir
+        `apps.restaurants.readiness`, qui explique pourquoi ce n'est pas une
+        relation inverse.
+        """
+        manques: list[str] = []
+
+        # Le point de retrait hors de la zone qu'il dessert est la faute de
+        # saisie que rien d'autre n'attraperait : la commande partirait, et le
+        # calcul de distance mesurerait depuis une autre ville. C'est aussi la
+        # seule forme d'incohérence géographique que le schéma ne rend pas
+        # impossible — `City` porte une clé vers `Country`, si bien qu'une
+        # ville d'un autre pays ne peut pas être choisie.
+        if not self.zone.boundary.covers(self.location):
+            manques.append(
+                "La position de l'établissement tombe hors de sa zone de livraison."
+            )
+        if not self.opening_hours.exists():
+            manques.append("Aucune plage d'ouverture n'est définie.")
+        if not self.staff_memberships.exists():
+            manques.append("Aucun membre du personnel n'est rattaché à cet établissement.")
+
+        return manques + gaps_from_registry(self)
+
+    @property
+    def is_published(self) -> bool:
+        """Visible des applications clientes ?"""
+        return self.status == RestaurantStatus.ACTIVE
+
+    def transition_to(self, target: str) -> None:
+        """Change d'état en passant par la machine — le seul chemin d'écriture.
+
+        La mise en service est la seule transition que la complétude garde :
+        les autres servent précisément à corriger ce qui manque, et les
+        interdire tant que quelque chose manque rendrait la configuration
+        impossible à commencer.
+        """
+        RESTAURANT_MACHINE.validate(self.status, target)
+
+        if target == RestaurantStatus.ACTIVE:
+            manques = self.configuration_gaps()
+            if manques:
+                raise IncompleteConfiguration(manques)
+
+        self.status = target
+        self.save(update_fields=["status", "updated_at"])
 
     @property
     def currency(self) -> str:

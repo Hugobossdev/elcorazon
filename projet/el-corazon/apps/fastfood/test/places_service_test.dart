@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/services/places_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -116,9 +115,13 @@ void main() {
         requestedPlaceId: 'ChIJVQIrqQ4nCA8RJvNvY0Bs5Xw',
       );
 
-      expect(details!.city, AppConstants.defaultCityName);
+      // Les valeurs attendues sont celles de la **réponse** simulée, et non
+      // celles d'une constante de l'application : `defaultCityName` a disparu
+      // avec les autres constantes d'établissement, et la comparer ici
+      // vérifiait surtout que deux constantes se ressemblaient.
+      expect(details!.city, 'Lomé');
       expect(details.country, 'Togo');
-      expect(details.countryCode?.toLowerCase(), AppConstants.countryCode);
+      expect(details.countryCode?.toLowerCase(), 'tg');
     });
 
     test('sans `locality`, le niveau administratif tient lieu de ville', () {

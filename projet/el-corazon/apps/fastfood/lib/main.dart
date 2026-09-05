@@ -39,6 +39,7 @@ import 'package:elcora_fast/widgets/incoming_call_handler.dart';
 import 'package:elcora_fast/widgets/push_notification_router.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/services/social_service.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Backend Django v2 (Phase 6). L'app n'a plus aucun accès direct à une base de
 /// données : tout passe par `/api/v1/` et les WebSockets `ws/`.
@@ -265,6 +266,19 @@ class ClientApp extends StatelessWidget {
         // à `connectivity_plus`. C'était une seconde implémentation du même
         // guet, initialisée à chaque démarrage pour personne.
         ChangeNotifierProvider(create: (_) => AppService(container)),
+        // Sur quel restaurant porte l'application — lu sur `GET /restaurants/`.
+        //
+        // Construit sans attendre qu'un écran le demande (`lazy: false`) : le
+        // catalogue, le panier et les adresses le lisent dès le premier écran,
+        // et le résoudre à la demande ferait attendre chacun d'eux à son tour.
+        //
+        // Il remplace six constantes qui décrivaient l'établissement de Lomé et
+        // rendaient impossible l'ouverture d'un second sans republier
+        // l'application.
+        ChangeNotifierProvider(
+          create: (_) => RestaurantContextService()..resolve(),
+          lazy: false,
+        ),
         ChangeNotifierProvider(create: (_) => CartService()),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => NotificationService()),

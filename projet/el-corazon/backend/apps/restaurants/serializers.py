@@ -20,6 +20,7 @@ from rest_framework import serializers
 from apps.accounts.models import Role, User, UserType
 from apps.geography.models import DeliveryZone
 from apps.restaurants.models import OpeningHours, Restaurant, StaffMembership
+from apps.restaurants.states import RestaurantStatus
 from common.serializers import LocationField, MoneyField
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "OpeningHoursSerializer",
     "RestaurantDetailSerializer",
     "RestaurantSerializer",
+    "RestaurantStatusTransitionSerializer",
     "StaffSerializer",
 ]
 
@@ -52,6 +54,24 @@ class RestaurantSerializer(serializers.ModelSerializer[Restaurant]):
 
     location = LocationField(read_only=True)
     city = serializers.CharField(source="zone.city.name", read_only=True)
+
+    # Le **slug** de la ville et le code du pays, à côté de leurs libellés.
+    #
+    # L'application cliente en a besoin pour deux choses qu'elle écrivait
+    # jusqu'ici en dur : rattacher une adresse à la bonne ville
+    # (`AddressSerializer.city` attend une clé, que le client résout par slug)
+    # et borner l'autocomplétion de lieux au bon pays. Sans eux, elle portait
+    # `citySlug = 'lome'` et `countryCode = 'tg'` dans ses constantes — donc un
+    # second établissement ailleurs aurait enregistré ses adresses à Lomé.
+    #
+    # Le nom seul ne suffit pas : « Lomé » ne se compare pas à une clé, et
+    # deux villes homonymes de deux pays ne se distinguent que par là.
+    city_slug = serializers.CharField(source="zone.city.slug", read_only=True)
+    country = serializers.CharField(source="zone.city.country.iso_code", read_only=True)
+    phone_prefix = serializers.CharField(
+        source="zone.city.country.phone_prefix", read_only=True
+    )
+
     currency = serializers.CharField(read_only=True)
     delivery_fee_from = MoneyField(source="zone.base_fee", read_only=True)
     estimated_delivery_minutes = serializers.IntegerField(
@@ -72,6 +92,9 @@ class RestaurantSerializer(serializers.ModelSerializer[Restaurant]):
             "address",
             "location",
             "city",
+            "city_slug",
+            "country",
+            "phone_prefix",
             "phone",
             "cover_image",
             "currency",
@@ -156,6 +179,17 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
     currency = serializers.CharField(read_only=True)
     timezone = serializers.CharField(read_only=True)
 
+    # Rendus pour situer l'établissement sans un second appel : l'écran qui
+    # liste les établissements d'un réseau affiche « Abidjan, CI », et le
+    # recomposer côté client demanderait de charger la zone, puis la ville, puis
+    # le pays — trois appels pour deux mots.
+    city = serializers.CharField(source="zone.city.name", read_only=True)
+    city_slug = serializers.CharField(source="zone.city.slug", read_only=True)
+    country = serializers.CharField(source="zone.city.country.iso_code", read_only=True)
+    zone_name = serializers.CharField(source="zone.name", read_only=True)
+
+    configuration_gaps = serializers.SerializerMethodField()
+
     class Meta:
         model = Restaurant
         fields = [
@@ -164,6 +198,10 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
             "slug",
             "description",
             "zone",
+            "zone_name",
+            "city",
+            "city_slug",
+            "country",
             "address",
             "location",
             "phone",
@@ -171,13 +209,58 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
             "cover_image",
             "currency",
             "timezone",
+            "status",
+            "configuration_gaps",
             "is_active",
             "accepts_orders",
             "default_preparation_minutes",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "currency", "timezone", "created_at", "updated_at"]
+        # `status` se lit ici et s'écrit sur `POST manage/{slug}/status/` : la
+        # machine à états et la vérification de complétude ne peuvent pas vivre
+        # dans un `PATCH` qui accepte aussi le numéro de téléphone. Un
+        # établissement se publierait alors en corrigeant une faute de frappe.
+        #
+        # `is_active` est dérivé de `status` (voir `Restaurant.save`) : le
+        # laisser inscriptible offrirait un second levier de publication, dont
+        # la prochaine écriture du modèle annulerait l'effet en silence.
+        read_only_fields = [
+            "id",
+            "zone_name",
+            "city",
+            "city_slug",
+            "country",
+            "currency",
+            "timezone",
+            "status",
+            "configuration_gaps",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_configuration_gaps(self, obj: Restaurant) -> list[str]:
+        """Ce qui manque pour ouvrir — la liste qu'affiche l'écran de validation.
+
+        Calculée à la lecture plutôt que stockée : elle dépend du catalogue, des
+        horaires et de la flotte, qui changent sans passer par l'établissement.
+        Une colonne dénormalisée serait fausse dès la première catégorie
+        supprimée ailleurs.
+        """
+        return obj.configuration_gaps()
+
+
+class RestaurantStatusTransitionSerializer(serializers.Serializer[Any]):
+    """Corps de `POST /restaurants/manage/{slug}/status/`.
+
+    Un seul champ, et c'est voulu : la cible. Les règles d'enchaînement vivent
+    dans la machine (`RESTAURANT_MACHINE`) et la complétude dans le modèle, si
+    bien qu'il n'y a rien à valider ici qu'une valeur du registre — le reste se
+    décide sur l'objet, que ce sérialiseur ne voit pas.
+    """
+
+    status = serializers.ChoiceField(choices=RestaurantStatus.choices)
 
 
 class ManagedOpeningHoursSerializer(serializers.ModelSerializer[OpeningHours]):

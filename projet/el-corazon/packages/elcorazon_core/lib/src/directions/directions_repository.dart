@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import 'package:elcorazon_core/src/directions/geo_point.dart';
 import 'package:elcorazon_core/src/directions/route_info.dart';
+import 'package:elcorazon_core/src/directions/route_step.dart';
 
 /// Itinéraires et distances — API Google Directions et Distance Matrix.
 ///
@@ -45,15 +46,28 @@ class DirectionsRepository {
   /// son tracé de repli plutôt que de casser. Toute autre anomalie lève : une
   /// erreur de quota ou une requête refusée doit se voir, pas se confondre
   /// avec « aucun itinéraire ».
+  ///
+  /// [langue] est la langue des instructions. Elle est **envoyée à Google**
+  /// plutôt qu'appliquée après coup : les noms de rue et les tournures
+  /// viennent de son côté, et traduire « Turn right onto Boulevard du 13
+  /// Janvier » ici produirait un mélange. Elle entre dans la clé de cache —
+  /// deux langues sont deux itinéraires différents à l'oreille.
+  ///
+  /// [avecEtapes] demande les manœuvres. Elles voyagent dans la même réponse
+  /// et ne coûtent aucune requête de plus ; elles alourdissent seulement la
+  /// charge utile, d'où le fait de pouvoir s'en passer quand l'appelant ne
+  /// trace qu'une ligne sur une carte.
   Future<RouteInfo?> getRoute({
     required GeoPoint origin,
     required GeoPoint destination,
     List<GeoPoint>? waypoints,
     String mode = 'driving',
+    String langue = 'fr',
+    bool avecEtapes = false,
   }) async {
     if (!_cleConfiguree) return null;
 
-    final cle = _cleDeCache(origin, destination, waypoints, mode);
+    final cle = _cleDeCache(origin, destination, waypoints, mode, langue, avecEtapes);
     final enCache = _cacheItineraires[cle];
     if (enCache != null) {
       if (DateTime.now().difference(enCache.timestamp) < cacheDuration) {
@@ -66,6 +80,7 @@ class DirectionsRepository {
       'origin': '$origin',
       'destination': '$destination',
       'mode': mode,
+      'language': langue,
       if (waypoints != null && waypoints.isNotEmpty)
         'waypoints': waypoints.join('|'),
     });
@@ -90,6 +105,22 @@ class DirectionsRepository {
       polylinePoints: decodePolyline(trace),
       encodedPolyline: trace,
       timestamp: DateTime.now(),
+      steps: !avecEtapes
+          ? const []
+          : [
+              // `steps` peut manquer sur une réponse tronquée. Rendre un
+              // itinéraire sans manœuvres vaut mieux que de n'en rendre
+              // aucun : la carte et la distance restent justes, et le moteur
+              // de navigation sait se taire.
+              // `etape` désigne ici le tronçon (`leg`) ; la variable de
+              // boucle porte donc un autre nom, sans quoi la lecture de
+              // `etape['steps']` deviendrait ambiguë à la relecture.
+              for (final manoeuvre in (etape['steps'] as List<dynamic>? ?? const []))
+                RouteStep.fromJson(
+                  manoeuvre as Map<String, dynamic>,
+                  decoder: decodePolyline,
+                ),
+            ],
     );
 
     _cacheItineraires[cle] = itineraire;
@@ -237,9 +268,17 @@ class DirectionsRepository {
     GeoPoint destination,
     List<GeoPoint>? waypoints,
     String mode,
+    String langue,
+    bool avecEtapes,
   ) =>
       // Accolades obligatoires : `$origin_` se lirait comme un identifiant.
-      '${origin}_${destination}_${waypoints?.join('|') ?? ''}_$mode';
+      //
+      // La langue et la présence des étapes entrent dans la clé : sans elles,
+      // un premier appel sans manœuvres servirait son résultat à l'écran de
+      // navigation, qui n'aurait alors rien à prononcer pendant les cinq
+      // minutes de validité du cache.
+      '${origin}_${destination}_${waypoints?.join('|') ?? ''}_${mode}_'
+      '${langue}_$avecEtapes';
 }
 
 /// Refus de Google, avec son code — `ZERO_RESULTS`, `OVER_QUERY_LIMIT`…

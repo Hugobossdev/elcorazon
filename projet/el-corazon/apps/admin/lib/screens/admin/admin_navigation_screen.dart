@@ -15,6 +15,8 @@ import 'package:admin/screens/admin/category_management_screen.dart';
 import 'package:admin/screens/admin/customization_management_screen.dart';
 import 'package:admin/screens/admin/menu_management_screen.dart';
 import 'package:admin/screens/admin/payments_screen.dart';
+import 'package:admin/screens/admin/reseau/reseau_screen.dart';
+import 'package:admin/screens/admin/selecteur_etablissement.dart';
 import 'package:admin/screens/admin/marketing_screen.dart';
 import 'package:admin/screens/admin/promotions_screen.dart';
 import 'package:admin/screens/admin/gamification_management_screen.dart';
@@ -177,6 +179,16 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
       ],
     ),
     NavigationGroup(
+      title: 'RÉSEAU',
+      items: [
+        NavigationItem(
+          title: 'Pays, villes, établissements',
+          icon: Icons.public_rounded,
+          index: 17,
+        ),
+      ],
+    ),
+    NavigationGroup(
       title: 'SYSTÈME',
       items: [
         NavigationItem(
@@ -270,6 +282,9 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
         break;
       case 16:
         screen = const PaymentsScreen();
+        break;
+      case 17:
+        screen = const ReseauScreen();
         break;
       default:
         screen = const AdminDashboardScreen();
@@ -789,6 +804,11 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
             ],
           ),
           const Spacer(),
+          // Sur quel établissement porte tout ce que montre cet écran. Absent
+          // quand le compte n'en supervise qu'un — il n'y a alors rien à
+          // choisir.
+          const SelecteurEtablissement(),
+          const SizedBox(width: 12),
           _buildAppBarAction(
             context,
             icon: Icons.search,

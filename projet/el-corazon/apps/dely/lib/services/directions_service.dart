@@ -4,7 +4,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcora_dely/config/api_config.dart';
 
 export 'package:elcorazon_core/elcorazon_core.dart'
-    show DirectionsException, DistanceTimeInfo, GeoPoint, RouteInfo;
+    show DirectionsException, DistanceTimeInfo, GeoPoint, Manoeuvre, RouteInfo, RouteStep;
 
 /// Adaptation entre les `LatLng` de la carte et le dépôt d'itinéraires du socle.
 ///
@@ -41,17 +41,27 @@ class DirectionsService {
   /// retombe alors sur son calcul de haversine, ce qu'il faisait déjà :
   /// l'ancienne version levait dans ce cas, et le `catch` de l'écran appelait
   /// le même repli.
+  ///
+  /// [avecEtapes] demande les manœuvres, sans lesquelles aucune instruction de
+  /// navigation n'est possible. Elles voyagent dans la même réponse et ne
+  /// coûtent pas de requête supplémentaire ; l'écran qui ne trace qu'une ligne
+  /// s'en passe, celui qui guide un livreur les demande. [langue] est celle
+  /// dans laquelle Google rédige ces instructions.
   Future<RouteInfo?> getRoute({
     required LatLng origin,
     required LatLng destination,
     List<LatLng>? waypoints,
     String mode = 'driving',
+    String langue = 'fr',
+    bool avecEtapes = false,
   }) {
     return _depotCourant.getRoute(
       origin: origin.enGeoPoint,
       destination: destination.enGeoPoint,
       waypoints: waypoints?.map((p) => p.enGeoPoint).toList(),
       mode: mode,
+      langue: langue,
+      avecEtapes: avecEtapes,
     );
   }
 

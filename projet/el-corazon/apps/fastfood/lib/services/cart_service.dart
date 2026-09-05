@@ -7,12 +7,12 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/tarification.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
 
 /// Service de gestion du panier (local + synchronisation Supabase)
@@ -58,6 +58,9 @@ class CartService extends ChangeNotifier {
   final OfflineSyncService _offlineSyncService = OfflineSyncService();
   final DeliveryFeeService _deliveryFeeService = DeliveryFeeService();
 
+  /// Désabonnement du changement d'établissement — voir [_surChangementDEtablissement].
+  VoidCallback? _finDAbonnement;
+
   // Getters
   List<CartItem> get items => List.unmodifiable(_items);
   bool get isEmpty => _items.isEmpty;
@@ -101,16 +104,44 @@ class CartService extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   String? get userId => _userId;
 
-  String get _cartItemsKey => 'cart_items_${_userId ?? 'guest'}';
+  /// Qui possède ce panier — le compte, **et l'établissement**.
+  ///
+  /// La clé ne portait que le compte. Le panier est pourtant par établissement
+  /// des deux côtés : le serveur en tient un par restaurant
+  /// (`GET /carts/{restaurant_slug}/`), et changer de restaurant côté
+  /// application faisait donc relire, sous le nouveau nom, les lignes de
+  /// l'ancien — des plats qui n'existent pas à la carte qu'on regarde, à des
+  /// prix qui ne sont pas les siens. La première synchronisation les aurait
+  /// poussés sur le serveur du nouvel établissement.
+  ///
+  /// L'établissement est celui du contexte au moment de la lecture ; `sans`
+  /// couvre le court instant du démarrage, avant que l'annuaire ait répondu.
+  String get _proprietaire => '${_userId ?? 'guest'}_${_slugLocal ?? 'sans'}';
+
+  String get _cartItemsKey => 'cart_items_$_proprietaire';
 
   /// Clé de l'ancien montant de livraison mémorisé localement. Elle n'est plus
   /// écrite — seulement effacée : un frais rendu par le serveur pour un panier
   /// et une adresse donnés n'a aucun sens à la session suivante.
-  String get _legacyDeliveryFeeKey => 'cart_delivery_fee_${_userId ?? 'guest'}';
-  String get _promoDiscountKey => 'cart_promo_discount_${_userId ?? 'guest'}';
+  String get _legacyDeliveryFeeKey => 'cart_delivery_fee_$_proprietaire';
+  String get _promoDiscountKey => 'cart_promo_discount_$_proprietaire';
   // Legacy key for migration
-  String get _discountKey => 'cart_discount_${_userId ?? 'guest'}';
-  String get _promoCodeKey => 'cart_promo_code_${_userId ?? 'guest'}';
+  String get _discountKey => 'cart_discount_$_proprietaire';
+  String get _promoCodeKey => 'cart_promo_code_$_proprietaire';
+
+  /// Établissement courant, tel que le contexte le connaît **maintenant**.
+  ///
+  /// Lecture synchrone, pour les clés de stockage : les rendre asynchrones
+  /// obligerait à attendre le réseau avant de relire un panier local, qui n'en
+  /// a pas besoin.
+  String? get _slugLocal => RestaurantContextService().slug;
+
+  /// Établissement à écrire côté serveur, en résolvant l'annuaire au besoin.
+  ///
+  /// Distinct de [_slugLocal] : une écriture distante ne doit jamais partir
+  /// sur un établissement deviné, alors qu'une lecture locale peut se contenter
+  /// de ce qu'on sait.
+  Future<String> _slug() => RestaurantContextService().exigerSlug();
 
   /// Initialise le service (chargement local)
   Future<void> initialize() async {
@@ -118,6 +149,11 @@ class CartService extends ChangeNotifier {
 
     try {
       _prefs = await SharedPreferences.getInstance();
+      // Avant la première lecture : un panier relu sous l'ancienne clé puis
+      // relu de nouveau après le changement afficherait brièvement les lignes
+      // du restaurant précédent.
+      _finDAbonnement ??= RestaurantContextService()
+          .ecouterLeChangement(_surChangementDEtablissement);
       await _loadCartFromStorage();
       _isInitialized = true;
       notifyListeners();
@@ -166,7 +202,7 @@ class CartService extends ChangeNotifier {
   Future<void> clearForLogout() async {
     if (_userId != null) {
       try {
-        await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
+        await _cartRepository.clear(restaurantSlug: await _slug());
       } catch (e) {
         eccore.Journal.trace('CartService: erreur lors du nettoyage distant - $e');
       }
@@ -182,6 +218,37 @@ class CartService extends ChangeNotifier {
 
     await _loadCartFromStorage(); // recharger le panier "invité"
     notifyListeners();
+  }
+
+  /// Recharge le panier quand on change d'établissement.
+  ///
+  /// **Ni fusion, ni report.** Les lignes de l'ancien restaurant désignent des
+  /// articles de son catalogue : les porter sur le nouveau les ferait refuser
+  /// une par une par le serveur, ou pire, correspondre par hasard à un article
+  /// homonyme au mauvais prix. Chaque établissement a son panier, ici comme
+  /// côté serveur, et on relit simplement celui du nouveau.
+  ///
+  /// Le panier de l'ancien reste sur l'appareil sous sa propre clé : y revenir
+  /// le retrouve intact, ce qui est le comportement qu'attend quiconque
+  /// compare deux cartes avant de commander.
+  Future<void> _surChangementDEtablissement(String ancien, String nouveau) async {
+    eccore.Journal.trace('CartService : établissement $ancien → $nouveau');
+
+    _items.clear();
+    _quote = null;
+    _promoDiscount = 0.0;
+    _promoCode = null;
+    // Les getters de clés lisent déjà le nouvel établissement : ce chargement
+    // porte donc sur le panier du restaurant qu'on vient de choisir.
+    await _loadCartFromStorage();
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _finDAbonnement?.call();
+    _finDAbonnement = null;
+    super.dispose();
   }
 
   /// Ajoute un article au panier avec protection contre les doublons
@@ -798,7 +865,7 @@ class CartService extends ChangeNotifier {
     _isHydrating = true;
     try {
       final remoteCart = await _cartRepository.getCart(
-        restaurantSlug: AppConstants.restaurantSlug,
+        restaurantSlug: await _slug(),
       );
 
       if (remoteCart.lines.isEmpty) {
@@ -849,13 +916,17 @@ class CartService extends ChangeNotifier {
     // vide, si elle survenait juste après le `clear`.
     final lignes = List<CartItem>.from(_items);
 
-    await _cartRepository.clear(restaurantSlug: AppConstants.restaurantSlug);
+    // Un seul appel pour toute la réécriture : le redemander ligne par
+    // ligne laisserait un changement d'établissement couper le panier en
+    // deux, la moitié partant chez l'un et la moitié chez l'autre.
+    final etablissement = await _slug();
+    await _cartRepository.clear(restaurantSlug: etablissement);
 
     final refused = <String>[];
     for (final item in lignes) {
       try {
         await _cartRepository.addLine(
-          restaurantSlug: AppConstants.restaurantSlug,
+          restaurantSlug: etablissement,
           menuItemId: item.menuItemId,
           quantity: item.quantity,
           optionIds: item.selectedOptionIds,
@@ -943,7 +1014,7 @@ class CartService extends ChangeNotifier {
     try {
       _isSyncing = true;
       final remoteCart = await _cartRepository.getCart(
-        restaurantSlug: AppConstants.restaurantSlug,
+        restaurantSlug: await _slug(),
       );
       final remoteItems = remoteCart.lines.map(_fromRemoteLine).toList();
 

@@ -1,7 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Critères de recherche avancée
 class SearchCriteria {
@@ -121,7 +121,7 @@ class AdvancedSearchService {
   Future<List<eccore.MenuItem>> search(SearchCriteria criteria) async {
     try {
       final items = await _catalog.getMenuItems(
-        restaurantSlug: AppConstants.restaurantSlug,
+        restaurantSlug: await RestaurantContextService().exigerSlug(),
         search: criteria.query,
         // Le contrat désigne les catégories par leur `slug` ; l'écran n'en
         // passe qu'une à la fois.

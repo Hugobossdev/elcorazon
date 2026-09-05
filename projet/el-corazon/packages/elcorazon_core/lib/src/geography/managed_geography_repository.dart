@@ -2,6 +2,7 @@ import 'package:elcorazon_core/src/models/money.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/geography/delivery_zone.dart';
 import 'package:elcorazon_core/src/geography/managed_city.dart';
+import 'package:elcorazon_core/src/geography/managed_country.dart';
 
 /// Géographie du back-office — `/api/v1/geography/manage/*`
 /// (`backend/apps/geography/backoffice.py`), réservée au **siège**.
@@ -16,59 +17,171 @@ class ManagedGeographyRepository {
 
   final ApiClient apiClient;
 
+  /// Pays d'opération, **fermés compris**.
+  ///
+  /// Premier échelon de la hiérarchie et le seul qu'on ne pouvait pas ouvrir
+  /// sans passer par `django-admin` : la route existait des deux côtés,
+  /// personne ne l'appelait.
+  Future<List<ManagedCountry>> countries({bool? isActive}) {
+    return _collect(
+      '/geography/manage/countries/',
+      ManagedCountry.fromJson,
+      queryParameters: {if (isActive != null) 'is_active': isActive.toString()},
+    );
+  }
+
+  /// Ouvre un marché.
+  ///
+  /// [currency] et [timezone] engagent tout ce qui suivra : la devise est figée
+  /// sur chaque commande passée dans ce pays, et le fuseau décide de l'heure à
+  /// laquelle ses restaurants ouvrent. Les corriger après les premières
+  /// commandes ne convertit rien — d'où leur présence ici, à l'ouverture, et
+  /// non dans un écran de réglages.
+  Future<ManagedCountry> createCountry({
+    required String isoCode,
+    required String name,
+    required String currency,
+    required String phonePrefix,
+    required String timezone,
+    String defaultLanguage = 'fr',
+    bool isActive = true,
+  }) async {
+    final response = await apiClient.post(
+      '/geography/manage/countries/',
+      data: {
+        'iso_code': isoCode.toUpperCase(),
+        'name': name,
+        'currency': currency.toUpperCase(),
+        'phone_prefix': phonePrefix,
+        'timezone': timezone,
+        'default_language': defaultLanguage,
+        'is_active': isActive,
+      },
+    );
+    return ManagedCountry.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Modification partielle d'un pays — un paramètre omis n'est pas transmis.
+  ///
+  /// `currency` n'est volontairement pas modifiable ici. Le serveur l'accepte,
+  /// mais rien ne se convertit rétroactivement : la changer sur un marché en
+  /// activité laisserait le catalogue et l'historique dans deux unités. Fermer
+  /// le pays et en ouvrir un autre est le geste qui correspond à l'intention.
+  Future<ManagedCountry> updateCountry({
+    required String isoCode,
+    String? name,
+    String? phonePrefix,
+    String? timezone,
+    String? defaultLanguage,
+    bool? isActive,
+  }) async {
+    final response = await apiClient.patch(
+      '/geography/manage/countries/${isoCode.toUpperCase()}/',
+      data: {
+        if (name != null) 'name': name,
+        if (phonePrefix != null) 'phone_prefix': phonePrefix,
+        if (timezone != null) 'timezone': timezone,
+        if (defaultLanguage != null) 'default_language': defaultLanguage,
+        if (isActive != null) 'is_active': isActive,
+      },
+    );
+    return ManagedCountry.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Ouvre une ville dans un pays.
+  ///
+  /// Le pays est désigné par son **code ISO** : c'est ce que le serveur attend
+  /// (`SlugRelatedField(slug_field: "iso_code")`), et c'est ce qui rend
+  /// impossible la combinaison incohérente que redoute l'exploitation — une
+  /// ville ne peut pas appartenir à un autre pays que celui qu'on nomme ici,
+  /// puisqu'elle n'a qu'une seule clé de rattachement.
+  ///
+  /// Le [centroid] centre une carte et trie par proximité ; il ne décide
+  /// **jamais** d'une livrabilité, qui est le rôle du contour de la zone.
+  Future<ManagedCity> createCity({
+    required String countryIsoCode,
+    required String name,
+    required String slug,
+    required double latitude,
+    required double longitude,
+    bool isActive = true,
+  }) async {
+    final response = await apiClient.post(
+      '/geography/manage/cities/',
+      data: {
+        'country': countryIsoCode.toUpperCase(),
+        'name': name,
+        'slug': slug,
+        'centroid': {'lat': latitude, 'lon': longitude},
+        'is_active': isActive,
+      },
+    );
+    return ManagedCity.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Modification partielle d'une ville.
+  ///
+  /// Le pays n'est pas modifiable ici : déplacer une ville d'un marché à un
+  /// autre changerait la devise de ses zones et de leurs barèmes, donc le prix
+  /// de commandes déjà passées. C'est une opération de reprise de données, pas
+  /// un champ de formulaire.
+  Future<ManagedCity> updateCity({
+    required String cityId,
+    String? name,
+    String? slug,
+    double? latitude,
+    double? longitude,
+    bool? isActive,
+  }) async {
+    if ((latitude == null) != (longitude == null)) {
+      throw ArgumentError(
+        'Une latitude seule ne situe rien : les deux coordonnées se fournissent ensemble.',
+      );
+    }
+
+    final response = await apiClient.patch(
+      '/geography/manage/cities/$cityId/',
+      data: {
+        if (name != null) 'name': name,
+        if (slug != null) 'slug': slug,
+        if (latitude != null && longitude != null)
+          'centroid': {'lat': latitude, 'lon': longitude},
+        if (isActive != null) 'is_active': isActive,
+      },
+    );
+    return ManagedCity.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// Villes, **fermées comprises**, pour la même raison que [zones].
   ///
   /// Le back-office s'en sert pour **nommer** la ville d'une zone : la zone ne
   /// porte que sa clé (`ManagedDeliveryZoneSerializer` sérialise `city` en
   /// `PrimaryKeyRelatedField`), et un écran qui doit choisir les quartiers
   /// desservis ne peut pas afficher un UUID à la place de « Lomé ».
-  Future<List<ManagedCity>> cities({String? countryIsoCode, bool? isActive}) async {
-    final villes = <ManagedCity>[];
-    String? path = '/geography/manage/cities/';
-    Map<String, dynamic>? queryParameters = {
-      if (countryIsoCode != null) 'country__iso_code': countryIsoCode,
-      if (isActive != null) 'is_active': isActive.toString(),
-    };
-
-    while (path != null) {
-      final response = await apiClient.get(path, queryParameters: queryParameters);
-      final body = response.data as Map<String, dynamic>;
-      villes.addAll(
-        (body['results'] as List<dynamic>).map(
-          (json) => ManagedCity.fromJson(json as Map<String, dynamic>),
-        ),
-      );
-      path = body['next'] as String?;
-      queryParameters = null;
-    }
-
-    return villes;
+  Future<List<ManagedCity>> cities({String? countryIsoCode, bool? isActive}) {
+    return _collect(
+      '/geography/manage/cities/',
+      ManagedCity.fromJson,
+      queryParameters: {
+        if (countryIsoCode != null) 'country__iso_code': countryIsoCode.toUpperCase(),
+        if (isActive != null) 'is_active': isActive.toString(),
+      },
+    );
   }
 
   /// Zones, **inactives comprises** : la liste publique les filtre, celle-ci
   /// les montre — sans quoi désactiver une zone la ferait disparaître de
   /// l'écran qui sert à la rouvrir.
-  Future<List<DeliveryZone>> zones({String? citySlug, bool? isActive}) async {
-    final zones = <DeliveryZone>[];
-    String? path = '/geography/manage/zones/';
-    Map<String, dynamic>? queryParameters = {
-      if (citySlug != null) 'city__slug': citySlug,
-      if (isActive != null) 'is_active': isActive.toString(),
-    };
-
-    while (path != null) {
-      final response = await apiClient.get(path, queryParameters: queryParameters);
-      final body = response.data as Map<String, dynamic>;
-      zones.addAll(
-        (body['results'] as List<dynamic>).map(
-          (json) => DeliveryZone.fromJson(json as Map<String, dynamic>),
-        ),
-      );
-      path = body['next'] as String?;
-      queryParameters = null;
-    }
-
-    return zones;
+  Future<List<DeliveryZone>> zones({String? citySlug, String? cityId, bool? isActive}) {
+    return _collect(
+      '/geography/manage/zones/',
+      DeliveryZone.fromJson,
+      queryParameters: {
+        if (citySlug != null) 'city__slug': citySlug,
+        if (cityId != null) 'city': cityId,
+        if (isActive != null) 'is_active': isActive.toString(),
+      },
+    );
   }
 
   /// Crée une zone.
@@ -158,5 +271,36 @@ class ManagedGeographyRepository {
       },
     );
     return DeliveryZone.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  // --------------------------------------------------------------- interne
+
+  /// Suit la pagination jusqu'au bout.
+  ///
+  /// Les trois listes de ce dépôt alimentent des sélecteurs — un pays, une
+  /// ville, une zone —, et une deuxième page oubliée y rend une option
+  /// invisible, donc inchoisissable. Même assistant que
+  /// `ManagedCatalogRepository`, écrit ici plutôt que partagé : les deux dépôts
+  /// n'ont pas d'ancêtre commun, et s'en inventer un pour six lignes coûterait
+  /// plus qu'il ne rapporte.
+  Future<List<T>> _collect<T>(
+    String path,
+    T Function(Map<String, dynamic>) fromJson, {
+    Map<String, dynamic>? queryParameters,
+  }) async {
+    final items = <T>[];
+    String? next = path;
+    Map<String, dynamic>? parameters = queryParameters;
+
+    while (next != null) {
+      final response = await apiClient.get(next, queryParameters: parameters);
+      final body = response.data as Map<String, dynamic>;
+      final results = body['results'] as List<dynamic>;
+      items.addAll(results.map((json) => fromJson(json as Map<String, dynamic>)));
+      next = body['next'] as String?;
+      parameters = null;
+    }
+
+    return items;
   }
 }

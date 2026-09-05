@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
@@ -285,6 +287,132 @@ class DeliveryZoneService extends ChangeNotifier {
       eccore.Journal.trace('Zones : villes non nommées — ${e.code}');
       return const {};
     }
+  }
+
+  /// Ouvre une zone de livraison dans une ville.
+  ///
+  /// **C'est ce qui manquait pour ouvrir un restaurant ailleurs.**
+  /// `Restaurant.zone` est une clé étrangère non nulle : sans zone, aucun
+  /// établissement n'est créable. Le dépôt savait écrire (`createZone`), aucun
+  /// écran ne l'appelait, et la seule façon d'ouvrir une ville était de passer
+  /// par `django-admin`.
+  ///
+  /// ## Pourquoi un centre et un rayon, et non un contour tracé
+  ///
+  /// Le serveur attend un `MultiPolygon` — la forme que produisent les outils
+  /// de cartographie, et celle que l'exploitation tracera pour de bon. Un
+  /// éditeur de contour sur carte est un travail à part entière, et l'absence
+  /// d'un tel éditeur ne doit pas empêcher d'ouvrir un marché : le disque
+  /// approché ici couvre un quartier de façon utilisable dès le premier jour,
+  /// et se remplace ensuite par le contour réel sans migration — c'est le même
+  /// champ.
+  ///
+  /// Le polygone est fermé explicitement (dernier point = premier) : PostGIS
+  /// refuse un anneau ouvert, et l'oubli est l'erreur classique.
+  Future<DeliveryZone?> createZone({
+    required String cityId,
+    required String name,
+    required double centerLatitude,
+    required double centerLongitude,
+    required double radiusKm,
+    required String currency,
+    required double baseFee,
+    required double feePerKm,
+    double? freeDeliveryThreshold,
+    double? minOrderAmount,
+    double? maxDistanceKm,
+    int estimatedDeliveryMinutes = 30,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final creee = await _geographie.createZone(
+        cityId: cityId,
+        name: name,
+        boundary: disqueGeoJson(
+          latitude: centerLatitude,
+          longitude: centerLongitude,
+          rayonKm: radiusKm,
+        ),
+        baseFee: eccore.Money.fromMajorUnits(baseFee, currency),
+        feePerKm: eccore.Money.fromMajorUnits(feePerKm, currency),
+        freeDeliveryThreshold: freeDeliveryThreshold == null
+            ? null
+            : eccore.Money.fromMajorUnits(freeDeliveryThreshold, currency),
+        minOrderAmount: minOrderAmount == null
+            ? null
+            : eccore.Money.fromMajorUnits(minOrderAmount, currency),
+        // Par défaut, la zone refuse au-delà de son propre rayon : un plafond
+        // plus large que le contour ne sert à rien, un plafond plus étroit
+        // ferait refuser des points pourtant dans la zone.
+        maxDistanceKm: maxDistanceKm ?? radiusKm,
+        estimatedDeliveryMinutes: estimatedDeliveryMinutes,
+      );
+
+      final locale = DeliveryZone.fromRemote(creee);
+      _zones = [..._zones, locale];
+      return locale;
+    } on eccore.ApiException catch (e) {
+      _error = e.status == 403
+          ? "L'ouverture d'une zone relève du siège : votre compte est "
+                'rattaché à un périmètre.'
+          : e.detail;
+      eccore.Journal.trace('Zones : ouverture refusée — ${e.code}');
+      return null;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Contour circulaire approché, en GeoJSON `MultiPolygon`.
+  ///
+  /// Le rayon est converti en degrés séparément sur chaque axe : un degré de
+  /// longitude vaut `cos(latitude)` fois un degré de latitude, et l'ignorer
+  /// produirait une zone deux fois trop large en longitude sous nos latitudes —
+  /// c'est-à-dire une zone qui accepte des courses qu'aucun livreur ne peut
+  /// faire.
+  ///
+  /// Trente-six sommets : un pas de dix degrés, dont l'écart au cercle reste
+  /// sous 0,4 % du rayon. Au-delà, on paie des octets sur chaque lecture pour
+  /// une précision qu'aucune décision n'utilise — le plafond kilométrique de la
+  /// zone tranche les cas limites.
+  @visibleForTesting
+  static Map<String, dynamic> disqueGeoJson({
+    required double latitude,
+    required double longitude,
+    required double rayonKm,
+    int sommets = 36,
+  }) {
+    const degreDeLatitudeEnKm = 110.574;
+    const degreDeLongitudeALEquateurEnKm = 111.320;
+
+    final rayonEnLatitude = rayonKm / degreDeLatitudeEnKm;
+    final cosinus = math.cos(latitude * math.pi / 180);
+    final rayonEnLongitude =
+        rayonKm / (degreDeLongitudeALEquateurEnKm * (cosinus.abs() < 1e-6 ? 1e-6 : cosinus));
+
+    final anneau = <List<double>>[
+      for (var i = 0; i < sommets; i++)
+        () {
+          final angle = 2 * math.pi * i / sommets;
+          return <double>[
+            longitude + rayonEnLongitude * math.cos(angle),
+            latitude + rayonEnLatitude * math.sin(angle),
+          ];
+        }(),
+    ];
+    // Fermeture explicite de l'anneau : PostGIS refuse un contour ouvert.
+    anneau.add(anneau.first);
+
+    return {
+      'type': 'MultiPolygon',
+      'coordinates': [
+        [anneau],
+      ],
+    };
   }
 
   /// Rouvre ou ferme une zone.

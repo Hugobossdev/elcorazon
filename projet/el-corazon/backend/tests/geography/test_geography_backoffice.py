@@ -145,8 +145,16 @@ class TestGeographieReserveeAuSiege:
     def test_un_pays_se_ferme_sans_s_effacer(self, siege: APIClient, country: Country) -> None:
         """Commandes, adresses et établissements y renvoient : les clés sont en
         `PROTECT`, et un `DELETE` échouerait en violation d'intégrité plutôt
-        que par une règle lisible."""
-        url = reverse("v1:geography:managed-country-detail", args=[country.pk])
+        que par une règle lisible.
+
+        Le pays s'adresse par son **code ISO** et non par sa clé primaire, comme
+        la route publique et comme le reste du back-office adresse ses
+        ressources (un établissement par son slug, une ville par le code de son
+        pays). La vue attendait un UUID, seule de son espèce : fermer un marché
+        supposait de connaître un identifiant qu'aucune des trois applications
+        ne transporte.
+        """
+        url = reverse("v1:geography:managed-country-detail", args=[country.iso_code])
 
         ferme = siege.patch(url, {"is_active": False}, format="json")
 

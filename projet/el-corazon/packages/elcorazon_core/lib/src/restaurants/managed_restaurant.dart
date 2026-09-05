@@ -1,3 +1,5 @@
+import 'package:elcorazon_core/src/restaurants/restaurant_lifecycle.dart';
+
 /// Établissement vu de l'exploitation — miroir de `ManagedRestaurantSerializer`
 /// (`backend/apps/restaurants/serializers.py`).
 ///
@@ -26,6 +28,7 @@ class ManagedRestaurant {
     required this.longitude,
     required this.currency,
     required this.timezone,
+    required this.status,
     required this.isActive,
     required this.acceptsOrders,
     required this.defaultPreparationMinutes,
@@ -33,6 +36,11 @@ class ManagedRestaurant {
     this.phone,
     this.email,
     this.coverImage,
+    this.cityName = '',
+    this.citySlug = '',
+    this.countryIsoCode = '',
+    this.zoneName = '',
+    this.configurationGaps = const [],
   });
 
   factory ManagedRestaurant.fromJson(Map<String, dynamic> json) {
@@ -55,7 +63,15 @@ class ManagedRestaurant {
       coverImage: json['cover_image'] as String?,
       currency: json['currency'] as String,
       timezone: json['timezone'] as String,
-      isActive: json['is_active'] as bool? ?? true,
+      cityName: json['city'] as String? ?? '',
+      citySlug: json['city_slug'] as String? ?? '',
+      countryIsoCode: json['country'] as String? ?? '',
+      zoneName: json['zone_name'] as String? ?? '',
+      status: RestaurantLifecycle.fromCode(json['status'] as String),
+      configurationGaps: (json['configuration_gaps'] as List<dynamic>? ?? const [])
+          .map((phrase) => phrase as String)
+          .toList(growable: false),
+      isActive: json['is_active'] as bool? ?? false,
       acceptsOrders: json['accepts_orders'] as bool? ?? true,
       defaultPreparationMinutes: json['default_preparation_minutes'] as int,
     );
@@ -88,8 +104,31 @@ class ManagedRestaurant {
   final String currency;
   final String timezone;
 
-  /// L'établissement existe-t-il encore ? Un établissement inactif reste
-  /// visible du siège et disparaît des applications clientes.
+  /// Ville, code pays et zone de rattachement — rendus par le serveur pour
+  /// situer l'établissement sans trois appels de plus. Vides sur une réponse
+  /// d'une version antérieure du contrat.
+  final String cityName;
+  final String citySlug;
+  final String countryIsoCode;
+  final String zoneName;
+
+  /// Où en est l'établissement dans son provisionnement.
+  ///
+  /// C'est désormais la seule chose qu'on écrit : [isActive] en découle côté
+  /// serveur. Un back-office qui basculerait le booléen verrait son effet
+  /// annulé au prochain enregistrement.
+  final RestaurantLifecycle status;
+
+  /// Ce qui manque pour ouvrir au public, en clair — carte vide, horaires
+  /// absents, aucun livreur approuvé, position hors de la zone.
+  ///
+  /// Calculée par le serveur à chaque lecture plutôt que stockée : elle dépend
+  /// du catalogue, des horaires et de la flotte, qui changent sans passer par
+  /// la fiche de l'établissement.
+  final List<String> configurationGaps;
+
+  /// Projection de [status] : vrai pour le seul état « en service ». Rendu par
+  /// le serveur, jamais envoyé.
   final bool isActive;
 
   /// Prend-il des commandes **maintenant** ? C'est le drapeau du coup de feu,
@@ -97,4 +136,10 @@ class ManagedRestaurant {
   final bool acceptsOrders;
 
   final int defaultPreparationMinutes;
+
+  /// L'établissement est-il configuré au point de pouvoir ouvrir ?
+  bool get isReadyToPublish => configurationGaps.isEmpty;
+
+  /// « El Corazón — Abidjan », ou le seul nom quand la ville manque.
+  String get label => cityName.isEmpty ? name : '$name — $cityName';
 }

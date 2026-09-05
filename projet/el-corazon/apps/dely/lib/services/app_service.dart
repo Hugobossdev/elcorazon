@@ -572,7 +572,7 @@ class AppService extends ChangeNotifier {
   /// Route publique — appelée avant même qu'un compte existe. La liste ne
   /// contient que les établissements ouverts, qui sont exactement ceux que le
   /// serveur acceptera dans la candidature.
-  Future<List<eccore.RestaurantOption>> etablissementsOuverts() {
+  Future<List<eccore.Restaurant>> etablissementsOuverts() {
     return eccore.RestaurantDirectoryRepository(
       apiClient: _container.read(eccore.apiClientProvider),
     ).list();

@@ -13,6 +13,7 @@ class ApiException implements Exception {
     required this.code,
     required this.detail,
     this.errors = const {},
+    this.members = const {},
   });
 
   /// Réponse qui n'est pas au format `problem+json` (panne réseau, timeout,
@@ -37,13 +38,55 @@ class ApiException implements Exception {
               ),
             )
           : const {},
+      members: Map.unmodifiable({
+        for (final entree in body.entries)
+          if (!_membresDuContrat.contains(entree.key)) entree.key: entree.value,
+      }),
     );
   }
+
+  /// Membres définis par la RFC 9457 elle-même. Tout le reste est une extension
+  /// posée par le serveur, et c'est cela que [members] recueille.
+  static const Set<String> _membresDuContrat = {
+    'type',
+    'title',
+    'status',
+    'detail',
+    'instance',
+    'code',
+    'errors',
+  };
 
   final int status;
   final String code;
   final String detail;
   final Map<String, List<String>> errors;
+
+  /// Membres d'extension du corps `problem+json`, hors champs du contrat.
+  ///
+  /// Le serveur en pose depuis l'origine — `current_status` et
+  /// `allowed_transitions` sur une transition refusée, `verification_status`
+  /// sur un dossier livreur, `missing` sur un établissement incomplet — et le
+  /// client n'en lisait aucun : ils étaient perdus au décodage, si bien qu'une
+  /// erreur qui disait précisément quoi faire arrivait à l'écran comme une
+  /// phrase générique.
+  ///
+  /// Volontairement non typés : ce sont des données de diagnostic dont la forme
+  /// dépend de l'erreur. L'appelant sait ce qu'il attend d'un code donné, et le
+  /// lit avec [stringList] ou une conversion explicite.
+  final Map<String, dynamic> members;
+
+  /// Membre d'extension lu comme une liste de phrases, ou une liste vide.
+  ///
+  /// Absorbe les trois formes que peut prendre un membre absent, scalaire ou
+  /// déjà en liste, plutôt que de laisser chaque appelant écrire le même
+  /// `is List` défensif.
+  List<String> stringList(String membre) {
+    final valeur = members[membre];
+    if (valeur is List) return valeur.map((v) => v.toString()).toList(growable: false);
+    if (valeur == null) return const [];
+    return [valeur.toString()];
+  }
 
   bool get isThrottled => status == 429;
   bool get isUnauthorized => status == 401;

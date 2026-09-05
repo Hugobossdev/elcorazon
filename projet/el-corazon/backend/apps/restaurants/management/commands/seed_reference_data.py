@@ -22,7 +22,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from apps.geography.models import City, Country, DeliveryZone
-from apps.restaurants.models import OpeningHours, Restaurant, Weekday
+from apps.restaurants.models import OpeningHours, Restaurant, RestaurantStatus, Weekday
 from common.money import Money
 
 # Centre de Lomé.
@@ -78,7 +78,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(self.style.SUCCESS(f"Zone : {zone}"))
 
-        restaurant, _ = Restaurant.objects.update_or_create(
+        restaurant, cree = Restaurant.objects.update_or_create(
             slug="el-corazon-lome",
             defaults={
                 "name": "El Corazón",
@@ -89,7 +89,23 @@ class Command(BaseCommand):
                 "default_preparation_minutes": 20,
             },
         )
-        self.stdout.write(self.style.SUCCESS(f"Restaurant : {restaurant}"))
+        # `status` est **absent des `defaults`**, et c'est ce qui rend la
+        # commande rejouable sans dégât : un rejeu sur une installation en
+        # service ne doit ni dépublier l'établissement qui tourne, ni republier
+        # celui qu'on a suspendu pour refaire sa carte.
+        #
+        # À la première installation, il faut bien un état. C'est « en
+        # configuration » et non « en service » : cette commande pose la
+        # géographie et les horaires, pas le catalogue ni la flotte, et un
+        # établissement publié sans carte s'ouvrirait vide dans l'application
+        # cliente — le défaut exact que produisait `is_active`, vrai par défaut.
+        if cree:
+            restaurant.status = RestaurantStatus.CONFIGURING
+            restaurant.save(update_fields=["status"])
+
+        self.stdout.write(
+            self.style.SUCCESS(f"Restaurant : {restaurant} [{restaurant.get_status_display()}]")
+        )
 
         # 11h–23h tous les jours, service continu.
         for weekday in Weekday:
@@ -108,3 +124,28 @@ class Command(BaseCommand):
                 "adresse et téléphone du restaurant."
             )
         )
+
+        # Bilan de complétude, en clair.
+        #
+        # Cette commande pose la géographie et les horaires, pas le catalogue ni
+        # la flotte : elle ne peut donc pas mettre l'établissement en service, et
+        # le dire ici évite de chercher plus tard pourquoi le restaurant
+        # n'apparaît pas dans l'application. La liste vient du serveur, qui la
+        # calcule à partir des trois domaines concernés.
+        manques = restaurant.configuration_gaps()
+        if manques:
+            self.stdout.write(
+                self.style.WARNING(
+                    "\nIl reste à faire avant que cet établissement soit visible "
+                    "des clients :"
+                )
+            )
+            for manque in manques:
+                self.stdout.write(self.style.WARNING(f"  - {manque}"))
+        elif not restaurant.is_published:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "\nConfiguration complète. Mise en service depuis le "
+                    "back-office, ou : restaurant.transition_to('active')."
+                )
+            )

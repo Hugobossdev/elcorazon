@@ -26,6 +26,8 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from django.db.models import QuerySet
+from drf_spectacular.utils import extend_schema
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.mixins import (
     CreateModelMixin,
@@ -33,6 +35,8 @@ from rest_framework.mixins import (
     RetrieveModelMixin,
     UpdateModelMixin,
 )
+from rest_framework.request import Request
+from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 from apps.accounts.models import User, UserType
@@ -42,8 +46,10 @@ from apps.restaurants.scoping import assert_in_scope, is_unscoped, staff_restaur
 from apps.restaurants.serializers import (
     ManagedOpeningHoursSerializer,
     ManagedRestaurantSerializer,
+    RestaurantStatusTransitionSerializer,
     StaffSerializer,
 )
+from apps.restaurants.states import RestaurantStatus
 from common.permissions import (
     HasReadWritePermission,
     assert_unscoped,
@@ -178,6 +184,8 @@ class ManagedRestaurantViewSet(
     queryset = Restaurant.objects.select_related("zone__city__country").order_by("name")
     filterset_fields: ClassVar[dict[str, list[str]]] = {
         "zone__city__slug": ["exact"],
+        "zone__city__country__iso_code": ["exact"],
+        "status": ["exact"],
         "is_active": ["exact"],
         "accepts_orders": ["exact"],
     }
@@ -205,6 +213,49 @@ class ManagedRestaurantViewSet(
                 authenticated_user(self.request), "Le changement de zone d'un établissement"
             )
         serializer.save()
+
+    # ------------------------------------------------------- cycle de vie
+
+    @extend_schema(
+        request=RestaurantStatusTransitionSerializer,
+        responses={200: ManagedRestaurantSerializer},
+        tags=["restaurants"],
+    )
+    @action(detail=True, methods=["post"], url_path="status", url_name="status")
+    def update_status(self, request: Request, slug: str) -> Response:
+        """Fait avancer l'établissement dans son cycle de vie.
+
+        Route à part du `PATCH` de la fiche, et non un champ de plus : publier
+        un établissement et corriger son numéro de téléphone ne sont pas le même
+        geste, n'appellent pas les mêmes vérifications, et n'ont pas à partager
+        un formulaire. Fondus dans le `PATCH`, la machine à états et le contrôle
+        de complétude s'exécuteraient à chaque enregistrement d'un champ de
+        contact.
+
+        **La mise en service relève du siège.** Le reste du cycle — passer en
+        configuration, se déclarer prêt, suspendre pour la journée — est ouvert
+        au gérant de l'établissement : ce sont les gestes de l'exploitation.
+        Ouvrir au public ne l'est pas, pour la même raison que la création :
+        cela engage l'enseigne, et un compte cloisonné s'attribuerait un
+        marché.
+
+        Une transition refusée sort en 409 avec les cibles autorisées
+        (`IllegalTransition`), et un établissement incomplet en 409 avec la
+        liste de ce qui manque (`IncompleteConfiguration`) — deux réponses
+        distinctes, parce que les deux appellent deux gestes distincts.
+        """
+        payload = RestaurantStatusTransitionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        cible = payload.validated_data["status"]
+
+        if cible == RestaurantStatus.ACTIVE:
+            assert_unscoped(
+                authenticated_user(request), "La mise en service d'un établissement"
+            )
+
+        etablissement = self.get_object()
+        etablissement.transition_to(cible)
+        return Response(ManagedRestaurantSerializer(etablissement).data)
 
 
 class ManagedOpeningHoursViewSet(ModelViewSet[OpeningHours]):

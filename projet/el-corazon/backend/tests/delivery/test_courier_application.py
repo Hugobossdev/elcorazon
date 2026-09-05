@@ -27,7 +27,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import User, UserType, VerificationCode, VerificationPurpose
 from apps.delivery.models import CourierProfile, VehicleType
 from apps.delivery.states import VerificationStatus
-from apps.restaurants.models import Restaurant
+from apps.restaurants.models import Restaurant, RestaurantStatus
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
 
@@ -195,8 +195,10 @@ class TestRefus:
         """La liste où le candidat choisit est celle de `GET /restaurants/`, qui
         ne rend que les établissements actifs. Accepter les autres permettrait
         de se rattacher, en tapant un slug, à une adresse fermée."""
-        restaurant.is_active = False
-        restaurant.save(update_fields=["is_active"])
+        # `is_active` découle de `status` : l'écrire seul serait annulé par
+        # le prochain `save()`, qui le réaligne sur l'état.
+        restaurant.status = RestaurantStatus.INACTIVE
+        restaurant.save(update_fields=["status"])
 
         response = client.post(reverse(APPLY), candidature, format="json")
 

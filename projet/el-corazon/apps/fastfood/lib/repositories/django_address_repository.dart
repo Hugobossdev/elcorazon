@@ -1,8 +1,8 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
-import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/presentation/adresse.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 
 /// Ce qu'un client saisit pour créer ou corriger une adresse.
 ///
@@ -107,23 +107,36 @@ class DjangoAddressRepository implements AddressBookRepository {
   final eccore.AddressRepository _addresses;
   final eccore.GeographyRepository _geography;
 
-  /// Id Django de la ville configurée (`AppConstants.citySlug`) — résolu une
-  /// fois puis mis en cache : une seule ville en base aujourd'hui, inutile de
-  /// la redemander à chaque écriture.
-  static String? _cachedCityId;
+  /// Identifiants de ville déjà résolus, **par slug**.
+  ///
+  /// Le cache portait un seul identifiant, celui de la ville écrite en
+  /// constante : une adresse saisie depuis un second établissement aurait donc
+  /// été rattachée à la ville du premier — enregistrée à Lomé alors qu'elle est
+  /// à Abidjan, avec les conséquences qu'on imagine sur la livraison.
+  ///
+  /// La ville vient maintenant de l'établissement courant, et le cache est
+  /// indexé par son slug : deux villes coexistent sans se chasser l'une
+  /// l'autre.
+  static final Map<String, String> _identifiantsDeVille = {};
 
   Future<String> _cityId() async {
-    final cached = _cachedCityId;
-    if (cached != null) return cached;
+    final slug = RestaurantContextService().citySlug;
+    if (slug == null || slug.isEmpty) {
+      throw const AucunEtablissement();
+    }
+
+    final connu = _identifiantsDeVille[slug];
+    if (connu != null) return connu;
 
     final cities = await _geography.getCities();
     final city = cities.firstWhere(
-      (c) => c.slug == AppConstants.citySlug,
+      (c) => c.slug == slug,
       orElse: () => throw StateError(
-        'Aucune ville avec le slug "${AppConstants.citySlug}" côté backend.',
+        'Aucune ville avec le slug "$slug" côté backend : la ville de '
+        "l'établissement courant n'est pas desservie.",
       ),
     );
-    return _cachedCityId = city.id;
+    return _identifiantsDeVille[slug] = city.id;
   }
 
   @override

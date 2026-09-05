@@ -77,14 +77,51 @@ ENTETE = """// Fichier généré par `tools/couverture.py` — ne pas modifier �
 """
 
 
+#: Bibliothèques que la machine virtuelle de test ne fournit pas.
+#:
+#: Un fichier qui les importe est l'implémentation *web* d'un import
+#: conditionnel : sa contrepartie `_stub` est celle que la VM charge. L'importer
+#: directement depuis le fichier généré ne le rend pas instrumenté — il rend le
+#: fichier **incompilable**, et c'est toute la suite de l'application qui ne se
+#: charge plus. Le symptôme est trompeur : « Dart library 'dart:js_interop' is
+#: not available on this platform », signalé sur le fichier généré, pour une
+#: cause qui est trois imports plus loin.
+#:
+#: Ces fichiers sortent donc du dénominateur. C'est honnête : ils ne sont pas
+#: exécutables par `flutter test` sur cette plateforme, et les compter comme
+#: non couverts reviendrait à mesurer une dette qu'aucun test de VM ne peut
+#: rembourser.
+BIBLIOTHEQUES_ABSENTES_DE_LA_VM = (
+    "dart:js_interop",
+    "dart:js_util",
+    "dart:html",
+    "package:web/",
+)
+
+
+def _reserve_au_web(chemin_absolu: str) -> bool:
+    """Ce fichier importe-t-il une bibliothèque que seule la plateforme web a ?"""
+    try:
+        source = open(chemin_absolu, encoding="utf-8", errors="ignore").read()
+    except OSError:  # pragma: no cover - un fichier illisible n'est pas notre sujet
+        return False
+    return any(
+        f"import '{bibliotheque}" in source or f'import "{bibliotheque}' in source
+        for bibliotheque in BIBLIOTHEQUES_ABSENTES_DE_LA_VM
+    )
+
+
 def fichiers_lib(racine_app: str) -> list[str]:
     lib = os.path.join(racine_app, "lib")
     trouves = []
     for repertoire, _, noms in os.walk(lib):
         for nom in noms:
-            if nom.endswith(".dart"):
-                chemin = os.path.join(repertoire, nom)
-                trouves.append(os.path.relpath(chemin, lib).replace(os.sep, "/"))
+            if not nom.endswith(".dart"):
+                continue
+            chemin = os.path.join(repertoire, nom)
+            if _reserve_au_web(chemin):
+                continue
+            trouves.append(os.path.relpath(chemin, lib).replace(os.sep, "/"))
     return sorted(trouves)
 
 

@@ -1,40 +1,61 @@
 import 'dart:async';
-import 'dart:math' as math;
+
+import 'package:elcorazon_core/elcorazon_core.dart'
+    show EtatNavigation, EtapeNavigation, Journal, LangueNavigation;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:elcora_dely/services/app_service.dart';
-import 'package:elcora_dely/services/directions_service.dart';
-import 'package:elcora_dely/services/realtime_tracking_service.dart';
+
 import 'package:elcora_dely/presentation/libelles_course.dart';
+import 'package:elcora_dely/presentation/messages_erreur.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
-import 'package:elcora_dely/widgets/loading_widget.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
-import 'package:elcora_dely/presentation/messages_erreur.dart';
+import 'package:elcora_dely/screens/delivery/widgets/bandeau_instruction.dart';
+import 'package:elcora_dely/screens/delivery/widgets/panneau_simulation.dart';
+import 'package:elcora_dely/services/app_service.dart';
+import 'package:elcora_dely/services/navigation_service.dart';
+import 'package:elcora_dely/widgets/loading_widget.dart';
 
+/// La carte du livreur : suivi de course **et** navigation guidée.
+///
+/// ## Ce que cet écran est devenu
+///
+/// Il affichait une carte, trois repères et un trait. Le trait venait bien de
+/// Google Directions, mais tout ce qui fait une navigation manquait : les
+/// manœuvres étaient jetées à la lecture de la réponse, il n'existait aucune
+/// voix dans le projet, rien ne détectait une sortie d'itinéraire, rien ne
+/// savait qu'on était arrivé, et la caméra recadrait l'itinéraire entier à
+/// chaque recalcul — ce qui annulait le suivi du livreur et son propre geste
+/// sur la carte.
+///
+/// La logique n'est plus ici. Elle est dans `MoteurDeNavigation` (socle), qui
+/// se vérifie sans carte ni GPS, et dans `NavigationService`, qui l'assemble
+/// avec le flux de position existant. Cet écran dessine, et transmet les
+/// gestes.
+///
+/// ## Ce qui n'a pas changé
+///
+/// Le parcours métier. L'unique bouton d'avancement vient toujours de
+/// `allowed_transitions`, la confirmation de livraison reste obligatoire, et
+/// **aucune arrivée détectée par le GPS ne fait avancer une course**. Le GPS
+/// guide ; le serveur décide.
 class RealTimeTrackingScreen extends StatefulWidget {
-  final Course order;
+  const RealTimeTrackingScreen({required this.order, super.key});
 
-  const RealTimeTrackingScreen({
-    required this.order, super.key,
-  });
+  final Course order;
 
   @override
   State<RealTimeTrackingScreen> createState() => _RealTimeTrackingScreenState();
 }
 
 class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
+  late final NavigationService _navigation;
+  late AppService _appService;
+
   GoogleMapController? _mapController;
-  Set<Marker> _markers = {};
-  Set<Polyline> _polylines = {};
-
-  LatLng? _driverLocation;
-
-  /// Les deux points de la course, lus sur l'affectation — voir [_course].
-  late LatLng _restaurantLocation;
-  late LatLng _customerLocation;
 
   /// La course, telle qu'elle est **maintenant**.
   ///
@@ -49,363 +70,175 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   /// tel : l'émission vers le serveur vit dans `RealtimeTrackingService`, pour
   /// toute la course, et fermer ce flux-ci ne la touchait pas. Le livreur
   /// croyait donc pouvoir couper son suivi d'un geste — il ne coupait que le
-  /// recentrage de sa propre carte. Le bouton dit maintenant ce qu'il fait.
-  bool _cameraSuitLeLivreur = true;
+  /// recentrage de sa propre carte.
+  bool _suitLeLivreur = true;
+
+  /// Une animation de caméra est-elle en cours de notre fait ?
+  ///
+  /// `onCameraMoveStarted` se déclenche aussi bien pour un geste du livreur que
+  /// pour nos propres animations, et rien dans l'API ne les distingue. Ce
+  /// drapeau le fait : sans lui, chaque recentrage automatique se prendrait
+  /// pour un geste et couperait le suivi qu'il vient d'appliquer.
+  bool _cameraPilotee = false;
+
   bool _isUpdatingStatus = false;
-  bool _isLoading = true;
-  bool _isCalculatingRoute = false;
-  String _estimatedTime = 'Calcul en cours...';
-  double _estimatedDistance = 0.0;
-
-  /// Le transport temps réel, seul détenteur du flux de position.
-  ///
-  /// ## Pourquoi cet écran n'ouvre plus le sien
-  ///
-  /// Il ouvrait un **second** `Geolocator.getPositionStream` en parallèle de
-  /// celui du service, uniquement pour bouger un repère sur sa carte. Deux flux
-  /// haute précision sur le même appareil, c'est deux fois la dépense du poste
-  /// le plus lourd d'un téléphone, pour une donnée que le premier avait déjà et
-  /// publie (`currentPosition`, avec notification). Le second n'apportait qu'une
-  /// occasion de diverger : ses réglages n'étaient pas ceux du suivi — filtre à
-  /// 10 m au lieu du réglage partagé, aucune déclaration d'arrière-plan — et il
-  /// s'arrêtait à la fermeture de l'écran alors que le vrai suivi continuait.
-  final RealtimeTrackingService _tracking = RealtimeTrackingService();
-
-  final DirectionsService _directionsService = DirectionsService();
-  
-  // Dernière position pour éviter trop de recalculs
-  LatLng? _lastCalculatedPosition;
-  DateTime? _lastCalculationTime;
+  bool _pret = false;
 
   @override
   void initState() {
     super.initState();
     _course = widget.order;
-    _restaurantLocation =
-        LatLng(_course.latitudeRetrait, _course.longitudeRetrait);
-    _customerLocation =
-        LatLng(_course.latitudeLivraison, _course.longitudeLivraison);
-    _initializeTracking();
+    _navigation = NavigationService()..addListener(_surNavigation);
+
+    _appService = Provider.of<AppService>(context, listen: false);
+    _appService.addListener(_surCourse);
+
+    unawaited(_ouvrir());
   }
 
-  /// Où le livreur doit se rendre **en ce moment** : le restaurant tant qu'il
-  /// n'a pas le repas, le client ensuite.
-  ///
-  /// L'écran visait le client dès l'ouverture, quelle que soit l'étape. Un
-  /// livreur qui venait d'accepter voyait donc un itinéraire vers une adresse
-  /// où il n'avait rien à faire, et une durée estimée qui ne comptait pas le
-  /// passage au restaurant.
-  LatLng get _destination =>
-      _course.repasRecupere ? _customerLocation : _restaurantLocation;
-
-  String get _destinationLibelle =>
-      _course.repasRecupere ? 'Client' : 'Restaurant';
+  Future<void> _ouvrir() async {
+    await _navigation.ouvrir(_course);
+    if (mounted) setState(() => _pret = true);
+  }
 
   @override
   void dispose() {
-    _tracking.removeListener(_surNouvellePosition);
+    // Chaque ressource est rendue là où elle a été prise : l'écouteur de
+    // course, celui de la navigation, la navigation elle-même — qui referme la
+    // voix et se désabonne du flux de position — puis la carte.
+    _appService.removeListener(_surCourse);
+    _navigation.removeListener(_surNavigation);
+    unawaited(_navigation.fermer().then((_) => _navigation.dispose()));
+    _mapController?.dispose();
     super.dispose();
   }
 
-  /// Prend la position que le service tient déjà, et suit ses mises à jour.
-  ///
-  /// L'écran relevait lui-même un premier point puis ouvrait son propre flux.
-  /// Les deux gestes doublaient ce que `RealtimeTrackingService` fait pour la
-  /// course entière, avec deux conséquences : la dépense d'un second capteur
-  /// haute précision, et une carte qui pouvait afficher une position pendant
-  /// que le vrai suivi était en panne — le livreur se croyait suivi.
-  Future<void> _initializeTracking() async {
+  void _surNavigation() {
     if (!mounted) return;
-
-    _tracking.addListener(_surNouvellePosition);
-
-    final connue = _tracking.currentPosition;
-    if (connue != null) {
-      _driverLocation = LatLng(connue.latitude, connue.longitude);
-    }
-
-    // Les deux points de la course sont déjà connus (voir `initState`) : ils
-    // viennent de l'affectation, que le serveur rend avec `pickup_location` et
-    // `delivery_location`, tous deux obligatoires.
-    //
-    // Cet écran géocodait à la place la **chaîne** d'adresse de livraison, et
-    // retombait, quand le géocodage échouait, sur `LatLng(5.3599, -4.0083)` —
-    // Abidjan, sous un commentaire annonçant Lomé. Le restaurant, lui, était un
-    // point écrit en dur, le même pour tous les établissements. Un livreur
-    // pouvait donc être guidé vers un autre pays sans qu'aucune erreur ne
-    // s'affiche.
-    _updateMarkers();
-    if (_driverLocation != null) await _calculateRoute();
-
-    if (mounted) setState(() => _isLoading = false);
-  }
-
-  /// Une position vient d'arriver — ou le suivi vient de s'interrompre.
-  ///
-  /// Le service notifie aussi quand il **cesse** de suivre : la position
-  /// redevient nulle, et le repère doit alors rester là où il était plutôt que
-  /// de disparaître. C'est la dernière position connue, et le bandeau au-dessus
-  /// de la carte dit qu'elle ne bouge plus.
-  void _surNouvellePosition() {
-    if (!mounted) return;
-
-    final position = _tracking.currentPosition;
-    if (position == null) {
-      // Rafraîchit le bandeau d'obstacle sans toucher au repère.
-      setState(() {});
-      return;
-    }
-
-    _driverLocation = LatLng(position.latitude, position.longitude);
-    _updateMarkers();
-
-    if (_cameraSuitLeLivreur) {
-      unawaited(
-        _mapController
-                ?.animateCamera(CameraUpdate.newLatLng(_driverLocation!))
-                .catchError((Object e) => Journal.trace('Camera: $e')) ??
-            Future<void>.value(),
-      );
-    }
-
-    unawaited(_calculateRoute());
     setState(() {});
+    unawaited(_majCamera());
   }
 
-  Future<void> _calculateRoute() async {
-    if (_driverLocation == null || !mounted) {
+  /// La course a bougé — de notre fait, ou par le canal de suivi.
+  void _surCourse() {
+    if (!mounted) return;
+    final rafraichie = _appService.courseForOrder(_course.orderId);
+    if (rafraichie == null) return;
+    if (rafraichie.assignment.status == _course.assignment.status) return;
+
+    setState(() => _course = rafraichie);
+    // C'est ici que la navigation passe du restaurant au client : elle **suit**
+    // l'étape que le livreur a déclarée et que le serveur a enregistrée. Elle
+    // ne la provoque jamais.
+    unawaited(_navigation.majCourse(rafraichie));
+  }
+
+  // ------------------------------------------------------------------ caméra
+
+  Future<void> _majCamera() async {
+    final carte = _mapController;
+    if (carte == null) return;
+
+    if (!_navigation.enNavigation) {
+      // En aperçu, la caméra cadre l'itinéraire entier — c'est ce que le
+      // livreur consulte.
       return;
     }
+    if (!_suitLeLivreur) return;
 
-    // Éviter trop de recalculs (throttling)
-    if (_lastCalculatedPosition != null && _lastCalculationTime != null) {
-      final distanceSinceLastCalc = _calculateDistance(
-        _driverLocation!.latitude,
-        _driverLocation!.longitude,
-        _lastCalculatedPosition!.latitude,
-        _lastCalculatedPosition!.longitude,
-      );
-      
-      final timeSinceLastCalc = DateTime.now().difference(_lastCalculationTime!);
-      
-      // Ne recalculer que si déplacé de plus de 100m ou après 30 secondes
-      if (distanceSinceLastCalc < 0.1 && timeSinceLastCalc.inSeconds < 30) {
-        return;
-      }
-    }
+    final position = _navigation.positionLivreur;
+    if (position == null) return;
 
-    if (_isCalculatingRoute) return;
-
-    setState(() => _isCalculatingRoute = true);
-
-    try {
-      // Utiliser Google Directions API pour obtenir la vraie route
-      final routeInfo = await _directionsService.getRoute(
-        origin: _driverLocation!,
-        destination: _destination,
-      );
-
-      if (routeInfo != null && mounted) {
-        // Mettre à jour les informations
-        setState(() {
-          _estimatedDistance = routeInfo.distanceKm;
-          _estimatedTime = routeInfo.formattedDuration;
-          _lastCalculatedPosition = _driverLocation;
-          _lastCalculationTime = DateTime.now();
-        });
-
-        // Mettre à jour le polyline avec la vraie route
-        // Le socle rend le tracé en `GeoPoint`, sans dépendance à la
-        // cartographie ; la carte le veut en `LatLng`.
-        await _updateRoutePolyline(routeInfo.polylinePoints.enLatLng);
-      } else {
-        // Fallback: utiliser le calcul Haversine si l'API échoue
-        _calculateRouteFallback();
-      }
-    } catch (e) {
-      Journal.trace('❌ Erreur calcul route avec Directions API: $e');
-      
-      // Fallback: utiliser le calcul Haversine
-      _calculateRouteFallback();
-    } finally {
-      if (mounted) {
-        setState(() => _isCalculatingRoute = false);
-      }
-    }
-  }
-
-  /// Calcul de route en fallback (Haversine) si l'API échoue
-  void _calculateRouteFallback() {
-    try {
-      double distance = 0.0;
-      if (_driverLocation != null) {
-        distance = _calculateDistance(
-          _driverLocation!.latitude,
-          _driverLocation!.longitude,
-          _destination.latitude,
-          _destination.longitude,
-        );
-      }
-
-      // Estimation basée sur la distance (vitesse moyenne: 30 km/h en ville)
-      // Ajouter 5 minutes pour le ramassage
-      const averageSpeedKmh = 30.0;
-      const minutesPerKm = 60.0 / averageSpeedKmh;
-      final estimatedMinutes = (distance * minutesPerKm).round() + 5;
-      final duration = Duration(minutes: estimatedMinutes.clamp(5, 60));
-
-      if (mounted) {
-        setState(() {
-          _estimatedDistance = distance;
-          _estimatedTime = _formatDuration(duration);
-          _lastCalculatedPosition = _driverLocation;
-          _lastCalculationTime = DateTime.now();
-        });
-      }
-
-      // Créer un polyline simple (ligne droite)
-      _updateRoutePolyline([_driverLocation!, _destination]);
-    } catch (e) {
-      Journal.trace('❌ Erreur calcul route fallback: $e');
-    }
-  }
-
-  /// Met à jour le polyline de la route sur la carte
-  Future<void> _updateRoutePolyline(List<LatLng> points) async {
-    if (!mounted || points.isEmpty) return;
-
-    setState(() {
-      _polylines = {
-        Polyline(
-          polylineId: const PolylineId('route'),
-          points: points,
-          color: Colors.blue,
-          width: 5,
-          patterns: [PatternItem.dash(20), PatternItem.gap(10)],
+    await _animer(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: position,
+          zoom: 17.5,
+          // La carte tourne dans le sens de marche : c'est ce qui permet de
+          // lire « à droite » sur l'écran comme à droite sur la route. Sans
+          // cap fiable — à l'arrêt — on garde le nord plutôt que de faire
+          // pivoter la carte au hasard.
+          bearing: _navigation.capLivreur ?? 0,
+          tilt: 45,
         ),
-      };
-    });
-
-    // Ajuster la caméra pour afficher toute la route
-    if (_mapController != null && points.length > 1) {
-      try {
-        final bounds = _calculateBounds(points);
-        await _mapController!.animateCamera(
-          CameraUpdate.newLatLngBounds(bounds, 100),
-        );
-      } catch (e) {
-        Journal.trace('Erreur ajustement caméra: $e');
-      }
-    }
-  }
-
-  /// Calcule les limites (bounds) d'une liste de points
-  LatLngBounds _calculateBounds(List<LatLng> points) {
-    double minLat = points[0].latitude;
-    double maxLat = points[0].latitude;
-    double minLng = points[0].longitude;
-    double maxLng = points[0].longitude;
-
-    for (final point in points) {
-      minLat = math.min(minLat, point.latitude);
-      maxLat = math.max(maxLat, point.latitude);
-      minLng = math.min(minLng, point.longitude);
-      maxLng = math.max(maxLng, point.longitude);
-    }
-
-    return LatLngBounds(
-      southwest: LatLng(minLat, minLng),
-      northeast: LatLng(maxLat, maxLng),
+      ),
     );
   }
 
-  void _updateMarkers() {
-    if (!mounted) return;
+  /// Cadre l'itinéraire entier — l'aperçu.
+  Future<void> _cadrerLItineraire() async {
+    final carte = _mapController;
+    final trace = _navigation.trace;
+    if (carte == null || trace.length < 2) return;
 
-    setState(() {
-      _markers = {
-        if (_driverLocation != null)
-          Marker(
-            markerId: const MarkerId('driver'),
-            position: _driverLocation!,
-            icon:
-                BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-            infoWindow: const InfoWindow(
-              title: 'Votre position',
-              snippet: 'Livreur',
-            ),
-          ),
-        Marker(
-          markerId: const MarkerId('customer'),
-          position: _customerLocation,
-          icon:
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-          infoWindow: InfoWindow(
-            title:
-                _course.destinataire.isEmpty ? 'Client' : _course.destinataire,
-            snippet: _course.adresseLivraison,
-          ),
-        ),
-        Marker(
-          markerId: const MarkerId('restaurant'),
-          position: _restaurantLocation,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-          infoWindow: InfoWindow(
-            title: _course.assignment.restaurantName,
-            snippet: 'Point de retrait',
-          ),
-        ),
-      };
-    });
+    var sudOuest = trace.first;
+    var nordEst = trace.first;
+    for (final point in trace) {
+      sudOuest = LatLng(
+        point.latitude < sudOuest.latitude ? point.latitude : sudOuest.latitude,
+        point.longitude < sudOuest.longitude
+            ? point.longitude
+            : sudOuest.longitude,
+      );
+      nordEst = LatLng(
+        point.latitude > nordEst.latitude ? point.latitude : nordEst.latitude,
+        point.longitude > nordEst.longitude
+            ? point.longitude
+            : nordEst.longitude,
+      );
+    }
+
+    await _animer(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(southwest: sudOuest, northeast: nordEst),
+        80,
+      ),
+    );
   }
 
-  /// Calculate distance between two GPS coordinates using Haversine formula
-  /// Returns distance in kilometers
-  double _calculateDistance(
-    double lat1,
-    double lon1,
-    double lat2,
-    double lon2,
-  ) {
-    const double earthRadius = 6371.0; // Earth radius in kilometers
+  Future<void> _animer(CameraUpdate maj) async {
+    final carte = _mapController;
+    if (carte == null) return;
 
-    final double dLat = _degreesToRadians(lat2 - lat1);
-    final double dLon = _degreesToRadians(lon2 - lon1);
-
-    final double a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(_degreesToRadians(lat1)) *
-            math.cos(_degreesToRadians(lat2)) *
-            math.sin(dLon / 2) *
-            math.sin(dLon / 2);
-
-    final double c = 2 * math.asin(math.sqrt(a));
-    final double distance = earthRadius * c;
-
-    return distance;
+    _cameraPilotee = true;
+    try {
+      await carte.animateCamera(maj);
+    } catch (e) {
+      Journal.trace('Caméra : $e');
+    }
+    // Le délai laisse passer les événements de mouvement que notre propre
+    // animation vient d'émettre. Les compter comme des gestes du livreur
+    // couperait le suivi à chaque relevé de position.
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    _cameraPilotee = false;
   }
 
-  double _degreesToRadians(double degrees) {
-    return degrees * (3.141592653589793 / 180.0);
+  /// La carte a bougé : de notre fait, ou de la main du livreur ?
+  void _surMouvementDeCamera() {
+    if (_cameraPilotee || !_suitLeLivreur) return;
+    // Un geste manuel libère la caméra, et rien ne la ramène de force : le
+    // livreur regarde peut-être la suite de son trajet. Le bouton « recentrer »
+    // apparaît alors, et c'est lui qui rend la main.
+    setState(() => _suitLeLivreur = false);
   }
 
-  String _formatDuration(Duration duration) {
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes % 60;
-
-    if (hours > 0) {
-      return '${hours}h ${minutes}min';
+  Future<void> _recentrer() async {
+    setState(() => _suitLeLivreur = true);
+    if (_navigation.enNavigation) {
+      await _majCamera();
     } else {
-      return '${minutes}min';
+      await _cadrerLItineraire();
     }
   }
+
+  // ------------------------------------------------------------- métier
 
   /// Fait franchir une étape à la course, puis relit ce que le serveur a
   /// réellement enregistré.
   ///
   /// L'écran fermait auparavant dès l'appel parti, quelle que soit l'étape :
   /// le livreur en déduisait que c'était fait, alors que la réponse pouvait
-  /// encore refuser. Il ne se ferme plus que sur une course terminée, et
-  /// l'affichage — étape, destination, boutons — suit la course rendue.
+  /// encore refuser. Il ne se ferme que sur une course terminée.
   Future<void> _updateOrderStatus(EtapeCourse etape) async {
     if (_isUpdatingStatus) return;
 
@@ -414,12 +247,13 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
 
     setState(() => _isUpdatingStatus = true);
     try {
-      final appService = Provider.of<AppService>(context, listen: false);
-      await appService.updateOrderStatus(_course.orderId, etape);
+      await _appService.updateOrderStatus(_course.orderId, etape);
 
       // La course rendue par le serveur porte la nouvelle étape **et** les
-      // transitions désormais permises : c'est elle qui décide de la suite.
-      final rafraichie = appService.courseForOrder(_course.orderId);
+      // transitions désormais permises : c'est elle qui décide de la suite. Le
+      // basculement de la navigation vers le client passe par `_surCourse`,
+      // que `AppService` déclenche en notifiant.
+      final rafraichie = _appService.courseForOrder(_course.orderId);
 
       if (!mounted) return;
       setState(() {
@@ -439,26 +273,12 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       // Le suivi GPS, lui, s'arrête tout seul : `AppService` referme la porte
       // dès qu'aucune course n'est active (`suivreLaCourse`). Le faire aussi
       // ici laisserait croire que c'est cet écran qui en décide.
-      if (_course.prochaineEtape == null) {
-        Navigator.pop(context);
-      } else {
-        // La destination vient peut-être de changer (restaurant -> client) :
-        // sans cette remise à zéro, l'étranglement anti-recalcul garderait le
-        // tracé vers le restaurant pendant trente secondes après que le
-        // livreur a déclaré avoir récupéré la commande.
-        _lastCalculatedPosition = null;
-        _lastCalculationTime = null;
-        _updateMarkers();
-        await _calculateRoute();
-      }
+      if (_course.prochaineEtape == null && mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         setState(() => _isUpdatingStatus = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(messageErreur(e)),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text(messageErreur(e)), backgroundColor: Colors.red),
         );
       }
     }
@@ -468,8 +288,9 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   ///
   /// L'étape est **irréversible** : la machine à états du serveur est
   /// acyclique, une course livrée ne se rouvre pas, et c'est elle qui crédite
-  /// la rémunération et incrémente les compteurs. Un appui malheureux sur un
-  /// téléphone posé sur un guidon ne doit pas la déclencher.
+  /// la rémunération. Un appui malheureux sur un téléphone posé sur un guidon
+  /// ne doit pas la déclencher — et l'arrivée détectée par le GPS ne la
+  /// déclenche pas non plus : elle allume un bouton, elle ne l'appuie pas.
   ///
   /// Il n'y a **pas** de preuve de livraison à demander ici : le contrat
   /// n'expose ni code, ni photo, ni signature — `Assignment.proof_of_delivery`
@@ -477,9 +298,8 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   /// accessible. En fabriquer une côté application donnerait une garantie que
   /// rien ne vérifie.
   Future<bool> _confirmerLivraison() async {
-    final montant = _course.moyenPaiement.aEncaisser
-        ? _course.total?.format()
-        : null;
+    final montant =
+        _course.moyenPaiement.aEncaisser ? _course.total?.format() : null;
 
     final confirme = await showDialog<bool>(
       context: context,
@@ -507,221 +327,464 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
     return confirme ?? false;
   }
 
-  /// Voyant d'état du suivi, et ce qui le bloque le cas échéant.
-  ///
-  /// L'obstacle vient du service : c'est lui qui a essayé d'ouvrir le flux et
-  /// qui sait pourquoi il n'y est pas arrivé. L'afficher ici est le seul moyen
-  /// pour le livreur d'apprendre qu'il n'est pas suivi autrement que par le
-  /// reproche d'un client.
-  Widget _voyantDeSuivi() {
-    final obstacle = _tracking.trackingUnavailableReason;
-    final actif = _tracking.isTrackingLocation && obstacle == null;
-    final couleur = actif
-        ? Colors.green
-        : (obstacle == null ? Colors.grey : Colors.orange);
+  // -------------------------------------------------------------- rendu
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+  @override
+  Widget build(BuildContext context) {
+    if (!_pret) {
+      return const Scaffold(
+        body: LoadingWidget(message: 'Préparation de la navigation...'),
+      );
+    }
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          _carte(),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(child: _hautDeLEcran()),
+          ),
+          Positioned(
+            right: 12,
+            bottom: MediaQuery.of(context).size.height * 0.34 + 12,
+            child: _boutonsFlottants(),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _basDeLEcran(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _carte() {
+    final destination = _navigation.destination;
+    final livreur = _navigation.positionLivreur;
+
+    return GoogleMap(
+      initialCameraPosition: CameraPosition(
+        // Jamais un point écrit en dur : à défaut de position du livreur, la
+        // carte s'ouvre sur là où il doit aller.
+        target: livreur ?? destination ?? const LatLng(0, 0),
+        zoom: 15,
+      ),
+      onMapCreated: (controller) {
+        _mapController = controller;
+        unawaited(_cadrerLItineraire());
+      },
+      onCameraMoveStarted: _surMouvementDeCamera,
+      markers: _reperes(),
+      polylines: _traces(),
+      // Le point bleu du système reste **éteint** — c'est le défaut, et on ne
+      // l'allume pas — au profit de notre repère. Deux raisons : il ignore le
+      // trajet simulé du mode debug (il afficherait la position réelle du
+      // développeur pendant qu'on rejoue un trajet à Lomé), et il ne tourne pas
+      // dans le sens de marche.
+      myLocationButtonEnabled: false,
+      zoomControlsEnabled: false,
+      padding: EdgeInsets.only(
+        top: 140,
+        bottom: MediaQuery.of(context).size.height * 0.34,
+      ),
+    );
+  }
+
+  Set<Marker> _reperes() {
+    final livreur = _navigation.positionLivreur;
+    final restaurant = _navigation.pointRestaurant;
+    final client = _navigation.pointClient;
+
+    return {
+      if (livreur != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: livreur,
+          // Le repère tourne dans le sens de marche, et il est **plat** :
+          // posé sur la carte, il tourne avec elle. Un repère dressé
+          // resterait vertical pendant que la carte pivote, et pointerait
+          // alors n'importe où.
+          rotation: _navigation.capLivreur ?? 0,
+          flat: true,
+          anchor: const Offset(0.5, 0.5),
+          zIndexInt: 2,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          infoWindow: const InfoWindow(title: 'Votre position'),
+        ),
+      if (restaurant != null)
+        Marker(
+          markerId: const MarkerId('restaurant'),
+          position: restaurant,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          infoWindow: InfoWindow(
+            title: _course.assignment.restaurantName,
+            snippet: 'Point de retrait',
+          ),
+        ),
+      if (client != null)
+        Marker(
+          markerId: const MarkerId('customer'),
+          position: client,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+          infoWindow: InfoWindow(
+            title: _course.destinataire.isEmpty ? 'Client' : _course.destinataire,
+            snippet: _course.adresseLivraison,
+          ),
+        ),
+    };
+  }
+
+  Set<Polyline> _traces() {
+    final trace = _navigation.trace;
+    if (trace.length < 2) return const {};
+
+    final approximatif = _navigation.traceApproximatif;
+    return {
+      Polyline(
+        polylineId: const PolylineId('route'),
+        points: trace,
+        // Le repli en ligne droite se **voit** : pointillés et couleur
+        // atténuée. Il était auparavant dessiné comme un itinéraire, ce qui
+        // invitait le livreur à suivre un trait qui traverse les murs.
+        color: approximatif
+            ? Colors.blueGrey.withValues(alpha: 0.7)
+            : Theme.of(context).colorScheme.primary,
+        width: approximatif ? 4 : 7,
+        patterns: approximatif
+            ? [PatternItem.dash(20), PatternItem.gap(12)]
+            : const [],
+      ),
+    };
+  }
+
+  Widget _hautDeLEcran() {
+    final instruction = _navigation.instruction;
+    final enNavigation = _navigation.enNavigation;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              _rondBouton(
+                Icons.arrow_back,
+                'Retour',
+                () => Navigator.pop(context),
+              ),
+              const Spacer(),
+              _rondBouton(
+                Icons.more_vert,
+                'Plus',
+                _menu,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (enNavigation && instruction != null)
+            BandeauInstruction(
+              instruction: instruction,
+              manoeuvre: _navigation.manoeuvre,
+              distanceMetres: _navigation.distanceAvantManoeuvreMetres,
+              instructionSuivante: _navigation.instructionSuivante,
+            )
+          else
+            _enteteApercu(),
+          if (kDebugMode) ...[
+            const SizedBox(height: 8),
+            PanneauSimulation(navigation: _navigation),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _enteteApercu() {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(12),
+      elevation: 3,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
           children: [
-            Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
+            Icon(
+              _navigation.etapeNavigation == EtapeNavigation.restaurant
+                  ? Icons.storefront
+                  : Icons.home_outlined,
+              color: theme.colorScheme.primary,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                actif ? 'Suivi actif' : 'Suivi interrompu',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: couleur,
-                ),
-                overflow: TextOverflow.ellipsis,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Course ${_course.reference}',
+                    style: theme.textTheme.labelSmall,
+                  ),
+                  Text(
+                    'Vers ${_navigation.destinationLibelle}',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ),
             ),
           ],
         ),
-        if (obstacle != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            obstacle,
-            style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+      ),
+    );
+  }
+
+  Widget _boutonsFlottants() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!_suitLeLivreur)
+          _rondBouton(Icons.my_location, 'Recentrer', _recentrer),
+        if (!_suitLeLivreur) const SizedBox(height: 8),
+        if (_navigation.enNavigation) ...[
+          _rondBouton(
+            _navigation.voix.actif ? Icons.volume_up : Icons.volume_off,
+            _navigation.voix.actif ? 'Couper la voix' : 'Rétablir la voix',
+            () => _navigation.voix.definirActif(actif: !_navigation.voix.actif),
           ),
+          const SizedBox(height: 8),
+          _rondBouton(
+            Icons.replay,
+            'Répéter l’instruction',
+            _navigation.repeterLInstruction,
+          ),
+          const SizedBox(height: 8),
         ],
+        _rondBouton(
+          Icons.refresh,
+          'Recalculer l’itinéraire',
+          _navigation.calculEnCours ? null : _navigation.recalculer,
+        ),
       ],
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Suivi — ${_course.reference}'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          IconButton(
-            onPressed: () => setState(
-              () => _cameraSuitLeLivreur = !_cameraSuitLeLivreur,
-            ),
-            icon: Icon(
-              _cameraSuitLeLivreur
-                  ? Icons.my_location
-                  : Icons.location_searching,
-            ),
-            tooltip: _cameraSuitLeLivreur
-                ? 'La carte suit votre position'
-                : 'Recentrer sur votre position',
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) {
-              switch (value) {
-                case 'profile':
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const DriverProfileScreen(),
-                    ),
-                  );
-                  break;
-                case 'settings':
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const SettingsScreen(),
-                    ),
-                  );
-                  break;
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'profile',
-                child: Row(
-                  children: [
-                    Icon(Icons.person, size: 20),
-                    SizedBox(width: 8),
-                    Text('Mon profil'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'settings',
-                child: Row(
-                  children: [
-                    Icon(Icons.settings, size: 20),
-                    SizedBox(width: 8),
-                    Text('Paramètres'),
-                  ],
-                ),
-              ),
+  Widget _rondBouton(IconData icone, String infobulle, VoidCallback? action) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      shape: const CircleBorder(),
+      elevation: 3,
+      child: IconButton(
+        onPressed: action,
+        icon: Icon(icone),
+        tooltip: infobulle,
+        color: Theme.of(context).colorScheme.onSurface,
+      ),
+    );
+  }
+
+  Widget _basDeLEcran() {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: theme.scaffoldBackgroundColor,
+      elevation: 12,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _bandeauEtat(),
+              const SizedBox(height: 10),
+              _mesures(),
+              const SizedBox(height: 12),
+              _boutonDeMode(),
+              const SizedBox(height: 8),
+              _buildActionSuivante(),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Ce que le livreur doit savoir de l'état du guidage, en une ligne.
+  ///
+  /// Trois choses s'y disputent la place, et l'ordre est celui de l'urgence :
+  /// une arrivée détectée, un obstacle au suivi, puis l'état ordinaire. Le
+  /// voyant de suivi vient du service qui l'assure — c'est le seul moyen pour
+  /// le livreur d'apprendre qu'il n'est pas suivi autrement que par le reproche
+  /// d'un client.
+  Widget _bandeauEtat() {
+    final theme = Theme.of(context);
+    final etat = _navigation.etat;
+    final obstacle = _navigation.obstacle;
+
+    final (IconData icone, Color couleur, String texte) = switch (etat) {
+      EtatNavigation.arriveAuRestaurant => (
+          Icons.storefront,
+          Colors.green,
+          'Vous êtes arrivé au restaurant.',
+        ),
+      EtatNavigation.arriveChezLeClient => (
+          Icons.flag,
+          Colors.green,
+          'Vous êtes arrivé chez le client.',
+        ),
+      EtatNavigation.horsItineraire => (
+          Icons.alt_route,
+          Colors.orange,
+          'Vous avez quitté l’itinéraire. Recalcul en cours…',
+        ),
+      EtatNavigation.positionIndisponible => (
+          Icons.gps_off,
+          Colors.orange,
+          obstacle ?? 'Position indisponible.',
+        ),
+      EtatNavigation.erreur => (
+          Icons.error_outline,
+          Colors.red,
+          obstacle ?? 'Itinéraire indisponible.',
+        ),
+      EtatNavigation.preparation => (
+          Icons.hourglass_empty,
+          Colors.blueGrey,
+          'Calcul de l’itinéraire…',
+        ),
+      EtatNavigation.terminee => (
+          Icons.check_circle,
+          Colors.green,
+          'Course terminée.',
+        ),
+      _ => _navigation.positionSuivie
+          ? (Icons.gps_fixed, Colors.green, 'Suivi actif')
+          : (Icons.gps_not_fixed, Colors.grey, 'Suivi interrompu'),
+    };
+
+    return Row(
+      children: [
+        Icon(icone, size: 18, color: couleur),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            texte,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: couleur, fontWeight: FontWeight.w600),
+            maxLines: 2,
+          ),
+        ),
+        if (_navigation.traceApproximatif)
+          Tooltip(
+            message: 'Tracé approximatif : itinéraire routier indisponible.',
+            child: Icon(
+              Icons.warning_amber,
+              size: 18,
+              color: Colors.orange.shade700,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _mesures() {
+    final distance = _navigation.distanceRestanteMetres;
+    final duree = _navigation.dureeRestante;
+    final arrivee = _navigation.heureArriveeEstimee;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _mesure(
+            Icons.schedule,
+            'Arrivée',
+            arrivee == null ? '—' : DateFormat.Hm().format(arrivee),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _mesure(
+            Icons.timer_outlined,
+            'Restant',
+            duree == null ? '—' : _dureeLisible(duree),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _mesure(
+            Icons.straighten,
+            'Distance',
+            distance == null ? '—' : distanceLisible(distance),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static String _dureeLisible(Duration duree) {
+    if (duree.inMinutes < 60) return '${duree.inMinutes} min';
+    return '${duree.inHours} h ${duree.inMinutes % 60} min';
+  }
+
+  Widget _mesure(IconData icone, String titre, String valeur) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          Icon(icone, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(height: 2),
+          Text(
+            valeur,
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
+            maxLines: 1,
+          ),
+          Text(titre, style: theme.textTheme.labelSmall),
         ],
       ),
-      body: _isLoading
-          ? const LoadingWidget(message: 'Initialisation du suivi...')
-          : Column(
-              children: [
-                // Map
-                Expanded(
-                  flex: 3,
-                  child: GoogleMap(
-                    initialCameraPosition: CameraPosition(
-                      // Jamais un point écrit en dur : à défaut de position
-                      // du livreur, la carte s'ouvre sur là où il doit aller.
-                      target: _driverLocation ?? _destination,
-                      zoom: 15,
-                    ),
-                    onMapCreated: (GoogleMapController controller) {
-                      _mapController = controller;
-                      _updateMarkers();
-                    },
-                    markers: _markers,
-                    polylines: _polylines,
-                    myLocationEnabled: true,
-                  ),
-                ),
-
-                // Status and controls
-                Expanded(
-                  flex: 2,
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).scaffoldBackgroundColor,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.1),
-                          blurRadius: 8,
-                          offset: const Offset(0, -2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // État **réel** du suivi, lu sur le service qui
-                        // l'assure. Ce voyant reflétait jusqu'ici l'ouverture
-                        // du flux de cet écran : il passait au vert dès que la
-                        // carte s'affichait, y compris quand le suivi
-                        // n'émettait rien vers le serveur — GPS coupé,
-                        // permission refusée. Le livreur lisait « suivi actif »
-                        // pendant que le client voyait un point immobile.
-                        _voyantDeSuivi(),
-                        const SizedBox(height: 16),
-
-                        // ETA and distance
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildInfoCard(
-                                'Temps estimé',
-                                _isCalculatingRoute ? 'Calcul...' : _estimatedTime,
-                                Icons.access_time,
-                                Colors.blue,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildInfoCard(
-                                'Distance',
-                                _isCalculatingRoute 
-                                    ? 'Calcul...' 
-                                    : '${_estimatedDistance.toStringAsFixed(1)} km',
-                                Icons.straighten,
-                                Colors.orange,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Order status
-                        Text(
-                          'Étape : ${_course.etape.libelle}',
-                          style:
-                              Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                        ),
-                        Text(
-                          'Direction : $_destinationLibelle',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        const SizedBox(height: 16),
-
-                        _buildActionSuivante(),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
     );
+  }
+
+  Widget _boutonDeMode() {
+    final enNavigation = _navigation.enNavigation;
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: enNavigation
+            ? _navigation.arreterLaNavigation
+            : _demarrerLaNavigation,
+        icon: Icon(enNavigation ? Icons.stop_circle_outlined : Icons.navigation),
+        label: Text(
+          enNavigation
+              // Le libellé dit ce que le bouton fait : il arrête le **guidage**,
+              // pas le suivi de la course, qui appartient au serveur et au
+              // client.
+              ? 'Arrêter le guidage vocal'
+              : 'Démarrer la navigation',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _demarrerLaNavigation() async {
+    setState(() => _suitLeLivreur = true);
+    await _navigation.demarrerLaNavigation();
+    await _majCamera();
   }
 
   /// L'unique bouton d'avancement, décidé par le serveur.
@@ -734,7 +797,8 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   ///
   /// `allowed_transitions` dit ce que le serveur accepte depuis l'état
   /// courant. Un seul bouton en découle, et il disparaît quand il n'y a plus
-  /// rien à franchir.
+  /// rien à franchir. **L'arrivée détectée par le GPS ne le remplace pas** :
+  /// elle le met en avant, elle ne l'appuie pas.
   Widget _buildActionSuivante() {
     final suivante = _course.prochaineEtape;
 
@@ -762,6 +826,9 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
     }
 
     final estLivraison = suivante == EtapeCourse.livree;
+    // L'arrivée détectée met le geste en avant — c'est le moment où le livreur
+    // en a besoin — sans rien décider à sa place.
+    final misEnAvant = _navigation.etat.estUneArrivee;
 
     return SizedBox(
       width: double.infinity,
@@ -784,14 +851,14 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
               ? Colors.green
               : Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          padding: EdgeInsets.symmetric(vertical: misEnAvant ? 18 : 14),
+          elevation: misEnAvant ? 6 : 2,
         ),
       ),
     );
   }
 
-  /// Le geste, pas l'état : le bouton dit ce que le livreur fait, l'étiquette
-  /// d'étape au-dessus dit où il en est.
+  /// Le geste, pas l'état : le bouton dit ce que le livreur fait.
   String _libelleAction(EtapeCourse etape) => switch (etape) {
         EtapeCourse.recuperee => 'J\'ai récupéré la commande',
         EtapeCourse.enRoute => 'Je pars chez le client',
@@ -806,35 +873,60 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
         _ => Icons.arrow_forward,
       };
 
-  Widget _buildInfoCard(
-      String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: color,
-              fontSize: 16,
+  void _menu() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (feuille) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.translate),
+              title: const Text('Langue du guidage'),
+              subtitle: Text(
+                _navigation.langue == LangueNavigation.francais
+                    ? 'Français'
+                    : 'English',
+              ),
+              onTap: () {
+                Navigator.pop(feuille);
+                unawaited(
+                  _navigation.definirLangue(
+                    _navigation.langue == LangueNavigation.francais
+                        ? LangueNavigation.anglais
+                        : LangueNavigation.francais,
+                  ),
+                );
+              },
             ),
-          ),
-          Text(
-            title,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
+            ListTile(
+              leading: const Icon(Icons.person),
+              title: const Text('Mon profil'),
+              onTap: () {
+                Navigator.pop(feuille);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (context) => const DriverProfileScreen(),
+                  ),
+                );
+              },
             ),
-          ),
-        ],
+            ListTile(
+              leading: const Icon(Icons.settings),
+              title: const Text('Paramètres'),
+              onTap: () {
+                Navigator.pop(feuille);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (context) => const SettingsScreen(),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

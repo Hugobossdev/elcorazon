@@ -11,6 +11,7 @@ import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/places_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal, LocationAvailability;
 
 /// Résultat de la sélection de position
@@ -51,14 +52,24 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
 
-  /// Établissement — les coordonnées de `AppConstants`, seule position de
-  /// restaurant du projet. Cet écran en portait une seconde, écrite en dur, et
-  /// qui pointait sur Abidjan : les cercles de couverture qu'il dessinait
-  /// étaient centrés à 600 km du restaurant.
-  static const LatLng _restaurantLocation = LatLng(
-    AppConstants.restaurantLatitude,
-    AppConstants.restaurantLongitude,
-  );
+  /// Position de l'établissement courant, **lue sur le serveur**.
+  ///
+  /// Cet écran en portait une écrite en dur, qui pointait sur Abidjan : les
+  /// cercles de couverture qu'il dessinait étaient centrés à 600 km du
+  /// restaurant. Elle a ensuite été ramenée sur la constante de
+  /// `AppConstants` — juste pour un établissement, fausse pour le deuxième.
+  ///
+  /// Nulle tant que l'annuaire n'a pas répondu : la carte s'ouvre alors sur la
+  /// position du client, et le repère du restaurant n'est simplement pas
+  /// dessiné. Un point de repli inventé serait pire — il désignerait un lieu
+  /// où il n'y a pas de restaurant.
+  LatLng? get _restaurantLocation {
+    final contexte = RestaurantContextService();
+    final latitude = contexte.latitude;
+    final longitude = contexte.longitude;
+    if (latitude == null || longitude == null) return null;
+    return LatLng(latitude, longitude);
+  }
 
   /// Point visé par la caméra.
   ///
@@ -94,14 +105,10 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
   @override
   void initState() {
     super.initState();
-    _target = widget.initialLocation ?? _restaurantLocation;
-    _markers.add(
-      const Marker(
-        markerId: MarkerId('restaurant'),
-        position: _restaurantLocation,
-        infoWindow: InfoWindow(title: 'El Corazon'),
-      ),
-    );
+    // `initialLocation` d'abord — c'est l'adresse qu'on vient corriger. À
+    // défaut, l'établissement, que `_initialize` posera dès que l'annuaire
+    // aura répondu ; à défaut encore, la position du client.
+    _target = widget.initialLocation ?? _restaurantLocation ?? const LatLng(0, 0);
     _initialize();
   }
 
@@ -125,6 +132,13 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
   // repère lui-même qui porte la réponse, à chaque déplacement de la carte.
 
   Future<void> _initialize() async {
+    // L'annuaire d'abord : la position de l'établissement en dépend, et sans
+    // elle la carte s'ouvrirait au large du golfe de Guinée — le point nul,
+    // qui est ce qu'on obtient faute de mieux à la construction de l'état.
+    await RestaurantContextService().resolve();
+    if (!mounted) return;
+    _poserLeRepereDuRestaurant();
+
     // La permission est demandée d'emblée, mais son refus n'empêche rien : on
     // ouvre alors sur le restaurant, et le client déplace la carte lui-même.
     _hasLocationPermission = await _locationService.requestLocationPermission();
@@ -135,6 +149,32 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     } else {
       await _resolve(_target);
     }
+  }
+
+  /// Place le repère de l'établissement, et recentre si rien ne l'avait fait.
+  ///
+  /// Le recentrage ne s'applique qu'au point nul : il ne doit pas déplacer une
+  /// carte déjà posée sur l'adresse qu'on corrige, ni sur la position du
+  /// client.
+  void _poserLeRepereDuRestaurant() {
+    final etablissement = _restaurantLocation;
+    if (etablissement == null) return;
+
+    _markers.add(
+      Marker(
+        markerId: const MarkerId('restaurant'),
+        position: etablissement,
+        infoWindow: InfoWindow(
+          title: RestaurantContextService().name ?? 'Restaurant',
+        ),
+      ),
+    );
+
+    if (widget.initialLocation == null && _target.latitude == 0 && _target.longitude == 0) {
+      _target = etablissement;
+      _mapController?.animateCamera(CameraUpdate.newLatLng(etablissement));
+    }
+    setState(() {});
   }
 
   // ---------------------------------------------------------------- caméra
@@ -288,7 +328,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
       final results = await _placesService.autocomplete(
         query,
         language: 'fr',
-        countryCode: AppConstants.countryCode,
+        countryCode: RestaurantContextService().countryCode,
         // Biaisé autour de l'établissement : sans cela, « rue du marché »
         // proposait des résultats de l'autre bout du pays avant ceux d'ici.
         locationBias: _restaurantLocation,

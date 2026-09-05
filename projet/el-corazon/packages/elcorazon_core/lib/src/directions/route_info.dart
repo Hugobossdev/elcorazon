@@ -1,4 +1,5 @@
 import 'package:elcorazon_core/src/directions/geo_point.dart';
+import 'package:elcorazon_core/src/directions/route_step.dart';
 
 /// Durée et distance d'un trajet, telles qu'un écran les montre.
 ///
@@ -43,6 +44,7 @@ class RouteInfo with TrajetMesure {
     required this.encodedPolyline,
     required this.timestamp,
     this.durationInTrafficMinutes,
+    this.steps = const [],
   });
 
   @override
@@ -63,6 +65,28 @@ class RouteInfo with TrajetMesure {
 
   /// Moment du calcul — c'est lui qui date l'entrée en cache.
   final DateTime timestamp;
+
+  /// Les manœuvres, dans l'ordre — c'est de là que sortent les instructions
+  /// de navigation.
+  ///
+  /// Vide quand l'itinéraire a été demandé sans elles, ou quand il vient d'un
+  /// repli. Un appelant qui affiche une carte n'en a pas besoin ; celui qui
+  /// guide un livreur ne peut rien sans. La liste vide n'est donc pas une
+  /// erreur, et le moteur de navigation la traite comme telle : il continue
+  /// d'annoncer la distance et l'arrivée, sans les virages.
+  final List<RouteStep> steps;
+
+  /// L'itinéraire porte-t-il de quoi guider ?
+  bool get guidagePossible => steps.isNotEmpty;
+
+  /// Durée totale des étapes, en secondes.
+  ///
+  /// Préférée à [durationMinutes] pour tout ce qui se recalcule en cours de
+  /// route : la minute arrondie fait sauter une estimation de trente secondes
+  /// d'un coup.
+  int get durationSeconds => steps.isEmpty
+      ? durationMinutes * 60
+      : steps.fold(0, (total, etape) => total + etape.durationSeconds);
 }
 
 /// Mesures seules, sans tracé — réponse de l'API Distance Matrix.

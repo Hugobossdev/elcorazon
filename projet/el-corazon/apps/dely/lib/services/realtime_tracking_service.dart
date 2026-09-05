@@ -8,6 +8,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
+import 'package:elcora_dely/utils/position_simulee_geolocator.dart';
 import 'package:elcora_dely/config/adresses.dart';
 
 /// Transport temps réel du livreur (Phase 6) — remplace intégralement
@@ -440,8 +441,11 @@ class RealtimeTrackingService extends ChangeNotifier
     }
     _trackingUnavailableReason = null;
 
-    _positionSubscription =
-        Geolocator.getPositionStream(locationSettings: _locationSettings).listen(
+    // Flux du capteur, **ou** celui du simulateur en mode debug — voir
+    // `fluxDePositions`. Le service ne sait pas lequel il écoute, et c'est ce
+    // qui fait qu'un trajet rejoué exerce exactement le même chemin de code
+    // qu'une course réelle, émission au serveur comprise.
+    _positionSubscription = fluxDePositions(_locationSettings).listen(
       (position) {
         _currentPosition = position;
         notifyListeners();
@@ -469,6 +473,22 @@ class RealtimeTrackingService extends ChangeNotifier
     });
 
     notifyListeners();
+  }
+
+  /// Rouvre le flux de position — **mode debug uniquement**.
+  ///
+  /// `fluxDePositions` choisit sa source **à l'abonnement** : allumer la
+  /// simulation alors que le flux du capteur est déjà ouvert ne change rien,
+  /// et le laisser croire le contraire ferait chercher longtemps pourquoi le
+  /// trajet rejoué ne bouge pas. Le panneau de simulation appelle donc ceci
+  /// après avoir posé — ou retiré — un trajet.
+  ///
+  /// Sans effet hors debug, et sans effet hors course : le flux reste adossé à
+  /// la course, et rien ici ne rouvre une porte que `suivreLaCourse` a fermée.
+  Future<void> relancerLeFluxDePosition() async {
+    if (!kDebugMode) return;
+    if (!_suiviAttendu) return;
+    await _startPositionEmission();
   }
 
   /// Traduction du cran de précision partagé vers l'énumération du greffon.
@@ -546,6 +566,13 @@ class RealtimeTrackingService extends ChangeNotifier
   /// différents : rallumer le GPS, répondre à la demande, ou passer par les
   /// réglages du système — un refus définitif ne se redemande pas.
   Future<String?> _locationObstacle() async {
+    // Trajet rejoué — **mode debug uniquement**. Le flux ne vient pas du
+    // capteur : exiger sa permission empêcherait de vérifier une navigation
+    // depuis un poste sans GPS, ce qui est précisément l'usage de la
+    // simulation. `simulationDePositionActive` est constant à faux hors
+    // `kDebugMode`, et le compilateur retire cette branche du binaire.
+    if (simulationDePositionActive) return null;
+
     if (!await Geolocator.isLocationServiceEnabled()) {
       return 'La localisation est désactivée sur cet appareil.';
     }
