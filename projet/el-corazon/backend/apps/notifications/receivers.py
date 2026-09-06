@@ -17,7 +17,7 @@ from apps.delivery.signals import assignment_accepted, assignment_offered
 from apps.notifications.models import NotificationKind
 from apps.notifications.services import notify, staff_to_alert
 from apps.orders.models import Order
-from apps.orders.signals import order_status_changed
+from apps.orders.signals import order_created, order_status_changed
 from apps.orders.states import OrderStatus
 from apps.payments.models import Transaction
 from apps.payments.signals import payment_transaction_failed
@@ -25,6 +25,7 @@ from apps.payments.signals import payment_transaction_failed
 __all__ = [
     "on_assignment_accepted",
     "on_assignment_offered",
+    "on_order_created_for_staff",
     "on_order_status_changed",
     "on_order_status_changed_for_staff",
     "on_payment_failed",
@@ -83,9 +84,41 @@ def on_order_status_changed(
 #: back-office n'a besoin d'apprendre qu'une commande a été livrée normalement —
 #: c'est le cas nominal, et le notifier noierait les deux qui comptent.
 STAFF_ANNOUNCEMENTS: dict[str, tuple[str, str]] = {
-    OrderStatus.CONFIRMED: ("Nouvelle commande", "Commande {reference} à préparer."),
+    # « Nouvelle commande » a changé de place : c'est l'**arrivée** qui porte ce
+    # titre désormais (`on_order_created_for_staff`), et non la confirmation.
+    # Les deux moments sont distincts et le personnel doit pouvoir les
+    # distinguer — surtout quand ils sont séparés par son propre geste, ce qui
+    # est le cas d'un règlement en espèces.
+    OrderStatus.CONFIRMED: ("Commande confirmée", "La commande {reference} est à préparer."),
     OrderStatus.CANCELLED: ("Commande annulée", "La commande {reference} a été annulée."),
 }
+
+
+@receiver(order_created, sender=Order, dispatch_uid="notifications.order_created_staff")
+def on_order_created_for_staff(sender: type[Order], *, order: Order, **kwargs: Any) -> None:
+    """Prévient l'établissement qu'une commande vient d'arriver.
+
+    C'est le premier maillon, et il manquait. `STAFF_ANNOUNCEMENTS` est indexé
+    sur des **transitions** ; or une commande naît en `pending` et la seule voie
+    automatique vers `confirmed` est l'encaissement par webhook. Le règlement en
+    espèces à la livraison — aujourd'hui le seul moyen actif dans l'application
+    cliente — n'en émet aucun. Une commande passée un vendredi soir n'était donc
+    annoncée à personne : elle attendait qu'un membre du personnel rafraîchisse
+    la liste et remarque la ligne.
+
+    Le client, lui, n'est pas notifié ici : il vient de valider sa commande et a
+    l'écran de confirmation sous les yeux. Lui envoyer une notification pour le
+    geste qu'il achève à l'instant est le genre d'envoi qui fait couper les
+    notifications — et perdre du même coup celles qui comptent.
+    """
+    for membre in staff_to_alert(restaurant_id=order.restaurant_id, permission=ORDERS_READ):
+        notify(
+            user=membre,
+            kind=NotificationKind.ORDER_STATUS,
+            title="Nouvelle commande",
+            body=f"Commande {order.reference} reçue.",
+            data={"order": str(order.pk), "status": order.status},
+        )
 
 
 @receiver(order_status_changed, sender=Order, dispatch_uid="notifications.order_status_staff")

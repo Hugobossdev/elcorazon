@@ -31,7 +31,7 @@ from apps.catalog.services import StockService, record_purchase
 from apps.geography.models import DeliveryZone
 from apps.geography.services import DeliveryQuote, quote_delivery
 from apps.orders.models import Order, OrderLine, OrderStatusEvent
-from apps.orders.signals import order_status_changed
+from apps.orders.signals import order_created, order_status_changed
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from apps.profiles.models import Address
 from apps.promotions.services import PromotionService
@@ -264,6 +264,31 @@ class OrderService:
             PromotionService.redeem(
                 promotion=promotion, user=user, order_id=order.pk, discount=discount
             )
+
+        # La commande **entre**, et l'exploitation doit l'apprendre maintenant.
+        #
+        # Diffusé après le commit, pour la même raison que dans
+        # `transition_to` : annoncer une commande sur une transaction qui échoue
+        # ensuite ferait apparaître au tableau de bord une ligne qui n'existe
+        # pas, et rien ne viendrait la retirer.
+        def _diffuser() -> None:
+            publish(
+                restaurant_group(order.restaurant_id),
+                "order.created",
+                {
+                    "order": str(order.pk),
+                    "reference": order.reference,
+                    "status": order.status,
+                    "total": order.total.amount_minor,
+                    "currency": order.total.currency,
+                },
+            )
+
+        transaction.on_commit(_diffuser)
+
+        # Le signal, lui, part **dans** la transaction : son abonné écrit une
+        # notification en base, qui doit vivre ou mourir avec la commande.
+        order_created.send(sender=Order, order=order)
 
         return order
 

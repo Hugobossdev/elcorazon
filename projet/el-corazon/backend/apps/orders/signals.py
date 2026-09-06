@@ -19,7 +19,25 @@ from __future__ import annotations
 
 import django.dispatch
 
-__all__ = ["order_status_changed"]
+__all__ = ["order_created", "order_status_changed"]
+
+#: Arguments : `order`.
+#:
+#: Une commande **vient d'être créée**, et c'est un événement distinct de tout
+#: changement de statut : à la création il n'y a pas de statut précédent, et
+#: aucune transition n'a eu lieu.
+#:
+#: Ce signal manquait, et son absence ouvrait un trou au tout premier maillon de
+#: la chaîne. La seule voie automatique vers `confirmed` est l'encaissement
+#: (`PaymentService`, webhook du prestataire) — or le règlement **en espèces à
+#: la livraison** est aujourd'hui le seul moyen de paiement actif dans
+#: l'application cliente. Aucun webhook ne part donc jamais, et une commande
+#: passée par un client restait en `pending` sans que rien ne l'annonce : ni
+#: notification au personnel — `STAFF_ANNOUNCEMENTS` est indexé sur des
+#: transitions — ni événement sur le tableau de bord temps réel, qui ne diffuse
+#: que `order.status`. Le repas n'était donc préparé que si quelqu'un
+#: rafraîchissait la liste des commandes et remarquait la ligne.
+order_created = django.dispatch.Signal()
 
 #: Arguments : `order`, `previous`, `target`, `reason`.
 order_status_changed = django.dispatch.Signal()

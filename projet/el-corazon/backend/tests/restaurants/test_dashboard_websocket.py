@@ -13,6 +13,7 @@ from channels.testing import WebsocketCommunicator
 
 from apps.accounts.models import Role, User, UserType
 from apps.accounts.services import AuthService
+from apps.carts.services import CartService
 from apps.orders.models import Order
 from apps.orders.services import OrderService
 from apps.orders.states import OrderStatus
@@ -165,6 +166,47 @@ class TestDiffusionDesCommandes:
         assert recu["type"] == "order.status"
         assert recu["order"] == str(order.pk)
         assert recu["status"] == OrderStatus.CONFIRMED
+
+        await dashboard.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_une_commande_qui_arrive_atteint_le_tableau_de_bord(
+        self, customer: User, restaurant: Restaurant, menu_item: object, address: object
+    ) -> None:
+        """L'**arrivee** d'une commande, et pas seulement ses transitions.
+
+        Le tableau de bord ne diffusait que `order.status`. Or une commande
+        naît en `pending` sans transition, et la seule voie automatique vers
+        `confirmed` est l'encaissement par webhook — que le règlement en
+        espèces, seul moyen actif côté client, n'émet jamais. L'écran du
+        personnel restait donc muet exactement au moment où il devait parler.
+        """
+        user = await staff_for(restaurant)
+        dashboard = await connect(
+            f"/ws/restaurants/{restaurant.pk}/dashboard/",
+            token=await database_sync_to_async(token_for)(user),
+        )
+        await dashboard.connect()
+
+        @database_sync_to_async
+        def commander() -> Order:
+            panier = CartService.cart_for(customer, restaurant)
+            CartService.add_line(cart=panier, menu_item=menu_item, quantity=1, options=[])
+            return OrderService.create_from_cart(
+                user=customer,
+                cart=CartService.cart_for(customer, restaurant),
+                address=address,
+                payment_method="cash",
+            )
+
+        commande = await commander()
+
+        recu = await dashboard.receive_json_from(timeout=5)
+
+        assert recu["type"] == "order.created"
+        assert recu["order"] == str(commande.pk)
+        assert recu["reference"] == commande.reference
+        assert recu["status"] == OrderStatus.PENDING
 
         await dashboard.disconnect()
 
