@@ -24,7 +24,7 @@ from django.db.models.functions import TruncDate
 from apps.accounts.models import User, UserType
 from apps.catalog.models import MenuItem
 from apps.delivery.models import Assignment, CourierProfile
-from apps.delivery.states import DeliveryStatus
+from apps.delivery.states import DeliveryStatus, VerificationStatus
 from apps.loyalty.models import PointsAccount
 from apps.orders.models import Order, OrderLine
 from apps.orders.states import OrderStatus
@@ -306,7 +306,20 @@ class ReportingService:
             customers_count=User.objects.filter(
                 user_type=UserType.CUSTOMER, is_active=True
             ).count(),
-            couriers_online=CourierProfile.objects.filter(is_online=True).count(),
+            # Les trois termes de L1, et pas le seul `is_online`. Le tableau de
+            # bord intitule ce nombre « Livreurs actifs » : ce que le
+            # superviseur y lit, c'est combien de livreurs peuvent prendre une
+            # course à cet instant. `is_online` seul est une **déclaration** du
+            # livreur — un dossier en attente peut la faire, un dossier suspendu
+            # la conserve — et comptait donc des livreurs à qui le serveur
+            # refuse toute course. Le chiffre annonçait une capacité de
+            # livraison qui n'existait pas, ce qui se voit au pire moment :
+            # celui où on décide d'accepter un afflux de commandes.
+            couriers_online=CourierProfile.objects.filter(
+                is_online=True,
+                verification_status=VerificationStatus.APPROVED,
+                user__is_active=True,
+            ).count(),
             menu_items_available=catalogue["disponibles"],
             menu_items_total=catalogue["total"],
         )
