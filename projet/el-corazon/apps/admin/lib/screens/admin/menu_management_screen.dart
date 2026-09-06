@@ -8,6 +8,7 @@ import 'package:admin/widgets/modern/modern_button.dart';
 import 'package:admin/widgets/modern/modern_card.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/screens/admin/menu_item_form_dialog.dart';
 import 'package:admin/screens/admin/category_management_screen.dart';
@@ -31,7 +32,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(_onTabChanged);
     _searchController.addListener(_onSearchChanged);
 
@@ -50,16 +51,19 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() {
-        switch (_tabController.index) {
-          case 0:
-            _currentFilter = MenuFilter.all;
-            break;
-          case 1:
-            _currentFilter = MenuFilter.available;
-            break;
-          case 2:
-            _currentFilter = MenuFilter.unavailable;
-            break;
+        final precedent = _currentFilter;
+        _currentFilter = switch (_tabController.index) {
+          0 => MenuFilter.all,
+          1 => MenuFilter.available,
+          2 => MenuFilter.unavailable,
+          _ => MenuFilter.archived,
+        };
+        // Franchir la frontière entre la carte et l'archive change la
+        // **requête**, pas seulement le tri : sans ce rechargement, l'onglet
+        // « Retirés » filtrerait la carte du jour et s'afficherait toujours
+        // vide, ce qui se lirait comme « aucun article retiré ».
+        if (precedent.litLArchive != _currentFilter.litLArchive) {
+          _menuItemsFuture = null;
         }
       });
     });
@@ -253,6 +257,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                             Tab(text: 'Tous'),
                             Tab(text: 'Disponibles'),
                             Tab(text: 'Indisponibles'),
+                            Tab(text: 'Retirés'),
                           ],
                         ),
                       ),
@@ -292,7 +297,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                           }
 
                           if (snapshot.hasError) {
-                            return _buildErrorState(snapshot.error.toString());
+                            return _buildErrorState(snapshot.error!);
                           }
 
                           final allItems = snapshot.data ?? [];
@@ -343,7 +348,11 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
     CategoryManagementService categoryService,
   ) async {
     // Récupérer les items (filtrés par catégorie ou tous)
-    final items = await menuService.getMenuItems(_selectedCategoryId, notify: false);
+    final items = await menuService.getMenuItems(
+      _selectedCategoryId,
+      notify: false,
+      archived: _currentFilter.litLArchive,
+    );
 
     // Trier par nom
     items.sort((a, b) => a.name.compareTo(b.name));
@@ -362,6 +371,11 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
         break;
       case MenuFilter.unavailable:
         filtered = filtered.where((item) => !item.isAvailable).toList();
+        break;
+      case MenuFilter.archived:
+        // Rien à retrancher : le serveur n'a rendu que des articles retirés,
+        // et « disponible » n'a plus de sens pour eux — un article hors carte
+        // ne se commande pas, quelle que soit la valeur du champ.
         break;
     }
 
@@ -557,24 +571,37 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                               case 'delete':
                                 _deleteMenuItem(context, item, menuService);
                                 break;
+                              case 'restore':
+                                _restoreMenuItem(context, item, menuService);
+                                break;
                             }
                           },
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(
-                              value: 'edit',
-                              child: Text('Modifier'),
-                            ),
-                            PopupMenuItem(
-                              value: 'toggle',
-                              child: Text(
-                                  item.isAvailable ? 'Masquer' : 'Afficher',),
-                            ),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Text('Supprimer',
-                                  style: TextStyle(color: scheme.error),),
-                            ),
-                          ],
+                          // Un article retiré ne se modifie ni ne se masque :
+                          // il n'est plus à la carte. La seule chose à lui
+                          // faire est de l'y remettre.
+                          itemBuilder: (context) => _currentFilter.litLArchive
+                              ? [
+                                  const PopupMenuItem(
+                                    value: 'restore',
+                                    child: Text('Remettre au menu'),
+                                  ),
+                                ]
+                              : [
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Modifier'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'toggle',
+                                    child: Text(
+                                        item.isAvailable ? 'Masquer' : 'Afficher',),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Retirer de la carte',
+                                        style: TextStyle(color: scheme.error),),
+                                  ),
+                                ],
                         ),
                       ],
                     ),
@@ -590,34 +617,43 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
 
   Widget _buildEmptyState() {
     final scheme = Theme.of(context).colorScheme;
+    // Une archive vide n'est pas un catalogue vide : rien n'a été retiré, et
+    // proposer « Ajouter un produit » depuis cet onglet créerait un article
+    // qui n'y apparaîtrait pas.
+    final archive = _currentFilter.litLArchive;
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.restaurant_menu,
+            archive ? Icons.inventory_2_outlined : Icons.restaurant_menu,
             size: 64,
             color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
           ),
           const SizedBox(height: 16),
           Text(
-            'Aucun produit trouvé',
+            archive ? 'Aucun article retiré' : 'Aucun produit trouvé',
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
           ),
-          const SizedBox(height: 24),
-          ModernButton(
-            label: 'Ajouter un produit',
-            icon: Icons.add,
-            onPressed: () => _showMenuItemForm(context, null),
-          ),
+          if (!archive) ...[
+            const SizedBox(height: 24),
+            ModernButton(
+              label: 'Ajouter un produit',
+              icon: Icons.add,
+              onPressed: () => _showMenuItemForm(context, null),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildErrorState(String error) {
+  /// Prend l'erreur, pas sa conversion en texte : `toString()` sur une
+  /// `ApiException` rend « ApiException(403, permission_denied, …) », quand la
+  /// même exception porte une phrase écrite pour être lue.
+  Widget _buildErrorState(Object error) {
     final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Column(
@@ -625,7 +661,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
         children: [
           Icon(Icons.error_outline, size: 64, color: scheme.error),
           const SizedBox(height: 16),
-          Text('Erreur: $error'),
+          Text(messageErreur(error), textAlign: TextAlign.center),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _refreshMenu,
@@ -674,11 +710,21 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
     eccore.ManagedMenuItem item,
     MenuService menuService,
   ) async {
+    // Le libellé dit ce qui se passe vraiment. Le serveur **archive** — les
+    // commandes passées renvoient à l'article, et un effacement réel rendrait
+    // leur historique illisible. Promettre une suppression était donc faux
+    // dans les deux sens : celui qui voulait faire disparaître l'article
+    // croyait l'avoir fait, et celui qui se trompait de ligne croyait la perte
+    // définitive alors que l'onglet « Retirés » la rend en un geste.
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Supprimer ?'),
-        content: Text('Voulez-vous vraiment supprimer "${item.name}" ?'),
+        title: const Text('Retirer de la carte ?'),
+        content: Text(
+          '"${item.name}" ne sera plus commandable. Il reste lisible depuis '
+          'les commandes passées, et l\'onglet « Retirés » permet de le '
+          'remettre au menu.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -687,7 +733,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Supprimer'),
+            child: const Text('Retirer'),
           ),
         ],
       ),
@@ -697,6 +743,26 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
       await menuService.deleteMenuItem(item.id);
       unawaited(_refreshMenu());
     }
+  }
+
+  Future<void> _restoreMenuItem(
+    BuildContext context,
+    eccore.ManagedMenuItem item,
+    MenuService menuService,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final remis = await menuService.restoreMenuItem(item.id);
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          remis
+              ? '"${item.name}" est de retour au menu.'
+              : menuService.error ?? 'La remise au menu a échoué.',
+        ),
+      ),
+    );
+    if (remis) unawaited(_refreshMenu());
   }
 
   Future<void> _refreshMenu() async {
@@ -709,4 +775,15 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
   }
 }
 
-enum MenuFilter { all, available, unavailable }
+/// Ce que l'onglet demande à voir.
+///
+/// [archived] n'est pas un filtre comme les trois autres : les trois premiers
+/// trient une liste déjà chargée, celui-ci change la liste. Le serveur ne mêle
+/// jamais la carte du jour et les articles retirés — le défaut est la carte, et
+/// l'archive se demande (`?archived=true`).
+enum MenuFilter { all, available, unavailable, archived }
+
+extension MenuFilterQuery on MenuFilter {
+  /// L'onglet demande-t-il l'archive plutôt que la carte ?
+  bool get litLArchive => this == MenuFilter.archived;
+}

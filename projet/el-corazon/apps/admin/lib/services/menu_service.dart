@@ -103,9 +103,11 @@ class MenuService extends ChangeNotifier {
     }
   }
 
+  /// Articles de la carte, ou ses [archived] — jamais les deux mêlés.
   Future<List<eccore.ManagedMenuItem>> getMenuItems(
     String? categoryId, {
     bool notify = true,
+    bool archived = false,
   }) async {
     if (notify) {
       _isLoading = true;
@@ -114,7 +116,10 @@ class MenuService extends ChangeNotifier {
     }
 
     try {
-      final remote = await _catalog.menuItems(categoryId: categoryId);
+      final remote = await _catalog.menuItems(
+        categoryId: categoryId,
+        archived: archived,
+      );
       return remote;
     } on eccore.ApiException catch (e) {
       _error = e.detail;
@@ -225,6 +230,19 @@ class MenuService extends ChangeNotifier {
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('MenuService: suppression refusée — ${e.code}');
+      return false;
+    }
+  }
+
+  /// Remet au menu un article retiré.
+  Future<bool> restoreMenuItem(String id) async {
+    try {
+      await _catalog.restoreMenuItem(id);
+      notifyListeners();
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      eccore.Journal.trace('MenuService: restauration refusée — ${e.code}');
       return false;
     }
   }
@@ -347,9 +365,13 @@ class MenuService extends ChangeNotifier {
 
 
 
-  /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
-  eccore.Money _versMoney(double montant) =>
-      eccore.Money(amountMinor: montant.round(), currency: 'XOF');
+  /// Montant saisi dans un formulaire, converti pour l'API.
+  ///
+  /// La devise et l'exposant viennent de l'établissement supervisé, plus de
+  /// `'XOF'` écrit ici : le serveur refuse un prix dont la devise n'est pas la
+  /// sienne, et le back-office ne pouvait donc rien écrire pour un restaurant
+  /// hors zone franc CFA.
+  eccore.Money _versMoney(double montant) => _scope.versMoney(montant);
 
   static String _slugifier(String valeur) {
     final base = valeur
