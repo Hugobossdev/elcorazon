@@ -1,6 +1,6 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Dernière révision** : 4 septembre 2026
+**Dernière révision** : 6 septembre 2026
 
 > ⚠️ **Inventaire fonctionnel daté.** Le corps de ce document a été écrit en
 > décembre 2024, quand les trois applications parlaient directement à Supabase.
@@ -11,6 +11,92 @@
 >
 > La référence à jour est **[docs/architecture/04-migration-flutter.md](docs/architecture/04-migration-flutter.md)**,
 > qui trace domaine par domaine ce qui a été migré, construit ou supprimé.
+
+## 📣 La commande qui n'arrivait à personne (6 septembre 2026)
+
+**Une commande passée n'était annoncée à personne.** C'est le premier maillon
+de la chaîne, et il était rompu.
+
+Le personnel n'était prévenu que sur des **transitions** de statut, et la seule
+voie automatique vers « confirmée » est l'encaissement par webhook du
+prestataire. Or le règlement **en espèces à la livraison** est aujourd'hui le
+seul moyen de paiement actif dans l'application cliente — mobile money, carte
+de crédit et carte de débit y sont explicitement désactivés. Aucun webhook ne
+partait donc jamais : toute commande réellement passée naissait « en attente »
+sans notification au personnel, et sans événement sur le tableau de bord temps
+réel, qui ne diffusait que `order.status`. Le repas n'était préparé que si
+quelqu'un rafraîchissait la liste et remarquait la ligne.
+
+Un signal `order_created` a été ajouté, avec ses deux abonnés : la notification
+au personnel de l'établissement, et un événement `order.created` sur le canal du
+tableau de bord. Le back-office porte désormais un bandeau distinct — « une
+nouvelle commande est arrivée » — séparé de celui des changements de statut :
+les deux n'appellent pas le même geste. « Nouvelle commande » a changé de place
+au passage ; c'est l'arrivée qui porte ce titre, la confirmation disant
+maintenant « commande confirmée ».
+
+## 🗂️ Ce que l'audit du 5 septembre a trouvé, et corrigé
+
+**Deux tests du backend encodaient des règles opposées** sur la mise en ligne
+d'un livreur : l'un exigeait un refus (409) sur un dossier non validé, l'autre
+une acceptation (200). L'un ne passait que parce que l'autre échouait.
+L'arbitrage retenu est la **déclaration** : `is_online` dit que le livreur
+roule, ce que lui seul sait, et l'éligibilité reste `can_accept_orders`, relue
+à chaque proposition de course et au tri des livreurs disponibles. Refuser
+faisait **perdre** la disponibilité déclarée — un dossier validé laissait le
+livreur hors ligne à son insu. Le tableau de bord comptait par ailleurs comme
+« livreurs actifs » tous ceux qui s'étaient déclarés en ligne, dossier validé ou
+non : il annonçait une capacité de livraison qui n'existait pas.
+
+**Un oracle d'énumération de comptes** subsistait sur les routes d'envoi de
+code. Le délai de réessai était tronqué (59 s) pour une adresse connue et rendu
+en constante (60 s) pour une inconnue : une seconde d'écart suffisait à
+distinguer les deux, c'est-à-dire à faire de ces routes l'annuaire d'abonnés que
+tout le reste du module s'applique à ne pas être.
+
+**Le service worker de push web de `Dely` visait un projet Firebase
+inexistant** (`fastfoodgo-deliver`, clé factice), reste d'un gabarit resté en
+place quand l'application cliente a été remise d'aplomb. Les jetons partaient
+vers un projet inconnu, l'appareil web n'était jamais enregistré, et **aucune
+offre de course n'arrivait** sur la version navigateur. Deux défauts du même
+gabarit sont corrigés au passage : une version du SDK désaccordée de celle que
+FlutterFire injecte dans la page, et un `showNotification` sans condition qui
+aurait affiché deux bandeaux par offre. L'en-tête de `firebase_options.dart` de
+`Dely`, qui annonçait encore des « valeurs de remplissage », disait le contraire
+de la réalité.
+
+**Le back-office ne pouvait rien écrire hors zone franc CFA.** Quatre services
+composaient leurs montants avec `XOF` en dur, alors que le serveur refuse un
+prix dont la devise n'est pas celle de l'établissement. L'écran « Réseau »
+permet pourtant d'ouvrir un marché dans un autre pays. La conversion passait de
+surcroît par un `round()`, juste pour une devise sans décimale seulement : en
+cédi, un prix de 12,50 serait parti à treize centièmes. Devise et exposant
+viennent désormais de l'établissement supervisé.
+
+**Les articles retirés du catalogue étaient irrécupérables depuis le
+back-office.** Le serveur archive au lieu d'effacer — les commandes passées
+renvoient à l'article — et expose une action de restauration qu'aucun écran
+n'appelait. La boîte de dialogue promettait par-dessus le marché une
+« suppression », fausse dans les deux sens. Un onglet « Retirés » et une action
+« Remettre au menu » ferment le cycle.
+
+**Le consentement au marketing ne pouvait pas être retiré.** Le serveur le
+respecte depuis l'origine — une campagne n'atteint pas un client qui l'a coupé —
+mais aucune application ne l'affichait. Un écran « Préférences » a été ajouté au
+profil client. Il n'expose que ce que le serveur applique : les notifications de
+commande n'y figurent pas, elles ne se coupent pas.
+
+**Dix-sept endroits mettaient une exception brute sous les yeux d'un
+utilisateur** (« Erreur : DioException [connection error] »), alors que le
+serveur écrit une phrase faite pour être lue. La règle de `Dely` est remontée
+dans le socle partagé, et les trois applications s'y adossent.
+
+**Deux simulations ont été retirées des parcours de production** : un service de
+reconnaissance vocale qui tirait la phrase « entendue » dans une liste de cinq
+écrite en dur, sans micro, sans dépendance et sans écran ; et une « localisation
+en temps réel » du back-office qui posait les livreurs à des positions
+inventées, sur un planisphère chargé depuis Wikimedia. La vraie carte existait
+déjà à un clic de là.
 
 ## 🏗️ Ce qui a changé depuis cet inventaire
 
