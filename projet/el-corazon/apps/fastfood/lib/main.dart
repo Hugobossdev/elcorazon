@@ -16,7 +16,6 @@ import 'package:elcora_fast/services/notification_service.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/services/group_cart_service.dart';
-import 'package:elcora_fast/services/voice_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
@@ -292,7 +291,6 @@ class ClientApp extends StatelessWidget {
         ),
         ChangeNotifierProvider(create: (_) => GroupCartService(), lazy: true),
         ChangeNotifierProvider(create: (_) => SocialService(), lazy: true),
-        ChangeNotifierProvider(create: (_) => VoiceService(), lazy: true),
         ChangeNotifierProvider(
           create: (_) => CustomizationService(),
           lazy: true,

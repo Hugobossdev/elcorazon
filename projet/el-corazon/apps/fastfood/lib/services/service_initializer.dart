@@ -5,7 +5,6 @@ import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/notification_service.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/services/group_cart_service.dart';
-import 'package:elcora_fast/services/voice_service.dart';
 import 'package:elcora_fast/services/customization_service.dart';
 import 'package:elcora_fast/services/realtime_tracking_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
@@ -42,7 +41,6 @@ class ServiceInitializer {
       final cartService = Provider.of<CartService>(context, listen: false);
       final gamificationService =
           Provider.of<GamificationService>(context, listen: false);
-      final voiceService = Provider.of<VoiceService>(context, listen: false);
       final customizationService =
           Provider.of<CustomizationService>(context, listen: false);
       final groupCartService = Provider.of<GroupCartService>(context, listen: false);
@@ -64,7 +62,6 @@ class ServiceInitializer {
 
       // Services avancés
       await _initializeAdvancedServices(
-        voiceService: voiceService,
         customizationService: customizationService,
       );
 
@@ -116,15 +113,11 @@ class ServiceInitializer {
 
   /// Initialise les services avancés
   Future<void> _initializeAdvancedServices({
-    required VoiceService voiceService,
     required CustomizationService customizationService,
   }) async {
     Journal.trace('🔧 Initialisation des services avancés...');
 
     // Services de fonctionnalités avancées
-    await _initializeServiceWithoutContext(
-      () => voiceService.initialize(),
-    );
     await _initializeServiceWithoutContext(
       () => customizationService.initialize(),
     );
