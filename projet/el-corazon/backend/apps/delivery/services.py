@@ -201,17 +201,24 @@ class CourierService:
     def set_online(*, courier: CourierProfile, is_online: bool) -> CourierProfile:
         """Bascule de disponibilité, à l'initiative du livreur.
 
-        Se mettre en ligne exige un dossier validé (L1). Le refus est explicite
-        plutôt que silencieux : un livreur qui bascule l'interrupteur et ne
-        reçoit aucune course ne doit pas avoir à deviner que son dossier est en
-        attente.
-        """
-        if is_online and courier.verification_status != VerificationStatus.APPROVED:
-            raise BusinessRuleViolation(
-                "Votre dossier n'est pas validé ; vous ne pouvez pas encore recevoir de courses.",
-                verification_status=courier.verification_status,
-            )
+        `is_online` est une **déclaration** : le livreur seul sait s'il roule.
+        Elle est donc toujours acceptée, y compris sur un dossier en attente.
+        Ce qu'elle ne donne pas, c'est l'éligibilité : celle-ci est
+        `can_accept_orders` (L1), qui exige en plus un dossier validé et un
+        compte ouvert, et qui est relue à chaque proposition de course
+        (`AssignmentService.offer`) comme au tri des livreurs disponibles
+        (`available_for`). Accepter la bascule ne desserre donc aucune garde.
 
+        Ce fut un refus (409), et le refus se retournait contre le livreur : sa
+        disponibilité déclarée était **perdue**, si bien qu'au moment où son
+        dossier était validé il restait hors ligne sans le savoir, et devait
+        rebasculer l'interrupteur pour exister. Accepter la déclaration fait
+        qu'une validation le rend disponible à l'instant où elle est prononcée.
+
+        L'explicite n'est pas sacrifié pour autant : la réponse porte
+        `can_accept_orders: false`, et l'application le dit — « vous êtes en
+        ligne, mais votre dossier n'est pas validé ».
+        """
         courier.is_online = is_online
         courier.save(update_fields=["is_online", "updated_at"])
         return courier

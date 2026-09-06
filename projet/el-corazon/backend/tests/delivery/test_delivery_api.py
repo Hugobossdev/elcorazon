@@ -153,12 +153,25 @@ class TestDossierLivreur:
         assert response.data["is_online"] is False
         assert response.data["can_accept_orders"] is False
 
-    def test_un_dossier_non_valide_ne_peut_pas_se_mettre_en_ligne(
+    def test_un_dossier_non_valide_se_declare_en_ligne_sans_devenir_eligible(
         self, as_courier: APIClient, courier: CourierProfile
     ) -> None:
-        """L1 — et le refus est explicite : un livreur qui bascule
-        l'interrupteur sans rien recevoir ne doit pas avoir à deviner
-        pourquoi."""
+        """L1 — la bascule est acceptée, l'éligibilité ne suit pas.
+
+        Ce test en remplace un qui exigeait un 409, et les deux ne pouvaient pas
+        avoir raison ensemble : `test_courier_application.py` vérifie de son
+        côté qu'un candidat vérifié obtient bien 200 sur cette même route. La
+        suite portait donc deux règles opposées, dont l'une ne passait que
+        parce que l'autre échouait.
+
+        L'arbitrage retenu est celui de la déclaration, pour trois raisons :
+        `is_online` dit que le livreur roule, ce que lui seul sait ; l'invariant
+        L1 est relu à chaque proposition de course et au tri des livreurs
+        disponibles, donc accepter la bascule ne desserre aucune garde (les deux
+        tests suivants le vérifient) ; et refuser **perdait** la disponibilité
+        déclarée, si bien qu'un dossier validé laissait le livreur hors ligne à
+        son insu jusqu'à ce qu'il repense à l'interrupteur.
+        """
         CourierProfile.objects.filter(pk=courier.pk).update(
             verification_status=VerificationStatus.PENDING, is_online=False
         )
@@ -167,8 +180,24 @@ class TestDossierLivreur:
             reverse("v1:delivery:me-online"), {"is_online": True}, format="json"
         )
 
-        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["is_online"] is True
+        # Ce que la déclaration n'achète pas, et que l'application affiche.
+        assert response.data["can_accept_orders"] is False
         assert response.data["verification_status"] == VerificationStatus.PENDING
+
+    def test_se_declarer_en_ligne_ne_fait_pas_entrer_dans_les_livreurs_disponibles(
+        self, courier: CourierProfile, ready_order: Order
+    ) -> None:
+        """La contrepartie de la bascule acceptée : le tri des disponibles
+        exige le dossier validé, pas la déclaration."""
+        from apps.delivery.services import CourierService
+
+        CourierProfile.objects.filter(pk=courier.pk).update(
+            verification_status=VerificationStatus.PENDING, is_online=True
+        )
+
+        assert courier not in CourierService.available_for(ready_order)
 
     def test_le_livreur_n_ecrit_pas_son_propre_statut_de_dossier(
         self, as_courier: APIClient, courier: CourierProfile
