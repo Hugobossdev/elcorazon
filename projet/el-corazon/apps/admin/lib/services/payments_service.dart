@@ -2,6 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
 import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 
 /// Encaissements et remboursements — `/payments/*` (Phase 6).
 ///
@@ -34,6 +35,9 @@ import 'package:admin/services/admin_auth_service.dart';
 ///   client et n'écrivait rien. Un rapprochement comptable se fait là où sont
 ///   les écritures.
 class PaymentsService extends ChangeNotifier {
+  /// D'où vient la devise d'un montant écrit.
+  final RestaurantScopeService _scope = RestaurantScopeService();
+
   eccore.PaymentRepository get _payments =>
       eccore.PaymentRepository(apiClient: AdminAuthService().apiClient);
 
@@ -96,10 +100,11 @@ class PaymentsService extends ChangeNotifier {
       final rembourse = await _payments.refund(
         orderId: orderId,
         transactionId: transactionId,
-        amount: eccore.Money(
-          amountMinor: amountMajor.round(),
-          currency: 'XOF',
-        ),
+        // Devise et exposant de l'établissement, jamais `XOF` écrit ici : un
+        // remboursement se libelle dans la monnaie de l'encaissement, et
+        // `round()` sur une devise à décimales aurait remboursé douze
+        // centièmes là où on rendait douze unités.
+        amount: _scope.versMoney(amountMajor),
         reason: reason,
       );
       // Le statut de la transaction d'origine ne change pas : un encaissement

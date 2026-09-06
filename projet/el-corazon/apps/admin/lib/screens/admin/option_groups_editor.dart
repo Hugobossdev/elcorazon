@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/widgets/custom_button.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 
 class OptionGroupsEditor extends StatefulWidget {
   final String menuItemId;
@@ -379,10 +380,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                   ..add(eccore.Option(
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
                     name: nameController.text.trim(),
-                    priceDelta: eccore.Money(
-                      amountMinor: prix,
-                      currency: 'XOF',
-                    ),
+                    priceDelta: eccore.Money.fromMajorUnits(prix, _devise),
                     isDefault: false,
                     isAvailable: true,
                     sortOrder: group.options.length,
@@ -464,10 +462,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                   final newOptions = List<eccore.Option>.from(group.options);
                   newOptions[optionIndex] = option.copyWith(
                     name: nameController.text.trim(),
-                    priceDelta: eccore.Money(
-                      amountMinor: prix,
-                      currency: 'XOF',
-                    ),
+                    priceDelta: eccore.Money.fromMajorUnits(prix, _devise),
                     isAvailable: isAvailable,
                   );
                   _groups[groupIndex] = group.copyWith(options: newOptions);
@@ -496,12 +491,20 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
   /// gestionnaire d'appui, fermant l'écran sans rien enregistrer et sans dire
   /// pourquoi. Rendre `null` laisse le bouton sans effet, ce qui est le
   /// comportement déjà retenu pour un nom vide.
-  static int? _prixSaisi(String saisie) {
+  /// Le prix saisi, en unité **majeure** — celle du formulaire.
+  ///
+  /// Il rendait auparavant des unités mineures par un `round()`, ce qui n'est
+  /// juste que pour une devise sans décimale. La conversion appartient à
+  /// [eccore.Money.fromMajorUnits], qui connaît l'exposant de la devise ; la
+  /// faire ici la faisait pour le franc CFA et pour lui seul.
+  static double? _prixSaisi(String saisie) {
     final normalise = saisie.trim().replaceAll(',', '.');
     if (normalise.isEmpty) return null;
-    final valeur = double.tryParse(normalise);
-    return valeur?.round();
+    return double.tryParse(normalise);
   }
+
+  /// La devise de l'établissement supervisé, celle dans laquelle il facture.
+  String get _devise => RestaurantScopeService().devise;
 
   /// Une borne de groupe saisie, ou [defaut] si la saisie n'en est pas une.
   static int _borneSaisie(String saisie, {required int defaut}) {

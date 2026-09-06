@@ -81,6 +81,33 @@ class RestaurantScopeService extends ChangeNotifier {
   /// résolu — un appelant qui écrit ne doit pas deviner à sa place.
   String? get slug => current?.slug;
 
+  /// Devise de l'établissement supervisé, celle dans laquelle il **facture**.
+  ///
+  /// Quatre services du back-office composaient leurs montants avec `'XOF'`
+  /// écrit en dur, et un cinquième pour les remboursements. Ce n'était pas
+  /// anodin : le serveur refuse un prix dont la devise n'est pas celle de
+  /// l'établissement (`ManagedMenuItemSerializer.validate` : « Cet
+  /// établissement facture en GHS ; prix reçu en XOF »). Le back-office ne
+  /// pouvait donc pas créer un seul article pour un restaurant hors zone
+  /// franc CFA — alors que l'écran « Réseau » permet précisément d'ouvrir un
+  /// marché dans un autre pays, avec sa propre devise.
+  ///
+  /// Le repli sur `XOF` n'est pas un choix mais un dernier recours, pour le
+  /// court instant où le périmètre n'est pas encore lu : le serveur tranchera
+  /// de toute façon, et il le dira clairement.
+  String get devise => current?.currency ?? 'XOF';
+
+  /// Convertit une saisie en unité **majeure** (ce que le formulaire affiche)
+  /// vers le montant que l'API attend.
+  ///
+  /// Passe par [eccore.Money.fromMajorUnits], qui connaît l'exposant de chaque
+  /// devise. Les services faisaient `montant.round()`, ce qui n'est juste que
+  /// pour une devise sans décimale : en cédi ou en naira, un prix de 12,50
+  /// serait parti à 13 unités mineures — soit treize centièmes — au lieu de
+  /// 1250. Le franc CFA masquait le défaut, n'ayant pas de décimale.
+  eccore.Money versMoney(double montantMajeur) =>
+      eccore.Money.fromMajorUnits(montantMajeur, devise);
+
   /// Le compte supervise-t-il plusieurs établissements ? C'est la condition
   /// d'affichage d'un sélecteur ; en dessous, il n'y a rien à choisir.
   bool get hasChoice => _etablissements.length > 1;

@@ -341,7 +341,11 @@ class CustomizationManagementService extends ChangeNotifier {
   }
 
 
-  /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
-  eccore.Money _versMoney(double montant) =>
-      eccore.Money(amountMinor: montant.round(), currency: 'XOF');
+  /// Montant saisi dans un formulaire, converti pour l'API.
+  ///
+  /// La devise et l'exposant viennent de l'établissement supervisé, plus de
+  /// `'XOF'` écrit ici : le serveur refuse un prix dont la devise n'est pas la
+  /// sienne, et le back-office ne pouvait donc rien écrire pour un restaurant
+  /// hors zone franc CFA.
+  eccore.Money _versMoney(double montant) => _scope.versMoney(montant);
 }

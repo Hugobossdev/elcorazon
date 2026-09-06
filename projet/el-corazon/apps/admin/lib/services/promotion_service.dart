@@ -2,6 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
 import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 
 /// Code promotionnel tel que l'affichent les écrans du back-office.
 ///
@@ -102,6 +103,9 @@ class Promotion {
 /// Il n'y a pas de suppression : `isActive` suspend. Les commandes passées
 /// portent la remise de ce code, et l'effacer rendrait leur addition illisible.
 class PromotionService extends ChangeNotifier {
+  /// D'où viennent le slug et la devise d'une écriture.
+  final RestaurantScopeService _scope = RestaurantScopeService();
+
   eccore.PromotionRepository get _promotions =>
       eccore.PromotionRepository(apiClient: AdminAuthService().apiClient);
 
@@ -263,7 +267,11 @@ class PromotionService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
-  eccore.Money _versMoney(double montant) =>
-      eccore.Money(amountMinor: montant.round(), currency: 'XOF');
+  /// Montant saisi dans un formulaire, converti pour l'API.
+  ///
+  /// La devise et l'exposant viennent de l'établissement supervisé, plus de
+  /// `'XOF'` écrit ici : le serveur refuse un prix dont la devise n'est pas la
+  /// sienne, et le back-office ne pouvait donc rien écrire pour un restaurant
+  /// hors zone franc CFA.
+  eccore.Money _versMoney(double montant) => _scope.versMoney(montant);
 }

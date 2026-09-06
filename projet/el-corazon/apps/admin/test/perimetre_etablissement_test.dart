@@ -20,6 +20,8 @@ void main() {
     double latitude = 6.1319,
     double longitude = 1.2255,
     eccore.RestaurantLifecycle status = eccore.RestaurantLifecycle.active,
+    String currency = 'XOF',
+    String timezone = 'Africa/Lome',
   }) {
     return eccore.ManagedRestaurant(
       id: 'rest-$slug',
@@ -29,8 +31,8 @@ void main() {
       address: 'Boulevard du 13 Janvier',
       latitude: latitude,
       longitude: longitude,
-      currency: 'XOF',
-      timezone: 'Africa/Lome',
+      currency: currency,
+      timezone: timezone,
       status: status,
       // Projection de `status` côté serveur : un établissement en service est
       // publié, et lui seul.
@@ -166,6 +168,54 @@ void main() {
 
     test('requireSlug rend null plutôt qu’un établissement inventé', () async {
       expect(await refus(403).requireSlug(), isNull);
+    });
+  });
+
+  group('La devise d’une écriture', () {
+    test('vient de l’établissement supervisé, pas d’une constante', () async {
+      // Le serveur refuse un prix dont la devise n'est pas celle de
+      // l'établissement (« Cet établissement facture en GHS ; prix reçu en
+      // XOF »). Avec `'XOF'` écrit en dur, le back-office ne pouvait créer
+      // aucun article pour un restaurant hors zone franc CFA.
+      final monte1 = monte(
+        () => [etablissement(slug: 'el-corazon-accra', currency: 'GHS')],
+      );
+
+      await monte1.scope.resolve();
+
+      expect(monte1.scope.devise, 'GHS');
+      expect(monte1.scope.versMoney(12.5).currency, 'GHS');
+    });
+
+    test('l’exposant de la devise est respecté', () async {
+      // Le cédi a deux décimales : 12,50 vaut 1250 unités mineures. Les
+      // services faisaient `montant.round()`, ce qui en aurait fait 13 — soit
+      // treize centièmes de cédi.
+      final monte1 = monte(
+        () => [etablissement(slug: 'el-corazon-accra', currency: 'GHS')],
+      );
+
+      await monte1.scope.resolve();
+
+      expect(monte1.scope.versMoney(12.5).amountMinor, 1250);
+    });
+
+    test('le franc CFA n’a pas de décimale, et c’est ce qui masquait le défaut', () async {
+      final monte1 = monte(() => [etablissement(slug: 'el-corazon-lome')]);
+
+      await monte1.scope.resolve();
+
+      expect(monte1.scope.devise, 'XOF');
+      expect(monte1.scope.versMoney(3500).amountMinor, 3500);
+    });
+
+    test('sans périmètre lu, le repli ne prétend rien — le serveur tranchera', () {
+      final monte1 = monte(() => [etablissement(slug: 'el-corazon-lome')]);
+
+      // Volontairement pas `null` : un montant doit bien porter une devise
+      // pour partir. Le serveur refuse et le dit clairement si elle est
+      // fausse, ce qui vaut mieux qu'un écran bloqué.
+      expect(monte1.scope.devise, 'XOF');
     });
   });
 

@@ -2,6 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
 import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 
 /// Catalogues de fidélisation — `/gamification/manage/*` et
 /// `/loyalty/manage/rewards/` (Phase 6).
@@ -31,6 +32,9 @@ import 'package:admin/services/admin_auth_service.dart';
 /// les clés sont **celles du serveur**, pour qu'un champ renommé côté API se
 /// voie ici plutôt que de se traduire en silence.
 class GamificationService extends ChangeNotifier {
+  /// D'où viennent le slug et la devise d'une écriture.
+  final RestaurantScopeService _scope = RestaurantScopeService();
+
   eccore.ManagedGamificationRepository get _catalogues =>
       eccore.ManagedGamificationRepository(
         apiClient: AdminAuthService().apiClient,
@@ -373,7 +377,11 @@ class GamificationService extends ChangeNotifier {
     'is_active': modele.isActive,
   };
 
-  /// Les francs CFA n'ont pas de décimale : l'unité mineure est le franc.
-  eccore.Money _versMoney(double montant) =>
-      eccore.Money(amountMinor: montant.round(), currency: 'XOF');
+  /// Montant saisi dans un formulaire, converti pour l'API.
+  ///
+  /// La devise et l'exposant viennent de l'établissement supervisé, plus de
+  /// `'XOF'` écrit ici : le serveur refuse un prix dont la devise n'est pas la
+  /// sienne, et le back-office ne pouvait donc rien écrire pour un restaurant
+  /// hors zone franc CFA.
+  eccore.Money _versMoney(double montant) => _scope.versMoney(montant);
 }
