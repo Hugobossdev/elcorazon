@@ -76,6 +76,7 @@ import 'package:elcorazon_core/src/navigation/phrases_navigation.dart';
 import 'package:elcorazon_core/src/navigation/suivi_de_trace.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/network/api_exception.dart';
+import 'package:elcorazon_core/src/network/message_erreur.dart';
 import 'package:elcorazon_core/src/network/page.dart';
 import 'package:elcorazon_core/src/notifications/app_notification.dart';
 import 'package:elcorazon_core/src/notifications/campaign.dart';

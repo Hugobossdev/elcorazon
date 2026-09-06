@@ -76,6 +76,7 @@ export 'src/notifications/campaign.dart';
 export 'src/notifications/campaign_repository.dart';
 export 'src/notifications/notification_repository.dart';
 export 'src/network/api_exception.dart';
+export 'src/network/message_erreur.dart';
 export 'src/network/page.dart';
 export 'src/orders/managed_order_repository.dart';
 export 'src/orders/order.dart';
