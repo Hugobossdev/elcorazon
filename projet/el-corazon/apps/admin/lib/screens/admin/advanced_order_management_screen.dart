@@ -90,7 +90,13 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
   /// en rompre l'ordre et le compte : on les annonce, l'opérateur recharge.
   int _changementsHorsSelection = 0;
 
+  /// Commandes **arrivées** depuis le dernier chargement. Comptées à part des
+  /// changements : une commande neuve n'est dans aucune page, et l'opérateur
+  /// n'a pas la même chose à en faire.
+  int _arriveesDepuisLeChargement = 0;
+
   StreamSubscription<ChangementDeStatut>? _abonnementChangements;
+  StreamSubscription<CommandeRecue>? _abonnementArrivees;
   StreamSubscription<void>? _abonnementReconnexions;
 
   @override
@@ -116,6 +122,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
     WidgetsBinding.instance.removeObserver(this);
     _rebond?.cancel();
     unawaited(_abonnementChangements?.cancel());
+    unawaited(_abonnementArrivees?.cancel());
     unawaited(_abonnementReconnexions?.cancel());
     _tabController
       ..removeListener(_onOngletChange)
@@ -162,6 +169,16 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
       if (!appliquee) setState(() => _changementsHorsSelection++);
     });
 
+    _abonnementArrivees = temps.arrivees.listen((arrivee) {
+      // Pas de relecture ciblée ici, contrairement aux changements : la
+      // commande n'est dans aucune page chargée, il n'y a donc rien à
+      // rafraîchir. L'insérer romprait l'ordre et le compte de la pagination —
+      // et la ferait réapparaître à la page suivante. On l'annonce, l'opérateur
+      // recharge quand il le décide.
+      if (!mounted) return;
+      setState(() => _arriveesDepuisLeChargement++);
+    });
+
     _abonnementReconnexions = temps.reconnexions.listen((_) {
       // À la reconnexion, des événements ont pu passer pendant la coupure.
       // Recharger la page est plus simple et plus juste que de rejouer un
@@ -197,7 +214,10 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
   /// Charge la première page de la sélection courante.
   Future<void> _recharger() async {
     if (!mounted) return;
-    setState(() => _changementsHorsSelection = 0);
+    setState(() {
+      _changementsHorsSelection = 0;
+      _arriveesDepuisLeChargement = 0;
+    });
     await context.read<OrderManagementService>().loadPage(_filtres);
   }
 
@@ -207,7 +227,10 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
   /// cohérent et pas seulement la moitié qu'on regarde.
   Future<void> _rechargerTout() async {
     if (!mounted) return;
-    setState(() => _changementsHorsSelection = 0);
+    setState(() {
+      _changementsHorsSelection = 0;
+      _arriveesDepuisLeChargement = 0;
+    });
     await Future.wait([
       context.read<OrderManagementService>().refresh(),
       context.read<AssignmentService>().refresh(),
@@ -391,7 +414,13 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
               ),
             ),
           ),
-          // Ce qui a changé hors de la sélection affichée.
+          // Ce qui vient d'arriver, et ce qui a changé ailleurs. Deux
+          // bandeaux distincts : « une commande est arrivée » appelle un geste
+          // — la préparer — que « une commande a changé » n'appelle pas.
+          BandeauArrivees(
+            nombre: _arriveesDepuisLeChargement,
+            onRecharger: () => unawaited(_recharger()),
+          ),
           BandeauNouveautes(
             nombre: _changementsHorsSelection,
             onRecharger: () => unawaited(_recharger()),

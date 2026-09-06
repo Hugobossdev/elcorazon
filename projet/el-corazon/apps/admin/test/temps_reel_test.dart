@@ -21,6 +21,58 @@ void main() {
   setUp(() => service = DashboardRealtimeService.pourTests());
   tearDown(() => service.dispose());
 
+  group('Une commande qui arrive', () {
+    test('est traduite en arrivée, pas en changement', () async {
+      // Le serveur ne diffusait rien à la création : une commande réglée en
+      // espèces — le seul moyen actif côté client — n'était annoncée par aucun
+      // événement, et l'écran ne l'apprenait qu'au rechargement suivant.
+      final arrivees = <CommandeRecue>[];
+      final changements = <ChangementDeStatut>[];
+      service.arrivees.listen(arrivees.add);
+      service.changements.listen(changements.add);
+
+      service.traiterPourTests(
+        _evenement('order.created', {
+          'order': 'commande-9',
+          'reference': 'EC000099',
+          'status': 'pending',
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(arrivees, hasLength(1));
+      expect(arrivees.single.orderId, 'commande-9');
+      expect(arrivees.single.reference, 'EC000099');
+      // Les deux flux ne se mélangent pas : « une commande a changé » pour une
+      // commande que personne n'a encore vue serait faux.
+      expect(changements, isEmpty);
+    });
+
+    test('sans identifiant, rien n’est émis', () async {
+      final arrivees = <CommandeRecue>[];
+      service.arrivees.listen(arrivees.add);
+
+      service.traiterPourTests(_evenement('order.created', {'reference': 'EC1'}));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(arrivees, isEmpty);
+    });
+
+    test('sans référence, l’arrivée passe quand même', () async {
+      // L'identifiant suffit à retrouver la commande ; refuser l'événement
+      // pour une référence absente ferait disparaître une commande réelle de
+      // l'écran, ce qui est bien pire qu'un libellé vide.
+      final arrivees = <CommandeRecue>[];
+      service.arrivees.listen(arrivees.add);
+
+      service.traiterPourTests(_evenement('order.created', {'order': 'commande-9'}));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(arrivees, hasLength(1));
+      expect(arrivees.single.reference, isEmpty);
+    });
+  });
+
   group('Un changement de statut', () {
     test('est traduit en commande à relire', () async {
       final recus = <ChangementDeStatut>[];

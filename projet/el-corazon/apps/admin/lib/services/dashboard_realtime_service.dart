@@ -136,6 +136,20 @@ class DashboardRealtimeService extends ChangeNotifier {
   Stream<ChangementDeStatut> get changements => _changements.stream;
   final _changements = StreamController<ChangementDeStatut>.broadcast();
 
+  /// Les commandes qui **arrivent**, à mesure que le serveur les reçoit.
+  ///
+  /// Distinct de [changements], et pas par souci de symétrie : une commande qui
+  /// arrive n'a pas de statut précédent, elle n'est dans aucune page déjà
+  /// chargée, et ce qu'elle demande au personnel n'est pas la même chose. Les
+  /// confondre ferait annoncer « une commande a changé » pour une commande que
+  /// personne n'avait encore vue.
+  ///
+  /// Ce flux n'existait pas parce que le serveur ne diffusait rien à la
+  /// création : une commande réglée en espèces — le seul moyen actif côté
+  /// client — n'était annoncée à personne.
+  Stream<CommandeRecue> get arrivees => _arrivees.stream;
+  final _arrivees = StreamController<CommandeRecue>.broadcast();
+
   /// Signalé quand le canal se (re)connecte.
   ///
   /// C'est le moment où l'écran doit recharger sa page : pendant la coupure,
@@ -272,10 +286,11 @@ class DashboardRealtimeService extends ChangeNotifier {
 
   /// Traduit un événement du canal en changement de statut.
   ///
-  /// Le seul type diffusé sur ce groupe est `order.status`
-  /// (`apps/orders/services.py`). `realtime.gap` peut arriver après une
-  /// reconnexion avec rattrapage : il signale un trou dans le journal, donc un
-  /// état local incomplet — la seule réponse juste est de recharger.
+  /// Deux types métier sont diffusés sur ce groupe (`apps/orders/services.py`) :
+  /// `order.created` quand une commande arrive, `order.status` quand elle
+  /// change d'état. `realtime.gap` peut arriver après une reconnexion avec
+  /// rattrapage : il signale un trou dans le journal, donc un état local
+  /// incomplet — la seule réponse juste est de recharger.
   @visibleForTesting
   void traiterPourTests(eccore.RealtimeEvent evenement) => _traiter(evenement);
 
@@ -294,6 +309,15 @@ class DashboardRealtimeService extends ChangeNotifier {
             depuis: evenement.payload['from_status'] as String? ?? '',
             vers: evenement.payload['status'] as String? ?? '',
             motif: evenement.payload['reason'] as String? ?? '',
+          ),
+        );
+      case 'order.created':
+        final nouvelle = evenement.payload['order'] as String?;
+        if (nouvelle == null) return;
+        _arrivees.add(
+          CommandeRecue(
+            orderId: nouvelle,
+            reference: evenement.payload['reference'] as String? ?? '',
           ),
         );
       case 'realtime.gap':
@@ -333,9 +357,22 @@ class DashboardRealtimeService extends ChangeNotifier {
     _repriseTimer?.cancel();
     unawaited(_fermerLeCanal());
     unawaited(_changements.close());
+    unawaited(_arrivees.close());
     unawaited(_reconnexions.close());
     super.dispose();
   }
+}
+
+/// Une commande qui vient d'arriver.
+///
+/// Porte de quoi la nommer et la retrouver, rien de plus : l'écran qui en a
+/// besoin relit la commande. La composer à partir de cette charge donnerait un
+/// objet privé de ses transitions autorisées — et donc des boutons faux.
+class CommandeRecue {
+  const CommandeRecue({required this.orderId, required this.reference});
+
+  final String orderId;
+  final String reference;
 }
 
 /// Un changement de statut annoncé par le serveur.

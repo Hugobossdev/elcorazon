@@ -221,3 +221,72 @@ class BandeauNouveautes extends StatelessWidget {
     );
   }
 }
+
+/// Le bandeau qui annonce des commandes **arrivées** depuis le chargement.
+///
+/// Distinct de [BandeauNouveautes], et sur la couleur d'alerte plutôt que sur
+/// celle de l'information : une commande qui change ailleurs peut attendre le
+/// prochain rechargement, une commande qui arrive attend qu'on la prépare. Les
+/// dire de la même façon reviendrait à noyer la seule des deux qui presse.
+///
+/// Il n'affichait rien avant que le serveur ne diffuse `order.created` : une
+/// commande réglée en espèces — le seul moyen actif côté client — n'était
+/// annoncée par aucun événement, et l'écran ne l'apprenait qu'au rechargement
+/// suivant, s'il avait lieu.
+class BandeauArrivees extends StatelessWidget {
+  const BandeauArrivees({
+    required this.nombre,
+    required this.onRecharger,
+    super.key,
+  });
+
+  final int nombre;
+  final VoidCallback onRecharger;
+
+  @override
+  Widget build(BuildContext context) {
+    if (nombre == 0) return const SizedBox.shrink();
+
+    final scheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: scheme.tertiaryContainer,
+      child: InkWell(
+        onTap: onRecharger,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.notifications_active_outlined,
+                size: 18,
+                color: scheme.onTertiaryContainer,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  nombre == 1
+                      ? 'Une nouvelle commande est arrivée.'
+                      : '$nombre nouvelles commandes sont arrivées.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onTertiaryContainer,
+                  ),
+                ),
+              ),
+              Text(
+                'Afficher',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: scheme.onTertiaryContainer,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
