@@ -8,9 +8,17 @@ import 'package:elcora_fast/repositories/django_gamification_repository.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
-/// Centralise la logique de fidélité (points, récompenses, historique) et de
-/// badges (Django, Phase 6) ; achievements/défis restent simulés côté client
-/// (aucun écran ne les affiche — voir `_loadAchievements`/`_loadChallenges`).
+/// Centralise la logique de fidélité (points, récompenses, historique), les
+/// badges, les succès et les défis — **tous servis par Django**.
+///
+/// La phrase précédente disait que « achievements/défis restent simulés côté
+/// client » et qu'aucun écran ne les affichait. Ce n'est plus vrai depuis que
+/// `DjangoGamificationRepository` les lit sur `/gamification/*` : la progression
+/// et le déblocage sont calculés par le serveur à la livraison d'une commande,
+/// et le client se contente de les lire. Laisser le commentaire en place
+/// invitait à recommencer le calcul ici — c'est-à-dire à rouvrir la faille que
+/// la migration a fermée, où n'importe qui se déclarait tous les succès
+/// débloqués et se créditait les points correspondants.
 class GamificationService extends ChangeNotifier {
   static final GamificationService _instance = GamificationService._internal();
 
