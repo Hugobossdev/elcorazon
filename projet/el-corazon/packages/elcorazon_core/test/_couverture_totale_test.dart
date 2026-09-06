@@ -91,6 +91,8 @@ import 'package:elcorazon_core/src/payments/split_payment.dart';
 import 'package:elcorazon_core/src/payments/transaction.dart';
 import 'package:elcorazon_core/src/profile/address.dart';
 import 'package:elcorazon_core/src/profile/address_repository.dart';
+import 'package:elcorazon_core/src/profile/customer_preferences.dart';
+import 'package:elcorazon_core/src/profile/preferences_repository.dart';
 import 'package:elcorazon_core/src/promotions/promotion.dart';
 import 'package:elcorazon_core/src/promotions/promotion_repository.dart';
 import 'package:elcorazon_core/src/realtime/chat_message.dart';
