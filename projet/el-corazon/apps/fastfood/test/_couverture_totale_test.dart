@@ -65,6 +65,7 @@ import 'package:elcora_fast/screens/client/order_details_screen.dart';
 import 'package:elcora_fast/screens/client/order_rating_screen.dart';
 import 'package:elcora_fast/screens/client/orders_screen.dart';
 import 'package:elcora_fast/screens/client/payment_screen.dart';
+import 'package:elcora_fast/screens/client/preferences_screen.dart';
 import 'package:elcora_fast/screens/client/product_reviews_screen.dart';
 import 'package:elcora_fast/screens/client/profile_screen.dart';
 import 'package:elcora_fast/screens/client/promo_codes_screen.dart';

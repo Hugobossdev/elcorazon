@@ -26,6 +26,7 @@ import 'package:elcora_fast/screens/client/shared_payment_screen.dart';
 import 'package:elcora_fast/screens/client/group_payment_status_screen.dart';
 import 'package:elcora_fast/screens/client/product_reviews_screen.dart';
 import 'package:elcora_fast/screens/client/support_screen.dart';
+import 'package:elcora_fast/screens/client/preferences_screen.dart';
 import 'package:elcora_fast/screens/client/advanced_search_screen.dart';
 import 'package:elcora_fast/screens/client/enhanced_orders_screen.dart';
 import 'package:elcora_fast/screens/client/driver_rating_screen.dart';
@@ -63,6 +64,7 @@ class AppRouter {
   static const String groupPaymentStatus = '/client/group-payment-status';
   static const String productReviews = '/client/product-reviews';
   static const String support = '/client/support';
+  static const String preferences = '/client/preferences';
   static const String advancedSearch = '/client/advanced-search';
   static const String enhancedOrders = '/client/enhanced-orders';
   static const String driverRating = '/client/driver-rating';
@@ -298,6 +300,12 @@ class AppRouter {
       case support:
         return MaterialPageRoute(
           builder: (_) => const SupportScreen(),
+          settings: settings,
+        );
+
+      case preferences:
+        return MaterialPageRoute(
+          builder: (_) => const PreferencesScreen(),
           settings: settings,
         );
 

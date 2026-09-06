@@ -553,8 +553,19 @@ class ProfileScreen extends StatelessWidget {
         _Entree(
           icone: Icons.notifications_none_rounded,
           titre: 'Notifications',
-          sousTitre: 'Alertes de commande et promotions',
+          sousTitre: 'Vos alertes de commande et messages reçus',
           onTap: () => context.navigateToNotifications(),
+        ),
+        // Distincte de l'entrée ci-dessus, qui ouvre la boîte de réception. Son
+        // ancien sous-titre — « Alertes de commande et promotions » — se lisait
+        // comme un écran de réglages, si bien que le client qui cherchait à
+        // couper les offres atterrissait sur la liste de ce qu'il avait reçu,
+        // et n'y trouvait rien à régler.
+        _Entree(
+          icone: Icons.tune_rounded,
+          titre: 'Préférences',
+          sousTitre: 'Choisir ce que vous recevez comme offres',
+          onTap: () => Navigator.of(context).pushNamed(AppRouter.preferences),
         ),
       ];
 
