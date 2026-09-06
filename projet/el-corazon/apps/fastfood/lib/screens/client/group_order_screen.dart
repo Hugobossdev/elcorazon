@@ -15,6 +15,7 @@ import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/presentation/paiement_partage.dart';
+import 'package:elcora_fast/presentation/messages_erreur.dart';
 
 class GroupOrderScreen extends StatefulWidget {
   const GroupOrderScreen({super.key});
@@ -1127,7 +1128,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur lors de la création du groupe: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: AppColors.error,
           ),
         );

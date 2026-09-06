@@ -68,8 +68,11 @@ class GuestContactScreen extends StatelessWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur lors de l\'ouverture de la carte: $e'),
+          const SnackBar(
+            content: Text(
+              'Impossible d\'ouvrir l\'application de cartes. '
+              'Vérifiez qu\'une application de navigation est installée.',
+            ),
             backgroundColor: Colors.red,
           ),
         );

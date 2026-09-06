@@ -14,6 +14,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:elcora_fast/presentation/messages_erreur.dart';
 
 /// Fiche d'un plat et sa personnalisation.
 ///
@@ -961,7 +962,7 @@ class _EnhancedItemCustomizationScreenState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur : $e')),
+          SnackBar(content: Text(messageErreur(e))),
         );
       }
     }

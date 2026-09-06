@@ -6,6 +6,7 @@ import 'package:elcora_fast/services/advanced_search_service.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
+import 'package:elcora_fast/presentation/messages_erreur.dart';
 
 /// Écran de recherche avancée avec filtres multiples
 class AdvancedSearchScreen extends StatefulWidget {
@@ -87,7 +88,7 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur lors de la recherche: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: Colors.red,
           ),
         );
