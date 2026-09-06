@@ -194,7 +194,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
               ?.copyWith(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
-        _buildMockMap(context, driverService.drivers),
+        _carteDesLivreurs(context, driverService.drivers),
         const SizedBox(height: 24),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -252,10 +252,39 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
     );
   }
 
-  Widget _buildMockMap(BuildContext context, List<eccore.CourierProfile> drivers) {
+  /// Entrée vers la carte des livreurs.
+  ///
+  /// ## Ce que ce bloc montrait, et pourquoi il a été refait
+  ///
+  /// Il affichait les cinq premiers livreurs sous forme de pastilles posées sur
+  /// un planisphère décoratif, à des positions tirées d'une liste
+  /// d'`Alignment` écrite en dur. Ces positions n'avaient **aucun rapport** avec
+  /// l'endroit où se trouvaient les livreurs : sous un titre « Localisation en
+  /// temps réel », un superviseur lisait une répartition inventée. C'est le
+  /// genre de figure qu'on croit sur parole pendant des mois.
+  ///
+  /// Le fond de carte venait par-dessus le marché de `NetworkImage` sur
+  /// Wikimedia : une requête sortante depuis le poste du personnel à chaque
+  /// affichage, et un bloc vide le jour où l'URL bouge.
+  ///
+  /// La vraie carte existe et fonctionne — [DriverMapScreen], qui lit les
+  /// positions rendues par le serveur et s'ouvre sur l'établissement supervisé.
+  /// Ce bloc n'est donc plus qu'une **porte** vers elle, et il ne dit que ce
+  /// qu'il sait : combien de livreurs sont en ligne, et pour combien d'entre
+  /// eux une position est connue.
+  Widget _carteDesLivreurs(
+    BuildContext context,
+    List<eccore.CourierProfile> drivers,
+  ) {
     final scheme = Theme.of(context).colorScheme;
-    final sem = AdminColorTokens.semantic(scheme);
+
+    final enLigne = drivers.where((d) => d.isOnline).length;
+    final localises = drivers
+        .where((d) => d.isOnline && d.lastLatitude != null && d.lastLongitude != null)
+        .length;
+
     return InkWell(
+      borderRadius: BorderRadius.circular(16),
       onTap: () {
         Navigator.push(
           context,
@@ -263,77 +292,49 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
         );
       },
       child: Container(
-        height: 250,
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: scheme.primaryContainer.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: scheme.outline.withValues(alpha: 0.18)),
-          image: const DecorationImage(
-            image: NetworkImage(
-                'https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/World_map_blank_without_borders.svg/2000px-World_map_blank_without_borders.svg.png',),
-            fit: BoxFit.cover,
-            opacity: 0.1,
-          ),
         ),
-        child: Stack(
+        child: Row(
           children: [
-            Center(
+            Icon(Icons.map_outlined, color: scheme.primary, size: 40),
+            const SizedBox(width: 16),
+            Expanded(
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.map, color: scheme.primary, size: 48),
-                  const SizedBox(height: 8),
                   Text(
-                    'Ouvrir la carte interactive',
+                    'Carte des livreurs',
                     style: TextStyle(
                       color: scheme.onSurface,
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
                     ),
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    // Distinguer « en ligne » de « localisé » plutôt que de
+                    // supposer l'un depuis l'autre : un livreur qui vient de
+                    // démarrer son application est en ligne sans avoir encore
+                    // émis de position, et la carte ne pourra pas le placer.
+                    enLigne == 0
+                        ? 'Aucun livreur en ligne pour le moment.'
+                        : localises == enLigne
+                            ? '$enLigne en ligne, tous localisés.'
+                            : '$enLigne en ligne, $localises avec une position connue.',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 13,
+                    ),
+                  ),
                 ],
               ),
             ),
-            ...drivers.take(5).toList().asMap().entries.map((entry) {
-              final index = entry.key;
-              final driver = entry.value;
-              final alignments = [
-                const Alignment(0.5, -0.5),
-                const Alignment(-0.6, 0.2),
-                const Alignment(0.3, 0.7),
-                const Alignment(-0.2, -0.6),
-                const Alignment(0.8, 0.1),
-              ];
-
-              return Align(
-                alignment: alignments[index % alignments.length],
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: scheme.surface,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        blurRadius: 4,
-                        color: sem.shadow.withValues(alpha: 0.35),
-                      ),
-                    ],
-                  ),
-                  child: CircleAvatar(
-                    radius: 14,
-                    backgroundColor:
-                        _getStatusColor(driver.statut).withValues(alpha: 0.2),
-                    child: Text(
-                      driver.fullName[0],
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: _getStatusColor(driver.statut),),
-                    ),
-                  ),
-                ),
-              );
-            }),
+            Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
           ],
         ),
       ),
