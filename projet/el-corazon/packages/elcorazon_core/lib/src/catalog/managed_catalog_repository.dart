@@ -89,13 +89,23 @@ class ManagedCatalogRepository {
 
   // --------------------------------------------------------------- articles
 
-  Future<List<ManagedMenuItem>> menuItems({String? restaurantSlug, String? categoryId}) {
+  /// Articles de la carte.
+  ///
+  /// [archived] demande les articles **retirés** au lieu des vivants. Le
+  /// serveur ne mélange jamais les deux : le défaut est la carte du jour, et
+  /// tout rendre y ferait remonter des articles retirés il y a deux ans.
+  Future<List<ManagedMenuItem>> menuItems({
+    String? restaurantSlug,
+    String? categoryId,
+    bool archived = false,
+  }) {
     return _collect(
       '/catalog/manage/items/',
       ManagedMenuItem.fromJson,
       queryParameters: {
         if (restaurantSlug != null) 'restaurant__slug': restaurantSlug,
         if (categoryId != null) 'category': categoryId,
+        if (archived) 'archived': 'true',
       },
     );
   }
@@ -214,6 +224,17 @@ class ManagedCatalogRepository {
   /// copie figée.
   Future<void> deleteMenuItem(String menuItemId) async {
     await apiClient.delete('/catalog/manage/items/$menuItemId/');
+  }
+
+  /// Remet au menu un article retiré — `POST .../items/{id}/restore/`.
+  ///
+  /// Le pendant de [deleteMenuItem], et ce qui rend ce retrait réversible.
+  /// Sans elle, l'archive du serveur existait sans porte : un article retiré
+  /// par erreur l'était pour de bon du point de vue du back-office, alors que
+  /// la ligne n'avait jamais quitté la base.
+  Future<ManagedMenuItem> restoreMenuItem(String menuItemId) async {
+    final response = await apiClient.post('/catalog/manage/items/$menuItemId/restore/');
+    return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
   }
 
   // -------------------------------------------------------------- image

@@ -97,6 +97,30 @@ class _FakeServer implements HttpClientAdapter {
       );
     }
 
+    if (options.path.endsWith('/restore/')) {
+      return ResponseBody.fromString(
+        jsonEncode(_itemJson()),
+        200,
+        headers: _jsonHeaders,
+      );
+    }
+
+    // La liste et le détail partagent le préfixe : c'est la fin du chemin qui
+    // les sépare, sans quoi `menuItems()` recevrait un objet là où il attend
+    // une page.
+    if (options.path.endsWith('/catalog/manage/items/') && options.method == 'GET') {
+      return ResponseBody.fromString(
+        jsonEncode({
+          'count': 1,
+          'next': null,
+          'previous': null,
+          'results': [_itemJson()],
+        }),
+        200,
+        headers: _jsonHeaders,
+      );
+    }
+
     if (options.path.contains('/catalog/manage/items/')) {
       return ResponseBody.fromString(
         jsonEncode(_itemJson()),
@@ -147,6 +171,36 @@ void main() {
         testAdapter: server,
       ),
     );
+  });
+
+  group('ManagedCatalogRepository — articles retirés', () {
+    test('la carte du jour ne demande pas l’archive', () async {
+      await repository.menuItems(restaurantSlug: 'el-corazon-lome');
+
+      // Absent, et non `archived=false` : le serveur lit la présence du
+      // paramètre, et le poser à faux revenait au même que de ne pas le poser
+      // — autant ne pas le dire.
+      expect(server.requests.last.queryParameters.containsKey('archived'), isFalse);
+    });
+
+    test('l’onglet des retirés demande l’archive au serveur', () async {
+      final retires = await repository.menuItems(
+        restaurantSlug: 'el-corazon-lome',
+        archived: true,
+      );
+
+      expect(server.requests.last.queryParameters['archived'], 'true');
+      expect(retires, hasLength(1));
+    });
+
+    test('restoreMenuItem remet l’article au menu', () async {
+      final remis = await repository.restoreMenuItem('item-1');
+
+      final requete = server.requests.last;
+      expect(requete.method, 'POST');
+      expect(requete.path, contains('/catalog/manage/items/item-1/restore/'));
+      expect(remis.name, 'Burger Corazón');
+    });
   });
 
   group('ManagedCatalogRepository — bibliothèque d’options', () {
