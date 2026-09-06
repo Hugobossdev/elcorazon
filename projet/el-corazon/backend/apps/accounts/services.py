@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -252,7 +253,16 @@ class VerificationService:
             expires_at=record.expires_at,
             # Jamais négatif : un client qui recevrait −3 en ferait un compte à
             # rebours qui ne se termine pas.
-            retry_after=max(0, int(remaining.total_seconds())),
+            #
+            # Arrondi **au-dessus**, et c'est ce qui ferme un oracle. Le délai
+            # restant d'un code qui vient d'être émis vaut 59,99 s, pas 60 :
+            # tronquer rendait 59 pour une adresse connue là où la réponse
+            # muette d'une adresse inconnue annonçait la constante, 60. L'écart
+            # d'une seconde suffisait à distinguer les deux — c'est-à-dire à
+            # faire de cette route l'annuaire d'abonnés que tout le reste du
+            # module s'applique à ne pas être. Arrondir au-dessus les fait
+            # coïncider, et ne fait jamais réessayer trop tôt.
+            retry_after=max(0, math.ceil(remaining.total_seconds())),
             code_length=settings.ACCOUNT_VERIFICATION_CODE_LENGTH,
         )
 
