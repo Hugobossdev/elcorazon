@@ -1130,7 +1130,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur lors de l\'appel: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -1179,7 +1179,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur lors de l\'envoi du message: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -1243,8 +1243,11 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur lors de l\'ouverture de la navigation: $e'),
+          const SnackBar(
+            content: Text(
+              'Impossible d\'ouvrir l\'application de navigation. '
+              'Vérifiez qu\'une application de cartes est installée.',
+            ),
             backgroundColor: Colors.red,
           ),
         );

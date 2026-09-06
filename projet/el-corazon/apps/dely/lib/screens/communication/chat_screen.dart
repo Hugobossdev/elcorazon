@@ -86,7 +86,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur de chargement: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: Colors.red,
           ),
         );
@@ -114,7 +114,7 @@ class _ChatScreenState extends State<ChatScreen> {
           });
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Erreur de connexion: $error'),
+              content: Text(messageErreur(error)),
               backgroundColor: Colors.orange,
               action: SnackBarAction(
                 label: 'Réessayer',
@@ -165,7 +165,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur d\'envoi: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: Colors.red,
             action: SnackBarAction(
               label: 'Réessayer',
@@ -274,8 +274,11 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur lors de l\'ouverture de WhatsApp: $e'),
+          const SnackBar(
+            content: Text(
+              'Impossible d\'ouvrir WhatsApp. Vérifiez qu\'il est installé '
+              'sur cet appareil.',
+            ),
             backgroundColor: Colors.red,
           ),
         );
