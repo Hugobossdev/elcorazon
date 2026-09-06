@@ -5,6 +5,7 @@ import 'package:admin/presentation/documents_livreur.dart';
 import 'package:admin/services/driver_document_service.dart' as svc;
 import 'package:admin/ui/ui.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:admin/presentation/messages_erreur.dart';
 
 class DriverDocumentValidationScreen extends StatefulWidget {
   final eccore.CourierProfile driver;
@@ -209,7 +210,7 @@ class _DriverDocumentValidationScreenState
       if (mounted && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur: $e'),
+            content: Text(messageErreur(e)),
             backgroundColor: inverseSurfaceColor,
           ),
         );

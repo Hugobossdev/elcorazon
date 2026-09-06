@@ -10,6 +10,7 @@ import 'package:admin/services/category_management_service.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/screens/admin/option_groups_editor.dart'; // Import du nouveau widget
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:admin/presentation/messages_erreur.dart';
 
 class MenuItemFormDialog extends StatefulWidget {
   final eccore.ManagedMenuItem? menuItem;
@@ -158,7 +159,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           final error = menuService.error ?? 'Erreur inconnue';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Erreur: $error'),
+              content: Text(messageErreur(error)),
               backgroundColor: Colors.red,
             ),
           );
@@ -167,7 +168,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Erreur upload: $e'),
+              content: Text(messageErreur(e)),
               backgroundColor: Colors.red,
             ),
           );

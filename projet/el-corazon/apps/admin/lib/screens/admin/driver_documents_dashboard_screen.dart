@@ -7,6 +7,7 @@ import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/screens/admin/driver_document_validation_screen.dart';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/messages_erreur.dart';
 
 class DriverDocumentsDashboardScreen extends StatefulWidget {
   const DriverDocumentsDashboardScreen({super.key});
@@ -63,7 +64,7 @@ class _DriverDocumentsDashboardScreenState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur chargement: $e')),
+          SnackBar(content: Text(messageErreur(e))),
         );
       }
     } finally {
@@ -88,7 +89,7 @@ class _DriverDocumentsDashboardScreenState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur: $e')),
+          SnackBar(content: Text(messageErreur(e))),
         );
       }
     } finally {
