@@ -197,6 +197,7 @@ atteignable depuis tout état non terminal.
 | L3 | Un livreur ne peut émettre une position que pour une course **qui lui est assignée**. | **[PROUVÉE]** — falsification du suivi temps réel possible |
 | L4 | Les compteurs (`total_deliveries`, `completed_deliveries`, gains) ne sont incrémentés qu'**une seule fois**, à la transition effective vers `delivered`. | Corollaire de C3 |
 | L5 | Modifier ses pièces d'identité après approbation **repasse le dossier en `pending`**. | Règle de conformité |
+| L6 | Un livreur ne porte qu'**une course engagée à la fois** — `accepted`, `picked_up`, `on_the_way`. Une simple proposition n'engage pas : il peut en recevoir plusieurs et choisir. | **[PROUVÉE]** — audit du 7 septembre 2026 : `available_for` proposait un livreur déjà en route, `offer` et `accept` l'acceptaient, et il en tenait deux |
 
 **Flux de statut livraison** (5 états) : `assigned → accepted → picked_up → on_the_way → delivered`,
 chaque étape projetant un statut commande correspondant.
@@ -331,7 +332,7 @@ back-office et analytics.
 | Langues | Français, Anglais | CDC |
 | Devise | FCFA (XOF) — **multi-devises requis** par le multi-pays | CDC + mission |
 | Conformité | RGPD : droit à l'effacement, minimisation, journal d'accès aux données sensibles | CDC |
-| Sécurité | Aucune régression sur les 20 invariants du §6 ; couverture par tests d'attaque | Analyse |
+| Sécurité | Aucune régression sur les 21 invariants du §6 ; couverture par tests d'attaque | Analyse |
 
 ---
 

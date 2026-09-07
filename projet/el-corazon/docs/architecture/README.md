@@ -10,7 +10,7 @@ commit `56e0bec`).
 
 | Document | Contenu |
 |---|---|
-| [01 — Analyse fonctionnelle](01-analyse-fonctionnelle.md) | Acteurs, parcours, **20 invariants métier**, besoins d'API et de temps réel, périmètre v2 |
+| [01 — Analyse fonctionnelle](01-analyse-fonctionnelle.md) | Acteurs, parcours, **21 invariants métier**, besoins d'API et de temps réel, périmètre v2 |
 | [02 — Architecture générale](02-architecture-generale.md) | Composants, flux, découpage en applications, couches, déploiement |
 | [03 — Modèle de données](03-modele-de-donnees.md) | Schéma PostgreSQL/PostGIS, invariants portés par la structure |
 | [04 — Migration Flutter](04-migration-flutter.md) | Plan de la Phase 6 : rupture nette avec Supabase, module Dart partagé, ordre de migration par domaine et par app |
@@ -34,7 +34,8 @@ commit `56e0bec`).
 ## Fil conducteur
 
 L'analyse de l'existant a produit 20 invariants métier, dont **12 correspondent à des failles
-reproduites empiriquement** sur l'implémentation précédente. Chaque ADR indique lesquelles il ferme,
+reproduites empiriquement** sur l'implémentation précédente. L'audit du 7 septembre 2026 en a ajouté
+un vingt-et-unième, L6, lui aussi reproduit avant d'être fermé. Chaque ADR indique lesquelles il ferme,
 et par quel mécanisme.
 
 La ligne de conduite est constante : **fermer une faille par conception plutôt que par vigilance**.
