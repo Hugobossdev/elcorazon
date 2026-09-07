@@ -461,6 +461,12 @@ class AppService extends ChangeNotifier {
   ///
   /// Le serveur, lui, disait précisément pourquoi : `problem+json` porte un
   /// `detail` lisible (`common/exceptions.py`). Il était jeté ici.
+  /// [idempotencyKey] identifie **la tentative**, pas l'appel.
+  ///
+  /// Elle vient de l'écran de caisse et ne change qu'entre deux tentatives
+  /// distinctes. Ce service ne la fabrique pas : il ne sait pas si l'appel
+  /// qu'on lui demande est un premier envoi ou le réessai d'un envoi dont la
+  /// réponse s'est perdue — l'écran, lui, le sait.
   Future<String> placeOrderFromCartService(
     eccore.Address? deliveryAddress,
     PaymentMethod paymentMethod,
@@ -468,6 +474,7 @@ class AppService extends ChangeNotifier {
     double subtotal,
     double deliveryFee,
     double discount, {
+    required String idempotencyKey,
     String? notes,
   }) async {
     if (cartItems.isEmpty) {
@@ -496,6 +503,7 @@ class AppService extends ChangeNotifier {
       final remoteOrder = await DjangoOrderRepository().createFromServerCart(
         address: deliveryAddress,
         paymentMethod: paymentMethod,
+        idempotencyKey: idempotencyKey,
         instructions: notes,
         promoCode: cartService.promoCode ?? '',
       );

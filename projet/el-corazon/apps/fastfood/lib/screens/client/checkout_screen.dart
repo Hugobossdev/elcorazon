@@ -8,6 +8,7 @@ import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/adresse.dart';
+import 'package:elcora_fast/presentation/cle_de_tentative.dart';
 import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/widgets/delivery_fee_breakdown_card.dart';
@@ -52,6 +53,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   /// l'ouverture reprocherait au client de ne pas avoir fait ce qu'on ne lui
   /// a pas encore demandé.
   bool _adresseReclamee = false;
+
+  /// La clé d'idempotence de la tentative en cours — voir [CleDeTentative].
+  ///
+  /// L'écran est le bon porteur parce qu'il est le seul à savoir ce qu'est
+  /// « une tentative » : elle naît à l'ouverture de la caisse et ne s'achève
+  /// qu'à une commande réellement créée.
+  final CleDeTentative _cleDeTentative = CleDeTentative();
   eccore.Address? _selectedAddress;
   // La distance et le délai estimé ne sont plus recopiés ici : ils vivent sur
   // `_deliveryBreakdown`, d'où l'écran les lit déjà.
@@ -792,6 +800,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           cartService.subtotal,
           cartService.deliveryFee,
           cartService.discount,
+        idempotencyKey: _cleDeTentative.valeur,
         notes: _notesController.text.trim().isNotEmpty
             ? _notesController.text.trim()
             : null,
@@ -800,6 +809,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       // `context.mounted` et non `mounted` : le contexte utilisé ici est celui
       // que la méthode reçoit en paramètre, pas celui de l'état.
       if (finalOrderId.isNotEmpty && context.mounted) {
+        // La tentative a abouti : la suivante repart d'une clé neuve, sans quoi
+        // une seconde commande passée depuis cet écran — le client revient en
+        // arrière et recommande — se verrait rendre la première.
+        _cleDeTentative.commandeCreee();
         cartService.clear();
         // Le paiement se règle par webhook signé, jamais par le retour de
         // cet écran (`apps/payments/services.py`) — la commande existe déjà

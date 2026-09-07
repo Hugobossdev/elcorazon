@@ -3,7 +3,6 @@ import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/repositories/order_repository.dart';
 import 'package:elcora_fast/services/restaurant_context_service.dart';
-import 'package:uuid/uuid.dart';
 
 /// Commandes contre le backend Django (Phase 6). Le paiement réel (PayDunya
 /// via le backend) est une tranche à venir — créer une commande ici ne
@@ -20,7 +19,6 @@ class DjangoOrderRepository implements OrderRepository {
   DjangoOrderRepository() : _orders = eccore.OrderRepository(apiClient: apiClient);
 
   final eccore.OrderRepository _orders;
-  final Uuid _uuid = const Uuid();
 
   /// Django n'a qu'un moyen de paiement « carte » — `creditCard`/`debitCard`
   /// s'y confondent (`common/models.py PaymentMethod`).
@@ -41,9 +39,28 @@ class DjangoOrderRepository implements OrderRepository {
   /// Crée la commande depuis le panier serveur déjà synchronisé
   /// (`CartService.ensureSynced`, à appeler par l'appelant avant celle-ci) —
   /// voir `docs/architecture/04-migration-flutter.md`.
+  ///
+  /// [idempotencyKey] doit être **stable sur une même tentative de commande**,
+  /// et vient donc de l'appelant.
+  ///
+  /// ## Ce qu'elle était, et ce que cela coûtait
+  ///
+  /// Cette méthode tirait elle-même un `_uuid.v4()` à chaque invocation, ce que
+  /// le contrat d'`eccore.OrderRepository.create` interdit en toutes lettres :
+  /// « à générer une fois par tentative côté appelant, **jamais par cette
+  /// méthode elle-même** ».
+  ///
+  /// La conséquence est exactement le cas pour lequel l'en-tête existe. La
+  /// requête part, le serveur crée la commande, la réponse se perd en route.
+  /// L'écran de caisse affiche alors « Connexion perdue : votre commande n'a
+  /// pas été envoyée. Réessayez une fois le réseau revenu » — il **invite** au
+  /// geste qui produit le doublon. Le second appel tirait une clé neuve,
+  /// `reserve()` ne reconnaissait rien, et une seconde commande était créée et
+  /// facturée.
   Future<Order> createFromServerCart({
     required eccore.Address address,
     required PaymentMethod paymentMethod,
+    required String idempotencyKey,
     String? instructions,
     String promoCode = '',
   }) async {
@@ -60,7 +77,7 @@ class DjangoOrderRepository implements OrderRepository {
       paymentMethod: _toRemotePaymentMethod(paymentMethod),
       instructions: instructions ?? '',
       promoCode: promoCode,
-      idempotencyKey: _uuid.v4(),
+      idempotencyKey: idempotencyKey,
     );
     return _toLocal(remote, userId: '');
   }
