@@ -4,6 +4,7 @@ import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -451,7 +452,11 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
   ) async {
     final driverService = context.read<DriverManagementService>();
     final orderService = context.read<OrderManagementService>();
-    final availableDrivers = driverService.getAvailableDrivers();
+    // Écartés : ceux qui portent déjà une course (L6). Les données sont dans
+    // `AssignmentService`, que cet écran charge déjà pour afficher les porteurs.
+    final availableDrivers = driverService.getAvailableDrivers(
+      engages: context.read<AssignmentService>().livreursEngages,
+    );
 
     if (availableDrivers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -485,11 +490,33 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                 ),
                 onTap: () async {
                   Navigator.pop(context);
-                  await orderService.assignDriver(order.id, driver.id);
+                  // Le retour d'`assignDriver` était **jeté**, et le bandeau de
+                  // succès s'affichait sans condition : un 403 sans droit, un
+                  // 409 « commande déjà confiée », un livreur inéligible ou une
+                  // panne réseau donnaient tous « Livreur X assigné ». Le
+                  // superviseur croyait la course partie, et personne n'allait
+                  // chercher le repas.
+                  try {
+                    await orderService.assignDriver(order.id, driver.id);
+                  } catch (erreur) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(messageErreur(erreur)),
+                          backgroundColor: Theme.of(context).colorScheme.error,
+                          duration: const Duration(seconds: 5),
+                        ),
+                      );
+                    }
+                    return;
+                  }
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Livreur ${driver.fullName} assigné'),
+                        // « Proposée » et non « assignée » : le livreur accepte
+                        // ou refuse, et l'écran ne doit pas annoncer un accord
+                        // qu'il n'a pas encore.
+                        content: Text('Course proposée à ${driver.fullName}'),
                       ),
                     );
                   }

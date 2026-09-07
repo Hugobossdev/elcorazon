@@ -124,6 +124,30 @@ class Assignment {
     DeliveryStatus.onTheWay,
   }.contains(status);
 
+  /// Le livreur **porte** cette course — miroir de `ENGAGED_STATUSES`
+  /// (`backend/apps/delivery/states.py`).
+  ///
+  /// ## Pourquoi c'est distinct d'[isActive]
+  ///
+  /// Une proposition est vivante sans occuper personne : le livreur peut en
+  /// recevoir plusieurs et choisir. Ce sont les trois étapes suivantes qui le
+  /// mobilisent — il roule vers un restaurant, puis vers un client.
+  ///
+  /// C'est sur cette distinction que porte l'invariant L6 : **le serveur ne
+  /// laisse plus un livreur engager deux courses à la fois**, et le garantit par
+  /// une contrainte de base (`one_engaged_assignment_per_courier`) autant que
+  /// par un refus métier à la proposition comme à l'acceptation.
+  ///
+  /// Rien ne le garantissait auparavant. Seule l'unicité par *commande* était
+  /// tenue, et `Dely` s'y référait pourtant pour ne suivre qu'une course : les
+  /// relevés de position ne partaient que pour la première trouvée, et le client
+  /// de l'autre commande voyait un livreur immobile.
+  bool get isEngaged => const {
+    DeliveryStatus.accepted,
+    DeliveryStatus.pickedUp,
+    DeliveryStatus.onTheWay,
+  }.contains(status);
+
   static DateTime? _parseDate(Object? value) =>
       value == null ? null : DateTime.parse(value as String);
 }

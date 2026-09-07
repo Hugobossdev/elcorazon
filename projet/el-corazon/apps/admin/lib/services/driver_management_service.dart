@@ -251,11 +251,27 @@ class DriverManagementService extends ChangeNotifier {
     }
   }
 
-  /// Obtenir les livreurs disponibles
-  List<eccore.CourierProfile> getAvailableDrivers() {
+  /// Les livreurs à qui l'on peut confier une course maintenant.
+  ///
+  /// [engages] porte les identifiants de dossier des livreurs qui **tiennent
+  /// déjà** une course, tels que `AssignmentService.livreursEngages` les
+  /// connaît. Sans lui, cette liste rendait « Disponible » quelqu'un déjà en
+  /// route : `CourierProfile` ne dit rien des affectations — `StatutLivreur` en
+  /// documente d'ailleurs l'absence — et le siège proposait donc à
+  /// l'assignation un livreur que le serveur refuse maintenant (L6).
+  ///
+  /// Le paramètre est facultatif et vaut l'ensemble vide : un écran qui ne
+  /// charge pas les courses n'a pas à mentir sur ce qu'il ignore, il rend la
+  /// liste large plutôt qu'une liste fausse.
+  List<eccore.CourierProfile> getAvailableDrivers({
+    Set<String> engages = const {},
+  }) {
     return _drivers
         .where(
-          (driver) => driver.statut == StatutLivreur.disponible && driver.estValide,
+          (driver) =>
+              driver.statut == StatutLivreur.disponible &&
+              driver.estValide &&
+              !engages.contains(driver.id),
         )
         .toList();
   }

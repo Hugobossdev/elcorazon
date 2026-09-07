@@ -461,18 +461,37 @@ class AppService extends ChangeNotifier {
   /// concernent.
   ///
   /// Une course simplement *proposée* n'en est pas une : se faire suivre sur une
-  /// course qu'on n'a pas prise n'aurait aucun sens. Le contrat n'en autorise
-  /// qu'une active à la fois (`AssignmentService._active_for`), il n'y a donc
-  /// pas à arbitrer entre plusieurs.
+  /// course qu'on n'a pas prise n'aurait aucun sens.
+  ///
+  /// ## Ce qui autorise à n'en rendre qu'une
+  ///
+  /// L'invariant **L6** : le serveur refuse qu'un livreur engage deux courses à
+  /// la fois — à la proposition, à l'acceptation, et par une contrainte de base
+  /// (`one_engaged_assignment_per_courier`).
+  ///
+  /// Ce commentaire invoquait auparavant `AssignmentService._active_for`, ce qui
+  /// était une **erreur de lecture** : cette garde porte sur une *commande* —
+  /// deux livreurs ne portent pas le même repas — et ne disait rien du cas
+  /// inverse. Rien n'empêchait alors un livreur d'en accepter deux, et cette
+  /// méthode rendait la première venue dans l'ordre d'itération d'un `Map`. Les
+  /// relevés ne partaient que pour celle-là, l'écran de navigation ne guidait
+  /// que vers elle, et le client de l'autre commande suivait un livreur figé.
+  ///
+  /// L'invariant tient désormais côté serveur, où il doit être. Si plusieurs
+  /// courses engagées apparaissaient malgré tout ici — reprise de données,
+  /// serveur d'une version antérieure —, la plus ancienne l'emporte : c'est
+  /// celle qui est déjà en route, et changer de destination en cours de trajet
+  /// serait le pire des deux comportements.
   Course? get activeCourse {
+    Course? plusAncienne;
     for (final course in _coursesByOrderId.values) {
-      final assignment = course.assignment;
-      if (assignment.isActive &&
-          assignment.status != eccore.DeliveryStatus.offered) {
-        return course;
+      if (!course.assignment.isEngaged) continue;
+      if (plusAncienne == null ||
+          course.assignment.offeredAt.isBefore(plusAncienne.assignment.offeredAt)) {
+        plusAncienne = course;
       }
     }
-    return null;
+    return plusAncienne;
   }
 
   /// Les courses qu'on me propose et auxquelles je n'ai pas encore répondu.

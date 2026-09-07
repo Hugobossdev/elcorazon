@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/statut_livreur.dart';
+import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/ui/ui.dart';
@@ -24,16 +26,28 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 ///
 /// Il existe un **second** dialogue d'assignation, dans
 /// `active_deliveries_screen.dart`. Les deux n'ont pas été fondus, et ce n'est
-/// pas un oubli : celui-ci marque la commande « récupérée » après l'avoir
-/// assignée, l'autre non. Les unifier trancherait une question de métier qui
-/// n'appartient pas au refactoring.
+/// pas un oubli : celui-ci marquait la commande « récupérée » après l'avoir
+/// assignée, l'autre non — une divergence de métier qu'un refactoring n'avait
+/// pas à trancher.
+///
+/// Elle est tranchée, et pas en faveur de ce fichier : `picked_up` appartient au
+/// livreur, et l'écrire ici rendait la commande inannulable pendant que le repas
+/// était encore en cuisine (voir `_assigner`). Les deux dialogues font
+/// désormais la même chose ; les fondre n'attend plus qu'une décision
+/// d'ergonomie.
 Future<void> afficherAssignationLivreur({
   required BuildContext context,
   required eccore.Order order,
   required OrderManagementService orderService,
   required DriverManagementService driverService,
+  required AssignmentService assignmentService,
 }) async {
-  final livreursDisponibles = driverService.getAvailableDrivers();
+  // Les livreurs déjà en course sont écartés (L6) : le serveur les refuse, et
+  // les proposer quand même ne laisse au superviseur qu'un message d'erreur là
+  // où il attendait une affectation.
+  final livreursDisponibles = driverService.getAvailableDrivers(
+    engages: assignmentService.livreursEngages,
+  );
 
   if (livreursDisponibles.isEmpty) {
     unawaited(
@@ -245,33 +259,45 @@ class _ChoixDuLivreurState extends State<_ChoixDuLivreur> {
       return;
     }
 
-    final assigne = await widget.orderService.assignDriver(
-      commandeId,
-      livreur.id,
-    );
-
-    if (!assigne) {
+    try {
+      await widget.orderService.assignDriver(commandeId, livreur.id);
+    } catch (erreur) {
       if (mounted) {
         _bandeau(
           context,
           icone: Icons.error,
           teinte: (sem) => sem.danger,
-          message: "Erreur lors de l'assignation du livreur",
+          // Le motif du serveur, pas « Erreur lors de l'assignation » : il dit
+          // s'il faut attendre, choisir quelqu'un d'autre, ou réclamer un droit.
+          message: messageErreur(erreur),
+          duree: const Duration(seconds: 5),
         );
       }
       return;
     }
 
-    // Marquer la commande comme récupérée après assignation.
-    await widget.orderService.markOrderPickedUp(commandeId);
-    await widget.orderService.refresh();
-
+    // La commande n'est **pas** marquée « récupérée » ici.
+    //
+    // Elle l'était, et c'était faux : le livreur vient d'être choisi, il n'a
+    // rien pris — souvent il n'est même pas encore au restaurant. Trois choses
+    // en découlaient, toutes visibles par le client :
+    //
+    //   * le suivi affichait « récupérée » à l'heure du geste du superviseur,
+    //     et la notification correspondante partait ;
+    //   * `ORDER_TRANSITIONS[picked_up]` ne mène qu'à `on_the_way` : la commande
+    //     devenait **inannulable** alors que le repas était encore en cuisine ;
+    //   * quand le livreur marquait le vrai enlèvement, la projection constatait
+    //     que la commande y était déjà et **retournait en silence** — l'étape
+    //     réelle ne produisait plus aucun événement.
+    //
+    // `picked_up` appartient au livreur, et à lui seul :
+    // `POST /delivery/assignments/{id}/status/`.
     if (mounted) {
       _bandeau(
         context,
         icone: Icons.check_circle,
         teinte: (sem) => sem.success,
-        message: 'Livreur ${livreur.fullName} assigné avec succès',
+        message: 'Course proposée à ${livreur.fullName}',
       );
     }
   }

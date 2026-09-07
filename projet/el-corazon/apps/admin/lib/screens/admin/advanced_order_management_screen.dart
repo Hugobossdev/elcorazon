@@ -1447,6 +1447,7 @@ class _ActionsCommandeState extends State<_ActionsCommande> {
                       order: order,
                       orderService: orderService,
                       driverService: driverService,
+                      assignmentService: assignments,
                     ).then((_) {
                       if (context.mounted) {
                         unawaited(context.read<AssignmentService>().refresh());

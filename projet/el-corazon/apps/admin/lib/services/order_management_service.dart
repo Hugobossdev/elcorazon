@@ -412,16 +412,27 @@ class OrderManagementService extends ChangeNotifier {
   ///
   /// [courierId] est l'identifiant du **dossier livreur**, celui que rend
   /// `/delivery/couriers/`.
-  Future<bool> assignDriver(String orderId, String courierId) async {
-    try {
-      await eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient)
-          .offer(orderId: orderId, courierId: courierId);
-      await refresh();
-      return true;
-    } on eccore.ApiException catch (e) {
-      eccore.Journal.trace('OrderManagementService: affectation refusée — ${e.code}');
-      return false;
-    }
+  ///
+  /// ## Pourquoi cette méthode lève au lieu de rendre un booléen
+  ///
+  /// Elle rendait `false` sur toute `ApiException`, en n'en gardant que le code
+  /// dans le journal. Le motif du serveur — écrit pour être lu — était perdu à
+  /// cette ligne, et le refus devenait indiscernable d'une panne réseau. Un
+  /// écran s'en servait bien ; l'autre jetait le booléen et annonçait « Livreur
+  /// assigné » quoi qu'il arrive. Le superviseur croyait une course partie, et
+  /// personne n'allait chercher le repas.
+  ///
+  /// Les refus possibles sont nombreux et disent tous quelque chose d'utile :
+  /// 403 sans `orders.assign_courier`, 409 « cette commande a déjà une course en
+  /// cours », 409 « ce livreur porte déjà une course » (L6), 409 « livreur non
+  /// éligible », 409 « livreur non rattaché à l'établissement ».
+  ///
+  /// Une méthode qui lève ne se laisse pas ignorer par distraction : c'est ce
+  /// qu'on veut d'un geste dont l'échec silencieux immobilise une commande.
+  Future<void> assignDriver(String orderId, String courierId) async {
+    await eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient)
+        .offer(orderId: orderId, courierId: courierId);
+    await refresh();
   }
 
   /// Filtrer les commandes par date

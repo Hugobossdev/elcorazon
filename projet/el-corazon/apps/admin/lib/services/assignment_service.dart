@@ -54,6 +54,31 @@ class AssignmentService extends ChangeNotifier {
   /// Le nom du porteur, tel qu'on l'annonce au téléphone.
   String? courierNameOf(String orderId) => _parCommande[orderId]?.courier.fullName;
 
+  /// Les livreurs qui **portent** déjà une course — L6.
+  ///
+  /// ## Ce que le siège ne savait pas
+  ///
+  /// `StatutLivreur` n'a que trois états, et son en-tête le documente : le
+  /// quatrième — « en livraison » — avait été retiré parce que *rien ne le
+  /// produisait*. Le back-office affichait donc « Disponible » en face de
+  /// quelqu'un déjà en route, et le proposait à l'assignation.
+  ///
+  /// Le serveur refuse désormais (invariant L6), et le refus est lisible ; mais
+  /// proposer un choix que le serveur rejettera reste un mauvais écran. Les
+  /// données étaient là depuis le début : [refresh] charge les courses vivantes
+  /// du périmètre, il suffisait de les lire par livreur au lieu de par commande.
+  ///
+  /// Seules les courses **engagées** comptent. Une proposition en attente
+  /// n'occupe personne, et l'inclure retirerait de la liste un livreur qui n'a
+  /// simplement pas encore répondu.
+  Set<String> get livreursEngages => {
+        for (final course in _parCommande.values)
+          if (course.isEngaged) course.courier.id,
+      };
+
+  /// Ce livreur porte-t-il déjà une course ?
+  bool estEngage(String courierId) => livreursEngages.contains(courierId);
+
   Future<void> refresh() async {
     _isLoading = true;
     _error = null;
