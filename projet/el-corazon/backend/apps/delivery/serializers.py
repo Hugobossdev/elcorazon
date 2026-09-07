@@ -540,3 +540,27 @@ class CourierUpdateSerializer(serializers.Serializer[Any]):
 
         instance.refresh_from_db()
         return instance
+
+
+class PeriodEarningsSerializer(serializers.Serializer[Any]):
+    """Ce qu'une période a rapporté, et combien de courses l'ont produite."""
+
+    earned = MoneyField(read_only=True)
+    deliveries = serializers.IntegerField(read_only=True)
+
+
+class EarningsSerializer(serializers.Serializer[Any]):
+    """Gains du livreur, agrégés côté serveur — `GET /delivery/me/earnings/`.
+
+    Les quatre périodes sont rendues ensemble : l'écran les présente en onglets,
+    et trois appels pour trois onglets feraient trois fois le même travail.
+
+    `lifetime` vient du dossier plutôt que d'une somme : c'est le compteur que
+    `_credit` tient à chaque livraison, et le solde sur lequel un retrait
+    s'apprécie.
+    """
+
+    today = PeriodEarningsSerializer(read_only=True)
+    week = PeriodEarningsSerializer(read_only=True)
+    month = PeriodEarningsSerializer(read_only=True)
+    lifetime = PeriodEarningsSerializer(read_only=True)

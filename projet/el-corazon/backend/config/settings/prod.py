@@ -143,3 +143,38 @@ for _required in ("DJANGO_SECRET_KEY", "JWT_SIGNING_KEY", "JWT_VERIFYING_KEY", "
             f"{_required} est absente de l'environnement. "
             "La production ne démarre pas sans configuration complète."
         )
+
+# Le service push, lui, ne s'oublie pas en restant vide : il **retombe** sur une
+# valeur par défaut parfaitement fonctionnelle, et c'est ce qui le rend
+# dangereux.
+#
+# `ConsolePushBackend` journalise et déclare tous les jetons livrés
+# (`PushResult(delivered=…)`). Rien n'échoue, rien n'est retenté, aucune métrique
+# ne bouge : un déploiement qui monte ses identifiants FCM sans poser cette
+# variable *paraît* configuré et n'envoie rien. Le défaut est passé exactement
+# ainsi — `.env.prod.example` déclarait `FCM_CREDENTIALS_PATH`, `FCM_PROJECT_ID`
+# et `FCM_TIMEOUT_SECONDS`, et taisait `PUSH_BACKEND`.
+#
+# Ce qu'on perd alors n'est pas un confort : l'ADR-008 pose la notification push
+# comme **doublure** du WebSocket pour les offres de course, parce qu'un livreur
+# n'a pas son application au premier plan en roulant. Sans elle, une course
+# proposée n'atteint personne.
+#
+# Le contrôle porte sur la classe et non sur les identifiants : ce sont eux qui
+# sont vérifiés à l'usage, par le connecteur lui-même, et un jeu d'identifiants
+# valide branché sur la console reste muet.
+#
+# Relu par `config` plutôt que pris à l'étoile de `base` : c'est la même lecture
+# que les garde-fous ci-dessus, et elle dit sans ambiguïté d'où vient la valeur.
+#
+# Le défaut répété ici est celui de `base` — et non `""` : c'est **l'absence** de
+# la variable qui constitue le défaut qu'on attrape, et un repli sur la chaîne
+# vide passerait à côté du seul cas qui s'est réellement produit.
+if config("PUSH_BACKEND", default="apps.notifications.push.ConsolePushBackend").endswith(
+    "ConsolePushBackend"
+):
+    raise RuntimeError(
+        "PUSH_BACKEND pointe sur ConsolePushBackend, qui n'envoie rien et déclare "
+        "pourtant tout livré. En production, poser "
+        "PUSH_BACKEND=apps.notifications.fcm.FirebaseCloudMessagingBackend."
+    )

@@ -203,6 +203,39 @@ services:
       - key: DEFAULT_FROM_EMAIL
         sync: false
 
+      # ------------------------------------------------------- notifications push
+      #
+      # Ce fichier n'en portait aucune trace, et l'omission ne se voyait pas :
+      # sans `PUSH_BACKEND`, `base.py` retombe sur `ConsolePushBackend`, qui
+      # journalise et déclare **tous les jetons livrés**. Aucune erreur, aucune
+      # reprise, aucune métrique — un déploiement muet qui se croit sain.
+      #
+      # Ce qui ne partait pas : l'offre de course au livreur, que l'ADR-008
+      # double par push parce qu'il ne regarde pas son écran en roulant ; l'alerte
+      # « nouvelle commande » au personnel ; la notification de livraison au
+      # client.
+      #
+      # `prod.py` refuse maintenant de démarrer sur la console, ce qui transforme
+      # cet oubli en échec de déploiement plutôt qu'en silence.
+      - key: PUSH_BACKEND
+        value: apps.notifications.fcm.FirebaseCloudMessagingBackend
+
+      # Le compte de service est un JSON multiligne : il ne passe pas par une
+      # variable d'environnement. Il se dépose en **Secret File** nommé
+      # `fcm.json` dans le tableau de bord Render, qui le monte sous
+      # `/etc/secrets/`. C'est l'équivalent du `/run/secrets` que `docker
+      # compose` monte en local — seul le chemin change.
+      - key: FCM_CREDENTIALS_PATH
+        value: /etc/secrets/fcm.json
+
+      # L'identifiant du projet Firebase, qui compose l'URL d'envoi. Une valeur
+      # fausse ici ne se voit qu'au premier envoi, en 404 sur `messages:send`.
+      - key: FCM_PROJECT_ID
+        sync: false
+
+      - key: FCM_TIMEOUT_SECONDS
+        value: "10"
+
       # ------------------------------------------------------- métier
       - key: DEFAULT_CURRENCY
         value: XOF

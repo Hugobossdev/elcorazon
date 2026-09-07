@@ -175,10 +175,14 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
             self.filter_queryset(self._perimetre())
             .order_by()
             .values("status")
-            .annotate(total=Count("id"))
+            # `nombre` et non `total` : `Order.total` est un `MoneyField`, et
+            # annoter sous ce nom redéfinit l'attribut — ce que `mypy` signale,
+            # et ce qui ferait lire un compte là où le reste du code lit un
+            # montant.
+            .annotate(nombre=Count("id"))
         )
-        resultat = {statut: 0 for statut in OrderStatus.values}
-        resultat.update({ligne["status"]: ligne["total"] for ligne in comptes})
+        resultat = dict.fromkeys(OrderStatus.values, 0)
+        resultat.update({ligne["status"]: ligne["nombre"] for ligne in comptes})
         return Response(resultat)
 
     @extend_schema(

@@ -8,8 +8,10 @@ vérifié : il n'existe pas de champ à valider.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
+from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -136,10 +138,14 @@ class OrderSerializer(serializers.ModelSerializer[Order]):
         second qui intéresse une facture ; les deux sont rendus, l'appelant
         choisit celui qu'il affiche.
         """
-        return self._compte(obj, "items_count", lambda lignes: sum(l.quantity for l in lignes))
+        return self._compte(
+            obj, "items_count", lambda lignes: sum(ligne.quantity for ligne in lignes)
+        )
 
     @staticmethod
-    def _compte(obj: Order, annotation: str, depuis_les_lignes: Any) -> int:
+    def _compte(
+        obj: Order, annotation: str, depuis_les_lignes: Callable[[QuerySet[OrderLine]], int]
+    ) -> int:
         """Lit l'annotation de la requête, ou retombe sur les lignes chargées.
 
         **Ces deux compteurs existent parce que la forme de liste ne porte pas

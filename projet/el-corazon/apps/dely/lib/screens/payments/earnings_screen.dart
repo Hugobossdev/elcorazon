@@ -10,7 +10,7 @@ import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
 import 'package:elcora_dely/presentation/messages_erreur.dart';
 import 'package:elcorazon_core/elcorazon_core.dart'
-    show Journal, Money, Withdrawal;
+    show Earnings, Journal, Money, PeriodEarnings, Withdrawal;
 
 class EarningsScreen extends StatefulWidget {
   const EarningsScreen({super.key});
@@ -26,7 +26,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
   /// Gains par période, en unité mineure — somme des `courier_fee` que le
   /// serveur a arrêtées sur les courses livrées de la période.
-  Map<String, Map<String, num>> _earningsData = {};
+  /// Les totaux rendus par le serveur — `null` tant qu'aucune lecture n'a
+  /// abouti, ce que l'écran distingue d'un livreur sans course.
+  Earnings? _gains;
 
   /// Les dernières courses livrées, pour la liste « gains récents ».
   List<Course> _recentDeliveries = const [];
@@ -58,26 +60,19 @@ class _EarningsScreenState extends State<EarningsScreen> {
         Journal.trace('⚠️ Could not refresh orders, using cached data: $e');
       }
 
-      // Les courses livrées **dont le serveur a horodaté la livraison**.
+      // Les courses livrées **dont le serveur a horodaté la livraison**, pour
+      // la liste des courses récentes.
       //
-      // Le regroupement par période se faisait sur `passeeLe`, c'est-à-dire,
-      // pour une course livrée dont le détail de commande n'est plus relu, sur
-      // `offered_at` — le moment où la course avait été *proposée*. Une course
-      // proposée à 23 h 50 et livrée à 00 h 10 comptait donc dans les gains de
-      // la veille, et le total d'une journée ne correspondait à aucune journée
-      // de travail.
+      // Le tri se fait sur `livreeLe` et non sur `passeeLe` : pour une course
+      // livrée dont le détail n'est plus relu, `passeeLe` vaut `offered_at`,
+      // c'est-à-dire le moment où la course avait été *proposée*.
+      //
+      // Les **totaux** ne se calculent plus ici — voir plus bas.
       final deliveries = appService.assignedDeliveries
           .where((course) =>
               course.etape == EtapeCourse.livree && course.livreeLe != null)
           .toList()
         ..sort((a, b) => b.livreeLe!.compareTo(a.livreeLe!));
-
-      final todayDeliveries =
-          deliveries.where((c) => _isToday(c.livreeLe!)).toList();
-      final weekDeliveries =
-          deliveries.where((c) => _isThisWeek(c.livreeLe!)).toList();
-      final monthDeliveries =
-          deliveries.where((c) => _isThisMonth(c.livreeLe!)).toList();
 
       // Best-effort : l'écran reste utilisable sans l'historique des retraits.
       var withdrawals = const <Withdrawal>[];
@@ -87,33 +82,26 @@ class _EarningsScreenState extends State<EarningsScreen> {
         Journal.trace('⚠️ Historique des retraits illisible : $e');
       }
 
-      /// Somme des rémunérations que le serveur a arrêtées pour ces courses.
-      ///
-      /// Cet écran appliquait auparavant une commission de 10 % au total de la
-      /// commande, majorée de pourboires et de primes estimés à 10 % et 5 %.
-      /// Aucun de ces trois taux n'existe au contrat, et le total en question
-      /// vaut **zéro** sur toute course livrée : le détail d'une commande
-      /// n'est pas relu une fois la course terminée. L'écran affichait donc
-      /// invariablement 0 FCFA, quelle que soit la période.
-      ///
-      /// `courier_fee` est la rémunération réelle, calculée et rendue par le
-      /// serveur sur chaque affectation. Le taux appartient au serveur.
-      Map<String, num> calculerGains(List<Course> courses) {
-        final total = courses.fold<int>(
-          0,
-          (somme, course) => somme + (course.remuneration?.amountMinor ?? 0),
-        );
-        return {'total': total, 'deliveries': courses.length};
-      }
+      // Les totaux viennent du **serveur**, en une lecture.
+      //
+      // Ils étaient calculés ici, sur `deliveries` — c'est-à-dire sur les
+      // courses que l'application avait en mémoire, soixante au plus
+      // (`recentlyDelivered` suit trois pages de vingt). L'onglet « ce mois »
+      // n'en couvrait donc que les six derniers jours pour un livreur à dix
+      // courses par jour, et affichait ce total-là sans rien signaler. C'est le
+      // genre de chiffre qu'on ne met pas en doute : on compte sa paie dessus.
+      //
+      // Le serveur les a toutes, et pose les bornes de période dans le fuseau
+      // de l'établissement — une course livrée à 23 h 30 appartient à cette
+      // journée-là pour celui qui l'a faite.
+      //
+      // `deliveries` continue de servir : elle alimente la liste des courses
+      // récentes, où une borne est légitime.
+      final gains = await appService.loadEarnings();
 
       if (mounted) {
         setState(() {
-          _earningsData = {
-            'today': calculerGains(todayDeliveries),
-            'week': calculerGains(weekDeliveries),
-            'month': calculerGains(monthDeliveries),
-          };
-
+          _gains = gains;
           _recentDeliveries = deliveries.take(10).toList();
           _withdrawals = withdrawals;
           _isLoading = false;
@@ -130,25 +118,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
     }
   }
 
-  bool _isToday(DateTime date) {
-    final now = DateTime.now();
-    return date.day == now.day &&
-        date.month == now.month &&
-        date.year == now.year;
-  }
-
-  bool _isThisWeek(DateTime date) {
-    final now = DateTime.now();
-    final weekStart = now.subtract(Duration(days: now.weekday - 1));
-    final weekEnd = weekStart.add(const Duration(days: 6));
-    return date.isAfter(weekStart.subtract(const Duration(days: 1))) &&
-        date.isBefore(weekEnd.add(const Duration(days: 1)));
-  }
-
-  bool _isThisMonth(DateTime date) {
-    final now = DateTime.now();
-    return date.month == now.month && date.year == now.year;
-  }
+  // `_isToday`, `_isThisWeek` et `_isThisMonth` ont été retirés avec le calcul
+  // qu'ils servaient. Les bornes de période sont désormais posées par le
+  // serveur — et dans le **fuseau de l'établissement**, ce que ces trois-là ne
+  // savaient pas faire : `DateTime.now()` répond dans le fuseau du téléphone,
+  // qui n'est pas forcément celui où le livreur travaille.
 
   /// Demande un retrait sur le **solde**, montant choisi par le livreur.
   ///
@@ -280,8 +254,15 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
-  Map<String, num> _getCurrentEarnings() {
-    return _earningsData[_selectedPeriod] ?? {};
+  /// La période affichée, ou `null` tant que le serveur n'a rien rendu.
+  PeriodEarnings? _periodeAffichee() {
+    final gains = _gains;
+    if (gains == null) return null;
+    return switch (_selectedPeriod) {
+      'week' => gains.week,
+      'month' => gains.month,
+      _ => gains.today,
+    };
   }
 
   /// Devise dans laquelle le livreur est payé, telle que le serveur la rend.
@@ -444,7 +425,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildEarningsSummary() {
-    final earnings = _getCurrentEarnings();
+    final periode = _periodeAffichee();
 
     return Card(
       elevation: 4,
@@ -477,7 +458,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              _formatMontant(earnings['total'] ?? 0),
+              // Le `Money` du serveur porte sa propre devise : la reformer
+              // depuis `_devise` referait un choix déjà fait, et le referait
+              // faux le jour où un livreur est payé dans une autre.
+              periode?.earned.format() ?? _formatMontant(0),
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 32,
@@ -489,7 +473,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildSummaryItem(
-                    'Livraisons', '${earnings['deliveries'] ?? 0}'),
+                    'Livraisons', '${periode?.deliveries ?? 0}'),
               ],
             ),
           ],
@@ -521,11 +505,19 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildEarningsBreakdown() {
-    final earnings = _getCurrentEarnings();
-    final deliveriesCount = earnings['deliveries'] ?? 0;
-    final deliveriesEarning = earnings['total'] ?? 0;
-    final avgPerDelivery =
-        deliveriesCount > 0 ? deliveriesEarning / deliveriesCount : 0.0;
+    final periode = _periodeAffichee();
+    final deliveriesCount = periode?.deliveries ?? 0;
+    final deliveriesEarning = periode?.earned;
+    // La moyenne est un montant, pas un ratio : elle se reforme en `Money`
+    // dans la devise de la somme, et non par un `double` qu'on habillerait
+    // ensuite. Arrondie à l'unité mineure — un demi-franc CFA n'existe pas.
+    final avgPerDelivery = deliveriesCount > 0 && deliveriesEarning != null
+        ? Money(
+            amountMinor:
+                (deliveriesEarning.amountMinor / deliveriesCount).round(),
+            currency: deliveriesEarning.currency,
+          )
+        : null;
 
     return Card(
       elevation: 2,
@@ -545,7 +537,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             _buildBreakdownItem(
               'Livraisons',
               '$deliveriesCount livraison${deliveriesCount > 1 ? 's' : ''}',
-              _formatMontant(deliveriesEarning),
+              deliveriesEarning?.format() ?? _formatMontant(0),
               Icons.delivery_dining,
               Colors.blue,
             ),
@@ -554,7 +546,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             _buildBreakdownItem(
               'Gain moyen',
               'par livraison',
-              deliveriesCount > 0 ? _formatMontant(avgPerDelivery) : '—',
+              avgPerDelivery?.format() ?? '—',
               Icons.payments_outlined,
               Colors.purple,
             ),

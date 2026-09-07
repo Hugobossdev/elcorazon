@@ -57,7 +57,62 @@ from collections import defaultdict, deque
 
 #: `part` compte autant qu'`import` : un fichier en `part of` n'est pas
 #: autonome, il appartient à celui qui le déclare.
-DIRECTIVE = re.compile(r"""(?:^|\n)\s*(?:import|export|part)\s+['"]([^'"]+)['"]""")
+#:
+#: La directive est capturée **jusqu'à son point-virgule**, et non sur sa
+#: première chaîne : une directive Dart peut en porter plusieurs.
+DIRECTIVE = re.compile(r"""(?:^|\n)\s*(?:import|export|part)\s+([^;]+);""")
+
+#: Une chaîne littérale, dans le corps d'une directive.
+#:
+#: ## Ce que la version précédente ne voyait pas
+#:
+#: Le motif ne retenait que la **première**. Sur la forme conditionnelle, qui
+#: est la façon standard de séparer web et natif en Dart —
+#:
+#:     export 'x_stub.dart' if (dart.library.js_interop) 'x_web.dart';
+#:
+#: — la branche `x_web.dart` n'était donc jamais suivie, et ce script la
+#: déclarait injoignable. C'est un **faux positif**, et du pire genre : la
+#: conclusion affichée est « les brancher, ou les supprimer », et supprimer
+#: `notification_navigateur_web.dart` aurait retiré l'affichage des notifications
+#: push sur la version navigateur du client — la seule implémentation qui
+#: existe, `flutter_local_notifications` commençant son `show()` par
+#: `if (kIsWeb) return;`.
+#:
+#: Un outil qui garde la CI rouge sur du code vivant se fait désarmer, puis
+#: contourner. Les deux branches sont donc retenues : `dart.library.*` n'est
+#: connu qu'à la compilation, et l'une comme l'autre s'exécute selon la cible.
+CHAINE = re.compile(r"""['"]([^'"]+)['"]""")
+
+
+def cibles_des_directives(texte: str) -> list[str]:
+    """Les chemins que ce fichier atteint, branches conditionnelles comprises."""
+    return [cible for corps in DIRECTIVE.findall(texte) for cible in CHAINE.findall(corps)]
+
+
+#: Déclaration, dans le fichier lui-même, d'une mise à l'écart assumée.
+#:
+#:     // code-mort: hors-graphe — outil interne, poussé à la main en debug
+#:
+#: ## Pourquoi ce mécanisme, plutôt qu'une liste dans ce script
+#:
+#: Certains fichiers sont **délibérément** hors du graphe. La galerie du pack
+#: d'emojis en est un : aucune route n'y mène, elle se pousse à la main depuis un
+#: point d'arrêt, et c'est écrit dans son en-tête — la garder hors du routeur
+#: évite qu'un lien traîne jusqu'en production. Elle sert encore : les trente
+#: illustrations ne sont pas toutes produites, et c'est là qu'on les juge.
+#:
+#: Sans ce mécanisme, il n'y avait que deux issues, mauvaises toutes les deux :
+#: supprimer un outil dont on a besoin, ou laisser la CI rouge — auquel cas
+#: l'état normal devient « rouge » et un vrai fichier mort s'y perd.
+#:
+#: La déclaration vit dans le fichier, et non dans une liste ici : elle se
+#: déplace et se supprime avec lui, et un fichier renommé ne laisse pas derrière
+#: lui une exemption orpheline qui couvrirait autre chose.
+#:
+#: Le motif exige un **motif rédigé** après le tiret. Une exemption qu'on doit
+#: justifier se pose moins facilement qu'une case à cocher.
+HORS_GRAPHE = re.compile(r"//\s*code-mort:\s*hors-graphe\s*[—-]\s*(\S.*)")
 
 #: Racine du dépôt, déduite de l'emplacement de ce script (`tools/`).
 RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -99,7 +154,7 @@ def graphe(lib: str, fichiers: set[str], paquet: str | None) -> dict[str, set[st
             arcs[source] = cibles
             continue
 
-        for brut in DIRECTIVE.findall(texte):
+        for brut in cibles_des_directives(texte):
             if brut.startswith("dart:"):
                 continue
             if brut.startswith("package:"):
@@ -127,11 +182,17 @@ def points_d_entree(fichiers: set[str], lib: str) -> set[str]:
     return {f for f in fichiers if os.path.basename(f) == "main.dart"}
 
 
-def analyse(racine_app: str) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
-    """Rend (fichiers injoignables, fichiers zombies), chacun avec son volume."""
+def analyse(
+    racine_app: str,
+) -> tuple[list[tuple[str, int]], list[tuple[str, int]], list[tuple[str, str]]]:
+    """Rend (injoignables, zombies, mis à l'écart déclarés).
+
+    Les deux premiers portent un volume en lignes, le troisième le motif que le
+    fichier déclare lui-même (voir [HORS_GRAPHE]).
+    """
     lib = os.path.join(racine_app, "lib")
     if not os.path.isdir(lib):
-        return [], []
+        return [], [], []
 
     fichiers = fichiers_dart(lib)
     arcs = graphe(lib, fichiers, nom_du_paquet(racine_app))
@@ -155,9 +216,22 @@ def analyse(racine_app: str) -> tuple[list[tuple[str, int]], list[tuple[str, int
     def relatif(chemin: str) -> str:
         return os.path.relpath(chemin, lib).replace(os.sep, "/")
 
+    def hors_graphe(chemin: str) -> str | None:
+        """Le motif déclaré par le fichier, s'il s'écarte volontairement."""
+        try:
+            with open(chemin, encoding="utf-8", errors="ignore") as fh:
+                trouve = HORS_GRAPHE.search(fh.read())
+        except OSError:
+            return None
+        return trouve.group(1).strip() if trouve else None
+
+    orphelins = fichiers - atteints
+    ecartes = {f: motif for f in orphelins if (motif := hors_graphe(f)) is not None}
+
     injoignables = sorted(
-        ((relatif(f), lignes(f)) for f in fichiers - atteints), key=lambda t: -t[1]
+        ((relatif(f), lignes(f)) for f in orphelins - set(ecartes)), key=lambda t: -t[1]
     )
+    declares = sorted((relatif(f), motif) for f, motif in ecartes.items())
 
     # Zombies : atteints, mais par `main.dart` seulement. Les écrans racines et
     # `firebase_options.dart` sont dans ce cas légitimement — d'où le simple
@@ -176,7 +250,7 @@ def analyse(racine_app: str) -> tuple[list[tuple[str, int]], list[tuple[str, int
         key=lambda t: -t[1],
     )
 
-    return injoignables, zombies
+    return injoignables, zombies, declares
 
 
 def main(argv: list[str]) -> int:
@@ -204,7 +278,7 @@ def main(argv: list[str]) -> int:
     for cible in cibles:
         chemin = cible if os.path.isabs(cible) else os.path.join(RACINE, cible)
         etiquette = os.path.basename(os.path.normpath(chemin))
-        injoignables, zombies = analyse(chemin)
+        injoignables, zombies, declares = analyse(chemin)
 
         if injoignables:
             volume = sum(n for _, n in injoignables)
@@ -215,6 +289,12 @@ def main(argv: list[str]) -> int:
                 print(f"    {rel}  ({n} l.)")
         else:
             print(f"\n{etiquette} — aucun fichier injoignable")
+
+        # Toujours affichés, jamais bloquants : une mise à l'écart qui
+        # disparaît de la sortie finit par ne plus être relue, et le motif
+        # qu'elle porte cesse d'être vrai sans que personne ne le voie.
+        for rel, motif in declares:
+            print(f"  (hors graphe, déclaré) {rel} — {motif}")
 
         if args.zombies and zombies:
             print(f"  (informatif) {len(zombies)} fichiers atteints par main.dart seul :")

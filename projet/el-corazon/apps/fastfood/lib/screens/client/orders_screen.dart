@@ -68,6 +68,31 @@ class _OrdersScreenState extends State<OrdersScreen>
           );
         }
 
+        // Une panne de chargement n'est pas un historique vide.
+        //
+        // `_loadUserOrders` rattrapait toute erreur en posant une liste vide, et
+        // cet écran affichait alors « Aucune commande passée — votre historique
+        // apparaîtra ici ». Un client dont le réseau vient de couper, ou dont la
+        // session a expiré, lisait donc une affirmation fausse sur son propre
+        // compte, sans aucun moyen de réessayer.
+        //
+        // Même règle que la carte (`erreurCatalogue`, `menu_screen.dart`), qui
+        // avait déjà été corrigée de ce défaut-là.
+        if (appService.erreurHistorique != null && appService.orders.isEmpty) {
+          return Scaffold(
+            backgroundColor: theme.colorScheme.surface,
+            appBar: const GlassAppBar(title: 'Mes commandes', showBack: false),
+            body: etats.EmptyStateWidget(
+              title: 'Commandes indisponibles',
+              message: '${appService.erreurHistorique!} '
+                  'Vos commandes sont bien là — c’est leur lecture qui a échoué.',
+              icon: Icons.cloud_off_rounded,
+              actionText: 'Réessayer',
+              onAction: () => appService.rechargerHistorique(),
+            ),
+          );
+        }
+
         return Scaffold(
           backgroundColor: theme.colorScheme.surface,
           appBar: GlassAppBar(

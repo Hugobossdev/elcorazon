@@ -53,9 +53,7 @@ def _url(courier: CourierProfile) -> str:
 
 
 class TestCorrection:
-    def test_la_plaque_se_corrige(
-        self, as_responsable: APIClient, courier: CourierProfile
-    ) -> None:
+    def test_la_plaque_se_corrige(self, as_responsable: APIClient, courier: CourierProfile) -> None:
         reponse = as_responsable.patch(
             _url(courier), {"vehicle_plate": "TG-4242-AB"}, format="json"
         )
@@ -194,14 +192,10 @@ class TestListeBlanche:
         courier.user.refresh_from_db()
         assert courier.user.email == avant
 
-    def test_put_est_refuse(
-        self, as_responsable: APIClient, courier: CourierProfile
-    ) -> None:
+    def test_put_est_refuse(self, as_responsable: APIClient, courier: CourierProfile) -> None:
         """Un remplacement complet écraserait par un défaut le premier champ
         que l'appelant oublierait."""
-        reponse = as_responsable.put(
-            _url(courier), {"vehicle_plate": "TG-3333-WW"}, format="json"
-        )
+        reponse = as_responsable.put(_url(courier), {"vehicle_plate": "TG-3333-WW"}, format="json")
 
         assert reponse.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
@@ -228,9 +222,7 @@ class TestValidation:
             phone="+22899887766",
         )
 
-        reponse = as_responsable.patch(
-            _url(courier), {"phone": "+22899887766"}, format="json"
-        )
+        reponse = as_responsable.patch(_url(courier), {"phone": "+22899887766"}, format="json")
 
         assert reponse.status_code == status.HTTP_400_BAD_REQUEST
         assert "phone" in reponse.data.get("errors", reponse.data)
@@ -263,9 +255,7 @@ class TestPermissionsEtPerimetre:
     ) -> None:
         """Lire la flotte ne donne pas le droit de l'écrire."""
         client = APIClient()
-        client.force_authenticate(
-            _personnel(restaurant, "lecteur@elcorazon.test", "couriers.read")
-        )
+        client.force_authenticate(_personnel(restaurant, "lecteur@elcorazon.test", "couriers.read"))
 
         reponse = client.patch(_url(courier), {"vehicle_plate": "TG-6666-UU"}, format="json")
 

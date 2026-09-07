@@ -386,7 +386,12 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            e.toString(),
+                            // Le motif du serveur, pas le `toString()` de
+                            // l'exception : « ApiException(409, …) » ou
+                            // « DioException [connection error] » sous les yeux
+                            // d'un livreur en service ne lui dit ni quoi faire
+                            // ni quoi attendre.
+                            messageErreur(e),
                             style: TextStyle(color: Colors.grey[600]),
                             textAlign: TextAlign.center,
                           ),

@@ -4,6 +4,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'package:elcora_fast/presentation/etape_de_course.dart';
+import 'package:elcora_fast/presentation/messages_erreur.dart';
 import 'package:elcora_fast/presentation/deplacement_livreur.dart';
 import 'package:elcora_fast/presentation/trajet_livreur.dart';
 import 'package:provider/provider.dart';
@@ -87,6 +89,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
   double? _capObserve;
 
   StreamSubscription<Order>? _orderUpdatesSubscription;
+  StreamSubscription<EtapeDeCourse>? _courseUpdatesSubscription;
   StreamSubscription<PositionLivreur>? _deliveryLocationSubscription;
   RealtimeTrackingService? _trackingService;
 
@@ -181,6 +184,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
   @override
   void dispose() {
     _orderUpdatesSubscription?.cancel();
+    _courseUpdatesSubscription?.cancel();
     _deliveryLocationSubscription?.cancel();
     _estimatedTimeUpdateTimer?.cancel();
     _orderRefreshTimer?.cancel();
@@ -240,8 +244,10 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
       eccore.Journal.trace('❌ Error loading order details: $e');
       setState(() {
         _isLoading = false;
-        _errorMessage =
-            'Erreur lors du chargement de la commande: ${e.toString()}';
+        // Le motif du serveur plutôt que le nom de la classe Dart : le client
+        // qui suit son repas doit savoir s'il faut attendre, se reconnecter ou
+        // réessayer.
+        _errorMessage = messageErreur(e);
       });
     }
   }
@@ -739,6 +745,23 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
       // ci-dessous, eux, sont posés tout de suite : ils écoutent le service,
       // pas le canal, et survivent à son ouverture différée.
       await _ouvrirSuiviSiDiffuse();
+
+      // L'étape de la **course**, que le statut de la commande ne reflète pas.
+      //
+      // `accepted` ne projette rien sur la commande — une commande reste
+      // « prête » tant que le repas n'est pas parti. L'affectation d'un livreur
+      // ne produisait donc aucun événement écouté ici, et n'apparaissait qu'à
+      // la relecture périodique suivante : jusqu'à une minute pendant laquelle
+      // le client ne savait pas que quelqu'un roulait vers le restaurant.
+      _courseUpdatesSubscription = _trackingService!.courseUpdates.listen(
+        (etape) {
+          if (etape.orderId != widget.orderId || !mounted) return;
+          // Relecture plutôt que recopie du nom : `/tracking/orders/{id}/`
+          // porte aussi la note du livreur, son véhicule et sa dernière
+          // position, que la diffusion ne transporte pas.
+          unawaited(_loadTracking());
+        },
+      );
 
       // S'abonner aux mises à jour de la commande
       _orderUpdatesSubscription = _trackingService!.orderUpdates.listen(

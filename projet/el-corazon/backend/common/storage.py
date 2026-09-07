@@ -218,7 +218,7 @@ class ObjectStorage(Storage):
 
     # -- lecture --------------------------------------------------------
 
-    def _open(self, name: str, mode: str = "rb") -> File:
+    def _open(self, name: str, mode: str = "rb") -> File[Any]:
         """Relit un fichier déposé.
 
         Passe par l'URL du stockage, donc signée pour un dossier privé : la
@@ -233,7 +233,11 @@ class ObjectStorage(Storage):
         reponse.raise_for_status()
         return File(io.BytesIO(reponse.content), name=name)
 
-    def url(self, name: str, parameters: dict[str, Any] | None = None, **kwargs: Any) -> str:
+    # La signature reprend celle de `Storage.url`, qui accepte `None` : la
+    # restreindre à `str` rendait cette classe insubstituable à sa base, ce que
+    # `mypy` refusait à raison. `parameters` et `**kwargs` restent pour les
+    # appelants qui suivent l'interface de `django-storages`.
+    def url(self, name: str | None, parameters: dict[str, Any] | None = None, **kwargs: Any) -> str:
         """Adresse de lecture.
 
         Publique et stable pour un dossier public, signée et expirante pour un
@@ -241,6 +245,12 @@ class ObjectStorage(Storage):
         classe, pas par l'appelant. Aucun site d'appel ne peut donc rendre
         publique une pièce d'identité en oubliant un argument.
         """
+        if name is None:
+            # `Storage.url` accepte `None` dans sa signature ; aucune adresse ne
+            # s'en déduit. Lever nomme l'appel fautif, là où rendre une chaîne
+            # vide poserait un lien mort dans une page ou un courriel.
+            raise ValueError("Aucun nom de fichier : pas d'adresse à construire.")
+
         if not self.is_public:
             return StorageService.presigned_url(self.bucket_alias, name)
 

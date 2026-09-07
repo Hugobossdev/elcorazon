@@ -48,9 +48,7 @@ def supplements(menu_item: MenuItem) -> OptionGroup:
 
 @pytest.fixture
 def fromage(supplements: OptionGroup) -> Option:
-    return Option.objects.create(
-        group=supplements, name="Fromage", price_delta=Money(500, XOF)
-    )
+    return Option.objects.create(group=supplements, name="Fromage", price_delta=Money(500, XOF))
 
 
 @pytest.fixture
@@ -68,9 +66,7 @@ def panier_personnalise(
     bacon: Option,
 ) -> None:
     """Deux burgers « À point », fromage et bacon — 3 500 + 1 500, ×2."""
-    cuisson = Option.objects.create(
-        group=option_group, name="À point", price_delta=Money(0, XOF)
-    )
+    cuisson = Option.objects.create(group=option_group, name="À point", price_delta=Money(0, XOF))
     cart = CartService.cart_for(customer, restaurant)
     CartService.add_line(
         cart=cart, menu_item=menu_item, quantity=2, options=[cuisson, fromage, bacon]
@@ -219,9 +215,7 @@ class TestLaCommandeRetientLaPersonnalisation:
         )
         cart = CartService.cart_for(customer, restaurant)
         CartService.add_line(cart=cart, menu_item=menu_item, quantity=1, options=[cuisson])
-        CartService.add_line(
-            cart=cart, menu_item=menu_item, quantity=1, options=[cuisson, fromage]
-        )
+        CartService.add_line(cart=cart, menu_item=menu_item, quantity=1, options=[cuisson, fromage])
 
         response = commander(as_customer, restaurant, address)
 

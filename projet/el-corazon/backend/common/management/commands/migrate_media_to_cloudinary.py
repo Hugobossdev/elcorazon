@@ -73,7 +73,13 @@ class Command(BaseCommand):
 
         for modele, champs in self._champs_fichier():
             for champ in champs:
-                for instance in modele.objects.exclude(**{champ: ""}).exclude(
+                # `apps.get_models()` rend des `type[Model]`, sur lesquels le
+                # greffon django-stubs ne sait pas retrouver le gestionnaire :
+                # `objects` n'est déclaré que sur les sous-classes concrètes.
+                # `_default_manager` est l'accès typé prévu pour ce cas, et c'est
+                # d'ailleurs celui que Django emploie dans son propre code
+                # générique.
+                for instance in modele._default_manager.exclude(**{champ: ""}).exclude(
                     **{f"{champ}__isnull": True}
                 ):
                     fichier = getattr(instance, champ)

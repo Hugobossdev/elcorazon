@@ -32,6 +32,7 @@ export 'src/delivery/courier_application.dart';
 export 'src/delivery/courier_profile.dart';
 export 'src/delivery/courier_shift.dart';
 export 'src/delivery/delivery_repository.dart';
+export 'src/delivery/earnings.dart';
 export 'src/delivery/managed_assignment_repository.dart';
 export 'src/delivery/managed_courier_repository.dart';
 export 'src/design/emojis/app_emoji.dart';

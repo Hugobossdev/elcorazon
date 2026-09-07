@@ -2,6 +2,7 @@ import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/delivery/assignment.dart';
 import 'package:elcorazon_core/src/delivery/courier_application.dart';
 import 'package:elcorazon_core/src/delivery/courier_profile.dart';
+import 'package:elcorazon_core/src/delivery/earnings.dart';
 
 /// Accès à `/api/v1/delivery/*` du point de vue du **livreur** — voir
 /// `backend/apps/delivery/{serializers,views,services}.py`.
@@ -48,6 +49,17 @@ class DeliveryRepository {
   Future<CourierProfile> me() async {
     final response = await apiClient.get('/delivery/me/');
     return CourierProfile.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Les gains du livreur, agrégés par le serveur (`/delivery/me/earnings/`).
+  ///
+  /// À préférer **toujours** à une somme faite sur [recentlyDelivered] : cette
+  /// liste est bornée à quelques pages, et un total mensuel calculé dessus est
+  /// silencieusement tronqué dès qu'un livreur travaille un peu. Voir
+  /// [Earnings].
+  Future<Earnings> earnings() async {
+    final response = await apiClient.get('/delivery/me/earnings/');
+    return Earnings.fromJson(response.data as Map<String, dynamic>);
   }
 
   /// Bascule de disponibilité. Le serveur rend le dossier à jour : lire
@@ -114,10 +126,15 @@ class DeliveryRepository {
   /// Les livraisons récentes, du plus récent au plus ancien.
   ///
   /// Borné à dessein : un livreur en poste depuis un an a des centaines de
-  /// courses derrière lui, et les écrans qui s'en servent (gains,
-  /// statistiques) ne regardent que les jours écoulés. Les totaux de carrière
-  /// se lisent sur le dossier ([me]), qui les tient à jour côté serveur, pas
-  /// en additionnant des pages.
+  /// courses derrière lui, et les écrans qui s'en servent n'en montrent qu'une
+  /// liste.
+  ///
+  /// **Ne rien totaliser à partir d'ici.** La borne était comprise comme « les
+  /// jours écoulés », et l'écran des gains en tirait un total *mensuel* : trois
+  /// pages de vingt, soit soixante courses, ce qui couvre six jours à dix
+  /// courses par jour. Le montant affiché était donc plus petit que la réalité,
+  /// sans que rien ne le signale. Les sommes se demandent à [earnings], qui les
+  /// calcule en base sur la totalité de l'historique.
   Future<List<Assignment>> recentlyDelivered({int maxPages = 3}) =>
       assignments(status: DeliveryStatus.delivered, maxPages: maxPages);
 

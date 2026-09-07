@@ -84,9 +84,7 @@ def gerant(restaurant: Restaurant) -> APIClient:
         "gerant@elcorazon.test", "motdepasse", full_name="Gérante", user_type=UserType.STAFF
     )
     membre.roles.add(
-        Role.objects.create(
-            name="Gérant", permissions=["restaurants.read", "restaurants.write"]
-        )
+        Role.objects.create(name="Gérant", permissions=["restaurants.read", "restaurants.write"])
     )
     StaffMembership.objects.create(user=membre, restaurant=restaurant)
     return connecte(membre)
@@ -474,15 +472,11 @@ class TestCompletude:
         assert any("article disponible" in manque for manque in manques)
         assert any("livreur approuvé" in manque for manque in manques)
 
-    def test_un_etablissement_complet_n_a_plus_de_manque(
-        self, restaurant: Restaurant
-    ) -> None:
+    def test_un_etablissement_complet_n_a_plus_de_manque(self, restaurant: Restaurant) -> None:
         completer(restaurant)
         assert restaurant.configuration_gaps() == []
 
-    def test_transition_to_refuse_la_publication_incomplete(
-        self, restaurant: Restaurant
-    ) -> None:
+    def test_transition_to_refuse_la_publication_incomplete(self, restaurant: Restaurant) -> None:
         restaurant.status = RestaurantStatus.READY
         restaurant.save(update_fields=["status"])
 
@@ -492,9 +486,7 @@ class TestCompletude:
         assert refus.value.manques
         assert refus.value.code == "incomplete_configuration"
 
-    def test_transition_to_refuse_un_enchainement_illegal(
-        self, restaurant: Restaurant
-    ) -> None:
+    def test_transition_to_refuse_un_enchainement_illegal(self, restaurant: Restaurant) -> None:
         with pytest.raises(IllegalTransition):
             # « en service » → « prêt » n'existe pas : on suspend d'abord.
             restaurant.transition_to(RestaurantStatus.READY)
@@ -565,9 +557,7 @@ class TestIsolationEntreEtablissements:
             slug="poulet-braise",
             price=Money(2_500, XOF),
         )
-        categorie_abidjan = Category.objects.create(
-            restaurant=abidjan, name="Plats", slug="plats"
-        )
+        categorie_abidjan = Category.objects.create(restaurant=abidjan, name="Plats", slug="plats")
         MenuItem.objects.create(
             restaurant=abidjan,
             category=categorie_abidjan,
@@ -577,12 +567,8 @@ class TestIsolationEntreEtablissements:
         )
 
         client = APIClient()
-        a_lome = client.get(
-            reverse("v1:catalog:item-list"), {"restaurant__slug": restaurant.slug}
-        )
-        a_abidjan = client.get(
-            reverse("v1:catalog:item-list"), {"restaurant__slug": abidjan.slug}
-        )
+        a_lome = client.get(reverse("v1:catalog:item-list"), {"restaurant__slug": restaurant.slug})
+        a_abidjan = client.get(reverse("v1:catalog:item-list"), {"restaurant__slug": abidjan.slug})
 
         assert [a["price"]["amount"] for a in a_lome.data["results"]] == ["2500"]
         assert [a["price"]["amount"] for a in a_abidjan.data["results"]] == ["3200"]

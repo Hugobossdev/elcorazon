@@ -249,9 +249,7 @@ class ManagedRestaurantViewSet(
         cible = payload.validated_data["status"]
 
         if cible == RestaurantStatus.ACTIVE:
-            assert_unscoped(
-                authenticated_user(request), "La mise en service d'un établissement"
-            )
+            assert_unscoped(authenticated_user(request), "La mise en service d'un établissement")
 
         etablissement = self.get_object()
         etablissement.transition_to(cible)

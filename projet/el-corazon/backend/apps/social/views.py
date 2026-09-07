@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from django.db.models import Q, QuerySet
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin
@@ -65,6 +66,13 @@ class SocialGroupViewSet(
         )
         return Response(SocialGroupSerializer(result.group).data, status=status.HTTP_201_CREATED)
 
+    # Sans cette déclaration, `drf-spectacular` publie la route **sans corps de
+    # requête** : le schéma dit alors qu'un `POST` nu suffit, quand le serveur
+    # exige `invite_code`. `--fail-on-warn` ne le signale pas, et le test de
+    # contrat s'appuyant sur ce même schéma, personne ne voyait l'écart.
+    @extend_schema(
+        request=JoinGroupSerializer, responses={200: SocialGroupSerializer}, tags=["social"]
+    )
     @action(detail=False, methods=["post"])
     def join(self, request: Request) -> Response:
         serializer = JoinGroupSerializer(data=request.data)

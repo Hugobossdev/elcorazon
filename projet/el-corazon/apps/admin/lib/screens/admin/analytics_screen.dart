@@ -130,6 +130,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             return const LoadingWidget(message: 'Chargement des analytics...');
           }
 
+          // Une lecture qui échoue doit se dire.
+          //
+          // `AnalyticsService` renseignait bien `_error`, et cet écran ne le
+          // lisait jamais. Chaque carte commençant par
+          // `if (_generalStats == null) return const SizedBox.shrink();`, un
+          // 403 sans `analytics.read`, un 500 ou une coupure réseau rendaient
+          // tous la même chose : une page vide sous le sélecteur de période,
+          // sans message ni moyen de réessayer. Le tableau de bord et l'écran
+          // des rôles traitaient déjà le cas — celui-ci était l'exception.
+          if (analyticsService.error != null && _generalStats == null) {
+            return _EchecDeLecture(
+              motif: analyticsService.error!,
+              reessayer: _loadAnalytics,
+            );
+          }
+
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -1034,6 +1050,49 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ],
           );
         }).toList(),
+      ),
+    );
+  }
+}
+
+
+/// Ce que l'écran montre quand les rapports n'ont pas pu être lus.
+///
+/// Le motif vient du serveur (`detail`, RFC 9457) : « Vous n'avez pas la
+/// permission analytics.read » se corrige, « Le serveur ne répond pas
+/// correctement » s'attend. Une page vide ne disait ni l'un ni l'autre.
+class _EchecDeLecture extends StatelessWidget {
+  const _EchecDeLecture({required this.motif, required this.reessayer});
+
+  final String motif;
+  final VoidCallback reessayer;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.query_stats_rounded, size: 48, color: scheme.outline),
+            const SizedBox(height: 12),
+            Text(
+              'Rapports indisponibles',
+              style: Theme.of(context).textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(motif, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            OutlinedButton(
+              onPressed: reessayer,
+              child: const Text('Réessayer'),
+            ),
+          ],
+        ),
       ),
     );
   }

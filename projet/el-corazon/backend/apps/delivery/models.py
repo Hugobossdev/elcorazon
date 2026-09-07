@@ -21,6 +21,8 @@ from django.db import models
 from apps.accounts.models import User
 from apps.delivery.states import (
     DELIVERY_MACHINE,
+    ENGAGED_STATUSES,
+    TERMINAL_STATUSES,
     VERIFICATION_MACHINE,
     DeliveryStatus,
     VerificationStatus,
@@ -187,14 +189,30 @@ class Assignment(UUIDModel, TimeStampedModel):
             # heurte à la base, pas à un état incohérent.
             models.UniqueConstraint(
                 fields=["order"],
-                condition=~models.Q(
-                    status__in=[
-                        DeliveryStatus.DECLINED,
-                        DeliveryStatus.CANCELLED,
-                        DeliveryStatus.DELIVERED,
-                    ]
-                ),
+                condition=~models.Q(status__in=TERMINAL_STATUSES),
                 name="one_active_assignment_per_order",
+            ),
+            # L6 — une seule course **engagée** par livreur.
+            #
+            # Symétrique de la précédente, et elle manquait. L'unicité par
+            # commande empêche deux livreurs de porter le même repas ; elle ne
+            # dit rien du cas inverse — un livreur qui en porte deux. Rien ne
+            # l'interdisait, et `available_for` proposait sans broncher un
+            # livreur déjà en route.
+            #
+            # Ce que cela cassait est plus loin que la base : `Dely` n'émet ses
+            # relevés de position que pour **une** course (`activeCourse`), et
+            # son écran de navigation ne guide que vers celle-là. Le client de la
+            # seconde commande suivait donc un livreur immobile, avec une
+            # estimation d'arrivée qui n'avançait plus.
+            #
+            # `offered` est hors du champ, et c'est le point délicat : recevoir
+            # plusieurs propositions n'occupe personne, et le livreur doit
+            # pouvoir choisir. C'est l'acceptation qui engage, et elle seule.
+            models.UniqueConstraint(
+                fields=["courier"],
+                condition=models.Q(status__in=ENGAGED_STATUSES),
+                name="one_engaged_assignment_per_courier",
             ),
         ]
         indexes = [

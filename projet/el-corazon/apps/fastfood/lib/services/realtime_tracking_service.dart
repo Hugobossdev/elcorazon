@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/main.dart' show adresseWebSocket;
+import 'package:elcora_fast/presentation/etape_de_course.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/position_livreur.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
@@ -35,6 +36,23 @@ class RealtimeTrackingService extends ChangeNotifier {
   final _deliveryLocationUpdatesController =
       StreamController<PositionLivreur>.broadcast();
 
+  /// Les étapes de la **course**, telles que le serveur les diffuse.
+  ///
+  /// ## Ce qui était perdu
+  ///
+  /// Le serveur publie `delivery.status` sur le canal de la commande, avec
+  /// l'étape et le nom du livreur. Ce service ne connaissait que `order.status`
+  /// et `tracking.position` : l'événement arrivait et était jeté.
+  ///
+  /// Ce n'est pas un doublon de `order.status`, et c'est tout le problème :
+  /// `accepted` **ne projette rien** sur la commande — choix assumé, une
+  /// commande reste « prête » tant que le repas n'est pas parti. L'affectation
+  /// d'un livreur ne produisait donc *aucun* événement que l'écran écoutait, et
+  /// n'apparaissait qu'à la relecture périodique suivante : jusqu'à une minute
+  /// pendant laquelle le client voyait « Prête » sans savoir que quelqu'un
+  /// venait de prendre sa commande.
+  final _courseUpdatesController = StreamController<EtapeDeCourse>.broadcast();
+
   bool _isConnected = false;
 
   // Position actuelle du livreur
@@ -45,6 +63,9 @@ class RealtimeTrackingService extends ChangeNotifier {
   Stream<Order> get orderUpdates => _orderUpdatesController.stream;
   Stream<PositionLivreur> get deliveryLocationUpdates =>
       _deliveryLocationUpdatesController.stream;
+
+  /// Les étapes de la course — voir [_courseUpdatesController].
+  Stream<EtapeDeCourse> get courseUpdates => _courseUpdatesController.stream;
 
   bool get isConnected => _isConnected;
 
@@ -83,6 +104,12 @@ class RealtimeTrackingService extends ChangeNotifier {
           final order = await DjangoOrderRepository().getOrderById(orderId);
           if (order != null) {
             _orderUpdatesController.add(order);
+          }
+          break;
+        case 'delivery.status':
+          final etape = EtapeDeCourse.depuisDiffusion(event.payload);
+          if (etape != null) {
+            _courseUpdatesController.add(etape);
           }
           break;
         case 'tracking.position':
@@ -141,6 +168,7 @@ class RealtimeTrackingService extends ChangeNotifier {
     disconnect();
     _orderUpdatesController.close();
     _deliveryLocationUpdatesController.close();
+    _courseUpdatesController.close();
     super.dispose();
   }
 }

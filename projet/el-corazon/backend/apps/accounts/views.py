@@ -257,9 +257,7 @@ class PasswordResetRequestView(APIView):
         if user is None or not user.is_active:
             return _challenge_response(_silent_challenge(email), ENVOI_ANNONCE)
 
-        challenge = VerificationService.issue(
-            user=user, purpose=VerificationPurpose.PASSWORD_RESET
-        )
+        challenge = VerificationService.issue(user=user, purpose=VerificationPurpose.PASSWORD_RESET)
         return _challenge_response(challenge, ENVOI_ANNONCE)
 
 

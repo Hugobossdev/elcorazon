@@ -11,9 +11,16 @@ transitoire du définitif**. Le premier se retente, le second supprime le jeton.
 Les confondre donne soit une purge d'appareils sains au premier hoquet réseau,
 soit la boucle infinie d'origine.
 
-`ConsolePushBackend` est l'implémentation fournie et celle des tests. Le
-connecteur FCM s'ajoutera ici, sans toucher au service : il demande un compte
-Firebase et un client HTTP, c'est-à-dire ce que ce découpage isole.
+`ConsolePushBackend` sert le développement et les tests. Le connecteur réel est
+`apps.notifications.fcm.FirebaseCloudMessagingBackend`, ajouté ici sans que le
+service ait bougé — c'est ce que ce découpage isolait. Cet en-tête l'annonçait
+encore au futur ; il existe depuis le 5 août 2026.
+
+**La console est interdite en production**, et `prod.py` refuse désormais de
+démarrer sur elle. Le motif tient à ce que fait cette implémentation : elle
+déclare **tous les jetons livrés**. Un déploiement qui la garde n'envoie rien et
+ne remonte aucune erreur — c'est exactement ce qui s'est produit, le gabarit de
+production montant les identifiants Firebase sans jamais poser `PUSH_BACKEND`.
 """
 
 from __future__ import annotations

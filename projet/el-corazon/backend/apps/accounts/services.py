@@ -97,9 +97,7 @@ class AuthService:
         # cliente qui existe et fonctionne. La différence avec le livreur tient
         # à la route employée : `POST /delivery/apply/` ne rend, elle, aucun
         # jeton — voir `CourierApplicationView`.
-        VerificationService.issue(
-            user=user, purpose=VerificationPurpose.ACCOUNT_VERIFICATION
-        )
+        VerificationService.issue(user=user, purpose=VerificationPurpose.ACCOUNT_VERIFICATION)
 
         return user, AuthService.issue_tokens(user)
 

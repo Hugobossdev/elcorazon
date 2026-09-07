@@ -1,6 +1,6 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Dernière révision** : 6 septembre 2026
+**Dernière révision** : 8 septembre 2026
 
 > ⚠️ **Inventaire fonctionnel daté.** Le corps de ce document a été écrit en
 > décembre 2024, quand les trois applications parlaient directement à Supabase.
@@ -11,6 +11,77 @@
 >
 > La référence à jour est **[docs/architecture/04-migration-flutter.md](docs/architecture/04-migration-flutter.md)**,
 > qui trace domaine par domaine ce qui a été migré, construit ou supprimé.
+
+## 🔕 Les notifications qui ne partaient pas, et ce qu'a trouvé l'audit du 7 septembre
+
+**Aucune notification push ne partait en production.** Le gabarit
+`.env.prod.example` montait les identifiants Firebase — chemin du compte de
+service, identifiant de projet, délai — et ne déclarait pas `PUSH_BACKEND`. Le
+repli de `base.py` s'appliquait donc : `ConsolePushBackend`, qui journalise et
+déclare **tous les jetons livrés**. Rien n'échouait, rien n'était retenté, aucune
+métrique ne bougeait ; un déploiement paraissait configuré et n'envoyait rien.
+
+Ce qui ne partait pas n'est pas accessoire : l'offre de course au livreur, que
+l'ADR-008 double par push précisément parce qu'il ne regarde pas son écran en
+roulant. Le même fichier prenait pourtant soin de forcer le connecteur de
+paiement réel, avec son avertissement — c'était un oubli, pas une décision.
+`prod.py` refuse maintenant de démarrer sur la console.
+
+**Un livreur pouvait porter deux courses à la fois.** Seule l'unicité par
+*commande* était gardée ; rien ne disait le cas inverse. `available_for`
+proposait sans broncher quelqu'un déjà en route, et le back-office l'affichait
+« Disponible » — `StatutLivreur` n'ayant aucun état « en livraison », ce que son
+en-tête documentait. Or `Dely` n'émet ses relevés de position que pour **une**
+course et ne guide que vers elle : le client de la seconde commande suivait un
+livreur immobile. L'invariant L6 est désormais tenu à trois niveaux, et
+`offered` en reste hors : plusieurs propositions n'occupent personne.
+
+**Un réessai créait une seconde commande.** La clé d'idempotence était tirée à
+chaque appel du dépôt, ce que le contrat du socle interdit en toutes lettres.
+Elle ne valait donc rien le jour où elle sert — réponse perdue, écran qui
+affiche « Réessayez une fois le réseau revenu », doublon facturé. Elle vit
+maintenant dans l'écran de caisse, seul à savoir ce qu'est une tentative.
+
+**Affecter un livreur marquait la commande « récupérée ».** Le repas était
+encore en cuisine. La chronologie du suivi devenait fausse, la notification
+partait, et la commande devenait **inannulable** — `picked_up` ne mène qu'à
+`on_the_way`. Le vrai enlèvement, lui, ne produisait plus aucun événement : la
+projection constatait la commande déjà arrivée et retournait en silence.
+
+**« Livreur assigné » s'affichait même sur un refus.** Le booléen était jeté :
+403 sans droit, 409 « commande déjà confiée », panne réseau — tout donnait le
+même bandeau vert. Le superviseur croyait la course partie.
+
+**Les gains du mois étaient tronqués sans le dire.** L'écran les additionnait
+sur les soixante dernières courses chargées ; un livreur à dix courses par jour
+n'en voyait que six jours. `GET /delivery/me/earnings/` agrège désormais en
+base, bornes posées dans le fuseau de l'établissement.
+
+**Trois écrans rendaient une panne comme une absence de données.** L'historique
+du client annonçait « Aucune commande passée » sur une coupure réseau ; l'écran
+Analyses du siège devenait blanc, sans message ni réessai. La règle existait
+déjà pour le catalogue ; elle n'avait pas été portée.
+
+**Le back-office ne vérifiait aucune permission.** `AdminAuthService.can(...)`
+existait et n'avait aucun site d'appel : les dix-huit modules s'affichaient pour
+tout compte du personnel, qui découvrait le refus à l'envoi d'un formulaire.
+
+**Les portes de la CI étaient rouges, donc muettes.** `code_mort.py` accusait un
+fichier vivant — il ne lisait que la première branche d'un export conditionnel,
+et sa conclusion étant « les brancher, ou les supprimer », le suivre aurait
+retiré le push web du client. Le job « Qualité » du serveur cumulait 6 erreurs
+ruff, 22 fichiers non formatés et 6 erreurs mypy. Et `contrat_routes.py`, qui
+annonce « c'est ce qui rend la CI rouge », ne tournait **nulle part** — la panne
+qu'il devait attraper est celle qui a servi Render sans son préfixe `/api/v1`.
+
+**Deux routes se publiaient sans corps de requête**, et la déclaration en a
+révélé une troisième : `support` et `social` déclaraient chacun un
+`AuthorSerializer`, tous deux nommés « Author » avec des champs différents.
+
+Restent deux points, tenus à part : la migration inachevée du modèle `Order`
+côté client (208 usages sur 18 fichiers, à faire par domaine), et les deux
+dépôts git qui suivent tous deux `backend/` — la CI vit dans l'un, Render
+déploie l'autre.
 
 ## 📣 La commande qui n'arrivait à personne (6 septembre 2026)
 

@@ -12,7 +12,7 @@ Aucune route n'est ouverte sans jeton : rien ici n'est public.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any
 
 from django.db import transaction
 from django.db.models import QuerySet
@@ -52,6 +52,7 @@ from apps.delivery.serializers import (
     DeclineSerializer,
     DeliveryTransitionSerializer,
     DocumentsSerializer,
+    EarningsSerializer,
     OfferSerializer,
     OnlineSerializer,
     VerificationSerializer,
@@ -208,6 +209,23 @@ class CourierProfileView(APIView):
         return Response(CourierProfileSerializer(courier).data)
 
 
+class CourierEarningsView(APIView):
+    """`/delivery/me/earnings/` — les gains du livreur, agrégés par période.
+
+    Existe parce que l'application les additionnait elle-même, sur les soixante
+    dernières courses chargées : son onglet « ce mois » n'en couvrait donc que
+    les tout derniers jours dès qu'un livreur travaillait un peu. Une somme se
+    demande au serveur, qui les a toutes.
+    """
+
+    permission_classes = [IsCourier]
+
+    @extend_schema(responses={200: EarningsSerializer}, tags=["delivery"])
+    def get(self, request: Request) -> Response:
+        gains = CourierService.earnings(courier=courier_of(request))
+        return Response(EarningsSerializer(gains).data)
+
+
 class CourierOnlineView(APIView):
     """`/delivery/me/online/` — la bascule de disponibilité."""
 
@@ -294,9 +312,7 @@ class AssignmentViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Assig
         return Response(AssignmentSerializer(assignment).data)
 
 
-class StaffCourierViewSet(
-    CreateModelMixin, UpdateModelMixin, ReadOnlyModelViewSet[CourierProfile]
-):
+class StaffCourierViewSet(CreateModelMixin, UpdateModelMixin, ReadOnlyModelViewSet[CourierProfile]):
     """Flotte, vue, **ouverte** et corrigée par le personnel de ses établissements.
 
     Pas de suppression : ce qu'un livreur a livré, encaissé et signé y renvoie.
@@ -326,7 +342,12 @@ class StaffCourierViewSet(
 
     #: `put` retiré de la liste par défaut de `UpdateModelMixin` : voir le
     #: docstring de la classe. `delete` n'y a jamais été.
-    http_method_names: ClassVar[list[str]] = ["get", "post", "patch", "head", "options"]
+    #:
+    #: Sans `ClassVar` : `django.views.View` déclare `http_method_names` en
+    #: variable d'instance, et `mypy` refuse qu'une sous-classe la redéclare en
+    #: variable de classe. L'annotation est donc simplement omise — l'affectation
+    #: reste bien un attribut de classe à l'exécution, comme dans Django même.
+    http_method_names = ["get", "post", "patch", "head", "options"]
     filterset_fields = {
         "verification_status": ["exact"],
         "is_online": ["exact"],

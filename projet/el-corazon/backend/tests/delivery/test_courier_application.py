@@ -115,9 +115,7 @@ class TestDepot:
 
         assert User.objects.get(email="yao@elcorazon.test").user_type == UserType.COURIER
 
-    def test_aucun_jeton_n_est_rendu(
-        self, client: APIClient, candidature: dict[str, Any]
-    ) -> None:
+    def test_aucun_jeton_n_est_rendu(self, client: APIClient, candidature: dict[str, Any]) -> None:
         """Sans quoi l'écran de saisie du code serait une étape que le client
         mobile pourrait sauter : il aurait déjà de quoi appeler l'API."""
         response = client.post(reverse(APPLY), candidature, format="json")

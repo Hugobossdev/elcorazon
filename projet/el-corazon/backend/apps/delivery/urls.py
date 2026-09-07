@@ -27,6 +27,7 @@ urlpatterns = [
     # il n'a qu'un dossier, et le lui faire retenir n'apporte rien.
     path("me/", views.CourierProfileView.as_view(), name="me"),
     path("me/online/", views.CourierOnlineView.as_view(), name="me-online"),
+    path("me/earnings/", views.CourierEarningsView.as_view(), name="me-earnings"),
     path(
         "orders/<uuid:order_id>/offer/",
         views.OfferAssignmentView.as_view(),

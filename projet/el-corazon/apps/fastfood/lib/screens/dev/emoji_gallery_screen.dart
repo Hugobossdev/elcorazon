@@ -27,6 +27,13 @@ import 'package:elcora_fast/widgets/design/design.dart';
 /// [ouvrir] ne fait rien en `release`, et aucune route ne mène ici : l'écran
 /// se pousse à la main depuis un point de mise au point. Le garder hors du
 /// routeur évite qu'un lien traîne jusqu'en production.
+///
+/// C'est aussi ce qui le rend invisible à `tools/code_mort.py`, qui part de
+/// `main.dart` et suit les directives : il le comptait comme injoignable et
+/// faisait échouer la CI. La ligne ci-dessous le lui déclare — l'écart est
+/// assumé, il n'est pas subi.
+// code-mort: hors-graphe — outil de relecture du pack emojis, poussé à la main
+// depuis un point d'arrêt ; le router exposerait un lien jusqu'en production.
 class EmojiGalleryScreen extends StatefulWidget {
   const EmojiGalleryScreen({super.key});
 

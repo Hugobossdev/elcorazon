@@ -136,8 +136,7 @@ class Command(BaseCommand):
         if manques:
             self.stdout.write(
                 self.style.WARNING(
-                    "\nIl reste à faire avant que cet établissement soit visible "
-                    "des clients :"
+                    "\nIl reste à faire avant que cet établissement soit visible des clients :"
                 )
             )
             for manque in manques:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from drf_spectacular.utils import extend_schema_serializer
 from rest_framework import serializers
 
 from apps.accounts.models import User
@@ -38,7 +39,22 @@ __all__ = [
 ]
 
 
+@extend_schema_serializer(component_name="SupportAuthor")
 class AuthorSerializer(serializers.ModelSerializer[User]):
+    """L'auteur d'un message de support — le client ou un agent, d'où `user_type`.
+
+    Le nom de composant est **imposé**, et ce n'est pas cosmétique : `support`
+    et `social` déclarent chacun un `AuthorSerializer`, et `drf-spectacular`
+    nomme ses composants d'après la classe. Les deux tombaient donc sur
+    « Author », avec des champs différents — un client engendré depuis ce
+    schéma lisait `user_type` là où le serveur envoie `avatar`, ou l'inverse,
+    selon celui des deux que le générateur avait écrit en dernier.
+
+    L'avertissement existait ; il ne faisait pas échouer la génération, et
+    `--fail-on-warn` n'était atteint qu'en présence d'une route qui référence
+    les deux.
+    """
+
     class Meta:
         model = User
         fields = ["id", "full_name", "user_type"]

@@ -68,9 +68,7 @@ class RestaurantSerializer(serializers.ModelSerializer[Restaurant]):
     # deux villes homonymes de deux pays ne se distinguent que par là.
     city_slug = serializers.CharField(source="zone.city.slug", read_only=True)
     country = serializers.CharField(source="zone.city.country.iso_code", read_only=True)
-    phone_prefix = serializers.CharField(
-        source="zone.city.country.phone_prefix", read_only=True
-    )
+    phone_prefix = serializers.CharField(source="zone.city.country.phone_prefix", read_only=True)
 
     currency = serializers.CharField(read_only=True)
     delivery_fee_from = MoneyField(source="zone.base_fee", read_only=True)

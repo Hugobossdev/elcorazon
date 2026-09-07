@@ -95,6 +95,20 @@ class TestRefus:
 
     def test_une_devise_etrangere_n_est_pas_convertie(self, zone: DeliveryZone) -> None:
         """Aucune conversion implicite : un taux inventé au passage produirait
-        un total faux dont personne ne retrouverait l'origine."""
-        with pytest.raises(BusinessRuleViolation, match="EUR"):
+        un total faux dont personne ne retrouverait l'origine.
+
+        Les deux devises sont vérifiées dans les **données contextuelles** et
+        non dans la phrase. Le `detail` d'un refus métier remonte tel quel à
+        l'écran (ADR-009), et il s'adresse donc à quelqu'un qui essaie de se
+        faire livrer, pas à qui lit un journal : « Le panier est en XOF, la zone
+        facture en GHS » nommait une règle d'implémentation à un client.
+
+        L'assertion y gagne : une reformulation du message ne la fera plus
+        tomber, alors que perdre les codes la fera.
+        """
+        with pytest.raises(BusinessRuleViolation) as refus:
             quote_delivery(zone=zone, distance_m=1_000, subtotal=Money(5_000, "EUR"))
+
+        assert refus.value.extra == {"cart_currency": "EUR", "zone_currency": XOF}
+        # La phrase, elle, doit rester lisible par un client.
+        assert "EUR" not in refus.value.detail

@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Ces tests gardent le contrat du registre : `domaine.action`, lu depuis le
 /// serveur, jamais recopié.
 void main() {
+  _permissionsDeNavigation();
   eccore.AdminRole role(List<String> permissions, {bool systeme = false}) {
     return eccore.AdminRole(
       id: 'role-1',
@@ -118,6 +119,116 @@ void main() {
       // de transitions de statut et de remboursements.
       expect(membre.isActive, isFalse);
       expect(membre.fullName, 'Ancien');
+    });
+  });
+}
+
+/// Les permissions que la navigation exige, confrontées au registre du serveur.
+///
+/// ## Pourquoi ces cas existent
+///
+/// `AdminAuthService.can(...)` existait et n'avait **aucun site d'appel** : les
+/// dix-huit entrées du menu s'affichaient pour tout compte du personnel. Un
+/// opérateur voyait « Rôles & Accès », « Réseau », « Paiements » ; il ouvrait
+/// l'écran, remplissait un formulaire, et récupérait un 403 à l'envoi.
+///
+/// Le filtre ajouté ne vaut évidemment que si les noms sont les bons. Une
+/// chaîne inventée — `manage_marketing`, le vocabulaire d'avant le 1er août —
+/// masquerait l'entrée pour **tout le monde**, en silence : personne ne détient
+/// une permission qui n'existe pas. C'est un mode de panne bien plus discret
+/// que celui qu'on corrige, d'où ce contrôle.
+void _permissionsDeNavigation() {
+  /// Le registre du serveur, tel que `common/permissions.py` et les
+  /// `backoffice.py` de chaque domaine le déclarent. Recopié ici à dessein :
+  /// c'est la liste que le test doit connaître indépendamment du code testé.
+  const registreServeur = {
+    'analytics.read',
+    'catalog.read',
+    'catalog.write',
+    'couriers.approve',
+    'couriers.read',
+    'couriers.suspend',
+    'couriers.write',
+    'customers.block',
+    'customers.read',
+    'gamification.read',
+    'gamification.write',
+    'loyalty.read',
+    'loyalty.write',
+    'notifications.send',
+    'orders.assign_courier',
+    'orders.cancel',
+    'orders.read',
+    'orders.refund',
+    'orders.update_status',
+    'promotions.read',
+    'promotions.write',
+    'restaurants.read',
+    'restaurants.write',
+    'roles.read',
+    'roles.write',
+  };
+
+  /// Ce que chaque entrée de menu exige. Repris de
+  /// `admin_navigation_screen.dart`, dont les listes sont privées à l'état de
+  /// l'écran.
+  const exigees = {
+    'Analyses & Stats': 'analytics.read',
+    'Commandes': 'orders.read',
+    'Livraisons actives': 'orders.read',
+    'Carte temps réel': 'couriers.read',
+    'Paiements': 'orders.read',
+    'Menu': 'catalog.read',
+    'Catégories': 'catalog.read',
+    'Personnalisations': 'catalog.read',
+    'Clients': 'customers.read',
+    'Livreurs': 'couriers.read',
+    'Validation Docs': 'couriers.read',
+    'Campagnes': 'notifications.send',
+    'Promotions': 'promotions.read',
+    'Gamification': 'gamification.read',
+    'Pays, villes, établissements': 'restaurants.read',
+    'Rôles & Accès': 'roles.read',
+  };
+
+  group('Permissions exigées par la navigation', () {
+    test('appartiennent toutes au registre du serveur', () {
+      final inconnues = exigees.entries
+          .where((e) => !registreServeur.contains(e.value))
+          .map((e) => '${e.key} → ${e.value}')
+          .toList();
+
+      expect(
+        inconnues,
+        isEmpty,
+        reason: 'Une permission absente du registre masque son entrée pour '
+            'tout le monde : personne ne détient ce que le serveur n’accorde pas.',
+      );
+    });
+
+    test('sont des permissions de lecture', () {
+      // Ouvrir un écran se juge sur ce qu'on peut lire, jamais sur ce qu'on
+      // peut écrire : un opérateur qui consulte le catalogue sans pouvoir le
+      // modifier doit voir l'entrée « Menu ». Le serveur refusera l'écriture,
+      // et c'est là que le refus a du sens.
+      final ecritures = exigees.values.where(
+        (code) => code.endsWith('.write') ||
+            code.endsWith('.approve') ||
+            code.endsWith('.suspend') ||
+            code.endsWith('.block') ||
+            code.endsWith('.refund') ||
+            code.endsWith('.cancel'),
+      );
+
+      expect(ecritures, isEmpty);
+    });
+
+    test('le tableau de bord et les paramètres restent ouverts', () {
+      // Ce sont les deux seules entrées sans permission : la première est
+      // l'écran d'accueil — la refuser fermerait l'application à un compte
+      // valide — et la seconde ne porte que des réglages locaux au poste.
+      expect(exigees.containsKey('Tableau de bord'), isFalse);
+      expect(exigees.containsKey('Paramètres'), isFalse);
     });
   });
 }

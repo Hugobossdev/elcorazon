@@ -46,11 +46,34 @@ class NavigationItem {
   final int index;
   final Color? color;
 
+  /// La permission que le **serveur** exige pour l'écran ouvert par cette
+  /// entrée (ADR-005), ou `null` quand il n'en demande aucune.
+  ///
+  /// ## Pourquoi elle est là
+  ///
+  /// `AdminAuthService.can(...)` existait et n'avait **aucun site d'appel** :
+  /// les dix-huit entrées ci-dessous s'affichaient pour tout compte du
+  /// personnel. Un opérateur voyait « Rôles & Accès », « Réseau »,
+  /// « Paiements » ; il ouvrait l'écran, remplissait un formulaire, et
+  /// récupérait un 403 à l'envoi. `AssignmentService` l'admet d'ailleurs en
+  /// commentaire — « l'écran qui l'affiche ne lui est de toute façon pas
+  /// destiné ».
+  ///
+  /// Le serveur reste l'autorité, et rien ici ne l'assouplit : masquer une
+  /// entrée n'accorde ni ne retire quoi que ce soit. L'interface cesse
+  /// seulement de promettre ce que le serveur refusera.
+  ///
+  /// Le nom est celui du registre serveur, repris tel quel. Une chaîne inventée
+  /// masquerait l'entrée pour tout le monde, en silence — d'où le test qui
+  /// vérifie qu'elles appartiennent toutes au registre.
+  final String? permission;
+
   const NavigationItem({
     required this.title,
     required this.icon,
     required this.index,
     this.color,
+    this.permission,
   });
 }
 
@@ -87,6 +110,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Analyses & Stats',
           icon: Icons.analytics_rounded,
           index: 4,
+          permission: 'analytics.read',
         ),
       ],
     ),
@@ -97,16 +121,19 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Commandes',
           icon: Icons.shopping_cart_rounded,
           index: 2,
+          permission: 'orders.read',
         ),
         NavigationItem(
           title: 'Livraisons actives',
           icon: Icons.local_shipping_rounded,
           index: 14,
+          permission: 'orders.read',
         ),
         NavigationItem(
           title: 'Carte temps réel',
           icon: Icons.map_rounded,
           index: 11,
+          permission: 'couriers.read',
         ),
         // Les encaissements suivent les commandes : c'est la même question
         // posée du côté de la caisse. Le service existait et n'était ouvert
@@ -115,6 +142,9 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Paiements',
           icon: Icons.payments_rounded,
           index: 16,
+          // La liste se lit avec les commandes ; le remboursement, seul geste
+          // d'écriture de l'écran, exige en plus `orders.refund`.
+          permission: 'orders.read',
         ),
       ],
     ),
@@ -125,16 +155,19 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Menu',
           icon: Icons.restaurant_menu_rounded,
           index: 1,
+          permission: 'catalog.read',
         ),
         NavigationItem(
           title: 'Catégories',
           icon: Icons.category_rounded,
           index: 6,
+          permission: 'catalog.read',
         ),
         NavigationItem(
           title: 'Personnalisations',
           icon: Icons.tune_rounded,
           index: 13,
+          permission: 'catalog.read',
         ),
       ],
     ),
@@ -145,16 +178,22 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Clients',
           icon: Icons.people_rounded,
           index: 5,
+          permission: 'customers.read',
         ),
         NavigationItem(
           title: 'Livreurs',
           icon: Icons.delivery_dining_rounded,
           index: 3,
+          permission: 'couriers.read',
         ),
         NavigationItem(
           title: 'Validation Docs',
           icon: Icons.verified_user_rounded,
           index: 15,
+          // Lire les dossiers suffit à ouvrir l'écran ; approuver ou suspendre
+          // demande `couriers.approve` et `couriers.suspend`, que le serveur
+          // vérifie geste par geste.
+          permission: 'couriers.read',
         ),
       ],
     ),
@@ -165,16 +204,19 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Campagnes',
           icon: Icons.campaign_rounded,
           index: 8,
+          permission: 'notifications.send',
         ),
         NavigationItem(
           title: 'Promotions',
           icon: Icons.local_offer_rounded,
           index: 9,
+          permission: 'promotions.read',
         ),
         NavigationItem(
           title: 'Gamification',
           icon: Icons.emoji_events_rounded,
           index: 10,
+          permission: 'gamification.read',
         ),
       ],
     ),
@@ -185,6 +227,11 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Pays, villes, établissements',
           icon: Icons.public_rounded,
           index: 17,
+          // `restaurants.read` ouvre l'écran ; ouvrir un pays ou une ville
+          // relève en plus du siège (`assert_unscoped`), qu'aucune permission
+          // nommée ne représente — un compte rattaché à un établissement y
+          // verra donc ses écritures refusées, et c'est le bon comportement.
+          permission: 'restaurants.read',
         ),
       ],
     ),
@@ -195,6 +242,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Rôles & Accès',
           icon: Icons.admin_panel_settings_rounded,
           index: 7,
+          permission: 'roles.read',
         ),
         NavigationItem(
           title: 'Paramètres',
@@ -205,7 +253,10 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
     ),
   ];
 
-  // Items pour la BottomNavigationBar (Mobile uniquement)
+  // Items pour la BottomNavigationBar (Mobile uniquement).
+  //
+  // Les permissions reprennent celles de la barre latérale : la même entrée ne
+  // peut pas être refusée sur un écran large et offerte sur un téléphone.
   static const List<NavigationItem> _mobileNavItems = [
     NavigationItem(
       title: 'Dashboard',
@@ -216,16 +267,19 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
       title: 'Menu',
       icon: Icons.restaurant_menu_rounded,
       index: 1,
+      permission: 'catalog.read',
     ),
     NavigationItem(
       title: 'Commandes',
       icon: Icons.shopping_cart_rounded,
       index: 2,
+      permission: 'orders.read',
     ),
     NavigationItem(
       title: 'Livreurs',
       icon: Icons.delivery_dining_rounded,
       index: 3,
+      permission: 'couriers.read',
     ),
   ];
 
@@ -295,6 +349,40 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
       child: RepaintBoundary(child: _SafeScreenWrapper(child: screen)),
     );
   }
+
+  /// Les groupes que ce compte a le droit d'ouvrir — ADR-005.
+  ///
+  /// Un groupe dont toutes les entrées sont refusées disparaît avec elles : un
+  /// intitulé « MARKETING » suivi de rien n'apprend qu'une chose, c'est qu'on
+  /// n'y a pas droit, et c'est justement ce qu'un menu n'a pas à annoncer.
+  ///
+  /// Le serveur reste l'autorité : ce filtre n'accorde rien et ne retire rien.
+  /// Il empêche seulement l'interface de promettre ce que le serveur refusera.
+  List<NavigationGroup> _groupesAutorises(AdminAuthService auth) {
+    final groupes = <NavigationGroup>[];
+    for (final groupe in _navigationGroups) {
+      final entrees = [
+        for (final entree in groupe.items)
+          if (entree.permission == null || auth.can(entree.permission!)) entree,
+      ];
+      if (entrees.isNotEmpty) {
+        groupes.add(
+          NavigationGroup(
+            title: groupe.title,
+            items: entrees,
+            icon: groupe.icon,
+          ),
+        );
+      }
+    }
+    return groupes;
+  }
+
+  /// Les entrées du bandeau mobile, même règle.
+  List<NavigationItem> _entreesMobileAutorisees(AdminAuthService auth) => [
+        for (final entree in _mobileNavItems)
+          if (entree.permission == null || auth.can(entree.permission!)) entree,
+      ];
 
   String _getCurrentTitle() {
     for (final group in _navigationGroups) {
@@ -447,7 +535,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: _navigationGroups.map((group) {
+                children: _groupesAutorises(adminAuth).map((group) {
                   return _buildNavigationGroup(group, theme);
                 }).toList(),
               ),
@@ -940,7 +1028,8 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: _mobileNavItems.map((item) {
+            children: _entreesMobileAutorisees(context.read<AdminAuthService>())
+                .map((item) {
               final isSelected = _selectedIndex == item.index;
               return GestureDetector(
                 onTap: () => setState(() => _selectedIndex = item.index),
@@ -1029,7 +1118,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                ..._navigationGroups.map((group) {
+                ..._groupesAutorises(context.read<AdminAuthService>()).map((group) {
                   return ExpansionTile(
                     title: Text(
                       group.title,

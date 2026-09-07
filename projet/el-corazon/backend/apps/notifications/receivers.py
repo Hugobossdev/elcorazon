@@ -218,8 +218,7 @@ def on_assignment_accepted(
         kind=NotificationKind.ORDER_STATUS,
         title="Un livreur arrive",
         body=(
-            f"{assignment.courier.user.full_name} prend en charge votre "
-            f"commande {order.reference}."
+            f"{assignment.courier.user.full_name} prend en charge votre commande {order.reference}."
         ),
         data={"order": str(order.pk), "assignment": str(assignment.pk)},
     )

@@ -692,6 +692,13 @@ class AppService extends ChangeNotifier {
   /// retraits ont déjà été demandés.
   eccore.Money? get soldeDisponible => _courierProfile?.totalEarnings;
 
+  /// Les gains, agrégés par le serveur — `GET /delivery/me/earnings/`.
+  ///
+  /// L'écran les additionnait lui-même sur les courses chargées, soit soixante
+  /// au plus : son onglet « ce mois » ne couvrait donc que les tout derniers
+  /// jours dès qu'un livreur travaillait un peu, et l'annonçait comme un total.
+  Future<eccore.Earnings> loadEarnings() => _delivery.earnings();
+
   /// Les demandes de retrait déjà faites — `GET /payments/withdrawals/`.
   ///
   /// Un retrait naît « en attente » : c'est l'exploitation qui exécute le

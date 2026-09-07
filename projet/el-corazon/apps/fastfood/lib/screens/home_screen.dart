@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:elcora_fast/presentation/messages_erreur.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/widgets/navigation_error_handler.dart';
@@ -35,7 +36,7 @@ class _HomeScreenState extends State<HomeScreen> {
             NavigationService.navigateBasedOnRole(context, user);
           } catch (e) {
             NavigationErrorHandler.handleNavigationError(
-                context, e.toString(), user,);
+                context, messageErreur(e), user,);
           }
         });
 

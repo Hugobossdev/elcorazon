@@ -14,14 +14,16 @@ dit que la course vient d'être prise.
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.gis.db.models.functions import Distance
 from django.db import transaction
-from django.db.models import F, QuerySet
+from django.db.models import Count, F, QuerySet, Sum
 from django.utils import timezone
 
 from apps.accounts.models import User, UserType
@@ -29,7 +31,9 @@ from apps.delivery.models import Assignment, CourierProfile, CourierRating
 from apps.delivery.signals import assignment_accepted, assignment_offered
 from apps.delivery.states import (
     DELIVERY_MACHINE,
+    ENGAGED_STATUSES,
     ORDER_STATUS_PROJECTION,
+    TERMINAL_STATUSES,
     VERIFICATION_MACHINE,
     DeliveryStatus,
     VerificationStatus,
@@ -198,6 +202,75 @@ class CourierService:
         return locked
 
     @staticmethod
+    def earnings(*, courier: CourierProfile) -> dict[str, object]:
+        """Gains du livreur, agrégés par période — **en base**.
+
+        ## Pourquoi cette route existe
+
+        L'écran des gains additionnait les courses que l'application avait en
+        mémoire, c'est-à-dire au plus **soixante** : `recentlyDelivered` suit
+        trois pages de vingt, et c'est délibéré — l'historique d'un livreur en
+        poste depuis un an croît sans limite, et le charger entier pour afficher
+        un total serait absurde.
+
+        Mais l'écran en tirait « aujourd'hui », « cette semaine » et **« ce
+        mois »**. Un livreur à dix courses par jour n'avait donc, dans son
+        onglet mensuel, que ses six derniers jours — un total plus petit que la
+        réalité, affiché sans la moindre mention de troncature. C'est le genre
+        de chiffre qu'on ne met pas en doute : on compte sa paie dessus.
+
+        Une somme se demande au serveur. Les trois périodes sont calculées ici,
+        en une requête, sur la totalité des courses livrées.
+
+        ## Le fuseau
+
+        Les bornes sont posées dans le fuseau de **l'établissement**, pas en UTC :
+        une course livrée à 23 h 30 à Lomé appartient à cette journée-là pour le
+        livreur qui l'a faite, et non au lendemain parce que le serveur compte
+        en temps universel.
+
+        La somme porte sur `courier_fee`, figée à l'acceptation : c'est ce qui
+        est dû, indépendamment des barèmes qui ont pu changer depuis.
+        """
+        fuseau = ZoneInfo(courier.restaurant.timezone)
+        maintenant = timezone.now().astimezone(fuseau)
+        aujourdhui = maintenant.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        bornes = {
+            "today": aujourdhui,
+            # La semaine commence lundi — convention ISO, celle du planning des
+            # livreurs (`CourierShift.day_of_week`).
+            "week": aujourdhui - dt.timedelta(days=aujourdhui.weekday()),
+            "month": aujourdhui.replace(day=1),
+        }
+
+        livrees = Assignment.objects.filter(
+            courier=courier,
+            status=DeliveryStatus.DELIVERED,
+            delivered_at__isnull=False,
+        )
+
+        devise = courier.restaurant.currency
+        periodes: dict[str, object] = {}
+        for nom, depuis in bornes.items():
+            agrege = livrees.filter(delivered_at__gte=depuis).aggregate(
+                total=Sum("courier_fee_minor"), nombre=Count("id")
+            )
+            periodes[nom] = {
+                "earned": Money(agrege["total"] or 0, devise),
+                "deliveries": agrege["nombre"],
+            }
+
+        # Le cumul de carrière vient du dossier, qui le tient à jour à chaque
+        # livraison (`_credit`) : le recalculer ici ferait deux sources pour un
+        # même chiffre, et c'est ainsi qu'elles divergent.
+        periodes["lifetime"] = {
+            "earned": courier.total_earnings or Money.zero(devise),
+            "deliveries": courier.deliveries_completed,
+        }
+        return periodes
+
+    @staticmethod
     def set_online(*, courier: CourierProfile, is_online: bool) -> CourierProfile:
         """Bascule de disponibilité, à l'initiative du livreur.
 
@@ -256,6 +329,14 @@ class CourierService:
         Un livreur sans position connue reste dans la liste, en fin de tri :
         l'écarter reviendrait à exclure celui qui vient de démarrer son
         application.
+
+        Un livreur **déjà engagé** en est en revanche exclu (L6). Il ne l'était
+        pas, et le back-office proposait donc en toute confiance quelqu'un qui
+        roulait déjà vers un autre client — `StatutLivreur` n'ayant par ailleurs
+        aucun état « en livraison » pour le dire au superviseur.
+
+        Une proposition en attente n'exclut pas : elle n'occupe personne, et un
+        livreur qui laisse traîner une offre bloquerait sinon sa propre file.
         """
         return (
             CourierProfile.objects.filter(
@@ -264,6 +345,7 @@ class CourierService:
                 verification_status=VerificationStatus.APPROVED,
                 user__is_active=True,
             )
+            .exclude(assignments__status__in=ENGAGED_STATUSES)
             .select_related("user")
             .annotate(to_restaurant=Distance("last_location", order.restaurant.location))
             .order_by("to_restaurant")
@@ -304,6 +386,19 @@ class AssignmentService:
                 "Ce livreur n'est pas rattaché à l'établissement de la commande."
             )
 
+        # L6 — le livreur ne porte qu'une course à la fois. Relu ici et pas
+        # seulement à l'acceptation : proposer une course à quelqu'un qui roule
+        # déjà, c'est faire attendre le repas jusqu'à ce qu'il refuse.
+        engagee = AssignmentService._engaged_for(courier)
+        if engagee is not None:
+            raise BusinessRuleViolation(
+                "Ce livreur porte déjà une course. Attendez qu'il l'ait livrée, "
+                "ou confiez celle-ci à quelqu'un d'autre.",
+                courier_id=str(courier.pk),
+                assignment_id=str(engagee.pk),
+                assignment_status=engagee.status,
+            )
+
         active = AssignmentService._active_for(locked)
         if active is not None:
             raise BusinessRuleViolation(
@@ -336,13 +431,18 @@ class AssignmentService:
 
     @staticmethod
     def _active_for(order: Order) -> Assignment | None:
-        return order.assignments.exclude(
-            status__in=[
-                DeliveryStatus.DECLINED,
-                DeliveryStatus.CANCELLED,
-                DeliveryStatus.DELIVERED,
-            ]
-        ).first()
+        return order.assignments.exclude(status__in=TERMINAL_STATUSES).first()
+
+    @staticmethod
+    def _engaged_for(courier: CourierProfile) -> Assignment | None:
+        """La course que ce livreur porte déjà, s'il en porte une (L6).
+
+        Distincte de `_active_for`, qui répond pour une **commande**. La
+        confusion entre les deux est exactement le défaut corrigé ici :
+        `Dely` justifiait de ne suivre qu'une course en citant `_active_for`,
+        qui ne dit rien du livreur.
+        """
+        return Assignment.objects.filter(courier=courier, status__in=ENGAGED_STATUSES).first()
 
     # ----------------------------------------------------------- acceptation
 
@@ -365,6 +465,23 @@ class AssignmentService:
             raise BusinessRuleViolation(
                 "Votre dossier ne vous permet pas d'accepter une course.",
                 verification_status=courier.verification_status,
+            )
+
+        # L6 — c'est ici que la règle se joue vraiment. Un livreur peut recevoir
+        # plusieurs propositions ; il n'en accepte qu'une. Sans ce contrôle, il
+        # lui suffisait d'appuyer deux fois, sur deux offres différentes, pour se
+        # retrouver avec deux courses dont son application n'en suivrait qu'une.
+        #
+        # Le verrou posé plus haut porte sur la commande, pas sur le livreur : il
+        # ne sérialise donc pas deux acceptations de commandes distinctes. C'est
+        # la contrainte `one_engaged_assignment_per_courier` qui tient ce cas de
+        # course, et ce contrôle qui lui évite de se manifester en 500.
+        engagee = AssignmentService._engaged_for(courier)
+        if engagee is not None:
+            raise BusinessRuleViolation(
+                "Vous portez déjà une course. Terminez-la avant d'en accepter une autre.",
+                assignment_id=str(engagee.pk),
+                assignment_status=engagee.status,
             )
 
         DELIVERY_MACHINE.validate(current.status, DeliveryStatus.ACCEPTED)

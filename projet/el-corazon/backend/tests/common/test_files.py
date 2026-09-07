@@ -100,9 +100,7 @@ class TestPiecesDesLivreurs:
         assert not storages["documents"].exists(premiere)
         assert storages["documents"].exists(courier.id_document.name)
 
-    def test_les_trois_pieces_sont_suivies_independamment(
-        self, courier: CourierProfile
-    ) -> None:
+    def test_les_trois_pieces_sont_suivies_independamment(self, courier: CourierProfile) -> None:
         courier.id_document = _image("cni.pdf")
         courier.licence_document = _image("permis.pdf")
         courier.save()
@@ -116,9 +114,7 @@ class TestPiecesDesLivreurs:
         assert storages["documents"].exists(cni)
         assert not storages["documents"].exists(permis)
 
-    def test_la_suppression_du_dossier_emporte_les_pieces(
-        self, courier: CourierProfile
-    ) -> None:
+    def test_la_suppression_du_dossier_emporte_les_pieces(self, courier: CourierProfile) -> None:
         # `CourierProfile` n'est pas à suppression logique : la ligne part
         # réellement, et ses pièces d'identité n'ont aucune raison de rester.
         courier.id_document = _image("cni.pdf")

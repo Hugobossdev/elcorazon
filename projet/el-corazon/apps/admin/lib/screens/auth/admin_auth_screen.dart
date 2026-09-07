@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/custom_text_field.dart';
@@ -149,7 +150,11 @@ class _AdminAuthScreenState extends State<AdminAuthScreen>
                     color: Theme.of(context).colorScheme.onError,),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text('Erreur de connexion: ${e.toString()}'),
+                  // Le motif du serveur — « Identifiants incorrects »,
+                  // « Ce compte n'est pas un compte administrateur » — et non
+                  // le `toString()` de l'exception, qui nommait une classe Dart
+                  // à quelqu'un qui essaie simplement d'ouvrir sa session.
+                  child: Text(messageErreur(e)),
                 ),
               ],
             ),

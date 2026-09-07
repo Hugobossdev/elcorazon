@@ -49,9 +49,19 @@ def quote_delivery(*, zone: DeliveryZone, distance_m: float, subtotal: Money) ->
     * une devise étrangère à la zone n'est pas convertie en silence.
     """
     if subtotal.currency != zone.base_fee.currency:
+        # Le `detail` d'un refus métier est remonté **tel quel** à l'écran
+        # (RFC 9457, ADR-009). Celui-ci nommait deux codes ISO et une règle
+        # d'implémentation — « aucune conversion implicite n'est faite » — à
+        # quelqu'un qui essayait simplement de se faire livrer. Ce qu'il doit
+        # comprendre est qu'il commande dans un établissement d'un autre pays
+        # que son adresse ; les codes restent dans les données contextuelles,
+        # pour le journal et pour l'exploitation.
         raise BusinessRuleViolation(
-            f"Le panier est en {subtotal.currency}, la zone facture en "
-            f"{zone.base_fee.currency}. Aucune conversion implicite n'est faite."
+            "Cette adresse est desservie depuis un autre pays que "
+            "l'établissement choisi. Commandez auprès d'un établissement de "
+            "votre pays, ou choisissez une adresse de livraison sur place.",
+            cart_currency=subtotal.currency,
+            zone_currency=zone.base_fee.currency,
         )
 
     distance_km = (Decimal(distance_m) / 1000).quantize(Decimal("0.01"))

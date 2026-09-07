@@ -182,9 +182,7 @@ class Restaurant(UUIDModel, TimeStampedModel):
         # impossible — `City` porte une clé vers `Country`, si bien qu'une
         # ville d'un autre pays ne peut pas être choisie.
         if not self.zone.boundary.covers(self.location):
-            manques.append(
-                "La position de l'établissement tombe hors de sa zone de livraison."
-            )
+            manques.append("La position de l'établissement tombe hors de sa zone de livraison.")
         if not self.opening_hours.exists():
             manques.append("Aucune plage d'ouverture n'est définie.")
         if not self.staff_memberships.exists():

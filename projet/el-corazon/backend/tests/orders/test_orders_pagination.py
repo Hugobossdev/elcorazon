@@ -50,10 +50,7 @@ def superviseur(restaurant: Restaurant) -> APIClient:
 @pytest.fixture
 def vingt_cinq_commandes(restaurant: Restaurant, customer: User) -> list[Order]:
     """Assez pour déborder la page par défaut (20) — le seuil est le sujet."""
-    return [
-        build_order(restaurant, customer, reference=f"EC{index:06d}")
-        for index in range(1, 26)
-    ]
+    return [build_order(restaurant, customer, reference=f"EC{index:06d}") for index in range(1, 26)]
 
 
 class TestPagination:

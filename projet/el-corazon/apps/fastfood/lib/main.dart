@@ -26,7 +26,6 @@ import 'package:elcora_fast/services/push_notification_service.dart';
 import 'package:elcora_fast/services/subscription_service.dart';
 import 'package:elcora_fast/services/error_handler_service.dart';
 import 'package:elcora_fast/services/performance_service.dart';
-import 'package:elcora_fast/services/form_validation_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
 import 'package:elcora_fast/services/review_rating_service.dart';
 import 'package:elcora_fast/services/support_service.dart';
@@ -224,7 +223,18 @@ Future<void> _initializeEssentialServices() async {
   // Initialize error handling
   await ErrorHandlerService().initialize();
 
-  await FormValidationService().initialize();
+  // `FormValidationService` a été retiré ici, et son fichier avec.
+  //
+  // Sept cent douze lignes — un moteur de règles générique, avec « protection
+  // contre les injections SQL » et « protection XSS » — que **rien n'appelait**
+  // : il était initialisé au démarrage, enregistré dans l'arbre de providers,
+  // et consommé par aucun écran. Les formulaires validaient chacun de leur
+  // côté, et continuent de le faire.
+  //
+  // Le remettre en service aurait été pire que le supprimer : filtrer des
+  // chaînes côté client pour se prémunir d'une injection est un contresens —
+  // l'ORM paramètre ses requêtes et le serveur valide ce qu'il reçoit — et la
+  // présence d'un tel service laisse croire à une défense qui n'existe pas.
 
   // Notifications push — **cet appel manquait**, et son absence rendait toute
   // la chaîne inerte : pas de gestionnaire d'arrière-plan, pas de canal
@@ -316,10 +326,6 @@ class ClientApp extends StatelessWidget {
           lazy: true,
         ),
         ChangeNotifierProvider(create: (_) => PerformanceService(), lazy: true),
-        ChangeNotifierProvider(
-          create: (_) => FormValidationService(),
-          lazy: true,
-        ),
         // Services avec initialisation immédiate nécessaire
         ChangeNotifierProvider(
           create: (_) => FavoritesService()..initialize(),

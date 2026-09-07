@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/main.dart' show apiClient;
+import 'package:elcora_fast/presentation/messages_erreur.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/presentation/etape_reglement.dart';
@@ -95,7 +96,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
       setState(() {
         _isProcessing = false;
         _etape = EtapeReglement.echouee;
-        _errorMessage = e.toString();
+        // Sous les yeux de quelqu'un qui règle une commande : le `detail`
+        // du serveur, jamais « DioException [connection error] ».
+        _errorMessage = messageErreur(e);
       });
     }
   }

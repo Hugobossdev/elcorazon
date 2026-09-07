@@ -51,9 +51,7 @@ def client() -> APIClient:
 def compte() -> User:
     """Compte non vérifié portant un code vivant — l'état où l'on sort de
     l'inscription."""
-    user = User.objects.create_user(
-        "kodjo@elcorazon.test", MOT_DE_PASSE, full_name="Kodjo Mensah"
-    )
+    user = User.objects.create_user("kodjo@elcorazon.test", MOT_DE_PASSE, full_name="Kodjo Mensah")
     VerificationService.issue(user=user, purpose=VerificationPurpose.ACCOUNT_VERIFICATION)
     return user
 
@@ -146,9 +144,7 @@ class TestEmission:
 
         VerificationService.issue(user=compte, purpose=VerificationPurpose.ACCOUNT_VERIFICATION)
 
-        assert (
-            VerificationCode.objects.filter(user=compte, consumed_at__isnull=True).count() == 1
-        )
+        assert VerificationCode.objects.filter(user=compte, consumed_at__isnull=True).count() == 1
         with pytest.raises(InvalidVerificationCode):
             VerificationService.consume(
                 user=compte, purpose=VerificationPurpose.ACCOUNT_VERIFICATION, code=ancien
@@ -281,9 +277,7 @@ class TestPresentation:
             assert rate.status_code == status.HTTP_400_BAD_REQUEST
 
         # Le bon code ne vaut plus rien : le compteur a fermé l'enregistrement.
-        final = client.post(
-            reverse(VERIFY), {"email": compte.email, "code": code}, format="json"
-        )
+        final = client.post(reverse(VERIFY), {"email": compte.email, "code": code}, format="json")
 
         assert final.status_code == status.HTTP_400_BAD_REQUEST
         assert VerificationCode.objects.get(user=compte).consumed_at is not None
@@ -305,9 +299,7 @@ class TestPresentation:
 
 
 class TestRenvoi:
-    def test_le_renvoi_annonce_les_durees_du_serveur(
-        self, client: APIClient, compte: User
-    ) -> None:
+    def test_le_renvoi_annonce_les_durees_du_serveur(self, client: APIClient, compte: User) -> None:
         """L'écran anime son compte à rebours sur ces valeurs plutôt que sur une
         constante à lui : deux applications qui les devineraient finiraient par
         proposer « Renvoyer » à un moment où le serveur refuse encore."""
@@ -461,9 +453,7 @@ class TestPasOracle:
         assert connue.data["detail"] == inconnue.data["detail"]
         assert connue.data["retry_after"] == inconnue.data["retry_after"]
 
-    def test_la_presentation_d_un_code_repond_pareil(
-        self, client: APIClient, compte: User
-    ) -> None:
+    def test_la_presentation_d_un_code_repond_pareil(self, client: APIClient, compte: User) -> None:
         connue = client.post(
             reverse(VERIFY), {"email": compte.email, "code": "000000"}, format="json"
         )

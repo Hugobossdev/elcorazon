@@ -52,9 +52,7 @@ def superviseur(restaurant: Restaurant) -> APIClient:
 
 @pytest.fixture
 def carte(restaurant: Restaurant) -> list[MenuItem]:
-    categorie = Category.objects.create(
-        restaurant=restaurant, name="Plats", slug="plats-compteurs"
-    )
+    categorie = Category.objects.create(restaurant=restaurant, name="Plats", slug="plats-compteurs")
     return [
         MenuItem.objects.create(
             restaurant=restaurant,
@@ -139,12 +137,10 @@ class TestCompteurDArticles:
         _ligne(order, carte[1], 2)
 
         liste = superviseur.get(reverse(LISTE)).data["results"][0]
-        detail = superviseur.get(
-            reverse("v1:orders:managed-order-detail", args=[order.pk])
-        ).data
+        detail = superviseur.get(reverse("v1:orders:managed-order-detail", args=[order.pk])).data
 
         assert liste["lines_count"] == len(detail["lines"])
-        assert liste["items_count"] == sum(l["quantity"] for l in detail["lines"])
+        assert liste["items_count"] == sum(ligne["quantity"] for ligne in detail["lines"])
 
     def test_le_compteur_ne_melange_pas_deux_commandes(
         self, superviseur: APIClient, restaurant: Restaurant, customer: User, carte: list[MenuItem]
@@ -157,7 +153,7 @@ class TestCompteurDArticles:
         _ligne(b, carte[0], 1)
 
         par_reference = {
-            l["reference"]: l for l in superviseur.get(reverse(LISTE)).data["results"]
+            ligne["reference"]: ligne for ligne in superviseur.get(reverse(LISTE)).data["results"]
         }
 
         assert par_reference["EC000001"]["items_count"] == 5
@@ -179,9 +175,7 @@ class TestCompteursParStatut:
         assert comptes[OrderStatus.PENDING] == 3
         assert comptes[OrderStatus.READY] == 1
 
-    def test_les_statuts_absents_valent_zero(
-        self, superviseur: APIClient, order: Order
-    ) -> None:
+    def test_les_statuts_absents_valent_zero(self, superviseur: APIClient, order: Order) -> None:
         """Tous les statuts sont présents dans la réponse : l'écran n'a pas à
         distinguer une clé manquante d'un zéro."""
         comptes = superviseur.get(reverse(COMPTES)).data
@@ -193,12 +187,8 @@ class TestCompteursParStatut:
         self, superviseur: APIClient, restaurant: Restaurant, customer: User
     ) -> None:
         """Sinon un onglet annonce douze commandes et en affiche trois."""
-        build_order(
-            restaurant, customer, reference="EC000001", recipient_name="Ama Konaté"
-        )
-        build_order(
-            restaurant, customer, reference="EC000002", recipient_name="Yao Mensah"
-        )
+        build_order(restaurant, customer, reference="EC000001", recipient_name="Ama Konaté")
+        build_order(restaurant, customer, reference="EC000002", recipient_name="Yao Mensah")
 
         comptes = superviseur.get(reverse(COMPTES), {"search": "Konaté"}).data
 

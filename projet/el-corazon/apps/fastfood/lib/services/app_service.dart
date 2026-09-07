@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/presentation/messages_erreur.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/notification_service.dart';
@@ -101,6 +102,22 @@ class AppService extends ChangeNotifier {
   /// seul recours proposé — retirer des filtres — n'y pouvait rien.
   String? get erreurCatalogue => _erreurCatalogue;
   String? _erreurCatalogue;
+
+  /// Pourquoi l'historique est vide, quand il l'est parce que le chargement a
+  /// échoué. `null` quand il a abouti — fût-ce sur un historique réellement
+  /// vide.
+  ///
+  /// Exactement le défaut que [erreurCatalogue] corrige, laissé en place sur
+  /// les commandes : `_loadUserOrders` rattrapait **toute** panne en posant une
+  /// liste vide, sans même prévenir ses auditeurs. L'écran affichait alors
+  /// « Aucune commande passée — votre historique apparaîtra ici », ce qu'un
+  /// client lit comme un fait sur son compte. Réseau coupé, session expirée,
+  /// 500 : ses commandes lui étaient déclarées inexistantes.
+  ///
+  /// Le catalogue a un repli hors-ligne qui adoucit sa panne ; l'historique n'en
+  /// a aucun, ce qui rend l'aveu plus nécessaire encore, pas moins.
+  String? get erreurHistorique => _erreurHistorique;
+  String? _erreurHistorique;
   List<String> get menuCategoryDisplayNames => _menuCategoryDisplayNames;
   List<eccore.Category> get menuCategories => _menuCategories;
 
@@ -686,12 +703,22 @@ class AppService extends ChangeNotifier {
 
     try {
       _orders = await DjangoOrderRepository().getUserOrders(_currentUser!.id);
-      notifyListeners();
+      _erreurHistorique = null;
     } catch (e) {
       eccore.Journal.trace('Error loading user orders: $e');
       _orders = [];
+      // Le motif du serveur quand il y en a un, une phrase sur la panne sinon.
+      // Sans lui, l'écran ne peut que montrer un historique vide — c'est-à-dire
+      // affirmer quelque chose de faux sur le compte du client.
+      _erreurHistorique = messageErreur(e);
     }
+    // Hors du `try` : la branche d'échec ne prévenait personne, si bien qu'un
+    // écran déjà construit gardait indéfiniment l'état d'avant la panne.
+    notifyListeners();
   }
+
+  /// Relit l'historique — pour le bouton « Réessayer » de l'écran des commandes.
+  Future<void> rechargerHistorique() => _loadUserOrders();
 
   // Admin methods
   List<Order> get allOrders => _orders;

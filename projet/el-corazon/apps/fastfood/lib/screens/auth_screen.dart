@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:elcorazon_core/elcorazon_core.dart';
+import 'package:elcora_fast/presentation/messages_erreur.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/widgets/navigation_error_handler.dart';
@@ -421,18 +421,20 @@ class _AuthScreenState extends State<AuthScreen> {
         } catch (e) {
           NavigationErrorHandler.handleNavigationError(
             context,
-            e.toString(),
+            messageErreur(e),
             user,
           );
         }
       }
     } catch (e) {
       if (mounted) {
-        // `ApiException` porte le message serveur (RFC 9457, ADR-009) — le
-        // reste (garde de rôle, panne réseau) retombe sur `toString()`.
-        final message = e is ApiException
-            ? e.detail
-            : e.toString().replaceFirst('Exception: ', '');
+        // La règle partagée : `detail` du serveur quand il y en a un, une
+        // phrase nommée sinon (session expirée, mauvais type de compte, panne
+        // réseau). Ce qui restait ici retombait sur `toString()` pour tout ce
+        // qui n'était pas une `ApiException` — donc sur un nom de classe Dart
+        // pour la garde de rôle et sur « DioException [connection error] » pour
+        // une coupure.
+        final message = messageErreur(e);
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

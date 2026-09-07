@@ -211,6 +211,12 @@ class DjangoDeliveryRepository {
   /// Le dossier du livreur connecté.
   Future<eccore.CourierProfile> profile() => _delivery.me();
 
+  /// Les gains agrégés par le serveur — voir `eccore.Earnings`.
+  ///
+  /// À préférer toujours à une somme faite sur les courses chargées : celles-ci
+  /// sont bornées à quelques pages, et le total mensuel s'en trouvait tronqué.
+  Future<eccore.Earnings> earnings() => _delivery.earnings();
+
   /// Bascule de disponibilité. Rend le dossier à jour : c'est
   /// `canAcceptOrders`, pas `isOnline`, qui dit si des courses arriveront (L1).
   Future<eccore.CourierProfile> setOnline({required bool isOnline}) =>

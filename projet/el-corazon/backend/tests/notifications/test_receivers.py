@@ -53,9 +53,7 @@ def operateur(restaurant: Restaurant) -> User:
         full_name="Afi Opératrice",
         user_type=UserType.STAFF,
     )
-    membre.roles.add(
-        Role.objects.create(name="Opérateur commandes", permissions=["orders.read"])
-    )
+    membre.roles.add(Role.objects.create(name="Opérateur commandes", permissions=["orders.read"]))
     StaffMembership.objects.create(user=membre, restaurant=restaurant)
     return membre
 
@@ -76,12 +74,12 @@ class TestQuiEstPrevenu:
             phone="+22890000001",
         )
         etranger = User.objects.create_user(
-            "kara@elcorazon.test", "motdepasse", full_name="Kodjo Kara",
+            "kara@elcorazon.test",
+            "motdepasse",
+            full_name="Kodjo Kara",
             user_type=UserType.STAFF,
         )
-        etranger.roles.add(
-            Role.objects.create(name="Opérateur Kara", permissions=["orders.read"])
-        )
+        etranger.roles.add(Role.objects.create(name="Opérateur Kara", permissions=["orders.read"]))
         StaffMembership.objects.create(user=etranger, restaurant=ailleurs)
 
         prevenus = list(staff_to_alert(restaurant_id=restaurant.pk, permission="orders.read"))
@@ -89,13 +87,13 @@ class TestQuiEstPrevenu:
         assert operateur in prevenus
         assert etranger not in prevenus
 
-    def test_la_permission_est_exigee_en_plus_du_rattachement(
-        self, restaurant: Restaurant
-    ) -> None:
+    def test_la_permission_est_exigee_en_plus_du_rattachement(self, restaurant: Restaurant) -> None:
         """Alerter d'une commande quelqu'un à qui l'API la refusera ensuite en
         403 produit une notification qui ne mène nulle part."""
         sans_droit = User.objects.create_user(
-            "cuisine@elcorazon.test", "motdepasse", full_name="Sans Droit",
+            "cuisine@elcorazon.test",
+            "motdepasse",
+            full_name="Sans Droit",
             user_type=UserType.STAFF,
         )
         StaffMembership.objects.create(user=sans_droit, restaurant=restaurant)
@@ -178,9 +176,7 @@ class TestCommande:
 
         assert len(notifications_de(operateur)) == avant
 
-    def test_une_annulation_previent_le_personnel(
-        self, order: Order, operateur: User
-    ) -> None:
+    def test_une_annulation_previent_le_personnel(self, order: Order, operateur: User) -> None:
         OrderService.transition_to(order=order, target=OrderStatus.CANCELLED)
 
         recues = notifications_de(operateur, NotificationKind.ORDER_STATUS)
@@ -230,9 +226,7 @@ class TestPaiementRefuse:
 
 
 class TestCourseAcceptee:
-    def test_l_acceptation_previent_le_client(
-        self, order: Order, courier: CourierProfile
-    ) -> None:
+    def test_l_acceptation_previent_le_client(self, order: Order, courier: CourierProfile) -> None:
         """L'intervalle où le client n'apprenait rien : `accepted` n'est pas
         projeté sur le statut de la commande — le repas n'est pas parti — si
         bien qu'entre « confirmée » et « en route » aucun signe de vie

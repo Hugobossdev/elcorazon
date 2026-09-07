@@ -110,8 +110,7 @@ class Command(BaseCommand):
             if etablissement is None:
                 self.stderr.write(
                     self.style.ERROR(
-                        f"{slug} n'existe pas. Lancez d'abord "
-                        "`python manage.py seed_demo_network`."
+                        f"{slug} n'existe pas. Lancez d'abord `python manage.py seed_demo_network`."
                     )
                 )
                 continue

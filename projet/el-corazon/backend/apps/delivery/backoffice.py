@@ -127,9 +127,9 @@ class ManagedAssignmentViewSet(ReadOnlyModelViewSet[Assignment]):
 
     def get_queryset(self) -> QuerySet[Assignment]:
         user = authenticated_user(self.request)
-        base = Assignment.objects.select_related(
-            "courier__user", "order__restaurant"
-        ).order_by("-offered_at")
+        base = Assignment.objects.select_related("courier__user", "order__restaurant").order_by(
+            "-offered_at"
+        )
         if is_unscoped(user):
             return base
         return base.filter(order__restaurant_id__in=staff_restaurant_ids(user))

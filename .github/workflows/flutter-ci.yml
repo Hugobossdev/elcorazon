@@ -29,6 +29,12 @@ on:
       # Jeu de règles de lint partagé par les trois applications : le
       # modifier change ce que la CI exige, il doit donc la déclencher.
       - "projet/el-corazon/analysis_options.yaml"
+      # Le contrôle de contrat compare les adresses appelées par le Dart à celles
+      # que le serveur sert : une route renommée côté Django doit donc le
+      # déclencher, sans quoi la dérive n'apparaîtrait qu'au prochain commit
+      # Flutter — ou à l'exécution.
+      - "projet/el-corazon/backend/apps/**/urls.py"
+      - "projet/el-corazon/backend/config/**"
       - ".github/workflows/flutter-ci.yml"
   pull_request:
     paths:
@@ -38,6 +44,8 @@ on:
       # Jeu de règles de lint partagé par les trois applications : le
       # modifier change ce que la CI exige, il doit donc la déclencher.
       - "projet/el-corazon/analysis_options.yaml"
+      - "projet/el-corazon/backend/apps/**/urls.py"
+      - "projet/el-corazon/backend/config/**"
       - ".github/workflows/flutter-ci.yml"
 
 env:
@@ -61,6 +69,10 @@ jobs:
         with:
           python-version: "3.13"
 
+      # `code_mort.py` n'a aucune dépendance — il lit des directives et suit un
+      # graphe. Ses tests, eux, ont besoin de pytest.
+      - run: pip install pytest
+
       - name: Aucun fichier Dart que rien n'exécute
         # Ce contrôle existe parce que `flutter analyze` ne le fait pas :
         # vérifié le 2026-08-06 sur `dely/lib/dialogs/menu_item_dialog.dart`,
@@ -74,6 +86,53 @@ jobs:
         # heure de plus s'il saute. Il ne demande ni Flutter ni dépendances —
         # il lit les directives `import`/`export`/`part` et suit le graphe.
         run: python tools/code_mort.py
+
+      - name: Ce que ce contrôle promet, il doit le tenir
+        # `code_mort.py` a rendu la CI rouge sur un fichier vivant : son motif ne
+        # lisait que la première chaîne d'une directive, et manquait donc la
+        # branche web d'un `export … if (dart.library.js_interop) …`. Sa
+        # conclusion étant « les brancher, ou les supprimer », le suivre aurait
+        # retiré le push web du client.
+        #
+        # Un outil de garde a besoin de sa propre garde.
+        run: python -m pytest tools/test_code_mort.py -q
+
+  contrat:
+    name: Contrat d'API (adresses appelées vs servies)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: projet/el-corazon
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Le script génère le schéma OpenAPI hors ligne — `SchemaGenerator` lit les
+      # vues, il ne les appelle pas — mais il lui faut Django et drf-spectacular,
+      # donc les dépendances du serveur. Aucune base n'est ouverte.
+      - name: Bibliothèques géospatiales
+        run: sudo apt-get update && sudo apt-get install -y gdal-bin libgdal-dev libgeos-dev
+
+      - name: Dépendances du serveur
+        working-directory: projet/el-corazon/backend
+        run: pip install -e ".[dev]"
+
+      - name: Aucune adresse appelée que le serveur ne sert
+        # Ce script existait et ne tournait **nulle part**, alors que son
+        # en-tête annonce « code de sortie 1 s'il reste une adresse orpheline :
+        # c'est ce qui rend la CI rouge ». Il ne la rendait pas rouge : il
+        # n'était branché ni ici ni dans `backend-ci.yml`.
+        #
+        # Ce qu'il attrape ne se voit d'aucun autre côté. Les tests Dart
+        # vérifient qu'un dépôt sait lire une réponse qu'un adaptateur de test
+        # lui dicte ; les tests Django vérifient la forme des réponses contre le
+        # schéma. Personne ne compare les deux arbres — et c'est ainsi que le
+        # déploiement Render a servi sans son préfixe `/api/v1`, toutes les
+        # routes revenant en 404 sans qu'aucune suite ne bronche.
+        run: python tools/contrat_routes.py
 
   paquet:
     name: Paquet partagé (analyse + tests)

@@ -33,9 +33,7 @@ def _superviseur(restaurant: Restaurant | None, email: str) -> User:
     membre = User.objects.create_user(
         email, "motdepasse", full_name="Kossi Supervision", user_type=UserType.STAFF
     )
-    membre.roles.add(
-        Role.objects.create(name=f"Supervision {email}", permissions=["orders.read"])
-    )
+    membre.roles.add(Role.objects.create(name=f"Supervision {email}", permissions=["orders.read"]))
     if restaurant is not None:
         StaffMembership.objects.create(user=membre, restaurant=restaurant)
     return membre
@@ -93,9 +91,7 @@ class TestLecture:
 
 
 class TestCloisonnement:
-    def test_un_operateur_d_une_autre_enseigne_ne_trouve_rien(
-        self, course: Assignment
-    ) -> None:
+    def test_un_operateur_d_une_autre_enseigne_ne_trouve_rien(self, course: Assignment) -> None:
         """Une course appartient à l'établissement de sa commande. Introuvable
         et non interdite, comme la commande elle-même."""
         autre = Restaurant.objects.create(

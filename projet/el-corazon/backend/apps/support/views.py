@@ -8,6 +8,7 @@ introuvables, jamais refusées avec un code qui trahirait leur existence.
 from __future__ import annotations
 
 from django.db.models import QuerySet
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin
@@ -55,6 +56,23 @@ class SupportTicketViewSet(
         )
         return Response(SupportTicketSerializer(ticket).data, status=status.HTTP_201_CREATED)
 
+    # Deux verbes, deux contrats : le schéma publiait la route sans corps de
+    # requête, si bien qu'il annonçait un `POST` nu là où le serveur exige
+    # `content`. La lecture, elle, rend une **page** de messages et non un
+    # message — ce que l'`operationId` généré (`…_messages_retrieve`) laissait
+    # croire.
+    @extend_schema(
+        methods=["GET"],
+        request=None,
+        responses={200: SupportMessageSerializer(many=True)},
+        tags=["support"],
+    )
+    @extend_schema(
+        methods=["POST"],
+        request=MessageWriteSerializer,
+        responses={201: SupportMessageSerializer},
+        tags=["support"],
+    )
     @action(detail=True, methods=["get", "post"])
     def messages(self, request: Request, pk: str | None = None) -> Response:
         ticket = self.get_object()

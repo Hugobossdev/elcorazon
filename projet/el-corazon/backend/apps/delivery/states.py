@@ -23,7 +23,9 @@ from common.state_machine import StateMachine
 
 __all__ = [
     "DELIVERY_MACHINE",
+    "ENGAGED_STATUSES",
     "ORDER_STATUS_PROJECTION",
+    "TERMINAL_STATUSES",
     "VERIFICATION_MACHINE",
     "DeliveryStatus",
     "VerificationStatus",
@@ -55,6 +57,61 @@ DELIVERY_TRANSITIONS: dict[str, set[str]] = {
 }
 
 DELIVERY_MACHINE = StateMachine(DELIVERY_TRANSITIONS, name="course")
+
+
+#: Étapes où le livreur **porte** la course — L6.
+#:
+#: `offered` n'en fait délibérément pas partie : une proposition ne mobilise
+#: personne, et un livreur peut en recevoir plusieurs et choisir. Ce sont les
+#: trois étapes suivantes qui l'occupent physiquement — il roule vers un
+#: restaurant, puis vers un client.
+#:
+#: La distinction porte une règle : **un livreur ne tient qu'une course engagée
+#: à la fois**. Elle n'existait nulle part. Seule l'unicité par *commande* était
+#: gardée (`one_active_assignment_per_order`), ce qui laissait un même livreur en
+#: accepter deux — et `Dely` supposait pourtant l'inverse, au point de ne
+#: rapporter sa position que pour la première course trouvée. Le client de la
+#: seconde commande voyait un livreur figé.
+#:
+#: Un tuple et non un ensemble, et l'ordre n'est pas décoratif : ces valeurs
+#: entrent dans une contrainte de base, dont Django compare la *déconstruction*
+#: littérale d'une migration à l'autre. Un ensemble, dont l'ordre d'itération ne
+#: se promet pas, ferait apparaître une migration « retirer la contrainte, créer
+#: la contrainte » sur une contrainte pourtant identique. L'ordre suivi est celui
+#: du cycle de vie.
+ENGAGED_STATUSES: tuple[str, ...] = (
+    DeliveryStatus.ACCEPTED,
+    DeliveryStatus.PICKED_UP,
+    DeliveryStatus.ON_THE_WAY,
+)
+
+#: Étapes où la course n'est plus à faire — elle est livrée, refusée ou retirée.
+#:
+#: Le complément de « vivante ». Écrit une fois ici plutôt que recopié à chaque
+#: `exclude(...)` : c'est la liste qu'on oublie de compléter quand une étape
+#: s'ajoute, et l'oubli laisse passer une course terminée pour une course en
+#: cours.
+#:
+#: L'ordre reprend celui qu'écrivait `one_active_assignment_per_order` avant
+#: d'être extrait ici, pour que ce déplacement ne produise aucune migration : la
+#: contrainte est la même, elle doit le rester jusque dans sa déconstruction.
+TERMINAL_STATUSES: tuple[str, ...] = (
+    DeliveryStatus.DECLINED,
+    DeliveryStatus.CANCELLED,
+    DeliveryStatus.DELIVERED,
+)
+
+# Garde-fou à l'import, du même esprit que celui de la projection : les deux
+# ensembles doivent partitionner la machine, sans recouvrement ni oubli. Une
+# étape ajoutée à `DeliveryStatus` sans être classée fait échouer le démarrage,
+# et non la production.
+_non_classes = set(DELIVERY_TRANSITIONS) - set(ENGAGED_STATUSES) - set(TERMINAL_STATUSES)
+if _non_classes != {DeliveryStatus.OFFERED}:  # pragma: no cover - vérifié à l'import
+    raise ValueError(
+        "Étapes de course non classées entre engagées et terminales : "
+        f"{sorted(_non_classes - {DeliveryStatus.OFFERED})}. "
+        "Toute étape doit dire si elle occupe le livreur."
+    )
 
 
 # Étapes de course qui doivent faire avancer la commande.
