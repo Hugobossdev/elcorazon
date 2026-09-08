@@ -33,6 +33,12 @@ c'est le sens du cliquet. Les baisser demande une raison écrite ici.
 Usage
 -----
 
+**`flutter test --coverage` d'abord, toujours.** Ce script *lit* `lcov.info`, il
+ne le produit pas : lancé seul, il mesure l'exécution précédente, dont le
+dénominateur lui-même peut être dépassé. L'audit du 7 septembre 2026 a publié
+trois pourcentages faux pour l'avoir oublié — 3,28 % annoncés pour `dely`, 9,75 %
+en réalité.
+
     flutter test --coverage                       # dans le répertoire visé
     python tools/couverture.py                    # les quatre paquets
     python tools/couverture.py apps/dely          # un seul

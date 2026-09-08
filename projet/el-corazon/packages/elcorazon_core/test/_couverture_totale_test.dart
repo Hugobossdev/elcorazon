@@ -36,6 +36,7 @@ import 'package:elcorazon_core/src/delivery/courier_application.dart';
 import 'package:elcorazon_core/src/delivery/courier_profile.dart';
 import 'package:elcorazon_core/src/delivery/courier_shift.dart';
 import 'package:elcorazon_core/src/delivery/delivery_repository.dart';
+import 'package:elcorazon_core/src/delivery/earnings.dart';
 import 'package:elcorazon_core/src/delivery/managed_assignment_repository.dart';
 import 'package:elcorazon_core/src/delivery/managed_courier_repository.dart';
 import 'package:elcorazon_core/src/design/emojis/app_emoji.dart';
