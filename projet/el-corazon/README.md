@@ -67,7 +67,7 @@ Trois applications distinctes, un socle Dart partagé, un backend commun :
     ┌─────────────────────────────────────────────┐
     │        Backend Django (ASGI) — backend/     │
     │  DRF /api/v1/*  ·  Channels /ws/*  ·  Celery│
-    │  19 apps métier · invariants en contraintes │
+    │  21 apps métier · invariants en contraintes │
     └─────────────────────┬───────────────────────┘
                           ▼
     ┌─────────────────────────────────────────────┐
@@ -376,6 +376,8 @@ projet/
 - **[DOCUMENTATION_GLOBALE.md](./DOCUMENTATION_GLOBALE.md)** : Vue d'ensemble technique complète
 - **[ETAT_FONCTIONNALITES.md](./ETAT_FONCTIONNALITES.md)** : État détaillé de toutes les fonctionnalités
 - **[FONCTIONNALITES_DETAILLEES.md](./FONCTIONNALITES_DETAILLEES.md)** : Détails techniques et logique métier
+- **[tools/valider_multi_cuisine.py](./tools/valider_multi_cuisine.py)** : vérifie en HTTP réel que la chaîne multi-pays tient — cloisonnement des catalogues, héritage des devises, tri par proximité, périmètre des rapports
+- **[docs/ouvrir-une-cuisine.md](./docs/ouvrir-une-cuisine.md)** : ouvrir un marché, une ville, une zone et une cuisine depuis le back-office — et donner un périmètre à quelqu'un
 - **[docs/architecture/](./docs/architecture/)** : architecture, modèle de données, ADR et plan de migration
 - **[docs/deploiement.md](./docs/deploiement.md)** : mise en service — compose de production, TLS, sauvegarde et restauration
 - **[docs/security/](./docs/security/)** : rotation des clés du prestataire de paiement, restriction de la clé Google Maps

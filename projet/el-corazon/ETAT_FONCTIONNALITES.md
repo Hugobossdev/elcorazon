@@ -12,6 +12,89 @@
 > La référence à jour est **[docs/architecture/04-migration-flutter.md](docs/architecture/04-migration-flutter.md)**,
 > qui trace domaine par domaine ce qui a été migré, construit ou supprimé.
 
+## 🌍 Le multi-cuisine, rendu utilisable (8 septembre 2026)
+
+**Ouvrir une cuisine dans un nouveau pays est désormais une opération de
+configuration.** L'architecture multi-pays existait entière côté serveur depuis
+l'ADR-006 et le back-office savait provisionner depuis le 4 septembre ; ce lot
+ferme les six écarts qui l'empêchaient encore de tenir sa promesse. Guide
+d'exploitation : **[docs/ouvrir-une-cuisine.md](docs/ouvrir-une-cuisine.md)**.
+
+### La fuite, d'abord
+
+- **Les statistiques n'étaient cloisonnées nulle part.** Un gérant rattaché au
+  seul établissement de Lomé, muni de `analytics.read`, lisait le chiffre
+  d'affaires d'Abidjan, ses articles les plus vendus et la rémunération de ses
+  livreurs. Le cloisonnement de l'ADR-005 s'appliquait partout — commandes,
+  catalogue, personnel — sauf à l'endroit précis où la donnée est agrégée, donc
+  la plus parlante. Rien ne le signalait : la réponse rendait des chiffres
+  justes, simplement pas les siens. Les six rapports portent maintenant le
+  périmètre du compte, et acceptent trois filtres qui **restreignent sans jamais
+  élargir**.
+
+### Ce qui manquait
+
+- **Le client ne pouvait pas choisir sa cuisine.** `hasChoice` et `select()`
+  existaient dans le service de contexte depuis l'origine et **aucun écran ne
+  les appelait** : le multi-cuisine était complet côté serveur et invisible côté
+  client. Un sélecteur — ville d'abord, cuisine ensuite — apparaît à partir de
+  deux établissements, avec un tri « Autour de moi » facultatif. La position
+  n'est pas réclamée au lancement : elle est demandée au moment où la réponse
+  sert visiblement à quelque chose.
+- **Le cloisonnement n'avait que deux étages** : le siège, ou un établissement.
+  Un directeur pays devait être rattaché à chacun de ses restaurants un par un,
+  et cessait **silencieusement** de voir le suivant qu'on ouvrait. Les paliers
+  ville et marché s'ajoutent au point de passage unique du périmètre : les huit
+  écrans qui le consultent en héritent d'un coup, et les alertes du personnel
+  avec eux.
+- **Aucune duplication d'établissement.** Recopier à la main une carte de
+  quarante articles, leurs options et sept plages horaires, c'est une
+  demi-journée et des oublis. Commandes, clients, livreurs et historiques n'ont
+  **aucune section** — il n'existe pas de chemin de code pour les copier, ce qui
+  est plus fort qu'une case décochée par défaut.
+- **La fiche d'un établissement ne portait aucun compteur.** Commandes,
+  livreurs, produits sont maintenant comptés par le serveur en une requête
+  annotée. « 0 livreur » explique, avant même d'ouvrir la fiche, pourquoi elle
+  ne peut pas être mise en service.
+- **La liste des établissements n'avait ni recherche ni filtres.** Pays, ville,
+  statut et recherche sur nom et adresse.
+- **Dix fuseaux horaires étaient écrits en dur** dans le formulaire d'ouverture
+  de marché, avec une liste de devises à côté. Ouvrir un onzième marché
+  demandait de recompiler et de republier l'application — exactement l'opération
+  de développement que le multi-pays existe pour supprimer. Les deux listes
+  viennent maintenant de la source qui les fait respecter, et le fuseau se
+  cherche au lieu de se dérouler.
+- **Le cycle de vie d'un établissement n'émettait rien.** Suspendre une cuisine
+  la faisait disparaître de l'application cliente à la seconde, et l'équipe
+  l'apprenait en constatant que les commandes ne rentraient plus — puis
+  cherchait la panne du côté du réseau. Une suspension est une décision, pas un
+  incident.
+
+### Hardcoding retiré
+
+- **Dely imposait `+228`** à l'inscription livreur : le Togo, quel que soit le
+  pays du restaurant visé. Un candidat d'Abidjan enregistrait un numéro togolais
+  s'il ne pensait pas à effacer la proposition — et c'est ce numéro que la
+  cuisine appelle pour lui confier une course. L'indicatif suit désormais
+  l'établissement choisi.
+- **Trois formateurs de `admin_helpers.dart`** codaient un marché en dur — devise
+  `XOF` par défaut, symbole `CFA`, indicatif `+225` ajouté à tout numéro sans
+  préfixe. Aucun écran ne les appelait, et leur règle existe en mieux dans le
+  socle. Retirés plutôt que corrigés : `flutter analyze` ne signale pas une
+  méthode publique inutilisée, et `tools/code_mort.py` raisonne par fichier — or
+  ce fichier-là est bien atteint, pour une autre méthode.
+
+### Ce que ce lot n'a pas fait
+
+- Le **barème par paliers de distance** (0–3 km → 500, 3–6 km → 1 000) reste à
+  faire : le barème actuel est affine — base plus prix au kilomètre, plafonné
+  par une distance maximale — et il fonctionne. Des paliers seraient un second
+  mode de calcul sur le même champ.
+- L'**éditeur de contour sur carte** reste à faire : une zone se saisit par un
+  centre et un rayon, que le contour réel remplacera sans migration.
+- La **position d'une cuisine se saisit encore en latitude et longitude**, sans
+  carte ni recherche d'adresse.
+
 ## 🔕 Les notifications qui ne partaient pas, et ce qu'a trouvé l'audit du 7 septembre
 
 **Aucune notification push ne partait en production.** Le gabarit
@@ -404,7 +487,8 @@ applications de l'écosystème El Corazón.
 
 #### 💬 Communication
 - ✅ Chat avec le livreur
-- ✅ Chat avec le support
+- ❌ Chat avec le support — **introuvable dans Dely**. Seule une adresse
+  `SUPPORT_EMAIL` existe (`config/api_config.dart`).
 - ✅ Appels vidéo/audio (Agora - structure)
 - ⚠️ **TODO** : Configuration complète Agora RTC
 
@@ -497,8 +581,12 @@ applications de l'écosystème El Corazón.
 #### 🔐 Authentification
 - ✅ Connexion livreur
 - ✅ Inscription livreur
-- ✅ Gestion du profil livreur
-- ✅ Validation des documents
+- ✅ Gestion du profil livreur — véhicule, plaque et numéros de pièces
+  corrigeables par le livreur (`PATCH /delivery/me/`)
+- ✅ **Dépôt** des pièces justificatives (`POST /delivery/me/`) — l'écran
+  n'existait pas avant le 8 septembre 2026 : la route serveur n'avait aucun
+  appelant, et le dossier d'un livreur ne pouvait jamais être complété. La
+  **validation**, elle, est un geste du back-office.
 
 #### 📦 Gestion des Livraisons
 - ✅ Réception des commandes
@@ -536,23 +624,30 @@ applications de l'écosystème El Corazón.
 - ✅ Nombre de livraisons
 
 #### 🎮 Gamification Livreur
-- ✅ Système de points
-- ✅ Objectifs et récompenses
-- ✅ Badges livreur
-- ✅ Classements
+- ❌ **Absente.** `apps.gamification` s'adresse aux **clients** ;
+  `CourierProfile` ne porte que des compteurs (`deliveries_completed`,
+  `rating_average`). Aucun point, aucun badge, aucun classement livreur au
+  contrat — `driver_profile_screen.dart` le documente d'ailleurs en toutes
+  lettres. Les quatre lignes « ✅ » qui figuraient ici étaient fausses.
 
 #### 📱 Notifications
-- ⚠️ Notifications Firebase — **câblées, pas configurées** : jeton enregistré et
-  renouvelé auprès de `/auth/devices/`, détaché à la déconnexion, mais les
-  identifiants Firebase sont factices (voir `docs/firebase.md`)
+- ⚠️ Notifications Firebase — **câblées et configurées, mais rien ne partait
+  en production**. Le projet `elcorazon-9595` est réel et validé côté serveur
+  (`docs/firebase.md`, 5 août 2026) ; l'affirmation « identifiants factices »
+  qui figurait ici était périmée. Le vrai défaut était ailleurs, et double :
+  `PUSH_BACKEND` retombait sur la console, et **aucun worker Celery n'était
+  déployé** pour consommer `send_push.delay()`. Les deux sont corrigés au
+  9 septembre 2026 ; la mise en service reste à faire côté Render.
 - ✅ Notifications locales
 - ✅ Notifications de nouvelles commandes
 - ✅ Notifications de statut
 
-#### 🎤 Commandes Vocales
-- ✅ Reconnaissance vocale
-- ✅ Commandes vocales
-- ✅ Service de synthèse vocale
+#### 🎤 Voix
+- ❌ **Reconnaissance vocale — absente.** Aucun paquet de reconnaissance au
+  `pubspec`, aucun code. Cette section annonçait « ✅ Reconnaissance vocale » et
+  « ✅ Commandes vocales » : les deux étaient faux.
+- ✅ Synthèse vocale du guidage (`flutter_tts`, `NavigationVoiceService`) — la
+  seule chose qui existe, et elle parle, elle n'écoute pas.
 
 #### 📍 Géolocalisation
 - ✅ Mise à jour position en temps réel — un relevé toutes les dix secondes,
@@ -575,7 +670,12 @@ applications de l'écosystème El Corazón.
    - Clé API partiellement configurée
    - **Action requise** : Vérifier la clé dans `.env`
 
-### 📈 Taux de Complétion : **~90%**
+### 📈 Taux de complétion
+
+**Retiré.** Un pourcentage global ne se mesure pas, et celui-ci a longtemps
+annoncé 90 % pendant qu'aucune notification ne partait en production. L'état
+réel se lit fonctionnalité par fonctionnalité, ci-dessus — et une ligne « ✅ »
+n'y vaut que si elle est vraie **du code déployé**, pas du code écrit.
 
 ---
 

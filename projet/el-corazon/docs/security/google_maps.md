@@ -7,8 +7,19 @@ de l'audit du 2 août 2026
 
 ## 1. Le constat
 
-Une **seule et même clé** est utilisée par les trois applications, sur toutes
-les plateformes, et elle est en clair dans le dépôt :
+**Deux** clés distinctes sont utilisées — une pour Android et iOS, une pour le
+web — et les deux sont en clair dans le dépôt. La première rédaction de ce
+document n'en comptait qu'une ; le constat du 9 septembre 2026 en a relevé deux.
+Cela ne change rien au fond : ni l'une ni l'autre ne porte de restriction, et
+chacune sert plusieurs contextes.
+
+> **Depuis le 10 septembre 2026** — la clé Android n'est plus écrite dans les
+> manifestes : `build.gradle.kts` l'injecte depuis `android/maps.properties`
+> (non versionné) ou la variable `MAPS_API_KEY`. Le dépôt ne la porte donc plus
+> pour les nouvelles clés. **Les deux clés présentes dans l'historique restent
+> compromises** et doivent être révoquées — ce document décrit comment.
+
+Les emplacements relevés :
 
 | Fichier | Plateforme |
 | --- | --- |

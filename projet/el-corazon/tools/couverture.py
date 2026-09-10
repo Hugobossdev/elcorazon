@@ -61,14 +61,24 @@ RACINE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: Le socle est à un tout autre niveau que les applications, et c'est le sujet
 #: du plan de refactoring : 2 514 lignes instrumentables contre 38 250 pour les
 #: trois applications réunies, et 1 480 lignes couvertes contre 837.
+#: **Resserrés le 10 septembre 2026.** Les planchers dataient du 7 août et
+#: constataient l'existant d'alors ; la couverture avait depuis largement
+#: dépassé chacun d'eux, si bien que le cliquet ne cliquetait plus. `fastfood`
+#: pouvait perdre huit points sans que rien ne rougisse, `admin` deux tiers de
+#: sa couverture.
+#:
+#: Ils sont posés **au niveau mesuré, moins une marge d'un demi-point**. La
+#: marge n'est pas de la complaisance : elle absorbe le bruit d'une ligne
+#: instrumentée différemment d'un `flutter test` à l'autre, sans laisser passer
+#: la suppression d'un test.
+#:
+#: Mesures du 10 septembre 2026, après les lots Phase 1 à 5 :
+#:   socle 65,89 % · fastfood 11,32 % · dely 9,64 % · admin 2,73 %
 CIBLES: dict[str, tuple[str, float]] = {
-    "packages/elcorazon_core": ("elcorazon_core", 55.0),
-    "apps/fastfood": ("elcora_fast", 3.0),
-    # Relevé de 1,0 à 2,5 au lot 3 : le test de traduction des courses
-    # (`django_delivery_repository_test.dart`) a porté la couverture réelle à
-    # 2,79 %. C'est le cliquet qui se resserre, comme prévu.
-    "apps/dely": ("elcora_dely", 2.5),
-    "apps/admin": ("admin", 0.9),
+    "packages/elcorazon_core": ("elcorazon_core", 65.0),
+    "apps/fastfood": ("elcora_fast", 11.0),
+    "apps/dely": ("elcora_dely", 9.0),
+    "apps/admin": ("admin", 2.5),
 }
 
 GENERE = "test/_couverture_totale_test.dart"
