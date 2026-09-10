@@ -223,6 +223,30 @@ class MenuService extends ChangeNotifier {
 
   /// Retire un article de la carte — suppression **logique** côté serveur :
   /// il reste lisible depuis les commandes passées, qui en gardent une copie.
+  /// Met un article en rupture, ou l'y sort — **et rien d'autre**.
+  ///
+  /// [updateMenuItem] exige le nom, la catégorie, le prix et les régimes : il
+  /// réécrit l'article entier. C'est ce qu'il faut depuis un formulaire
+  /// d'édition, où l'écran détient toutes ces valeurs ; c'est dangereux depuis
+  /// un poste de cuisine, où un interrupteur ne connaît que la disponibilité et
+  /// renverrait au serveur des valeurs qu'il n'a pas relues.
+  ///
+  /// Le `PATCH` du contrat n'envoie que les clés fournies : cette méthode
+  /// n'envoie donc que `is_available`.
+  Future<bool> basculerDisponibilite({
+    required String menuItemId,
+    required bool disponible,
+  }) async {
+    try {
+      await _catalog.updateMenuItem(menuItemId: menuItemId, isAvailable: disponible);
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<bool> deleteMenuItem(String id) async {
     try {
       await _catalog.deleteMenuItem(id);

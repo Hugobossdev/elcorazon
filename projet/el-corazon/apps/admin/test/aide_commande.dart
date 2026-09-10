@@ -29,6 +29,12 @@ Map<String, dynamic> commandeJson({
   DateTime? livreeLe,
   List<dynamic>? lignes,
   List<dynamic>? transitions,
+  /// Les étapes que le serveur autorise depuis l'état courant.
+  ///
+  /// C'est **la** source des boutons côté client : la machine à états n'est
+  /// jamais rejouée dans une application. Le défaut vide reproduit une
+  /// commande terminale ; les tests qui exercent une progression la précisent.
+  List<String>? transitionsAutorisees,
 }) {
   final quand = (passeeLe ?? DateTime(2026, 8, 8, 12)).toIso8601String();
 
@@ -38,7 +44,7 @@ Map<String, dynamic> commandeJson({
     'restaurant': 'el-corazon-lome',
     'restaurant_name': 'El Corazón Lomé',
     'status': statut,
-    'allowed_transitions': const <String>[],
+    'allowed_transitions': transitionsAutorisees ?? const <String>[],
     'subtotal': montantJson(totalCfa),
     'delivery_fee': montantJson(0),
     'discount': montantJson(0),
@@ -76,6 +82,7 @@ eccore.Order commandeDeTest({
   DateTime? livreeLe,
   List<dynamic>? lignes,
   List<dynamic>? transitions,
+  List<String>? transitionsAutorisees,
 }) {
   return eccore.Order.fromJson(
     commandeJson(
@@ -93,6 +100,7 @@ eccore.Order commandeDeTest({
       livreeLe: livreeLe,
       lignes: lignes,
       transitions: transitions,
+      transitionsAutorisees: transitionsAutorisees,
     ),
   );
 }

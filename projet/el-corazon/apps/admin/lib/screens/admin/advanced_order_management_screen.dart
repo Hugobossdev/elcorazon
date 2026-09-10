@@ -6,8 +6,9 @@ import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/dashboard_realtime_service.dart';
-import 'package:admin/services/driver_management_service.dart';
+import 'package:admin/screens/kitchen/kitchen_screen.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
+import 'package:admin/services/driver_management_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/statut_commande.dart';
@@ -302,6 +303,16 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                   ),
                 ),
                 const SizedBox(width: 12),
+                // Le poste de cuisine. Cet écran-ci pilote une flotte — ses
+                // filtres, ses exports, ses statistiques ; celui-là tient un
+                // coup de feu. Ce sont deux métiers, et le second se faisait
+                // jusqu'ici sur le premier, faute d'outil.
+                //
+                // Une entrée depuis ici plutôt qu'un index de plus dans la
+                // barre de navigation : les indices y sont écrits en dur de 0
+                // à 12, et en insérer un renumérote tout le reste.
+                const _EntreeVersLaCuisine(),
+                const SizedBox(width: 8),
                 Consumer<DashboardRealtimeService>(
                   builder: (context, temps, child) => PastilleTempsReel(etat: temps.etat),
                 ),
@@ -1731,3 +1742,38 @@ class _Onglet {
   final IconData icone;
   final StatutCommande? statut;
 }
+
+
+/// Le bouton qui ouvre le poste de cuisine.
+///
+/// Grisé tant qu'aucun établissement n'est sélectionné : le KDS est
+/// mono-établissement — un cuisinier est dans **une** cuisine, et mêler deux
+/// cartes ferait préparer un plat pour l'autre bout de la ville.
+class _EntreeVersLaCuisine extends StatelessWidget {
+  const _EntreeVersLaCuisine();
+
+  @override
+  Widget build(BuildContext context) {
+    final etablissement = context.watch<RestaurantScopeService>().current;
+
+    return Tooltip(
+      message: etablissement == null
+          ? 'Choisissez un établissement pour ouvrir son poste de cuisine'
+          : 'Poste de cuisine — ${etablissement.name}',
+      child: FilledButton.tonalIcon(
+        onPressed: etablissement == null
+            ? null
+            : () => unawaited(
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => KitchenScreen(restaurant: etablissement),
+                  ),
+                ),
+              ),
+        icon: const Icon(Icons.soup_kitchen_outlined),
+        label: const Text('Cuisine'),
+      ),
+    );
+  }
+}
+
