@@ -53,7 +53,6 @@ app.*.map.json
 
 # Signature Android de production : ne jamais versionner. La perte du keystore
 # interdit toute mise à jour de l'app publiée — le sauvegarder hors du dépôt.
-**/key.properties
 *.jks
 *.keystore
 
@@ -128,3 +127,12 @@ pubspec.lock
 build/
 dist/
 out/
+
+# Secrets de compilation Android — jamais versionnés.
+#
+# `key.properties` porte les mots de passe du keystore de release.
+# `maps.properties` porte la clé Google Maps Android, que `build.gradle.kts`
+# injecte au manifeste. Elle y était en clair et suivie par git ; une clé Maps
+# non restreinte se relève dans l'APK et se facture à son propriétaire.
+**/key.properties
+**/maps.properties

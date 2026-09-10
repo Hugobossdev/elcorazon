@@ -55,3 +55,12 @@ app.*.map.json
 **/api_keys.dart
 **/*_secret.dart
 **/*_key.dart
+
+# Secrets de compilation Android — jamais versionnés.
+#
+# `key.properties` porte les mots de passe du keystore de release.
+# `maps.properties` porte la clé Google Maps Android, que `build.gradle.kts`
+# injecte au manifeste. Elle y était en clair et suivie par git ; une clé Maps
+# non restreinte se relève dans l'APK et se facture à son propriétaire.
+**/key.properties
+**/maps.properties

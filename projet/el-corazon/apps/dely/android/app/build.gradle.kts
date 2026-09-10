@@ -22,6 +22,37 @@ if (hasReleaseKeystore) {
     FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
 }
 
+// Clé Google Maps **Android**, injectée au manifeste plutôt qu'écrite dedans.
+//
+// Elle y était en clair, suivie par git, et **partagée** avec l'application
+// cliente et avec iOS. Google n'accepte qu'un seul type de restriction par clé :
+// une clé qui sert Android, iOS et le web ne peut donc en porter aucune sans
+// casser deux contextes sur trois — ce qui explique qu'elle n'en ait aucune. Une
+// clé Maps non restreinte se relève dans l'APK et se facture à son propriétaire,
+// Google Maps Platform facturant à l'appel sans plafond par défaut.
+//
+// La clé reste **publique** une fois l'application distribuée : ce fichier ne la
+// cache pas, il l'empêche seulement d'entrer dans le dépôt, et rend possible
+// d'en avoir une par plateforme. Ce qui la protège est la restriction
+// (empreinte SHA-1 + nom de paquet), posée dans la console Google Cloud.
+//
+// Trois sources, dans l'ordre : `android/maps.properties` (poste de
+// développement, non versionné), la variable d'environnement `MAPS_API_KEY`
+// (CI et build de release), puis le vide.
+//
+// Vide, la carte s'affiche grise et le reste de l'application fonctionne. C'est
+// une dégradation lisible, préférable à un échec de compilation qui bloquerait
+// quelqu'un qui ne touche pas aux cartes.
+val mapsProperties = Properties()
+val mapsPropertiesFile = rootProject.file("maps.properties")
+if (mapsPropertiesFile.exists()) {
+    FileInputStream(mapsPropertiesFile).use { mapsProperties.load(it) }
+}
+val mapsApiKey: String =
+    (mapsProperties["MAPS_API_KEY"] as String?)
+        ?: System.getenv("MAPS_API_KEY")
+        ?: ""
+
 android {
     namespace = "com.elcorazon.dely"
     compileSdk = flutter.compileSdkVersion
@@ -41,6 +72,8 @@ android {
     }
 
     defaultConfig {
+        // Repris par `AndroidManifest.xml` sous `${MAPS_API_KEY}`.
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.elcorazon.dely"
         // You can update the following values to match your application needs.

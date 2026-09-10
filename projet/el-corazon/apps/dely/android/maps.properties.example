@@ -1,0 +1,23 @@
+# Clé Google Maps **Android** de cette application.
+#
+# Copier ce fichier en `maps.properties` (non versionné) et y poser la clé.
+# En CI et pour un build de release, la variable d'environnement `MAPS_API_KEY`
+# fait le même office et prime si ce fichier est absent.
+#
+# ## Une clé par plateforme, et c'est une contrainte de Google
+#
+# Google n'accepte **qu'un seul type de restriction par clé**. Une clé restreinte
+# à une empreinte Android cesse de fonctionner sur le web ; une clé restreinte
+# aux référents HTTP cesse de fonctionner sur Android. La clé unique utilisée
+# jusqu'ici servait Android, iOS et le web à la fois : elle ne pouvait donc
+# porter aucune restriction, et n'en avait aucune.
+#
+# Restriction à poser dans la console Google Cloud pour celle-ci :
+#   — type : applications Android ;
+#   — nom du paquet + empreinte SHA-1 du certificat de signature ;
+#   — API : Maps SDK for Android, et rien d'autre ;
+#   — quota journalier plafonné.
+#
+# Voir docs/security/google_maps.md.
+
+MAPS_API_KEY=
