@@ -25,6 +25,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.models import User, UserType
 from apps.accounts.serializers import CustomerStatsSerializer
+from apps.analytics.perimetre import Perimetre, PerimetreQuerySerializer, resolve_perimetre
 from apps.analytics.reports import ReportingService
 from apps.analytics.serializers import (
     CategoryRowSerializer,
@@ -78,6 +79,48 @@ def _period(request: Request) -> tuple[dt.date, dt.date, int]:
     query = ReportQuerySerializer(data=request.query_params)
     query.is_valid(raise_exception=True)
     return query.validated_data["start"], query.validated_data["end"], query.validated_data["limit"]
+
+
+def _perimetre(request: Request) -> Perimetre:
+    """Sur quels établissements porte ce rapport.
+
+    Appelé par chaque vue de rapport plutôt que posé dans une classe de base :
+    les six vues sont des `APIView` sans ancêtre commun, et en introduire un
+    pour trois lignes cacherait dans une hiérarchie ce qui doit rester lisible
+    au point d'appel — c'est **le** filtre qui décide de ce qu'on a le droit de
+    lire.
+    """
+    query = PerimetreQuerySerializer(data=request.query_params)
+    query.is_valid(raise_exception=True)
+    return resolve_perimetre(user=active_user(request), params=query.validated_data)
+
+
+#: Les trois filtres de réseau, documentés une fois pour les six rapports.
+#:
+#: Déclarés en paramètres explicites et non par `PerimetreQuerySerializer` :
+#: `extend_schema(parameters=...)` accepte les deux, mais le sérialiseur y
+#: apparaîtrait comme un corps de requête sur des vues qui n'en ont pas.
+PERIMETRE = [
+    OpenApiParameter(
+        name="country",
+        type=OpenApiTypes.STR,
+        description="Restreint au pays (code ISO 3166-1 alpha-2, ex. `TG`).",
+    ),
+    OpenApiParameter(
+        name="city",
+        type=OpenApiTypes.STR,
+        description="Restreint à la ville (slug, ex. `lome`).",
+    ),
+    OpenApiParameter(
+        name="restaurant",
+        type=OpenApiTypes.STR,
+        description=(
+            "Restreint à l'établissement (slug). Se compose avec le périmètre du "
+            "compte : un filtre hors périmètre rend un rapport vide, jamais les "
+            "chiffres d'un établissement qu'on n'administre pas."
+        ),
+    ),
+]
 
 
 #: Paramètre documenté de l'export, déclaré une fois pour les trois rapports.
@@ -134,11 +177,13 @@ class RevenueReportView(APIView):
     permission_classes = [HasPermission.of("analytics.read")]
 
     @extend_schema(
-        responses={200: RevenueRowSerializer(many=True)}, parameters=[EXPORT], tags=["analytics"]
+        responses={200: RevenueRowSerializer(many=True)},
+        parameters=[EXPORT, *PERIMETRE],
+        tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
         start, end, _ = _period(request)
-        rows = ReportingService.revenue_by_day(start=start, end=end)
+        rows = ReportingService.revenue_by_day(start=start, end=end, perimetre=_perimetre(request))
         return _rendu(request, rows, RevenueRowSerializer, f"chiffre-affaires-{start}-{end}")
 
 
@@ -148,11 +193,15 @@ class TopProductsReportView(APIView):
     permission_classes = [HasPermission.of("analytics.read")]
 
     @extend_schema(
-        responses={200: TopProductRowSerializer(many=True)}, parameters=[EXPORT], tags=["analytics"]
+        responses={200: TopProductRowSerializer(many=True)},
+        parameters=[EXPORT, *PERIMETRE],
+        tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
         start, end, limit = _period(request)
-        rows = ReportingService.top_products(start=start, end=end, limit=limit)
+        rows = ReportingService.top_products(
+            start=start, end=end, limit=limit, perimetre=_perimetre(request)
+        )
         return _rendu(request, rows, TopProductRowSerializer, f"top-produits-{start}-{end}")
 
 
@@ -186,12 +235,14 @@ class CourierPerformanceReportView(APIView):
 
     @extend_schema(
         responses={200: CourierPerformanceRowSerializer(many=True)},
-        parameters=[EXPORT],
+        parameters=[EXPORT, *PERIMETRE],
         tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
         start, end, _ = _period(request)
-        rows = ReportingService.courier_performance(start=start, end=end)
+        rows = ReportingService.courier_performance(
+            start=start, end=end, perimetre=_perimetre(request)
+        )
         return _rendu(request, rows, CourierPerformanceRowSerializer, f"livreurs-{start}-{end}")
 
 
@@ -201,11 +252,15 @@ class OrderStatusReportView(APIView):
     permission_classes = [HasPermission.of("analytics.read")]
 
     @extend_schema(
-        responses={200: StatusRowSerializer(many=True)}, parameters=[EXPORT], tags=["analytics"]
+        responses={200: StatusRowSerializer(many=True)},
+        parameters=[EXPORT, *PERIMETRE],
+        tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
         start, end, _ = _period(request)
-        rows = ReportingService.orders_by_status(start=start, end=end)
+        rows = ReportingService.orders_by_status(
+            start=start, end=end, perimetre=_perimetre(request)
+        )
         return _rendu(request, rows, StatusRowSerializer, f"commandes-{start}-{end}")
 
 
@@ -215,11 +270,15 @@ class CategoryReportView(APIView):
     permission_classes = [HasPermission.of("analytics.read")]
 
     @extend_schema(
-        responses={200: CategoryRowSerializer(many=True)}, parameters=[EXPORT], tags=["analytics"]
+        responses={200: CategoryRowSerializer(many=True)},
+        parameters=[EXPORT, *PERIMETRE],
+        tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
         start, end, _ = _period(request)
-        rows = ReportingService.sales_by_category(start=start, end=end)
+        rows = ReportingService.sales_by_category(
+            start=start, end=end, perimetre=_perimetre(request)
+        )
         return _rendu(request, rows, CategoryRowSerializer, f"categories-{start}-{end}")
 
 
@@ -232,7 +291,8 @@ class OverviewView(APIView):
 
     permission_classes = [HasPermission.of("analytics.read")]
 
-    @extend_schema(responses={200: OverviewSerializer}, tags=["analytics"])
+    @extend_schema(responses={200: OverviewSerializer}, parameters=PERIMETRE, tags=["analytics"])
     def get(self, request: Request) -> Response:
         start, end, _ = _period(request)
-        return Response(OverviewSerializer(ReportingService.overview(start=start, end=end)).data)
+        rapport = ReportingService.overview(start=start, end=end, perimetre=_perimetre(request))
+        return Response(OverviewSerializer(rapport).data)

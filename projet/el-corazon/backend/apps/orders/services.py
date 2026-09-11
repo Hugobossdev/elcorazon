@@ -20,7 +20,6 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Protocol
 
-from django.contrib.gis.db.models.functions import Distance
 from django.db import connection, transaction
 from django.utils import timezone
 
@@ -28,13 +27,13 @@ from apps.accounts.models import User
 from apps.carts.models import Cart
 from apps.carts.services import CartService, PricedSelection, price_cart
 from apps.catalog.services import StockService, record_purchase
-from apps.geography.models import DeliveryZone
-from apps.geography.services import DeliveryQuote, quote_delivery
+from apps.geography.services import DeliveryQuote
 from apps.orders.models import Order, OrderLine, OrderStatusEvent
 from apps.orders.signals import order_created, order_status_changed
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from apps.profiles.models import Address
 from apps.promotions.services import PromotionService
+from apps.restaurants.delivery import check_delivery
 from apps.restaurants.models import Restaurant
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
@@ -351,38 +350,46 @@ class OrderService:
 
     @staticmethod
     def _quote_for(restaurant: Restaurant, address: Address, subtotal: Money) -> DeliveryQuote:
-        """Zone et frais de la course, calculés par PostGIS.
+        """Zone et frais de la course — **par la règle unique du produit**.
 
         La zone est celle qui couvre l'**adresse de livraison**, pas celle du
         restaurant : c'est le point d'arrivée qui détermine ce qu'on facture et
         ce qu'on refuse de desservir.
+
+        ## Ce que ce passage par `check_delivery` corrige
+
+        Cette méthode choisissait la zone par `max_distance_km` croissant, tandis
+        que l'écran qui annonce le devis au client (`zones/resolve/`) la
+        choisissait par **surface** croissante. Les deux coïncident tant qu'une
+        ville n'a qu'une zone — l'état actuel — et divergent dès qu'une zone
+        « Centre-ville » est posée dans une zone « Grand Lomé » : l'application
+        annonçait un tarif, la commande en appliquait un autre, et rien ne le
+        signalait puisque les deux réponses étaient individuellement cohérentes.
+
+        Les deux appellent désormais `apps.geography.resolution.resolve_zone`,
+        au travers de `check_delivery` qui y ajoute l'établissement et la
+        distance. Il n'y a plus qu'un endroit où la règle peut changer.
         """
-        zone = (
-            DeliveryZone.objects.filter(
-                boundary__covers=address.location,
-                is_active=True,
-                city__is_active=True,
-                city__country__is_active=True,
-            )
-            .order_by("max_distance_km")
-            .first()
+        disponibilite = check_delivery(
+            point=address.location, restaurant=restaurant, subtotal=subtotal
         )
-        if zone is None:
+
+        if disponibilite.quote is None:
+            # Le refus est relayé **tel qu'il a été levé**, avec ses données
+            # contextuelles : `min_order_amount` dit au client combien il
+            # manque, `distance_km` situe l'adresse. Le remplacer par un
+            # `BusinessRuleViolation` reconstruit depuis le seul message les
+            # perdrait, et l'écran ne saurait plus dire que « ce n'est pas
+            # possible » — c'est précisément ce qu'un test a attrapé.
+            if disponibilite.refusal is not None:
+                raise disponibilite.refusal
             raise BusinessRuleViolation(
-                "Cette adresse n'est desservie par aucune zone de livraison.",
+                disponibilite.reason
+                or "Cette adresse n'est desservie par aucune zone de livraison.",
                 address_id=str(address.pk),
             )
 
-        distance = (
-            Restaurant.objects.filter(pk=restaurant.pk)
-            .annotate(to_address=Distance("location", address.location))
-            .values_list("to_address", flat=True)
-            .first()
-        )
-        if distance is None:  # pragma: no cover - le restaurant vient d'être lu
-            raise BusinessRuleViolation("Établissement introuvable.")
-
-        return quote_delivery(zone=zone, distance_m=distance.m, subtotal=subtotal)
+        return disponibilite.quote
 
     # ---------------------------------------------------------- transitions
 

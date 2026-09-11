@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import django.dispatch
 
-__all__ = ["assignment_accepted", "assignment_offered"]
+__all__ = ["assignment_accepted", "assignment_cancelled", "assignment_offered"]
 
 #: Arguments : `assignment`.
 assignment_offered = django.dispatch.Signal()
@@ -26,3 +26,20 @@ assignment_offered = django.dispatch.Signal()
 #: le repas n'est pas parti, la commande reste `ready`. C'est bien pourquoi ce
 #: signal existe séparément.
 assignment_accepted = django.dispatch.Signal()
+
+
+#: Arguments : `assignment`, `reason`.
+#:
+#: Émis quand le **personnel** retire une course à un livreur — un livreur
+#: injoignable, un incident de flotte, une réaffectation.
+#:
+#: Ce signal manquait, et son absence se voyait sur la route : le livreur
+#: n'était prévenu par rien. Il continuait vers le restaurant, y arrivait pour
+#: une course annulée, et l'apprenait de la cuisine. La seule autre trace était
+#: la diffusion sur le canal de la **commande** (`order_group`), que le livreur
+#: n'écoute pas — il n'écoute que sa propre file.
+#:
+#: Distinct de `declined`, qui est le refus du livreur lui-même : personne n'a
+#: besoin d'être prévenu de sa propre décision.
+assignment_cancelled = django.dispatch.Signal()
+

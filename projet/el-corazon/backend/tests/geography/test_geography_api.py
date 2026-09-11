@@ -161,3 +161,72 @@ class TestFuseauHoraire:
 
         with pytest.raises(ValidationError, match="Fuseau"):
             pays.full_clean()
+
+
+class TestReference:
+    """`GET /geography/reference/` — les valeurs qu'un pays peut prendre.
+
+    Le formulaire d'ouverture de marché du back-office portait dix fuseaux en
+    dur. Ouvrir un onzième marché demandait donc de republier l'application :
+    exactement l'opération de développement que le multi-pays existe pour
+    supprimer.
+    """
+
+    def test_les_devises_proposees_sont_celles_que_le_serveur_accepte(
+        self, client: APIClient
+    ) -> None:
+        """La liste vient de la table qui la fait respecter.
+
+        Une devise proposée à l'écran mais absente de `CURRENCY_EXPONENTS`
+        produisait un 400 après la saisie de tout le formulaire, sans dire
+        lequel des champs était en cause.
+        """
+        from common.money import CURRENCY_EXPONENTS
+
+        response = client.get(reverse("v1:geography:reference"))
+
+        assert response.status_code == status.HTTP_200_OK
+        proposees = {devise["code"] for devise in response.data["currencies"]}
+        assert proposees == set(CURRENCY_EXPONENTS)
+
+    def test_l_exposant_voyage_avec_la_devise(self, client: APIClient) -> None:
+        """Il décide de la saisie : francs entiers en XOF, centimes en EUR.
+
+        Sans lui, l'écran devrait redéployer la table de son côté — donc la
+        dupliquer, et la laisser diverger.
+        """
+        response = client.get(reverse("v1:geography:reference"))
+
+        exposants = {d["code"]: d["exponent"] for d in response.data["currencies"]}
+        assert exposants["XOF"] == 0
+        assert exposants["EUR"] == 2
+
+    def test_les_fuseaux_couvrent_plus_que_la_liste_ecrite_en_dur(self, client: APIClient) -> None:
+        """Le plafond des dix fuseaux est levé, pas déplacé.
+
+        `Africa/Lome` et `Africa/Abidjan` y étaient déjà ; `America/New_York`
+        n'y était pas, et c'est ce que ce test garde — la liste n'est plus une
+        sélection maison.
+        """
+        response = client.get(reverse("v1:geography:reference"))
+
+        fuseaux = set(response.data["timezones"])
+        assert {"Africa/Lome", "Africa/Abidjan", "Africa/Douala"} <= fuseaux
+        assert "America/New_York" in fuseaux
+
+    def test_un_fuseau_propose_est_accepte_par_le_modele(self, client: APIClient) -> None:
+        """Ce que l'écran propose, le serveur doit l'accepter.
+
+        C'est la propriété qui rend la route utile : sinon elle ne fait que
+        déplacer la divergence d'un fichier à l'autre.
+        """
+        from apps.geography.models import validate_timezone
+
+        response = client.get(reverse("v1:geography:reference"))
+
+        for fuseau in response.data["timezones"][:50]:
+            validate_timezone(fuseau)
+
+    def test_la_reference_est_lisible_sans_compte(self, client: APIClient) -> None:
+        """Comme le reste de la géographie : ce sont des constantes publiques."""
+        assert client.get(reverse("v1:geography:reference")).status_code == status.HTTP_200_OK

@@ -62,6 +62,17 @@ dependencies:
   # audio plutôt que de les couper — ce qui compte pour un livreur qui écoute
   # la radio en roulant.
   flutter_tts: ^4.2.3
+
+  # Choix d'une piece justificative — appareil photo ou galerie.
+  #
+  # Le meme paquet, a la meme version, que l'application `admin` : c'est le
+  # seul selecteur de media du projet, et en introduire un second ferait deux
+  # jeux de permissions a tenir a jour pour un geste identique.
+  #
+  # `XFile.readAsBytes()` plutot qu'un chemin : le dossier du livreur part en
+  # `multipart` depuis `DeliveryRepository.submitDocuments`, qui attend des
+  # octets — un chemin de fichier n'existe pas sur le web.
+  image_picker: ^1.0.7
   elcorazon_core:
     path: ../../packages/elcorazon_core
 

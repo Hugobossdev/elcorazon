@@ -1,34 +1,35 @@
 import 'package:intl/intl.dart';
 import 'package:admin/core/constants/admin_constants.dart';
 
-/// Classe utilitaire contenant des méthodes helper pour l'application admin
+/// Formateurs d'affichage du back-office.
+///
+/// ## Trois méthodes retirées, et pourquoi
+///
+/// `formatCurrency`, `formatPrice` et `formatPhone` vivaient ici et **aucun
+/// écran ne les appelait**. Toutes trois codaient un marché en dur : la devise
+/// par défaut `XOF`, le symbole `CFA`, et un indicatif `+225` ajouté à tout
+/// numéro sans préfixe — ivoirien, alors que l'établissement historique est à
+/// Lomé.
+///
+/// Elles n'ont pas été corrigées mais supprimées, parce que leur règle existe
+/// déjà ailleurs et en mieux :
+///
+/// * les montants passent par `formatPrice()` du socle
+///   (`apps/admin/lib/utils/price_formatter.dart`), qui déduit les décimales de
+///   la devise au lieu de la supposer ;
+/// * un indicatif se lit sur le pays de l'établissement (`phone_prefix`), que
+///   le serveur rend sur chaque fiche.
+///
+/// Les garder revenait à conserver un marché écrit en dur dans un produit
+/// multi-pays, derrière un angle mort : `flutter analyze` ne signale pas une
+/// méthode publique inutilisée, et `tools/code_mort.py` raisonne par fichier —
+/// or ce fichier-ci est bien atteint, pour `formatRelativeTime`.
 class AdminHelpers {
   AdminHelpers._(); // Constructeur privé
 
   // =====================================================
   // FORMATTING
   // =====================================================
-
-  /// Formate un montant en devise (XOF)
-  static String formatCurrency(double amount, {String symbol = 'XOF'}) {
-    final formatter = NumberFormat.currency(
-      symbol: '',
-      decimalDigits: 0,
-      locale: 'fr_FR',
-    );
-    return '${formatter.format(amount)} $symbol';
-  }
-
-  /// Formate un montant en CFA
-  static String formatPrice(double amount) {
-    final formatter = NumberFormat.currency(
-      symbol: 'CFA',
-      decimalDigits: 0,
-      locale: 'fr_FR',
-      customPattern: '#,### \u00A4',
-    );
-    return formatter.format(amount);
-  }
 
   /// Formate une date selon le format français
   static String formatDate(DateTime date, {bool includeTime = false}) {
@@ -54,15 +55,6 @@ class AdminHelpers {
     } else {
       return 'À l\'instant';
     }
-  }
-
-  /// Formate un numéro de téléphone
-  static String formatPhone(String phone) {
-    final cleaned = phone.replaceAll(RegExp(r'[^\d+]'), '');
-    if (cleaned.startsWith('+')) {
-      return cleaned;
-    }
-    return '+225 $cleaned';
   }
 
   /// Formate un ID de commande (affiche les 8 premiers caractères)

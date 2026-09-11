@@ -22,6 +22,7 @@ from django.db.models import Count, Max, Min, Q, Sum
 from django.db.models.functions import TruncDate
 
 from apps.accounts.models import User, UserType
+from apps.analytics.perimetre import Perimetre
 from apps.catalog.models import MenuItem
 from apps.delivery.models import Assignment, CourierProfile
 from apps.delivery.states import DeliveryStatus, VerificationStatus
@@ -182,10 +183,12 @@ class ReportingService:
         )
 
     @staticmethod
-    def revenue_by_day(*, start: dt.date, end: dt.date) -> list[RevenueRow]:
+    def revenue_by_day(*, start: dt.date, end: dt.date, perimetre: Perimetre) -> list[RevenueRow]:
         rows = (
             Order.objects.filter(
-                status=OrderStatus.DELIVERED, delivered_at__date__range=(start, end)
+                status=OrderStatus.DELIVERED,
+                delivered_at__date__range=(start, end),
+                **perimetre.filtre("restaurant_id"),
             )
             .annotate(day=TruncDate("delivered_at"))
             .values("day")
@@ -200,11 +203,14 @@ class ReportingService:
         ]
 
     @staticmethod
-    def top_products(*, start: dt.date, end: dt.date, limit: int = 10) -> list[TopProductRow]:
+    def top_products(
+        *, start: dt.date, end: dt.date, perimetre: Perimetre, limit: int = 10
+    ) -> list[TopProductRow]:
         rows = (
             OrderLine.objects.filter(
                 order__status=OrderStatus.DELIVERED,
                 order__delivered_at__date__range=(start, end),
+                **perimetre.filtre("order__restaurant_id"),
             )
             .values("menu_item_id", "item_name")
             .annotate(quantity_sold=Sum("quantity"), revenue_minor=Sum("line_total_minor"))
@@ -221,7 +227,7 @@ class ReportingService:
         ]
 
     @staticmethod
-    def orders_by_status(*, start: dt.date, end: dt.date) -> list[StatusRow]:
+    def orders_by_status(*, start: dt.date, end: dt.date, perimetre: Perimetre) -> list[StatusRow]:
         """Répartition des commandes par statut sur la fenêtre.
 
         Sur `placed_at` et non `delivered_at`, contrairement au chiffre
@@ -231,7 +237,9 @@ class ReportingService:
         précisément ce qu'on vient regarder.
         """
         rows = (
-            Order.objects.filter(placed_at__date__range=(start, end))
+            Order.objects.filter(
+                placed_at__date__range=(start, end), **perimetre.filtre("restaurant_id")
+            )
             .values("status")
             .annotate(orders_count=Count("id"), revenue_minor=Sum("total_minor"))
             .order_by("-orders_count")
@@ -246,7 +254,9 @@ class ReportingService:
         ]
 
     @staticmethod
-    def sales_by_category(*, start: dt.date, end: dt.date) -> list[CategoryRow]:
+    def sales_by_category(
+        *, start: dt.date, end: dt.date, perimetre: Perimetre
+    ) -> list[CategoryRow]:
         """Ventes agrégées par catégorie de la carte.
 
         La jointure passe par l'article, seul chemin vers la catégorie : la
@@ -259,6 +269,7 @@ class ReportingService:
                 order__status=OrderStatus.DELIVERED,
                 order__delivered_at__date__range=(start, end),
                 menu_item__isnull=False,
+                **perimetre.filtre("order__restaurant_id"),
             )
             .values("menu_item__category_id", "menu_item__category__name")
             .annotate(quantity_sold=Sum("quantity"), revenue_minor=Sum("line_total_minor"))
@@ -275,7 +286,7 @@ class ReportingService:
         ]
 
     @staticmethod
-    def overview(*, start: dt.date, end: dt.date) -> Overview:
+    def overview(*, start: dt.date, end: dt.date, perimetre: Perimetre) -> Overview:
         """Chiffres de tête du tableau de bord, en trois requêtes d'agrégation.
 
         L'écran précédent en obtenait autant en **téléchargeant toutes les
@@ -284,7 +295,9 @@ class ReportingService:
         plateforme grandissait, et les totaux dépendaient de ce que la
         pagination avait rendu.
         """
-        commandes = Order.objects.filter(placed_at__date__range=(start, end)).aggregate(
+        commandes = Order.objects.filter(
+            placed_at__date__range=(start, end), **perimetre.filtre("restaurant_id")
+        ).aggregate(
             total=Count("id"),
             livrees=Count("id", filter=Q(status=OrderStatus.DELIVERED)),
             annulees=Count("id", filter=Q(status=OrderStatus.CANCELLED)),
@@ -293,8 +306,10 @@ class ReportingService:
         livrees = commandes["livrees"]
         chiffre = commandes["chiffre"] or 0
 
-        catalogue = MenuItem.objects.alive().aggregate(
-            total=Count("id"), disponibles=Count("id", filter=Q(is_available=True))
+        catalogue = (
+            MenuItem.objects.alive()
+            .filter(**perimetre.filtre("restaurant_id"))
+            .aggregate(total=Count("id"), disponibles=Count("id", filter=Q(is_available=True)))
         )
 
         return Overview(
@@ -303,9 +318,7 @@ class ReportingService:
             orders_cancelled=commandes["annulees"],
             revenue_minor=chiffre,
             average_basket_minor=chiffre // livrees if livrees else 0,
-            customers_count=User.objects.filter(
-                user_type=UserType.CUSTOMER, is_active=True
-            ).count(),
+            customers_count=ReportingService._clients_du_perimetre(perimetre),
             # Les trois termes de L1, et pas le seul `is_online`. Le tableau de
             # bord intitule ce nombre « Livreurs actifs » : ce que le
             # superviseur y lit, c'est combien de livreurs peuvent prendre une
@@ -319,16 +332,46 @@ class ReportingService:
                 is_online=True,
                 verification_status=VerificationStatus.APPROVED,
                 user__is_active=True,
+                **perimetre.filtre("restaurant_id"),
             ).count(),
             menu_items_available=catalogue["disponibles"],
             menu_items_total=catalogue["total"],
         )
 
     @staticmethod
-    def courier_performance(*, start: dt.date, end: dt.date) -> list[CourierPerformanceRow]:
+    def _clients_du_perimetre(perimetre: Perimetre) -> int:
+        """Clients actifs rattachés à ce périmètre.
+
+        La définition est la même dans les deux cas — « les clients de ce
+        périmètre » — seule la façon de l'établir change, parce qu'un client n'a
+        pas de clé vers un établissement : il commande où il veut, et peut
+        commander dans deux pays.
+
+        Sur l'enseigne entière, tout client actif en fait partie. Restreint, le
+        rattachement se lit sur ses commandes : est client de cet établissement
+        celui qui y a commandé. Pas de borne de date, pour rester parallèle au
+        décompte global qui n'en a pas non plus : les deux répondent « combien
+        de clients », pas « combien ont commandé cette semaine » — c'est
+        `orders_count` qui répond à celle-là.
+        """
+        clients = User.objects.filter(user_type=UserType.CUSTOMER, is_active=True)
+        if not perimetre.is_global:
+            clients = clients.filter(
+                pk__in=Order.objects.filter(**perimetre.filtre("restaurant_id")).values(
+                    "customer_id"
+                )
+            )
+        return clients.count()
+
+    @staticmethod
+    def courier_performance(
+        *, start: dt.date, end: dt.date, perimetre: Perimetre
+    ) -> list[CourierPerformanceRow]:
         rows = (
             Assignment.objects.filter(
-                status=DeliveryStatus.DELIVERED, delivered_at__date__range=(start, end)
+                status=DeliveryStatus.DELIVERED,
+                delivered_at__date__range=(start, end),
+                **perimetre.filtre("order__restaurant_id"),
             )
             .values("courier_id", "courier__user__full_name")
             .annotate(deliveries=Count("id"), earnings_minor=Sum("courier_fee_minor"))

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/presentation/catalogue.dart';
+import 'package:elcora_fast/screens/client/selecteur_etablissement_sheet.dart';
 import 'package:elcora_fast/screens/client/widgets/quick_actions_widget.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/ai_recommendation_service.dart';
@@ -9,6 +10,7 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
+import 'package:elcora_fast/services/restaurant_context_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
@@ -109,7 +111,10 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
         showBack: false,
         centerTitle: false,
         titleWidget: const _EnteteLivraison(),
-        actions: [_Cloche(onTap: () => context.navigateToNotifications())],
+        actions: [
+          const _ChoixDeCuisine(),
+          _Cloche(onTap: () => context.navigateToNotifications()),
+        ],
       ),
       body: FadeTransition(
         opacity: _fondu,
@@ -329,6 +334,44 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
 /// par défaut. Sans carnet — visiteur, ou client qui n'a rien enregistré — la
 /// ligne invite à en ajouter une plutôt que d'afficher un vide : c'est l'étape
 /// qui bloquera le règlement, autant la proposer maintenant.
+/// Bascule d'établissement — **seulement quand il y a un choix à faire**.
+///
+/// `RestaurantContextService` exposait `hasChoice` et `select()` depuis
+/// l'origine ; aucun écran ne les appelait. Le client se voyait attribuer le
+/// premier établissement rendu par le serveur sans jamais savoir qu'il y en
+/// avait d'autres. C'est le geste qui manquait au multi-cuisine côté client.
+///
+/// Absent sous deux établissements : une bascule à une seule option est un
+/// bouton qui ne fait rien, et l'accueil en a déjà assez.
+///
+/// Le retour de la feuille recharge le catalogue quand l'établissement a
+/// changé. Sans cela, les plats du précédent resteraient affichés sous le
+/// nouveau nom — pire qu'une liste vide, parce que rien ne le signalerait.
+class _ChoixDeCuisine extends StatelessWidget {
+  const _ChoixDeCuisine();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<RestaurantContextService>(
+      builder: (context, contexte, _) {
+        if (!contexte.hasChoice) return const SizedBox.shrink();
+
+        return IconButton(
+          tooltip: 'Changer de cuisine',
+          icon: const Icon(Icons.storefront_outlined),
+          onPressed: () async {
+            final change = await SelecteurEtablissementSheet.ouvrir(context);
+            if (change && context.mounted) {
+              await context.read<AppService>().rechargerLeCatalogue();
+            }
+          },
+        );
+      },
+    );
+  }
+}
+
+
 class _EnteteLivraison extends StatelessWidget {
   const _EnteteLivraison();
 

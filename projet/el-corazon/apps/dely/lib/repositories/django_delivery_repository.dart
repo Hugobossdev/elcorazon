@@ -211,6 +211,45 @@ class DjangoDeliveryRepository {
   /// Le dossier du livreur connecté.
   Future<eccore.CourierProfile> profile() => _delivery.me();
 
+  /// Dépose des pièces justificatives — `POST /delivery/me/`, en `multipart`.
+  ///
+  /// Les trois emplacements sont facultatifs : on remplace ce qu'on remplace,
+  /// et une pièce omise reste celle qui est déjà en place. Il en faut au moins
+  /// une — le serveur refuse un dépôt vide plutôt que de rendre 200 sur une
+  /// requête qui n'a rien déposé.
+  ///
+  /// Les noms français correspondent aux trois champs du contrat, dans l'ordre
+  /// où l'écran les demande : `id_document`, `licence_document`,
+  /// `vehicle_document`.
+  ///
+  /// Rend le dossier **à jour**, statut compris : un dépôt rouvre l'instruction
+  /// d'un dossier validé ou refusé (L5), et le résultat se lit au lieu d'être
+  /// supposé.
+  Future<eccore.CourierProfile> deposerPieces({
+    eccore.PieceJustificative? identite,
+    eccore.PieceJustificative? permis,
+    eccore.PieceJustificative? carteGrise,
+  }) => _delivery.submitDocuments(
+    idDocument: identite,
+    licenceDocument: permis,
+    vehicleDocument: carteGrise,
+  );
+
+  /// Corrige les champs descriptifs du dossier — `PATCH /delivery/me/`.
+  ///
+  /// Ne rouvre pas l'instruction, contrairement à [deposerPieces].
+  Future<eccore.CourierProfile> corrigerDossier({
+    String? vehicleType,
+    String? vehiclePlate,
+    String? nationalIdNumber,
+    String? licenceNumber,
+  }) => _delivery.updateMe(
+    vehicleType: vehicleType,
+    vehiclePlate: vehiclePlate,
+    nationalIdNumber: nationalIdNumber,
+    licenceNumber: licenceNumber,
+  );
+
   /// Les gains agrégés par le serveur — voir `eccore.Earnings`.
   ///
   /// À préférer toujours à une somme faite sur les courses chargées : celles-ci

@@ -26,9 +26,11 @@ from apps.accounts.models import Role, User, UserType
 from apps.orders.models import Order, PaymentMethod
 from apps.orders.states import OrderStatus
 from apps.payments.models import PaymentProvider, PaymentStatus, Refund, Transaction
+from apps.payments.services import RefundService
 from apps.payments.services import PaymentService
 from apps.restaurants.models import Restaurant, StaffMembership
 from common.money import Money
+from common.state_machine import IllegalTransition
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
 
@@ -172,6 +174,152 @@ class TestWebhook:
         assert initiated.status == PaymentStatus.COMPLETED
         assert initiated.completed_at is not None
         assert order.status == OrderStatus.CONFIRMED
+
+    def test_un_montant_moindre_ne_solde_pas_la_transaction(
+        self, client: APIClient, order: Order, initiated: Transaction
+    ) -> None:
+        """**Rien ne confrontait le montant confirmé à celui de la transaction.**
+
+        Une notification annonçant cent francs sur une commande de quatre mille
+        la soldait donc intégralement, et `_confirm_order` la passait en
+        `confirmed` : la cuisine partait sur une commande sous-payée sans que
+        rien ne le signale.
+
+        La réponse reste 200 — refuser ferait retenter le prestataire à l'infini
+        sur une notification qu'il croit juste. Ce qui compte est que la
+        transaction ne bouge pas et que l'anomalie soit lisible.
+        """
+        response = post_webhook(
+            client,
+            {
+                "event_id": "evt-montant-court",
+                "provider_reference": initiated.provider_reference,
+                "status": PaymentStatus.COMPLETED,
+                "amount": 100,
+                "currency": XOF,
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        initiated.refresh_from_db()
+        order.refresh_from_db()
+        assert initiated.status == PaymentStatus.PROCESSING
+        assert initiated.completed_at is None
+        # La commande n'a surtout pas bougé : c'est elle que la cuisine lit.
+        assert order.status != OrderStatus.CONFIRMED
+
+    def test_la_divergence_de_montant_est_tracee(
+        self, client: APIClient, initiated: Transaction
+    ) -> None:
+        """Une anomalie muette ne vaut guère mieux qu'un encaissement faux.
+
+        L'événement est enregistré — donc l'idempotence tient — et porte le
+        motif du refus, qui nomme les deux montants.
+        """
+        post_webhook(
+            client,
+            {
+                "event_id": "evt-trace",
+                "provider_reference": initiated.provider_reference,
+                "status": PaymentStatus.COMPLETED,
+                "amount": 1,
+                "currency": XOF,
+            },
+        )
+
+        from apps.payments.models import WebhookEvent
+
+        event = WebhookEvent.objects.get(event_id="evt-trace")
+        assert event.processed_at is not None
+        assert "Montant" in event.processing_error
+
+    def test_un_montant_superieur_ne_passe_pas_davantage(
+        self, client: APIClient, initiated: Transaction
+    ) -> None:
+        """L'égalité, pas un plancher.
+
+        Un trop-perçu est une anomalie de rapprochement comptable, pas une
+        aubaine : le solder sans rien dire laisserait un écart que personne ne
+        retrouve.
+        """
+        post_webhook(
+            client,
+            {
+                "event_id": "evt-trop",
+                "provider_reference": initiated.provider_reference,
+                "status": PaymentStatus.COMPLETED,
+                "amount": initiated.amount.amount_minor + 1,
+                "currency": XOF,
+            },
+        )
+
+        initiated.refresh_from_db()
+        assert initiated.status == PaymentStatus.PROCESSING
+
+    def test_le_montant_exact_solde_normalement(
+        self, client: APIClient, order: Order, initiated: Transaction
+    ) -> None:
+        """Le contrôle ne doit pas refuser ce qu'il est censé laisser passer."""
+        response = post_webhook(
+            client,
+            {
+                "event_id": "evt-juste",
+                "provider_reference": initiated.provider_reference,
+                "status": PaymentStatus.COMPLETED,
+                "amount": initiated.amount.amount_minor,
+                "currency": XOF,
+            },
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        initiated.refresh_from_db()
+        order.refresh_from_db()
+        assert initiated.status == PaymentStatus.COMPLETED
+        assert order.status == OrderStatus.CONFIRMED
+
+    def test_une_notification_sans_montant_reste_acceptee(
+        self, client: APIClient, initiated: Transaction
+    ) -> None:
+        """Tous les prestataires ne rendent pas le montant.
+
+        Exiger ce qu'ils ne donnent pas ferait échouer des encaissements
+        légitimes. L'absence n'autorise rien de plus qu'avant — elle laisse
+        simplement le contrôle sans matière.
+        """
+        post_webhook(
+            client,
+            {
+                "event_id": "evt-sans-montant",
+                "provider_reference": initiated.provider_reference,
+                "status": PaymentStatus.COMPLETED,
+            },
+        )
+
+        initiated.refresh_from_db()
+        assert initiated.status == PaymentStatus.COMPLETED
+
+    def test_un_echec_n_est_pas_soumis_au_controle_de_montant(
+        self, client: APIClient, initiated: Transaction
+    ) -> None:
+        """Un échec n'a pas de montant à honorer.
+
+        Lui opposer une égalité laisserait `processing` une transaction que le
+        prestataire vient de clore — c'est-à-dire une commande bloquée.
+        """
+        post_webhook(
+            client,
+            {
+                "event_id": "evt-echec-montant",
+                "provider_reference": initiated.provider_reference,
+                "status": PaymentStatus.FAILED,
+                "amount": 1,
+                "currency": XOF,
+                "reason": "Solde insuffisant.",
+            },
+        )
+
+        initiated.refresh_from_db()
+        assert initiated.status == PaymentStatus.FAILED
 
     def test_une_signature_invalide_est_rejetee(
         self, client: APIClient, initiated: Transaction
@@ -490,3 +638,106 @@ class TestMoyenDePaiement:
         as_customer.post(reverse("v1:payments:initiate", args=[order.pk]))
 
         assert Transaction.objects.get().provider == PaymentProvider.CASH
+
+
+@signed
+class TestConstatDuVirement:
+    """`RefundService.settle` — le chaînon manquant du remboursement.
+
+    PayDunya n'expose aucune API de remboursement : le virement part de leur
+    tableau de bord, à la main. `refund()` n'écrivait donc qu'une intention, et
+    **rien** ne la ramenait ensuite hors de `pending` — ni route, ni action, ni
+    service. Les remboursements s'accumulaient dans une attente perpétuelle, et
+    `PaymentStatus.REFUNDED`, pourtant déclaré et atteignable dans la machine,
+    n'était atteint par personne.
+
+    Ces tests portent la règle qui compte : la **transaction** ne bascule qu'au
+    remboursement intégral. `completed → refunded` est terminal, et le poser sur
+    un remboursement partiel interdirait le suivant — en plus de mentir.
+    """
+
+    @pytest.fixture
+    def encaissee(self, client: APIClient, initiated: Transaction) -> Transaction:
+        post_webhook(
+            client,
+            {
+                "event_id": "evt-pour-remboursement",
+                "provider_reference": initiated.provider_reference,
+                "status": PaymentStatus.COMPLETED,
+            },
+        )
+        initiated.refresh_from_db()
+        return initiated
+
+    def demander(self, client: APIClient, order: Order, txn: Transaction, montant: int) -> None:
+        """Même forme que `TestRemboursement.rembourser` : `amount` est un `Money`."""
+        reponse = client.post(
+            reverse("v1:payments:refund", args=[order.pk]),
+            {
+                "transaction": str(txn.pk),
+                "amount": {"amount": str(montant), "currency": XOF},
+                "reason": "Commande annulée après encaissement.",
+            },
+            format="json",
+        )
+        assert reponse.status_code == status.HTTP_201_CREATED, reponse.data
+
+    def test_un_remboursement_integral_bascule_la_transaction(
+        self, as_staff: APIClient, order: Order, encaissee: Transaction
+    ) -> None:
+        self.demander(as_staff, order, encaissee, encaissee.amount.amount_minor)
+        remboursement = Refund.objects.get(order=order)
+        assert remboursement.status == PaymentStatus.PENDING
+
+        RefundService.settle(refund=remboursement, provider_reference="VIR-42")
+
+        remboursement.refresh_from_db()
+        encaissee.refresh_from_db()
+        assert remboursement.status == PaymentStatus.COMPLETED
+        assert remboursement.completed_at is not None
+        assert encaissee.status == PaymentStatus.REFUNDED
+        # La trace du virement est ce qu'on cherche quand un client affirme
+        # n'avoir rien reçu.
+        assert "VIR-42" in remboursement.reason
+
+    def test_un_remboursement_partiel_ne_bascule_pas_la_transaction(
+        self, as_staff: APIClient, order: Order, encaissee: Transaction
+    ) -> None:
+        """Rendre cinq cents francs sur quatre mille ne rembourse pas la course.
+
+        Et surtout : `refunded` étant terminal, y basculer ici interdirait le
+        second remboursement.
+        """
+        self.demander(as_staff, order, encaissee, 500)
+
+        RefundService.settle(refund=Refund.objects.get(order=order))
+
+        encaissee.refresh_from_db()
+        assert encaissee.status == PaymentStatus.COMPLETED
+
+    def test_le_cumul_des_partiels_finit_par_basculer(
+        self, as_staff: APIClient, order: Order, encaissee: Transaction
+    ) -> None:
+        """La comparaison porte sur le **cumul**, pas sur le dernier constaté."""
+        moitie = encaissee.amount.amount_minor // 2
+        self.demander(as_staff, order, encaissee, moitie)
+        RefundService.settle(refund=Refund.objects.get(order=order))
+
+        self.demander(as_staff, order, encaissee, encaissee.amount.amount_minor - moitie)
+        reste = Refund.objects.filter(order=order, status=PaymentStatus.PENDING).get()
+        RefundService.settle(refund=reste)
+
+        encaissee.refresh_from_db()
+        assert encaissee.status == PaymentStatus.REFUNDED
+
+    def test_un_remboursement_deja_constate_ne_se_reconstate_pas(
+        self, as_staff: APIClient, order: Order, encaissee: Transaction
+    ) -> None:
+        """La machine à états l'interdit, et c'est elle qui doit le dire."""
+        self.demander(as_staff, order, encaissee, encaissee.amount.amount_minor)
+        remboursement = Refund.objects.get(order=order)
+        RefundService.settle(refund=remboursement)
+        remboursement.refresh_from_db()
+
+        with pytest.raises(IllegalTransition):
+            RefundService.settle(refund=remboursement)

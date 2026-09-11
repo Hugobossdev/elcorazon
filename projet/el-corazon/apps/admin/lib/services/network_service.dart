@@ -38,6 +38,7 @@ class NetworkService extends ChangeNotifier {
   NetworkService._()
       : _geographieInjectee = null,
         _etablissementsInjectes = null,
+        _referenceInjectee = null,
         _perimetreInjecte = null;
 
   /// Instance isolée, alimentée par des dépôts donnés. Réservée aux tests :
@@ -46,13 +47,16 @@ class NetworkService extends ChangeNotifier {
   NetworkService.avecDepots({
     required eccore.ManagedGeographyRepository geographie,
     required eccore.ManagedRestaurantRepository etablissements,
+    eccore.GeographyReferenceRepository? reference,
     RestaurantScopeService? perimetre,
   }) : _geographieInjectee = geographie,
        _etablissementsInjectes = etablissements,
+       _referenceInjectee = reference,
        _perimetreInjecte = perimetre;
 
   final eccore.ManagedGeographyRepository? _geographieInjectee;
   final eccore.ManagedRestaurantRepository? _etablissementsInjectes;
+  final eccore.GeographyReferenceRepository? _referenceInjectee;
   final RestaurantScopeService? _perimetreInjecte;
 
   eccore.ManagedGeographyRepository get _geographie =>
@@ -63,12 +67,17 @@ class NetworkService extends ChangeNotifier {
       _etablissementsInjectes ??
       eccore.ManagedRestaurantRepository(apiClient: AdminAuthService().apiClient);
 
+  eccore.GeographyReferenceRepository get _depotReference =>
+      _referenceInjectee ??
+      eccore.GeographyReferenceRepository(apiClient: AdminAuthService().apiClient);
+
   /// Le périmètre à rafraîchir après une écriture. Nul en test isolé, où il n'y
   /// a pas de session à observer.
   RestaurantScopeService? get _perimetre =>
       _perimetreInjecte ??
       (_etablissementsInjectes == null ? RestaurantScopeService() : null);
 
+  eccore.GeographyReference _reference = eccore.GeographyReference.vide;
   List<eccore.ManagedCountry> _pays = const [];
   List<eccore.ManagedCity> _villes = const [];
   List<eccore.ManagedRestaurant> _etablissements = const [];
@@ -81,6 +90,17 @@ class NetworkService extends ChangeNotifier {
   /// masquer les fermés rendrait le geste impossible depuis l'écran même qui
   /// sert à le faire — le raisonnement que tiennent déjà les zones et les
   /// catégories.
+  /// Devises et fuseaux que le serveur accepte.
+  ///
+  /// Le formulaire d'ouverture de marché portait **dix fuseaux écrits en dur**
+  /// et une liste de devises à côté. Ouvrir un marché hors de ces dix demandait
+  /// de republier l'application, et une devise proposée mais non acceptée
+  /// produisait un 400 après la saisie de tout le formulaire.
+  ///
+  /// Vide tant que [chargerLaReference] n'a pas répondu : l'écran ne propose
+  /// alors rien plutôt qu'une valeur inventée.
+  eccore.GeographyReference get reference => _reference;
+
   List<eccore.ManagedCountry> get countries => List.unmodifiable(_pays);
   List<eccore.ManagedCity> get cities => List.unmodifiable(_villes);
   List<eccore.ManagedRestaurant> get restaurants => List.unmodifiable(_etablissements);
@@ -167,6 +187,27 @@ class NetworkService extends ChangeNotifier {
   /// La devise et le fuseau se saisissent ici, à l'ouverture, et nulle part
   /// ailleurs : la devise est figée sur chaque commande passée dans ce pays, et
   /// la corriger plus tard ne convertit rien rétroactivement.
+  /// Charge devises et fuseaux, une fois par session.
+  ///
+  /// Appelée par le formulaire d'ouverture de marché plutôt qu'au démarrage :
+  /// c'est le seul écran qui s'en sert, et six cents fuseaux n'ont pas à
+  /// voyager pour quelqu'un qui vient regarder ses commandes.
+  ///
+  /// Un échec est **silencieux** et laisse la référence vide. Le formulaire
+  /// affiche alors qu'il n'a pas pu charger les valeurs disponibles : c'est
+  /// une panne de configuration, pas une raison de faire échouer l'écran
+  /// entier — et proposer une liste de repli reviendrait à réintroduire
+  /// exactement le hardcoding qu'on retire.
+  Future<void> chargerLaReference() async {
+    if (!_reference.isEmpty) return;
+    try {
+      _reference = await _depotReference.fetch();
+      notifyListeners();
+    } on eccore.ApiException catch (e) {
+      eccore.Journal.trace('Réseau : référence illisible — ${e.code}');
+    }
+  }
+
   Future<eccore.ManagedCountry?> createCountry({
     required String isoCode,
     required String name,
@@ -282,6 +323,55 @@ class NetworkService extends ChangeNotifier {
 
     if (cree != null) await _perimetre?.resolve(force: true);
     return cree;
+  }
+
+  /// Ouvre un établissement en repartant d'un autre.
+  ///
+  /// [sections] dit ce qui est recopié — `general`, `opening_hours`,
+  /// `catalog`. Commandes, clients, livreurs et historiques ne sont copiables
+  /// par aucune valeur : il n'existe pas de section pour eux côté serveur.
+  ///
+  /// Le refus le plus courant est le 409 « devises différentes » : une carte
+  /// recopiée garde ses montants sans changer d'unité, et 2 500 XOF deviendrait
+  /// 2 500 NGN — un prix plausible et faux. [_messageDErreur] rend le message du
+  /// serveur tel quel, parce qu'il propose déjà la sortie : dupliquer sans le
+  /// catalogue.
+  Future<eccore.ManagedRestaurant?> duplicateRestaurant({
+    required String sourceSlug,
+    required String name,
+    required String slug,
+    required String zoneId,
+    required String address,
+    required double latitude,
+    required double longitude,
+    required String phone,
+    String? email,
+    List<String> sections = const [],
+  }) async {
+    final copie = await _ecrire(
+      () => _depotEtablissements.duplicate(
+        sourceSlug: sourceSlug,
+        name: name,
+        slug: slug,
+        zoneId: zoneId,
+        address: address,
+        latitude: latitude,
+        longitude: longitude,
+        phone: phone,
+        email: email,
+        sections: sections,
+      ),
+      apres: (etablissement) {
+        _etablissements = [..._etablissements, etablissement]
+          ..sort((a, b) => a.name.compareTo(b.name));
+      },
+    );
+
+    // Le périmètre du compte s'élargit du nouvel établissement, comme à la
+    // création : sans cette relecture, la fiche existe mais aucun écran de
+    // configuration ne peut basculer dessus.
+    if (copie != null) await _perimetre?.resolve(force: true);
+    return copie;
   }
 
   Future<eccore.ManagedRestaurant?> updateRestaurant({

@@ -115,7 +115,22 @@ ALLOWED: dict[str, set[str]] = {
     # qui ne dépend de personne : le socle d'identité y serait devenu le module
     # qui connaît tout le reste. La lecture est à sens unique — aucun de ces
     # modules ne connaît `analytics`, ce que garantit l'acyclicité du graphe.
-    "analytics": {"accounts", "catalog", "delivery", "loyalty", "orders", "profiles"},
+    #
+    # `restaurants` s'y ajoute pour le **périmètre** des rapports : agrégés sans
+    # filtre, ils rendaient le chiffre d'affaires de toute l'enseigne à un
+    # gérant rattaché à un seul établissement. Résoudre ce périmètre demande de
+    # traduire un pays, une ville ou un slug en établissements, ce que seul
+    # `restaurants` sait faire. L'arête reste dans le bon sens : `restaurants`
+    # ignore toujours `analytics`.
+    "analytics": {
+        "accounts",
+        "catalog",
+        "delivery",
+        "loyalty",
+        "orders",
+        "profiles",
+        "restaurants",
+    },
     # Le champ de recherche du back-office traverse quatre domaines et n'écrit
     # nulle part. C'est ce qui rend l'arête acceptable : toutes les flèches
     # entrent, aucune ne sort, et le graphe reste acyclique. L'alternative —

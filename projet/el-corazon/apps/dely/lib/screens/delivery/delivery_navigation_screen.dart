@@ -14,6 +14,8 @@ import 'package:elcora_dely/screens/payments/driver_payment_screen.dart';
 import 'package:elcora_dely/screens/communication/chat_screen.dart';
 import 'package:elcora_dely/presentation/etat_compte.dart';
 import 'package:elcora_dely/presentation/messages_erreur.dart';
+import 'package:elcora_dely/presentation/pieces_du_dossier.dart';
+import 'package:elcora_dely/screens/auth/pieces_justificatives_screen.dart';
 
 class DeliveryNavigationScreen extends StatefulWidget {
   const DeliveryNavigationScreen({super.key});
@@ -566,7 +568,8 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
 
 }
 
-/// Rappel discret de l'état du dossier, au-dessus de l'application.
+/// Rappel de l'état du dossier, au-dessus de l'application — et la porte vers
+/// ce qui le débloque.
 ///
 /// N'apparaît que pour un dossier **en attente d'instruction** — c'est le seul
 /// état qui laisse entrer tout en empêchant de travailler
@@ -576,48 +579,109 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
 /// Sans lui, un livreur dont le dossier n'est pas encore validé voit une
 /// application complète et une liste de courses vide, sans rien qui explique
 /// pourquoi. Il attend, puis il appelle.
+///
+/// ## Ce que le bandeau disait de faux
+///
+/// Il annonçait « El Corazón vérifie vos pièces » à un livreur qui **n'en avait
+/// déposé aucune** — et qui n'avait aucun moyen de le faire, l'écran de dépôt
+/// n'existant pas. L'attente qu'il décrivait n'avait donc pas de fin : rien
+/// n'arriverait jamais dans la file d'instruction du back-office.
+///
+/// Le bandeau distingue maintenant les deux situations, parce qu'elles
+/// appellent des gestes opposés : un dossier **incomplet** attend le livreur,
+/// un dossier **complet** attend El Corazón. Lui dire « patientez » dans le
+/// premier cas est la seule chose à ne pas faire.
 class _BandeauEtatDuDossier extends StatelessWidget {
   const _BandeauEtatDuDossier();
 
   @override
   Widget build(BuildContext context) {
-    final etat = context.watch<AppService>().etatCompte;
+    final app = context.watch<AppService>();
+    final etat = app.etatCompte;
     if (etat == null || !etat.meriteUnBandeau) return const SizedBox.shrink();
 
+    final exigence = ExigenceDuDossier.depuis(app.courierProfile);
+    final manquantes = app.courierProfile == null
+        ? const <PieceDuDossier>[]
+        : piecesManquantes(app.courierProfile!);
+
+    // Le dossier attend-il quelque chose du livreur, ou d'El Corazón ? Les
+    // deux phrases ne se ressemblent pas, et c'est voulu.
+    final incomplet = exigence == ExigenceDuDossier.incomplet;
+    final titre = incomplet ? 'Votre dossier est incomplet' : etat.titre;
+    final explication = incomplet
+        ? 'Il manque ${_enumerer(manquantes)}. Votre dossier ne sera pas '
+              'instruit tant que ces pièces ne sont pas déposées.'
+        : etat.explication;
+
     final theme = Theme.of(context);
+    // Un rouge discret quand la balle est dans le camp du livreur : la même
+    // couleur que « en cours de traitement » lui ferait lire la même chose.
+    final fond = incomplet
+        ? theme.colorScheme.errorContainer
+        : theme.colorScheme.secondaryContainer;
+    final encre = incomplet
+        ? theme.colorScheme.onErrorContainer
+        : theme.colorScheme.onSecondaryContainer;
+
     return Material(
-      color: theme.colorScheme.secondaryContainer,
+      color: fond,
       child: SafeArea(
         bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            children: [
-              Icon(etat.icone, size: 20, color: theme.colorScheme.onSecondaryContainer),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      etat.titre,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: theme.colorScheme.onSecondaryContainer,
-                      ),
-                    ),
-                    Text(
-                      etat.explication,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSecondaryContainer,
-                      ),
-                    ),
-                  ],
-                ),
+        child: InkWell(
+          onTap: () => unawaited(
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const PiecesJustificativesScreen(),
               ),
-            ],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
+                  incomplet ? Icons.upload_file : etat.icone,
+                  size: 20,
+                  color: encre,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        titre,
+                        style: theme.textTheme.labelLarge?.copyWith(color: encre),
+                      ),
+                      Text(
+                        explication,
+                        style: theme.textTheme.bodySmall?.copyWith(color: encre),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Toujours présent, y compris sur un dossier complet : c'est
+                // aussi par là qu'on relit et remplace une pièce déjà déposée.
+                Icon(Icons.chevron_right, size: 20, color: encre),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// « le permis de conduire », « la pièce d'identité et le permis », …
+  ///
+  /// Une liste à puces au-dessus de l'écran d'accueil serait plus lourde que le
+  /// message ne le mérite, et « 2 pièces manquantes » obligerait à ouvrir
+  /// l'écran pour savoir lesquelles.
+  static String _enumerer(List<PieceDuDossier> pieces) {
+    final libelles = [for (final piece in pieces) piece.libelle.toLowerCase()];
+    if (libelles.isEmpty) return 'des pièces';
+    if (libelles.length == 1) return libelles.single;
+    return '${libelles.sublist(0, libelles.length - 1).join(', ')} et ${libelles.last}';
   }
 }

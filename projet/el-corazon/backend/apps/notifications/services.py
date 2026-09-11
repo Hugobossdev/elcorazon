@@ -28,7 +28,7 @@ from apps.notifications.models import (
     Notification,
     NotificationKind,
 )
-from apps.restaurants.models import StaffMembership
+from apps.restaurants.scoping import staff_user_ids_for
 
 __all__ = ["MARKETING_KINDS", "notify", "recipients_of", "send_campaign", "staff_to_alert"]
 
@@ -97,17 +97,28 @@ def staff_to_alert(*, restaurant_id: UUID, permission: str) -> models.QuerySet[U
     n'en ont pas, et ils sont précisément ceux qu'on veut prévenir d'un
     incident.
 
-    ## Pourquoi `StaffMembership` est importé plutôt que traversé
+    ## Pourquoi le périmètre est importé plutôt que traversé
 
     Le même filtre s'écrit sans import, par la relation inverse
     (`staff_memberships__restaurant_id`) — le nom vient du `related_name` que
     `restaurants` déclare. C'est écarté délibérément : ce serait un couplage
     **réel** que le test d'architecture ne verrait pas, et qui casserait en
     silence, à l'exécution, le jour où ce `related_name` change. L'arête est
-    donc déclarée (`notifications → restaurants`, voir `ALLOWED`) et le modèle
-    importé, pour que la dépendance soit vérifiée au lieu d'être devinée.
+    donc déclarée (`notifications → restaurants`, voir `ALLOWED`) et la fonction
+    de périmètre appelée, pour que la dépendance soit vérifiée au lieu d'être
+    devinée.
+
+    Appeler `staff_user_ids_for` plutôt que de refaire la requête a une seconde
+    vertu : le jour où un troisième palier de cloisonnement apparaîtra, les
+    alertes le suivront sans qu'on y pense.
     """
-    rattaches = StaffMembership.objects.filter(restaurant_id=restaurant_id).values("user_id")
+    # Passe par le périmètre calculé, et non par la seule table de
+    # rattachement : depuis que le cloisonnement a un palier pays/ville
+    # (`AreaMembership`), un directeur de marché voit les commandes de son
+    # marché au back-office. Lire ici la seule `StaffMembership` le laisserait
+    # sans aucune alerte sur ce qu'il est chargé de superviser — les deux
+    # lectures doivent désigner la même population.
+    rattaches = staff_user_ids_for(restaurant_id=restaurant_id)
 
     habilites = User.objects.filter(user_type=UserType.STAFF, is_active=True).filter(
         models.Q(is_superuser=True)

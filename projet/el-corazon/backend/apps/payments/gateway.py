@@ -28,6 +28,7 @@ from django.conf import settings
 from django.utils.module_loading import import_string
 
 from apps.payments.models import PaymentStatus, Transaction
+from common.money import Money
 
 __all__ = [
     "CheckoutInstruction",
@@ -79,6 +80,21 @@ class Notification:
     provider_reference: str
     status: str
     reason: str = ""
+
+    #: Montant que le prestataire déclare avoir encaissé, quand il le dit.
+    #:
+    #: **Ce champ manquait, et son absence était une faille.** Le service
+    #: appliquait le statut sans jamais confronter le montant à celui de la
+    #: transaction ouverte : une confirmation portant sur une somme moindre
+    #: soldait une commande au prix fort. Rien ne le signalait, puisque rien ne
+    #: regardait.
+    #:
+    #: `None` reste permis, et c'est délibéré : tous les prestataires ne
+    #: rendent pas le montant, et exiger ce qu'ils ne donnent pas ferait échouer
+    #: des encaissements légitimes. `PaymentService._apply` ne compare donc que
+    #: lorsqu'il y a de quoi comparer — l'absence n'autorise rien, elle
+    #: n'interdit rien de plus qu'avant.
+    amount: Money | None = None
 
 
 class PaymentGateway(Protocol):
@@ -148,7 +164,30 @@ class SandboxGateway:
             provider_reference=reference,
             status=status,
             reason=str(data.get("reason", "")),
+            amount=self._montant(data),
         )
+
+    @staticmethod
+    def _montant(data: Mapping[str, Any]) -> Money | None:
+        """Montant de la notification, s'il en porte un.
+
+        Le bac à sable sert les espèces et le portefeuille, où l'appelant est
+        notre propre back-office : il peut donc joindre le montant, et le
+        contrôle de `_apply` s'applique alors comme pour PayDunya. Omis, la
+        notification reste valable — voir [`Notification.amount`].
+        """
+        brut = data.get("amount")
+        if brut is None:
+            return None
+
+        devise = str(data.get("currency") or settings.DEFAULT_CURRENCY)
+        try:
+            return Money(int(brut), devise)
+        except (TypeError, ValueError):
+            # Un montant illisible n'est pas un montant absent : le refuser ici
+            # ferait passer la notification pour « sans montant », donc sans
+            # contrôle. `GatewayError` la fait tracer sans être rejouée.
+            raise GatewayError(f"Montant de notification illisible : {brut!r}.") from None
 
 
 def gateway_for(provider: str) -> PaymentGateway:

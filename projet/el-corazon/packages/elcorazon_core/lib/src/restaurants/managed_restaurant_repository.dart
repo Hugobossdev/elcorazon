@@ -33,12 +33,40 @@ class ManagedRestaurantRepository {
   /// établissement suspendu, et le masquer le rendrait irrécupérable depuis
   /// l'écran même qui sert à le rouvrir — le raisonnement que tiennent déjà
   /// [ManagedCategory] et les zones de livraison.
-  Future<List<ManagedRestaurant>> list() async {
+  ///
+  /// Les filtres sont ceux du serveur (`filterset_fields`) et non un tri fait
+  /// après coup : sur un réseau de cinquante établissements, filtrer côté
+  /// client demanderait de tout charger d'abord, et le compteur affiché ne
+  /// porterait que sur les pages déjà rendues.
+  ///
+  /// [search] porte sur le nom et l'adresse, comme `search_fields` le déclare.
+  Future<List<ManagedRestaurant>> list({
+    String? countryIsoCode,
+    String? citySlug,
+    RestaurantLifecycle? status,
+    String? search,
+  }) async {
     final etablissements = <ManagedRestaurant>[];
+
+    // Les filtres passent par `queryParameters` et non concaténés au chemin.
+    // Deux raisons, et la seconde est celle qui a fait échouer la vérification
+    // de contrat : l'encodage revient à Dio plutôt qu'à un `Uri.encode` écrit à
+    // la main, et le chemin reste une **constante littérale**, donc reconnue
+    // par `tools/contrat_routes.py`. Une adresse construite par interpolation
+    // est invisible de cet outil, qui ne peut alors plus garantir que le
+    // serveur sert bien ce que l'application appelle.
+    Map<String, dynamic>? parametres = {
+      if (countryIsoCode != null && countryIsoCode.isNotEmpty)
+        'zone__city__country__iso_code': countryIsoCode,
+      if (citySlug != null && citySlug.isNotEmpty) 'zone__city__slug': citySlug,
+      if (status != null) 'status': status.code,
+      if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+    };
+
     String? path = '/restaurants/manage/';
 
     while (path != null) {
-      final response = await apiClient.get(path);
+      final response = await apiClient.get(path, queryParameters: parametres);
       final body = response.data as Map<String, dynamic>;
       etablissements.addAll(
         (body['results'] as List<dynamic>).map(
@@ -46,6 +74,9 @@ class ManagedRestaurantRepository {
         ),
       );
       path = body['next'] as String?;
+      // `next` porte déjà les filtres : les rejouer les dupliquerait dans
+      // l'URL. Même précaution que `ManagedGeographyRepository._collect`.
+      parametres = null;
     }
 
     return etablissements;
@@ -134,6 +165,52 @@ class ManagedRestaurantRepository {
         if (acceptsOrders != null) 'accepts_orders': acceptsOrders,
         if (defaultPreparationMinutes != null)
           'default_preparation_minutes': defaultPreparationMinutes,
+      },
+    );
+    return ManagedRestaurant.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Ouvre un établissement en repartant d'un autre — **en brouillon**.
+  ///
+  /// [sections] dit ce qui est recopié : `general` (description, délai de
+  /// préparation), `opening_hours`, `catalog`. Une liste vide duplique la seule
+  /// identité de marque, ce qui est un cas légitime — la succursale aura son
+  /// propre menu.
+  ///
+  /// Commandes, clients, livreurs et historiques ne sont copiables par aucune
+  /// valeur : il n'existe pas de section pour eux côté serveur, et une section
+  /// inventée est refusée en 400 plutôt qu'ignorée.
+  ///
+  /// L'adresse, la position et le téléphone sont **obligatoires** : les hériter
+  /// de la source produirait une fiche complète en apparence qui pointe sur une
+  /// autre ville, et le défaut ne se découvrirait qu'à la première course.
+  ///
+  /// Recopier une carte vers un marché d'une autre devise est refusé en 409 :
+  /// 2 500 XOF deviendraient 2 500 NGN, un prix plausible et faux. Le message
+  /// propose alors de dupliquer sans le catalogue.
+  Future<ManagedRestaurant> duplicate({
+    required String sourceSlug,
+    required String name,
+    required String slug,
+    required String zoneId,
+    required String address,
+    required double latitude,
+    required double longitude,
+    required String phone,
+    String? email,
+    List<String> sections = const [],
+  }) async {
+    final response = await apiClient.post(
+      '/restaurants/manage/$sourceSlug/duplicate/',
+      data: {
+        'name': name,
+        'slug': slug,
+        'zone': zoneId,
+        'address': address,
+        'location': {'lat': latitude, 'lon': longitude},
+        'phone': phone,
+        if (email != null && email.isNotEmpty) 'email': email,
+        'sections': sections,
       },
     );
     return ManagedRestaurant.fromJson(response.data as Map<String, dynamic>);

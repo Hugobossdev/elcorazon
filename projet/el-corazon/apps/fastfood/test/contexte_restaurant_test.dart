@@ -21,7 +21,16 @@ import 'package:elcora_fast/services/restaurant_context_service.dart';
 /// * **changer d'établissement se signale.** Le panier, les caches et les
 ///   écrans doivent se vider, sans quoi la carte de Lomé s'afficherait sous le
 ///   nom d'Abidjan.
+/// Points de référence transmis à l'annuaire, dans l'ordre des appels.
+///
+/// Le tri par proximité est fait par PostGIS, pas ici : ce qu'un test peut
+/// vérifier, c'est que l'application **demande** ce tri en transmettant sa
+/// position — et qu'elle ne le demande pas quand elle ne la connaît pas.
+final _origines = <(double?, double?)>[];
+
 void main() {
+  setUp(_origines.clear);
+
   eccore.Restaurant etablissement({
     required String slug,
     String name = 'El Corazón',
@@ -62,6 +71,7 @@ void main() {
     final contexte = RestaurantContextService.avecLecture(
       ({double? latitude, double? longitude}) async {
         appels.add(appels.length + 1);
+        _origines.add((latitude, longitude));
         return reponse();
       },
     );
@@ -334,6 +344,129 @@ void main() {
         contexte.exigerSlug(),
         throwsA(isA<AucunEtablissement>()),
       );
+    });
+  });
+
+  group('Choisir sa ville et sa cuisine', () {
+    test('les villes desservies sortent sans doublon, dans l’ordre du serveur', () async {
+      final monte1 = monte(
+        () => [
+          etablissement(slug: 'lome-centre'),
+          etablissement(slug: 'lome-nord'),
+          etablissement(
+            slug: 'abidjan-plateau',
+            city: 'Abidjan',
+            citySlug: 'abidjan',
+            country: 'CI',
+          ),
+        ],
+      );
+
+      await monte1.contexte.resolve();
+
+      // Deux établissements à Lomé ne font qu'une entrée : le sélecteur
+      // afficherait sinon « Lomé » deux fois, et le filtre paraîtrait cassé.
+      expect(monte1.contexte.villesDesservies, ['Lomé', 'Abidjan']);
+    });
+
+    test('filtrer par ville ne rend que ses établissements', () async {
+      final monte1 = monte(
+        () => [
+          etablissement(slug: 'lome-centre'),
+          etablissement(
+            slug: 'abidjan-plateau',
+            city: 'Abidjan',
+            citySlug: 'abidjan',
+            country: 'CI',
+          ),
+        ],
+      );
+
+      await monte1.contexte.resolve();
+
+      expect(
+        monte1.contexte.etablissementsDe('Abidjan').map((e) => e.slug),
+        ['abidjan-plateau'],
+      );
+      expect(monte1.contexte.etablissementsDe('Cotonou'), isEmpty);
+    });
+
+    test('une enseigne à un seul établissement n’offre aucun choix', () async {
+      // Condition d'affichage du sélecteur : en dessous de deux, la bascule
+      // serait un bouton qui ne fait rien.
+      final monte1 = monte(() => [etablissement(slug: 'el-corazon-lome')]);
+
+      await monte1.contexte.resolve();
+
+      expect(monte1.contexte.hasChoice, isFalse);
+      expect(monte1.contexte.villesDesservies, ['Lomé']);
+    });
+
+    test('aucune cuisine disponible : ni ville, ni choix, ni slug', () async {
+      final monte1 = monte(() => []);
+
+      await monte1.contexte.resolve();
+
+      expect(monte1.contexte.villesDesservies, isEmpty);
+      expect(monte1.contexte.hasChoice, isFalse);
+      expect(monte1.contexte.slug, isNull);
+    });
+
+    test('la résolution ordinaire ne transmet aucune position', () async {
+      // Réclamer la géolocalisation au lancement pour ordonner une liste est un
+      // coût disproportionné — et un refus, une fois donné, se reprend mal.
+      final monte1 = monte(() => [etablissement(slug: 'el-corazon-lome')]);
+
+      await monte1.contexte.resolve();
+
+      expect(_origines.single, (null, null));
+    });
+
+    test('trierParProximite transmet la position au serveur', () async {
+      final monte1 = monte(() => [etablissement(slug: 'el-corazon-lome')]);
+      await monte1.contexte.resolve();
+
+      await monte1.contexte.trierParProximite(latitude: 5.36, longitude: -4.0083);
+
+      // Le tri est fait par PostGIS sur un index géographique : la variante
+      // locale donnerait le même résultat sur dix restaurants et deviendrait
+      // impraticable à mille.
+      expect(_origines.last, (5.36, -4.0083));
+      expect(monte1.appels, hasLength(2));
+    });
+
+    test('trier ne défait pas un choix explicite', () async {
+      // Quelqu'un qui a choisi une cuisine précise la garde en changeant de
+      // quartier : le tri est une aide à la découverte, pas une décision prise
+      // à sa place.
+      final monte1 = monte(
+        () => [
+          etablissement(slug: 'lome-centre'),
+          etablissement(
+            slug: 'abidjan-plateau',
+            city: 'Abidjan',
+            citySlug: 'abidjan',
+            country: 'CI',
+          ),
+        ],
+      );
+      await monte1.contexte.resolve();
+      await monte1.contexte.select('abidjan-plateau');
+
+      await monte1.contexte.trierParProximite(latitude: 6.13, longitude: 1.22);
+
+      expect(monte1.contexte.slug, 'abidjan-plateau');
+    });
+
+    test('choisir une cuisine inconnue de l’annuaire ne fait rien', () async {
+      // Le sélecteur n'est pas une porte d'entrée vers un établissement que le
+      // serveur ne sert pas.
+      final monte1 = monte(() => [etablissement(slug: 'el-corazon-lome')]);
+      await monte1.contexte.resolve();
+
+      await monte1.contexte.select('el-corazon-douala');
+
+      expect(monte1.contexte.slug, 'el-corazon-lome');
     });
   });
 }

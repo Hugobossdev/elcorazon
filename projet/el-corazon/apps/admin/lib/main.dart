@@ -25,6 +25,7 @@ import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/dashboard_realtime_service.dart';
 import 'package:admin/services/opening_hours_service.dart';
+import 'package:admin/services/lieu_service.dart';
 import 'package:admin/services/network_service.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/screens/admin/admin_navigation_screen.dart';
@@ -152,6 +153,7 @@ class AdminApp extends StatelessWidget {
         // Pays, villes et établissements — l'écran de provisionnement. Les
         // routes existaient depuis l'ADR-006, aucune application ne les
         // appelait, et ouvrir un marché passait donc par `django-admin`.
+        ChangeNotifierProvider(create: (_) => LieuService()),
         ChangeNotifierProvider(create: (_) => NetworkService()),
         // Horaires d'ouverture. Ils vivaient dans les préférences du
         // poste, où rien ne les lisait ; ils sont désormais lus et écrits

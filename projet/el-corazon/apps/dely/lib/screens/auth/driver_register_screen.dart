@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:elcora_dely/presentation/messages_erreur.dart';
+import 'package:elcora_dely/presentation/vehicules.dart';
 import 'package:elcora_dely/screens/auth/verification_screen.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/utils/validators.dart';
@@ -47,29 +48,25 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
   final _prenom = TextEditingController();
   final _nom = TextEditingController();
   final _email = TextEditingController();
-  final _telephone = TextEditingController(text: '+228');
+  /// Vide à la construction — l'indicatif suit l'établissement choisi.
+  ///
+  /// Il valait `+228` en dur : le Togo, quel que soit le pays du restaurant
+  /// auquel le livreur postule. Un candidat d'Abidjan enregistrait donc un
+  /// numéro togolais s'il ne pensait pas à effacer la proposition, et c'est ce
+  /// numéro que la cuisine appelle pour lui confier une course.
+  final _telephone = TextEditingController();
   final _motDePasse = TextEditingController();
   final _confirmation = TextEditingController();
   final _plaque = TextEditingController();
 
   List<eccore.Restaurant>? _etablissements;
   String? _etablissementChoisi;
-  String _vehicule = _vehicules.first.$1;
+  String _vehicule = Vehicule.values.first.code;
 
   bool _chargementEtablissements = true;
   String? _erreurEtablissements;
   bool _envoiEnCours = false;
   String? _erreur;
-
-  /// Les valeurs de `VehicleType` côté serveur, et ce qu'on en dit en français.
-  /// Écrites ici plutôt que devinées : ce sont des identifiants d'API, pas des
-  /// libellés, et les traduire à l'envoi ferait refuser la candidature.
-  static const _vehicules = <(String, String, IconData)>[
-    ('motorcycle', 'Moto', Icons.two_wheeler),
-    ('scooter', 'Scooter', Icons.electric_scooter),
-    ('bicycle', 'Vélo', Icons.pedal_bike),
-    ('car', 'Voiture', Icons.directions_car),
-  ];
 
   @override
   void initState() {
@@ -103,12 +100,58 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
         // une liste d'un élément est une étape sans décision.
         _etablissementChoisi = options.length == 1 ? options.first.slug : null;
       });
+      _proposerLIndicatif();
     } catch (erreur) {
       if (!mounted) return;
       setState(() => _erreurEtablissements = messageErreur(erreur));
     } finally {
       if (mounted) setState(() => _chargementEtablissements = false);
     }
+  }
+
+  /// Indicatif du pays de l'établissement retenu, ou `null` tant qu'on ne le
+  /// connaît pas.
+  ///
+  /// Le premier de la liste sert de repli quand rien n'est encore choisi : à ce
+  /// stade la liste est triée par le serveur, et proposer l'indicatif du
+  /// premier vaut mieux que n'en proposer aucun.
+  String? get _indicatifPropose {
+    final etablissements = _etablissements;
+    if (etablissements == null || etablissements.isEmpty) return null;
+
+    final choisi = _etablissementChoisi;
+    final etablissement = choisi == null
+        ? etablissements.first
+        : etablissements.firstWhere(
+            (candidat) => candidat.slug == choisi,
+            orElse: () => etablissements.first,
+          );
+
+    return etablissement.phonePrefix.isEmpty ? null : etablissement.phonePrefix;
+  }
+
+  /// Propose l'indicatif du pays de l'établissement choisi.
+  ///
+  /// **Une proposition, jamais une contrainte.** Le champ n'est réécrit que
+  /// s'il est vide ou s'il ne contient encore qu'un indicatif : quelqu'un qui a
+  /// déjà tapé son numéro ne doit pas le voir disparaître parce qu'il corrige
+  /// son choix de restaurant.
+  ///
+  /// L'indicatif vient du serveur (`phone_prefix`, hérité du pays à travers la
+  /// zone) et non d'une table locale : c'est la même valeur que celle sur
+  /// laquelle le back-office et l'application cliente s'appuient, et elle suit
+  /// l'ouverture d'un marché sans qu'on republie l'application.
+  void _proposerLIndicatif() {
+    final prefixe = _indicatifPropose;
+    if (prefixe == null) return;
+
+    final saisi = _telephone.text.trim();
+    final estUnIndicatifSeul = RegExp(r'^\+\d{0,4}$').hasMatch(saisi);
+    if (saisi.isNotEmpty && !estUnIndicatifSeul) return;
+    if (saisi == prefixe) return;
+
+    _telephone.text = prefixe;
+    _telephone.selection = TextSelection.collapsed(offset: prefixe.length);
   }
 
   Future<void> _envoyer() async {
@@ -206,7 +249,11 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
                 const SizedBox(height: 16),
                 CustomTextField(
                   label: 'Téléphone',
-                  hint: '+22890123456',
+                  // Le filigrane suit le pays de l'établissement, comme la
+                  // valeur proposée : montrer un exemple togolais à un candidat
+                  // d'Abidjan lui fait saisir un numéro que la cuisine ne
+                  // pourra pas appeler.
+                  hint: '${_indicatifPropose ?? '+'}90123456',
                   controller: _telephone,
                   keyboardType: TextInputType.phone,
                   prefixIcon: Icons.phone_outlined,
@@ -263,7 +310,10 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
                   enChargement: _chargementEtablissements,
                   erreur: _erreurEtablissements,
                   enabled: !_envoiEnCours,
-                  onChanged: (slug) => setState(() => _etablissementChoisi = slug),
+                  onChanged: (slug) {
+                    setState(() => _etablissementChoisi = slug);
+                    _proposerLIndicatif();
+                  },
                   onRetry: _chargerEtablissements,
                 ),
 
@@ -277,14 +327,14 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
                     prefixIcon: Icon(Icons.two_wheeler),
                   ),
                   items: [
-                    for (final (valeur, libelle, icone) in _vehicules)
+                    for (final vehicule in Vehicule.values)
                       DropdownMenuItem(
-                        value: valeur,
+                        value: vehicule.code,
                         child: Row(
                           children: [
-                            Icon(icone, size: 20),
+                            Icon(vehicule.icone, size: 20),
                             const SizedBox(width: 8),
-                            Text(libelle),
+                            Text(vehicule.libelle),
                           ],
                         ),
                       ),

@@ -36,6 +36,7 @@ __all__ = [
     "CourierRatingSerializer",
     "CourierRatingWriteSerializer",
     "CourierSelfApplicationSerializer",
+    "CourierSelfUpdateSerializer",
     "CourierShiftSerializer",
     "CourierUpdateSerializer",
     "DeclineSerializer",
@@ -107,6 +108,14 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
             "verification_status",
             "verification_notes",
             "verified_at",
+            # Les deux numéros portés au dossier. Ils s'écrivaient déjà — le
+            # back-office les saisit à l'embauche (`CourierProvisioningSerializer`)
+            # et les corrige ensuite (`CourierUpdateSerializer`) — mais aucune
+            # réponse ne les rendait : ni le livreur ni le personnel ne pouvaient
+            # relire ce qui avait été enregistré, et le formulaire de correction
+            # ne savait pas préremplir les champs qu'il proposait de corriger.
+            "national_id_number",
+            "licence_number",
             "id_document",
             "licence_document",
             "vehicle_document",
@@ -419,16 +428,89 @@ class CourierShiftSerializer(serializers.ModelSerializer[CourierShift]):
         return attrs
 
 
-class CourierUpdateSerializer(serializers.Serializer[Any]):
-    """Correction d'un dossier livreur par le personnel — `PATCH`.
+class CourierSelfUpdateSerializer(serializers.Serializer[Any]):
+    """Correction de son **propre** dossier par le livreur — `PATCH /delivery/me/`.
 
-    **Une liste blanche, et rien d'autre.** Ce sérialiseur n'accepte que ce
-    qu'un back-office a de bonnes raisons de corriger : une plaque relevée de
-    travers à l'embauche, un numéro de téléphone qui change, un nom mal
-    orthographié, un livreur qui passe du scooter à la voiture. Tout le reste
-    du dossier lui est fermé, et la fermeture est ici plutôt que dans la vue
-    parce qu'un champ oublié dans une liste noire s'écrit, alors qu'un champ
-    oublié dans une liste blanche ne s'écrit pas.
+    ## Ce que le livreur corrige lui-même, et pourquoi c'est peu
+
+    Quatre champs, tous descriptifs : le véhicule qu'il conduit, sa plaque, et
+    les deux numéros que portent ses pièces. Ce sont exactement les valeurs
+    qu'il est seul à connaître et que personne d'autre n'a de raison de
+    ressaisir — un livreur qui passe du scooter à la voiture le sait avant le
+    back-office, et l'obliger à téléphoner pour faire changer une lettre de sa
+    plaque produit un dossier faux plutôt qu'un appel.
+
+    Tout le reste lui est fermé, et la liste blanche est ici plutôt que dans la
+    vue : un champ oublié dans une liste noire s'écrit, un champ oublié dans une
+    liste blanche ne s'écrit pas. En particulier `verification_status` —
+    l'invariant L1 tout entier tient à ce qu'un livreur ne puisse pas l'écrire,
+    faute de quoi il validerait son propre recrutement — et les compteurs, qui
+    sont des agrégats de faits et non des déclarations.
+
+    ## Ce que corriger un numéro **ne fait pas**
+
+    Le dossier n'est pas remis en instruction. Seul le dépôt d'une **pièce**
+    rouvre l'examen (L5, `CourierService.replace_documents`) : c'est la pièce
+    qu'un instructeur lit, pas le champ texte à côté. Remettre un dossier en
+    attente parce qu'une plaque a perdu un tiret suspendrait un livreur en
+    pleine tournée.
+
+    Le nom et le téléphone ne sont **pas** ici : ils appartiennent au compte, et
+    `PATCH /auth/me/` les porte déjà pour tous les types de comptes. Les
+    dédoubler ici donnerait deux routes pour un même geste, qui divergeraient.
+    """
+
+    vehicle_type = serializers.ChoiceField(choices=VehicleType.choices, required=False)
+    vehicle_plate = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    national_id_number = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    licence_number = serializers.CharField(max_length=64, required=False, allow_blank=True)
+
+    #: Énumérés dans le refus d'un corps vide. Le message dit ce qui *est*
+    #: accepté plutôt que ce qui ne l'est pas : l'appelant cherche le nom du
+    #: champ qu'il aurait dû envoyer.
+    CHAMPS_ACCEPTES = "type de véhicule, plaque, numéro de pièce d'identité, numéro de permis"
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Refuse un corps vide.
+
+        DRF l'accepterait et rendrait 200 sans rien écrire — l'écran
+        annoncerait « modifications enregistrées » sur une requête qui n'a rien
+        enregistré.
+        """
+        if not attrs:
+            raise serializers.ValidationError(
+                f"Aucun champ modifiable dans cette requête. Les champs acceptés "
+                f"sont : {self.CHAMPS_ACCEPTES}."
+            )
+        return attrs
+
+    def update(self, instance: CourierProfile, validated_data: dict[str, Any]) -> CourierProfile:
+        """Écrit le dossier, **dans une seule transaction**.
+
+        Elle ne sert à rien tant qu'un seul objet est touché ; elle sert dès que
+        la sous-classe y ajoute le compte, et la placer ici évite qu'on oublie
+        de l'ouvrir là-bas.
+        """
+        with transaction.atomic():
+            self._ecrire(instance, validated_data)
+
+        instance.refresh_from_db()
+        return instance
+
+    def _ecrire(self, instance: CourierProfile, validated_data: dict[str, Any]) -> None:
+        """Le geste d'écriture, isolé pour que la sous-classe s'y greffe."""
+        for champ, valeur in validated_data.items():
+            setattr(instance, champ, valeur)
+        if validated_data:
+            instance.save(update_fields=[*validated_data, "updated_at"])
+
+
+class CourierUpdateSerializer(CourierSelfUpdateSerializer):
+    """Correction d'un dossier livreur par le **personnel** — `PATCH`.
+
+    Le dossier de [`CourierSelfUpdateSerializer`], plus les deux champs du
+    compte qu'un back-office a de bonnes raisons de rectifier : un nom mal
+    orthographié à l'embauche, un numéro de téléphone qui change.
 
     Ce qui reste **hors d'atteinte**, et pourquoi :
 
@@ -465,29 +547,12 @@ class CourierUpdateSerializer(serializers.Serializer[Any]):
         allow_blank=True,
         validators=[phone_validator],
     )
-    vehicle_type = serializers.ChoiceField(choices=VehicleType.choices, required=False)
-    vehicle_plate = serializers.CharField(max_length=32, required=False, allow_blank=True)
-    national_id_number = serializers.CharField(max_length=64, required=False, allow_blank=True)
-    licence_number = serializers.CharField(max_length=64, required=False, allow_blank=True)
 
     #: Champs portés par le compte plutôt que par le dossier. La distinction
     #: n'a pas à remonter jusqu'à l'appelant : il corrige « le livreur ».
     CHAMPS_DU_COMPTE = ("full_name", "phone")
 
-    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        """Refuse un corps vide.
-
-        DRF l'accepterait et rendrait 200 sans rien écrire — l'écran
-        annoncerait « modifications enregistrées » sur une requête qui n'a rien
-        enregistré.
-        """
-        if not attrs:
-            raise serializers.ValidationError(
-                "Aucun champ modifiable dans cette requête. Les champs acceptés "
-                "sont : nom, téléphone, type de véhicule, plaque, numéro de "
-                "pièce d'identité, numéro de permis."
-            )
-        return attrs
+    CHAMPS_ACCEPTES = f"nom, téléphone, {CourierSelfUpdateSerializer.CHAMPS_ACCEPTES}"
 
     def validate_phone(self, value: str) -> str:
         """Unique sur les comptes, comme à l'inscription.
@@ -507,8 +572,9 @@ class CourierUpdateSerializer(serializers.Serializer[Any]):
             raise serializers.ValidationError("Ce numéro est déjà associé à un autre compte.")
         return numero
 
-    def update(self, instance: CourierProfile, validated_data: dict[str, Any]) -> CourierProfile:
-        """Écrit le dossier et le compte, **dans une seule transaction**.
+    def _ecrire(self, instance: CourierProfile, validated_data: dict[str, Any]) -> None:
+        """Écrit le compte, puis le dossier — sous la transaction ouverte par la
+        classe de base.
 
         Sans elle, un numéro de téléphone refusé par la base après qu'une
         plaque a été écrite laisserait le dossier à moitié corrigé, sans que
@@ -520,26 +586,19 @@ class CourierUpdateSerializer(serializers.Serializer[Any]):
             if champ in validated_data
         }
 
-        with transaction.atomic():
-            if compte:
-                for champ, valeur in compte.items():
-                    # Un téléphone vide vaut `NULL` et non `""` : la colonne est
-                    # `unique`, et deux chaînes vides s'y heurteraient alors que
-                    # deux `NULL` cohabitent.
-                    setattr(
-                        instance.user,
-                        champ,
-                        None if champ == "phone" and not valeur else valeur,
-                    )
-                instance.user.save(update_fields=[*compte, "updated_at"])
+        if compte:
+            for champ, valeur in compte.items():
+                # Un téléphone vide vaut `NULL` et non `""` : la colonne est
+                # `unique`, et deux chaînes vides s'y heurteraient alors que
+                # deux `NULL` cohabitent.
+                setattr(
+                    instance.user,
+                    champ,
+                    None if champ == "phone" and not valeur else valeur,
+                )
+            instance.user.save(update_fields=[*compte, "updated_at"])
 
-            for champ, valeur in validated_data.items():
-                setattr(instance, champ, valeur)
-            if validated_data:
-                instance.save(update_fields=[*validated_data, "updated_at"])
-
-        instance.refresh_from_db()
-        return instance
+        super()._ecrire(instance, validated_data)
 
 
 class PeriodEarningsSerializer(serializers.Serializer[Any]):

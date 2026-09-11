@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:admin/screens/admin/reseau/champs_reseau.dart';
+import 'package:admin/screens/admin/reseau/selecteur_de_lieu.dart';
 import 'package:admin/services/network_service.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/custom_text_field.dart';
@@ -106,6 +107,42 @@ class _VilleFormDialogState extends State<VilleFormDialog> {
     Navigator.of(context).pop(true);
   }
 
+  /// Ouvre la carte pour poser le centre de la ville.
+  ///
+  /// La recherche est bornée au pays déjà choisi dans le formulaire : chercher
+  /// « Kara » sans borne rend une ville du Togo, une du Nigeria et une région
+  /// de Turquie, et rien à l'écran ne dit laquelle est la bonne.
+  ///
+  /// Le nom proposé par Google **ne remplace pas** celui qu'on a tapé : c'est
+  /// le nom qui décide du slug, donc de l'URL, et un renommage silencieux
+  /// casserait les liens. Il n'est repris que si le champ est encore vide.
+  Future<void> _chercherLeCentre() async {
+    final courant = _positionCourante;
+    final lieu = await SelecteurDeLieu.ouvrir(
+      context,
+      titre: 'Centre de la ville',
+      positionInitiale: courant,
+      countryCode: _paysIso,
+    );
+    if (lieu == null || !mounted) return;
+
+    setState(() {
+      _latitude.text = lieu.latitude.toStringAsFixed(6);
+      _longitude.text = lieu.longitude.toStringAsFixed(6);
+      final proposee = lieu.city ?? lieu.name;
+      if (_nom.text.trim().isEmpty && proposee != null && proposee.isNotEmpty) {
+        _nom.text = proposee;
+      }
+    });
+  }
+
+  eccore.GeoPoint? get _positionCourante {
+    final lat = double.tryParse(_latitude.text.trim());
+    final lon = double.tryParse(_longitude.text.trim());
+    if (lat == null || lon == null) return null;
+    return eccore.GeoPoint(lat, lon);
+  }
+
   @override
   Widget build(BuildContext context) {
     final reseau = context.watch<NetworkService>();
@@ -152,6 +189,28 @@ class _VilleFormDialogState extends State<VilleFormDialog> {
                       RegExp(r'^[a-z0-9-]+$').hasMatch((valeur ?? '').trim())
                       ? null
                       : 'Minuscules, chiffres et tirets',
+                ),
+                const SizedBox(height: 12),
+                // **Le centre se cherche, plus ne se tape.**
+                //
+                // Chercher « Douala » rend son point en un geste ; le saisir au
+                // clavier suppose d'aller le lire ailleurs, et d'intervertir
+                // une fois sur deux la latitude et la longitude.
+                //
+                // Les champs restent visibles et modifiables : un relevé exact
+                // se saisit plus vite qu'il ne se pointe, et une carte
+                // indisponible ne doit pas empêcher d'ouvrir une ville.
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.tonalIcon(
+                    onPressed: _chercherLeCentre,
+                    icon: const Icon(Icons.map_outlined),
+                    label: Text(
+                      _latitude.text.isEmpty
+                          ? 'Chercher la ville sur la carte'
+                          : 'Ajuster le centre sur la carte',
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Row(

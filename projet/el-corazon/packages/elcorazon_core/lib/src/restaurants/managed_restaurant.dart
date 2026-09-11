@@ -32,6 +32,9 @@ class ManagedRestaurant {
     required this.isActive,
     required this.acceptsOrders,
     required this.defaultPreparationMinutes,
+    this.ordersCount = 0,
+    this.couriersCount = 0,
+    this.menuItemsCount = 0,
     this.description = '',
     this.phone,
     this.email,
@@ -74,6 +77,9 @@ class ManagedRestaurant {
       isActive: json['is_active'] as bool? ?? false,
       acceptsOrders: json['accepts_orders'] as bool? ?? true,
       defaultPreparationMinutes: json['default_preparation_minutes'] as int,
+      ordersCount: json['orders_count'] as int? ?? 0,
+      couriersCount: json['couriers_count'] as int? ?? 0,
+      menuItemsCount: json['menu_items_count'] as int? ?? 0,
     );
   }
 
@@ -136,6 +142,24 @@ class ManagedRestaurant {
   final bool acceptsOrders;
 
   final int defaultPreparationMinutes;
+
+  /// Compteurs d'exploitation — la ligne de tableau du back-office.
+  ///
+  /// Comptés par le serveur en une requête annotée, jamais dérivés d'une liste
+  /// chargée ici : le tableau de bord précédent téléchargeait les commandes
+  /// pour les compter à l'écran, et le total ne portait que sur la page
+  /// affichée.
+  ///
+  /// `menuItemsCount` exclut les articles retirés de la carte : « 43 produits »
+  /// dont la moitié sont supprimés n'aide personne à décider si un
+  /// établissement est prêt à ouvrir.
+  ///
+  /// Zéro par défaut plutôt que nul : la réponse d'une transition de statut
+  /// rend l'objet sans ses annotations, et un affichage doit montrer « 0 »
+  /// plutôt que disparaître.
+  final int ordersCount;
+  final int couriersCount;
+  final int menuItemsCount;
 
   /// L'établissement est-il configuré au point de pouvoir ouvrir ?
   bool get isReadyToPublish => configurationGaps.isEmpty;

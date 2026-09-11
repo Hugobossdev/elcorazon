@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
@@ -297,18 +296,24 @@ class DeliveryZoneService extends ChangeNotifier {
   /// écran ne l'appelait, et la seule façon d'ouvrir une ville était de passer
   /// par `django-admin`.
   ///
-  /// ## Pourquoi un centre et un rayon, et non un contour tracé
+  /// ## Le disque est désormais calculé par le serveur
   ///
-  /// Le serveur attend un `MultiPolygon` — la forme que produisent les outils
-  /// de cartographie, et celle que l'exploitation tracera pour de bon. Un
-  /// éditeur de contour sur carte est un travail à part entière, et l'absence
-  /// d'un tel éditeur ne doit pas empêcher d'ouvrir un marché : le disque
-  /// approché ici couvre un quartier de façon utilisable dès le premier jour,
-  /// et se remplace ensuite par le contour réel sans migration — c'est le même
-  /// champ.
+  /// Cet écran discrétisait lui-même le cercle en trente-six sommets, en
+  /// convertissant le rayon en degrés. La conversion était correcte pour nos
+  /// latitudes mais restait **une approximation locale** : elle s'écarte à
+  /// mesure qu'on s'éloigne de l'équateur, ce qui est exactement ce qu'un
+  /// produit multi-pays ne peut pas se permettre.
   ///
-  /// Le polygone est fermé explicitement (dernier point = premier) : PostGIS
-  /// refuse un anneau ouvert, et l'oubli est l'erreur classique.
+  /// Le serveur projette maintenant les sommets par la formule de destination
+  /// géodésique, en soixante-quatre côtés — voir `apps.geography.shapes`. Deux
+  /// gains, et le second compte plus que le premier : les sommets sont
+  /// réellement à la distance demandée, **et** la conversion vit à un seul
+  /// endroit. Deux écrans qui dessineraient chacun leur cercle produiraient
+  /// deux zones différentes pour la même saisie.
+  ///
+  /// Le centre et le rayon sont conservés en base à côté du contour : c'est ce
+  /// qui permet de rouvrir « 5 km » dans un champ, plutôt que soixante-quatre
+  /// sommets qu'on ne saurait ni relire ni ajuster.
   Future<DeliveryZone?> createZone({
     required String cityId,
     required String name,
@@ -331,11 +336,9 @@ class DeliveryZoneService extends ChangeNotifier {
       final creee = await _geographie.createZone(
         cityId: cityId,
         name: name,
-        boundary: disqueGeoJson(
-          latitude: centerLatitude,
-          longitude: centerLongitude,
-          rayonKm: radiusKm,
-        ),
+        shape: 'circle',
+        center: (latitude: centerLatitude, longitude: centerLongitude),
+        radiusMeters: (radiusKm * 1000).round(),
         baseFee: eccore.Money.fromMajorUnits(baseFee, currency),
         feePerKm: eccore.Money.fromMajorUnits(feePerKm, currency),
         freeDeliveryThreshold: freeDeliveryThreshold == null
@@ -367,53 +370,17 @@ class DeliveryZoneService extends ChangeNotifier {
     }
   }
 
-  /// Contour circulaire approché, en GeoJSON `MultiPolygon`.
-  ///
-  /// Le rayon est converti en degrés séparément sur chaque axe : un degré de
-  /// longitude vaut `cos(latitude)` fois un degré de latitude, et l'ignorer
-  /// produirait une zone deux fois trop large en longitude sous nos latitudes —
-  /// c'est-à-dire une zone qui accepte des courses qu'aucun livreur ne peut
-  /// faire.
-  ///
-  /// Trente-six sommets : un pas de dix degrés, dont l'écart au cercle reste
-  /// sous 0,4 % du rayon. Au-delà, on paie des octets sur chaque lecture pour
-  /// une précision qu'aucune décision n'utilise — le plafond kilométrique de la
-  /// zone tranche les cas limites.
-  @visibleForTesting
-  static Map<String, dynamic> disqueGeoJson({
-    required double latitude,
-    required double longitude,
-    required double rayonKm,
-    int sommets = 36,
-  }) {
-    const degreDeLatitudeEnKm = 110.574;
-    const degreDeLongitudeALEquateurEnKm = 111.320;
-
-    final rayonEnLatitude = rayonKm / degreDeLatitudeEnKm;
-    final cosinus = math.cos(latitude * math.pi / 180);
-    final rayonEnLongitude =
-        rayonKm / (degreDeLongitudeALEquateurEnKm * (cosinus.abs() < 1e-6 ? 1e-6 : cosinus));
-
-    final anneau = <List<double>>[
-      for (var i = 0; i < sommets; i++)
-        () {
-          final angle = 2 * math.pi * i / sommets;
-          return <double>[
-            longitude + rayonEnLongitude * math.cos(angle),
-            latitude + rayonEnLatitude * math.sin(angle),
-          ];
-        }(),
-    ];
-    // Fermeture explicite de l'anneau : PostGIS refuse un contour ouvert.
-    anneau.add(anneau.first);
-
-    return {
-      'type': 'MultiPolygon',
-      'coordinates': [
-        [anneau],
-      ],
-    };
-  }
+  // `disqueGeoJson` vivait ici — trente-six sommets, rayon converti en degrés
+  // sur chaque axe. La conversion était juste sous nos latitudes et **locale**
+  // par nature : elle s'écarte à mesure qu'on s'éloigne de l'équateur, ce qu'un
+  // produit multi-pays ne peut pas se permettre.
+  //
+  // Elle a été retirée, pas remplacée : le serveur projette désormais les
+  // sommets par la formule de destination géodésique (`apps.geography.shapes`),
+  // et cet écran ne lui envoie plus qu'un centre et un rayon. Garder les deux
+  // aurait laissé deux discrétisations du même cercle, donc deux zones
+  // possibles pour la même saisie — exactement la duplication qu'on cherche à
+  // supprimer.
 
   /// Rouvre ou ferme une zone.
   ///

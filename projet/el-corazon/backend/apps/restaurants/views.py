@@ -14,18 +14,24 @@ from django.contrib.gis.geos import Point
 from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema
 from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
+from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
+from rest_framework.views import APIView
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
+from apps.restaurants.delivery import check_delivery
 from apps.restaurants.models import Restaurant
 from apps.restaurants.serializers import (
+    DeliveryCheckQuerySerializer,
+    DeliveryCheckSerializer,
     NearbyQuerySerializer,
     RestaurantDetailSerializer,
     RestaurantSerializer,
 )
 from common.throttling import ResilientAnonRateThrottle, ResilientUserRateThrottle
 
-__all__ = ["RestaurantViewSet"]
+__all__ = ["DeliveryCheckView", "RestaurantViewSet"]
 
 
 @extend_schema(parameters=[NearbyQuerySerializer], tags=["restaurants"])
@@ -100,3 +106,89 @@ class RestaurantViewSet(ReadOnlyModelViewSet[Restaurant]):
         if "lat" not in params:
             return None
         return Point(params["lon"], params["lat"], srid=4326)
+
+
+class DeliveryCheckView(APIView):
+    """`POST /restaurants/delivery-check/` — **le référentiel unique de livrabilité**.
+
+    ## Ce que cette route remplace
+
+    Trois applications posaient la même question et n'obtenaient chacune qu'un
+    morceau de la réponse :
+
+    * `GET /geography/zones/resolve/` rendait **la zone seule** — ni
+      établissement, ni frais, ni distance, ni délai ;
+    * le devis complet n'existait qu'à l'intérieur d'`OrderService`, donc
+      seulement pour quelqu'un ayant déjà un panier ouvert sur un restaurant
+      choisi.
+
+    Chaque écran recomposait le reste à sa façon, et l'écart le plus grave était
+    invisible : la zone retenue pour *afficher* un tarif n'était pas choisie par
+    la même règle que celle retenue pour le *facturer*. Les deux passent
+    désormais par `check_delivery`, et il n'existe plus qu'un endroit où cette
+    règle peut changer.
+
+    ## Pourquoi POST plutôt que GET
+
+    Le sous-total est un montant — un objet, pas un scalaire (ADR-007) — et il
+    voyage mal en paramètre d'URL. Un `GET` obligerait à l'aplatir en deux
+    paramètres corrélés qu'aucune validation ne tiendrait ensemble.
+
+    La route ne modifie rien, et son POST ne doit donc pas être lu comme une
+    écriture : c'est une interrogation dont les critères sont trop structurés
+    pour une chaîne de requête, comme l'autocomplétion de Places.
+
+    ## Ouverte sans jeton
+
+    Un visiteur doit pouvoir savoir si on le livre **avant** de créer un compte.
+    C'est le même raisonnement que pour la géographie et l'annuaire : exiger une
+    inscription pour répondre « non, pas encore chez vous » est le meilleur
+    moyen de ne jamais revoir la personne.
+
+    Aucune donnée personnelle n'en sort : la réponse ne parle que de zones, de
+    barèmes et d'établissements, tous publics.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ResilientAnonRateThrottle, ResilientUserRateThrottle]
+
+    @extend_schema(
+        request=DeliveryCheckQuerySerializer,
+        responses={200: DeliveryCheckSerializer},
+        tags=["restaurants"],
+    )
+    def post(self, request: Request) -> Response:
+        requete = DeliveryCheckQuerySerializer(data=request.data)
+        requete.is_valid(raise_exception=True)
+        donnees = requete.validated_data
+
+        disponibilite = check_delivery(
+            point=Point(donnees["lon"], donnees["lat"], srid=4326),
+            restaurant=donnees.get("restaurant"),
+            subtotal=donnees.get("subtotal"),
+        )
+
+        devis = disponibilite.quote
+        return Response(
+            DeliveryCheckSerializer(
+                {
+                    "is_available": disponibilite.is_available,
+                    "reason": disponibilite.reason,
+                    "restaurant": disponibilite.restaurant,
+                    "zone": disponibilite.zone,
+                    "distance_m": (
+                        round(disponibilite.distance_m, 1)
+                        if disponibilite.distance_m is not None
+                        else None
+                    ),
+                    "estimated_minutes": disponibilite.estimated_minutes,
+                    # Les deux montants, et pas seulement celui qu'on facture :
+                    # le franco offre la course au client sans que le livreur
+                    # roule gratuitement, et l'écran doit pouvoir montrer le
+                    # prix barré.
+                    "delivery_fee": devis.fee if devis else None,
+                    "gross_delivery_fee": devis.gross_fee if devis else None,
+                    "is_free_delivery": devis.is_free if devis else None,
+                }
+            ).data
+        )

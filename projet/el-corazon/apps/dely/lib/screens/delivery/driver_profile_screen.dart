@@ -1,10 +1,39 @@
+import 'dart:async';
+
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:elcora_dely/presentation/pieces_du_dossier.dart';
+import 'package:elcora_dely/presentation/vehicules.dart';
+import 'package:elcora_dely/screens/auth/pieces_justificatives_screen.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/utils/validators.dart';
 
+/// Le profil du livreur — son compte d'un côté, son dossier de l'autre.
+///
+/// ## Deux objets, deux routes, un seul écran
+///
+/// Le **compte** (`User`) porte le nom et le téléphone : ils se corrigent par
+/// `PATCH /auth/me/`, comme pour n'importe quel type de compte. Le **dossier**
+/// (`CourierProfile`) porte le véhicule, la plaque et les numéros de pièces :
+/// ils se corrigent par `PATCH /delivery/me/`. L'écran réunit les deux parce
+/// que le livreur corrige « son profil », mais les deux écritures partent
+/// séparément — et seule celle dont le contenu a bougé part.
+///
+/// ## Ce que cet écran affichait de faux
+///
+/// Un champ intitulé « Numéro de permis » était rempli avec la **plaque
+/// d'immatriculation** — deux données sans rapport, et le livreur qui vérifiait
+/// son dossier y lisait une valeur qui n'était pas la sienne. Le vrai numéro de
+/// permis n'était nulle part : le sérialiseur ne le rendait pas.
+///
+/// Le champ « Véhicule » affichait la valeur brute du contrat — `motorcycle` —
+/// là où le formulaire d'inscription proposait « Moto ».
+///
+/// Les deux champs étaient grisés, commentés « on ne permet pas de modifier ici
+/// pour l'instant » : la route n'existait pas côté serveur. Elle existe
+/// désormais, et ils sont modifiables.
 class DriverProfileScreen extends StatefulWidget {
   const DriverProfileScreen({super.key});
 
@@ -17,8 +46,16 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
-  final _licenseController = TextEditingController();
-  final _vehicleController = TextEditingController();
+
+  // Trois champs du **dossier**, distincts et nommés pour ce qu'ils sont. Le
+  // premier s'appelait `_licenseController` et recevait la plaque.
+  final _plaqueController = TextEditingController();
+  final _permisController = TextEditingController();
+  final _cniController = TextEditingController();
+
+  /// Le code serveur du véhicule — `motorcycle`, `car`… Jamais son libellé.
+  String? _vehicule;
+
   bool _isEditing = false;
   bool _isSaving = false;
   bool _isLoadingDriverData = true;
@@ -40,8 +77,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
-    _licenseController.dispose();
-    _vehicleController.dispose();
+    _plaqueController.dispose();
+    _permisController.dispose();
+    _cniController.dispose();
     super.dispose();
   }
 
@@ -79,8 +117,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       final profile = appService.courierProfile;
 
       if (profile != null) {
-        _licenseController.text = profile.vehiclePlate;
-        _vehicleController.text = profile.vehicleType;
+        // Chaque champ reçoit **sa** valeur. La plaque arrivait dans le champ
+        // du permis, et le permis n'arrivait nulle part.
+        _plaqueController.text = profile.vehiclePlate;
+        _permisController.text = profile.licenceNumber;
+        _cniController.text = profile.nationalIdNumber;
+        _vehicule = profile.vehicleType;
       }
     } catch (e) {
       eccore.Journal.trace('Erreur chargement données livreur: $e');
@@ -109,10 +151,43 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         // `PATCH /auth/me/` : le compte modifié est celui du jeton, il ne se
         // désigne pas. L'ancienne version écrivait la table `users` avec un
         // dictionnaire libre, où rien n'interdisait `user_type` ni `email`.
-        await appService.updateOwnProfile(
-          fullName: _nameController.text.trim(),
-          phone: _phoneController.text.trim(),
-        );
+        //
+        // Envoyé seulement si quelque chose a bougé : le serveur accepterait
+        // une requête sans changement, mais elle réécrirait `updated_at` sur
+        // le compte à chaque ouverture de l'écran.
+        final nom = _nameController.text.trim();
+        final telephone = _phoneController.text.trim();
+        if (nom != user.fullName || telephone != (user.phone ?? '')) {
+          await appService.updateOwnProfile(fullName: nom, phone: telephone);
+        }
+
+        // `PATCH /delivery/me/` : le dossier, séparément — deux objets, deux
+        // routes. Seuls les champs réellement modifiés partent : `null`
+        // signifie « ne pas y toucher », et le serveur refuse un corps vide
+        // plutôt que d'annoncer un enregistrement qui n'a rien enregistré.
+        final dossier = appService.courierProfile;
+        final corrections = <String, String?>{
+          'vehicle_type': _vehicule != dossier?.vehicleType ? _vehicule : null,
+          'vehicle_plate': _plaqueController.text.trim() != dossier?.vehiclePlate
+              ? _plaqueController.text.trim()
+              : null,
+          'licence_number': _permisController.text.trim() != dossier?.licenceNumber
+              ? _permisController.text.trim()
+              : null,
+          'national_id_number':
+              _cniController.text.trim() != dossier?.nationalIdNumber
+              ? _cniController.text.trim()
+              : null,
+        };
+        if (corrections.values.any((valeur) => valeur != null)) {
+          await appService.corrigerDossier(
+            vehicleType: corrections['vehicle_type'],
+            vehiclePlate: corrections['vehicle_plate'],
+            licenceNumber: corrections['licence_number'],
+            nationalIdNumber: corrections['national_id_number'],
+          );
+        }
+
         await _loadProfile();
 
         setState(() {
@@ -387,7 +462,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.phone,
-              validator: Validators.validatePhone,
+              // E.164, comme à l'inscription et comme le serveur l'exige
+              // (`phone_validator`). `validatePhone` acceptait « 90123456 »,
+              // que le serveur refuse : l'enregistrement partait, échouait en
+              // 400, et le message parlait d'un format que l'écran venait
+              // d'accepter.
+              validator: Validators.validatePhoneE164,
             ),
           ],
         ),
@@ -412,28 +492,120 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   ),
             ),
             const SizedBox(height: 16),
+
+            // Le véhicule, par son libellé français et non par le code du
+            // contrat. Un menu déroulant plutôt qu'un champ libre : la valeur
+            // doit appartenir à `VehicleType`, et une saisie libre ferait
+            // refuser l'enregistrement pour une faute de frappe.
+            DropdownButtonFormField<String>(
+              initialValue: Vehicule.depuisServeur(_vehicule) == null ? null : _vehicule,
+              decoration: const InputDecoration(
+                labelText: 'Véhicule',
+                prefixIcon: Icon(Icons.two_wheeler),
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                for (final vehicule in Vehicule.values)
+                  DropdownMenuItem(
+                    value: vehicule.code,
+                    child: Row(
+                      children: [
+                        Icon(vehicule.icone, size: 20),
+                        const SizedBox(width: 8),
+                        Text(vehicule.libelle),
+                      ],
+                    ),
+                  ),
+              ],
+              onChanged: _isEditing
+                  ? (valeur) => setState(() => _vehicule = valeur ?? _vehicule)
+                  : null,
+            ),
+            const SizedBox(height: 16),
             TextFormField(
-              controller: _licenseController,
-              enabled: false, // On ne permet pas de modifier le permis ici pour l'instant
+              controller: _plaqueController,
+              enabled: _isEditing,
+              decoration: const InputDecoration(
+                labelText: 'Plaque d\'immatriculation',
+                prefixIcon: Icon(Icons.confirmation_number_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _permisController,
+              enabled: _isEditing,
               decoration: const InputDecoration(
                 labelText: 'Numéro de permis',
                 prefixIcon: Icon(Icons.card_membership),
                 border: OutlineInputBorder(),
+                // Le numéro, pas la photo : les deux se saisissent séparément,
+                // et le second ne remplace pas le premier.
+                helperText: 'La photo du permis se dépose dans vos pièces.',
               ),
             ),
             const SizedBox(height: 16),
             TextFormField(
-              controller: _vehicleController,
-              enabled: false, // Idem pour le véhicule
+              controller: _cniController,
+              enabled: _isEditing,
               decoration: const InputDecoration(
-                labelText: 'Véhicule',
-                prefixIcon: Icon(Icons.directions_bike),
+                labelText: 'Numéro de pièce d\'identité',
+                prefixIcon: Icon(Icons.badge_outlined),
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
+            _buildPiecesTile(),
+            const SizedBox(height: 16),
              _buildVerificationStatus(),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// L'accès aux pièces justificatives, et l'état de leur dépôt.
+  ///
+  /// L'écran n'en parlait pas du tout, et il n'y avait rien à en dire : aucune
+  /// application ne savait téléverser une pièce. La tuile porte le compte de ce
+  /// qui manque parce que c'est la seule chose qui bloque un dossier neuf, et
+  /// qu'un livreur ne devine pas qu'on attend trois documents de lui.
+  Widget _buildPiecesTile() {
+    final dossier = _courier;
+    final manquantes = dossier == null ? const <PieceDuDossier>[] : piecesManquantes(dossier);
+    final exigence = ExigenceDuDossier.depuis(dossier);
+    final theme = Theme.of(context);
+    final alerte = exigence.appelleUneAction;
+
+    return Card(
+      elevation: 0,
+      color: alerte
+          ? theme.colorScheme.errorContainer.withValues(alpha: 0.5)
+          : theme.colorScheme.surfaceContainerHighest,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: ListTile(
+        leading: Icon(
+          alerte ? Icons.upload_file : Icons.folder_shared_outlined,
+          color: alerte ? theme.colorScheme.error : theme.colorScheme.primary,
+        ),
+        title: Text(exigence.action),
+        subtitle: Text(
+          switch (exigence) {
+            ExigenceDuDossier.incomplet =>
+              '${manquantes.length} pièce${manquantes.length > 1 ? 's' : ''} manquante'
+                  '${manquantes.length > 1 ? 's' : ''}',
+            ExigenceDuDossier.aCorriger =>
+              'Déposez de nouvelles pièces pour un réexamen',
+            ExigenceDuDossier.rienAFaire => 'Vos trois pièces sont déposées',
+          },
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => unawaited(
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const PiecesJustificativesScreen(),
+            ),
+          ),
         ),
       ),
     );

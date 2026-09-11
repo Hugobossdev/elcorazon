@@ -13,7 +13,11 @@ from typing import Any
 from django.dispatch import receiver
 
 from apps.delivery.models import Assignment
-from apps.delivery.signals import assignment_accepted, assignment_offered
+from apps.delivery.signals import (
+    assignment_accepted,
+    assignment_cancelled,
+    assignment_offered,
+)
 from apps.notifications.models import NotificationKind
 from apps.notifications.services import notify, staff_to_alert
 from apps.orders.models import Order
@@ -21,6 +25,9 @@ from apps.orders.signals import order_created, order_status_changed
 from apps.orders.states import OrderStatus
 from apps.payments.models import Transaction
 from apps.payments.signals import payment_transaction_failed
+from apps.restaurants.models import Restaurant
+from apps.restaurants.signals import restaurant_status_changed
+from apps.restaurants.states import RestaurantStatus
 
 __all__ = [
     "on_assignment_accepted",
@@ -29,6 +36,7 @@ __all__ = [
     "on_order_status_changed",
     "on_order_status_changed_for_staff",
     "on_payment_failed",
+    "on_restaurant_status_changed",
 ]
 
 #: Permission qu'il faut détenir pour être prévenu d'un événement de commande.
@@ -243,3 +251,160 @@ def on_assignment_offered(
         body=f"{order.restaurant.name} — {order.delivery_address_line}",
         data={"assignment": str(assignment.pk), "order": str(order.pk)},
     )
+
+
+@receiver(
+    assignment_cancelled, sender=Assignment, dispatch_uid="notifications.delivery_cancelled"
+)
+def on_assignment_cancelled(
+    sender: type[Assignment], *, assignment: Assignment, reason: str = "", **kwargs: Any
+) -> None:
+    """Prévient le livreur qu'on lui a retiré sa course.
+
+    ## Le défaut que ce receveur ferme
+
+    Rien ne le lui disait. L'annulation par le personnel diffusait bien un
+    événement, mais sur le canal de la **commande** (`order_group`) — celui que
+    le client écoute pour suivre sa livraison. Le livreur, lui, n'écoute que sa
+    propre file (`ws/couriers/me/`).
+
+    Concrètement : un livreur en route vers le restaurant continuait d'y aller,
+    et l'apprenait de la cuisine en arrivant. C'est le pendant exact de
+    `on_assignment_offered`, et il manquait — on savait lui confier une course,
+    pas la lui reprendre.
+
+    ## Pourquoi le motif est repris
+
+    Une annulation sans raison se lit comme une sanction. Le personnel en
+    saisit une (`decline_reason`), et c'est elle qui distingue « le client a
+    annulé » d'« on vous retire cette course ». Absent, on ne prétend pas en
+    avoir un.
+    """
+    order = assignment.order
+    notify(
+        user=assignment.courier.user,
+        kind=NotificationKind.DELIVERY_OFFER,
+        title="Course annulée",
+        body=(
+            f"{order.restaurant.name} — {reason}"
+            if reason
+            else f"La course pour {order.restaurant.name} vous a été retirée."
+        ),
+        data={"assignment": str(assignment.pk), "order": str(order.pk)},
+    )
+
+
+#: Permission qu'il faut détenir pour être prévenu d'un événement d'établissement.
+#:
+#: C'est celle que l'écran opposera ensuite (`restaurants.read`). Alerter
+#: au-delà produirait des notifications qui mènent à un 403.
+RESTAURANTS_READ = "restaurants.read"
+
+#: Ce qu'on annonce, selon l'état d'arrivée.
+#:
+#: Indexé sur la cible et non sur la paire (précédent, cible) : seule
+#: l'inauguration se distingue d'une réouverture, et elle se lit sur le
+#: précédent au moment de composer le message. Une table à quinze entrées pour
+#: cette seule nuance serait plus difficile à relire que la condition.
+LIFECYCLE_ANNOUNCEMENTS: dict[str, tuple[str, str]] = {
+    RestaurantStatus.ACTIVE: (
+        "{name} est en service",
+        "L'établissement est visible des clients et prend les commandes.",
+    ),
+    RestaurantStatus.INACTIVE: (
+        "{name} est suspendu",
+        "L'établissement n'apparaît plus dans l'application cliente et ne reçoit "
+        "plus de commandes.",
+    ),
+    RestaurantStatus.CONFIGURING: (
+        "{name} entre en configuration",
+        "L'établissement est retiré de l'application cliente le temps des réglages.",
+    ),
+    RestaurantStatus.READY: (
+        "{name} est prêt à ouvrir",
+        "La configuration est complète : la mise en service peut être demandée.",
+    ),
+}
+
+
+@receiver(
+    restaurant_status_changed,
+    sender=Restaurant,
+    dispatch_uid="notifications.restaurant_status",
+)
+def on_restaurant_status_changed(
+    sender: type[Restaurant],
+    *,
+    restaurant: Restaurant,
+    previous: str,
+    target: str,
+    **kwargs: Any,
+) -> None:
+    """Prévient le personnel qu'un établissement change d'état.
+
+    ## Pourquoi cela manquait
+
+    Suspendre un établissement le fait disparaître de l'application cliente à
+    la seconde. Personne n'était prévenu : l'équipe l'apprenait en constatant
+    que les commandes ne rentraient plus, et cherchait la panne du côté du
+    réseau. Une suspension est une décision, pas un incident — elle doit
+    s'annoncer comme telle.
+
+    ## Qui est prévenu
+
+    Le personnel dont le périmètre couvre cet établissement, et qui est habilité
+    à le lire (`staff_to_alert`) : ses gérants, mais aussi le directeur du
+    marché depuis que le cloisonnement a ce palier. Pas les clients — ils voient
+    la conséquence dans l'application, et une notification « le restaurant est
+    suspendu » sur le téléphone de quelqu'un qui n'y commande pas serait du
+    bruit.
+
+    Pas non plus les livreurs : leur travail dépend des courses proposées, qui
+    s'arrêtent d'elles-mêmes quand l'établissement ne prend plus de commandes.
+    Les prévenir de l'état d'un établissement les rendrait dépendants d'une
+    information qu'ils n'ont pas à suivre.
+
+    ## `account` et non un genre dédié
+
+    C'est une nouvelle d'exploitation qui concerne le compte de celui qui la
+    reçoit, comme une suspension de dossier livreur. Créer un genre
+    `restaurant_status` obligerait chaque client — trois applications — à savoir
+    le ranger avant d'avoir un écran qui l'affiche, et un genre inconnu se
+    range mal.
+    """
+    message = LIFECYCLE_ANNOUNCEMENTS.get(target)
+    if message is None:
+        return
+
+    titre, corps = message
+
+    # Le sens du geste est dans la **paire** (précédent, cible), pas dans la
+    # seule cible. Deux nuances valent d'être dites, parce qu'elles changent ce
+    # qu'on comprend en relisant ses notifications trois jours plus tard :
+    #
+    # * « suspendu → en service » est une réouverture, pas une inauguration ;
+    # * « brouillon → en configuration » est un début, alors que « prêt → en
+    #   configuration » ou « suspendu → en configuration » est un retour en
+    #   arrière. Écrire « repasse » dans les trois cas laissait croire qu'un
+    #   établissement qu'on vient de créer avait déjà été configuré une fois.
+    #
+    # Le reste des transitions ne demande pas cette distinction : leur cible
+    # suffit à les décrire.
+    if target == RestaurantStatus.ACTIVE and previous == RestaurantStatus.INACTIVE:
+        titre = "{name} rouvre"
+    elif target == RestaurantStatus.CONFIGURING and previous != RestaurantStatus.DRAFT:
+        titre = "{name} repasse en configuration"
+
+    for membre in staff_to_alert(restaurant_id=restaurant.pk, permission=RESTAURANTS_READ):
+        notify(
+            user=membre,
+            kind=NotificationKind.ACCOUNT,
+            title=titre.format(name=restaurant.name),
+            body=corps,
+            data={
+                "restaurant": str(restaurant.pk),
+                "slug": restaurant.slug,
+                "previous": previous,
+                "status": target,
+            },
+        )

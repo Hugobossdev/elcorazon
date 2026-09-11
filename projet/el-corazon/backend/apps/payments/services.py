@@ -9,6 +9,7 @@ participant d'un paiement partagé basculait la commande entière en `completed`
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +37,12 @@ from apps.payments.signals import (
 )
 from common.exceptions import BusinessRuleViolation, InsufficientBalance
 from common.money import Money
+
+#: Journal du module. Le contrôle de montant y trace les divergences : la
+#: réponse au prestataire reste un 200, et sans cette trace l'anomalie ne
+#: laisserait qu'une ligne dans `WebhookEvent`, que personne ne relit.
+logger = logging.getLogger(__name__)
+
 
 __all__ = [
     "PaymentService",
@@ -264,6 +271,45 @@ class PaymentService:
             PaymentService._close(event)
             return WebhookOutcome(True, event.processing_error, txn)
 
+        # Le montant, quand le prestataire le donne — et **avant** d'écrire quoi
+        # que ce soit.
+        #
+        # Rien ne le confrontait à la transaction ouverte. Une confirmation
+        # portant sur une somme moindre soldait donc la commande au prix fort,
+        # et `_confirm_order` la passait en `confirmed` : la cuisine partait sur
+        # une commande sous-payée, sans que rien ne le signale.
+        #
+        # Le contrôle ne porte que sur l'**encaissement** : un échec ou une
+        # annulation n'ont pas de montant à honorer, et exiger une égalité sur
+        # une notification d'échec ferait rester `processing` une transaction
+        # que le prestataire vient de clore.
+        #
+        # La réponse reste un 200 accepté : refuser ferait retenter le
+        # prestataire indéfiniment sur une notification qu'il croit juste. Ce
+        # qui compte est que la transaction ne bouge pas, et que l'anomalie soit
+        # lisible — c'est exactement le traitement déjà réservé aux transitions
+        # refusées, quelques lignes plus haut.
+        if (
+            target == PaymentStatus.COMPLETED
+            and notification.amount is not None
+            and notification.amount != txn.amount
+        ):
+            event.processing_error = (
+                f"Montant confirmé {notification.amount} ≠ montant attendu "
+                f"{txn.amount} pour la référence {reference!r}."
+            )
+            logger.warning(
+                "webhook.montant_divergent",
+                extra={
+                    "provider": provider,
+                    "transaction": str(txn.pk),
+                    "attendu": txn.amount.amount_minor,
+                    "confirme": notification.amount.amount_minor,
+                },
+            )
+            PaymentService._close(event)
+            return WebhookOutcome(True, event.processing_error, txn)
+
         if target == PaymentStatus.FAILED:
             txn.failure_reason = notification.reason
             txn.save(update_fields=["failure_reason"])
@@ -379,6 +425,63 @@ class RefundService:
             requested_by=actor,
             status=PaymentStatus.PENDING,
         )
+
+    @staticmethod
+    @transaction.atomic
+    def settle(*, refund: Refund, provider_reference: str = "") -> Refund:
+        """Le virement a été exécuté — **geste de l'exploitation**, pas du client.
+
+        ## Pourquoi cette méthode n'existait pas, et pourquoi il en faut une
+
+        `refund()` enregistre une intention : PayDunya n'expose aucune API de
+        remboursement, et le virement part de leur tableau de bord, à la main.
+        Rien, ensuite, ne ramenait le remboursement hors de `pending`. Aucune
+        route, aucune action d'administration, aucun service. Les
+        remboursements s'accumulaient donc dans un état d'attente perpétuelle,
+        et `PaymentStatus.REFUNDED` — pourtant déclaré, et atteignable dans la
+        machine depuis `completed` — n'était jamais atteint par personne.
+
+        Ce qui manquait n'est donc pas l'automatisation, qui n'est pas
+        réalisable : c'est le moyen de **constater** ce qu'un humain vient de
+        faire. Tant que ce constat n'existe pas, la comptabilité de l'application
+        et celle du prestataire divergent sans que rien ne le dise.
+
+        ## La transaction ne bascule qu'au remboursement **intégral**
+
+        `completed → refunded` est terminal. Le poser sur un remboursement
+        partiel interdirait le suivant, et surtout mentirait : une transaction
+        de quatre mille francs dont on a rendu cinq cents n'est pas remboursée.
+
+        La comparaison porte donc sur le **cumul** des remboursements soldés de
+        cette transaction, et non sur celui qu'on vient de constater.
+        """
+        PAYMENT_MACHINE.validate(refund.status, PaymentStatus.PROCESSING)
+        PAYMENT_MACHINE.validate(PaymentStatus.PROCESSING, PaymentStatus.COMPLETED)
+
+        refund.status = PaymentStatus.COMPLETED
+        refund.completed_at = timezone.now()
+        refund.save(update_fields=["status", "completed_at", "updated_at"])
+
+        txn = Transaction.objects.select_for_update().get(pk=refund.transaction_id)
+        rendu = Money.zero(txn.amount.currency)
+        for solde in txn.refunds.filter(status=PaymentStatus.COMPLETED):
+            rendu += solde.amount
+
+        if rendu >= txn.amount and PAYMENT_MACHINE.can(txn.status, PaymentStatus.REFUNDED):
+            txn.status = PaymentStatus.REFUNDED
+            txn.save(update_fields=["status", "updated_at"])
+
+        # `provider_reference` est la trace du virement chez le prestataire —
+        # ce qu'on cherche quand un client affirme n'avoir rien reçu. Le modèle
+        # n'en porte pas de champ propre ; il rejoint le motif, qui est le seul
+        # texte libre de la ligne.
+        if provider_reference:
+            refund.reason = (
+                f"{refund.reason} — virement {provider_reference}".strip()
+            )
+            refund.save(update_fields=["reason", "updated_at"])
+
+        return refund
 
 
 class WithdrawalService:

@@ -32,6 +32,7 @@ import hashlib
 import hmac
 import logging
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -44,6 +45,7 @@ from apps.payments.gateway import (
     Notification,
 )
 from apps.payments.models import PaymentStatus, Transaction
+from common.money import Money
 
 __all__ = ["PayDunyaGateway"]
 
@@ -251,7 +253,47 @@ class PayDunyaGateway:
             provider_reference=token,
             status=status,
             reason=motif,
+            # Tiré de la **confirmation**, jamais du corps posté : c'est la même
+            # règle que pour le statut, et pour la même raison. Un corps forgé
+            # peut annoncer n'importe quel montant ; la réponse de PayDunya à
+            # notre propre requête, non.
+            amount=self._montant_confirme(confirmee),
         )
+
+    @staticmethod
+    def _montant_confirme(confirmee: Mapping[str, Any]) -> Money | None:
+        """Montant que PayDunya déclare pour cette facture.
+
+        Lu sous `invoice.total_amount`, à l'endroit exact où `open_checkout` l'a
+        écrit — c'est la symétrie qui rend la comparaison de `_apply` valable :
+        les deux valeurs parlent du même champ, dans la même unité mineure.
+
+        `None` quand la clé manque plutôt qu'une erreur : le contrat de PayDunya
+        peut évoluer, et faire échouer une confirmation d'encaissement réelle
+        parce qu'un champ a été renommé coûterait plus cher que de retomber sur
+        le comportement d'avant — qui ne comparait rien.
+
+        La devise n'est pas dans la réponse : PayDunya facture dans celle du
+        compte marchand, et le projet n'en a qu'une (`DEFAULT_CURRENCY`). La
+        comparaison de `_apply` porte de toute façon sur le couple montant +
+        devise, et un jour où deux devises coexisteront, c'est ici qu'il faudra
+        la lire.
+        """
+        facture = confirmee.get("invoice")
+        if not isinstance(facture, Mapping):
+            return None
+
+        brut = facture.get("total_amount")
+        if brut is None:
+            return None
+
+        try:
+            # PayDunya rend parfois un nombre, parfois sa forme décimale en
+            # chaîne. `Decimal` puis `int` traverse les deux sans passer par le
+            # flottant, que toute la chaîne s'attache à exclure.
+            return Money(int(Decimal(str(brut))), settings.DEFAULT_CURRENCY)
+        except (ArithmeticError, TypeError, ValueError):
+            raise GatewayError(f"Montant PayDunya illisible : {brut!r}.") from None
 
     def _confirm(self, token: str) -> Mapping[str, Any]:
         """Interroge PayDunya pour le statut réel d'une facture.

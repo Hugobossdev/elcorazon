@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from apps.restaurants import backoffice, views
@@ -20,7 +21,16 @@ router.register("staff", backoffice.StaffViewSet, basename="staff")
 router.register(
     "manage/hours", backoffice.ManagedOpeningHoursViewSet, basename="managed-opening-hours"
 )
+router.register(
+    "manage/zones", backoffice.ManagedRestaurantZoneViewSet, basename="managed-restaurant-zone"
+)
 router.register("manage", backoffice.ManagedRestaurantViewSet, basename="managed-restaurant")
 router.register("", views.RestaurantViewSet, basename="restaurant")
 
-urlpatterns = router.urls
+urlpatterns = [
+    # Déclarée **avant** le routeur : un motif de slug capterait
+    # `delivery-check` et le traiterait comme l'identifiant d'un établissement,
+    # exactement comme il capterait `staff` ou `manage`.
+    path("delivery-check/", views.DeliveryCheckView.as_view(), name="delivery-check"),
+    *router.urls,
+]

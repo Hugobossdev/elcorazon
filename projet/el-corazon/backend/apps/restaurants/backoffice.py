@@ -25,7 +25,8 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from django.db.models import QuerySet
+from django.db import transaction
+from django.db.models import Count, Q, QuerySet
 from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -41,22 +42,34 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 from apps.accounts.models import User, UserType
 from apps.accounts.services import AuthService
-from apps.restaurants.models import OpeningHours, Restaurant
-from apps.restaurants.scoping import assert_in_scope, is_unscoped, staff_restaurant_ids
+from apps.geography.models import DeliveryZone
+from apps.restaurants.duplication import SECTION_GENERAL, copy_sections
+from apps.restaurants.models import AreaMembership, OpeningHours, Restaurant
+from apps.restaurants.scoping import (
+    assert_can_open_in_zone,
+    assert_in_scope,
+    is_unscoped,
+    staff_restaurant_ids,
+)
 from apps.restaurants.serializers import (
     ManagedOpeningHoursSerializer,
     ManagedRestaurantSerializer,
+    ManagedRestaurantZoneSerializer,
+    RestaurantDuplicationSerializer,
     RestaurantStatusTransitionSerializer,
     StaffSerializer,
 )
 from apps.restaurants.states import RestaurantStatus
-from common.permissions import (
-    HasReadWritePermission,
-    assert_unscoped,
-    authenticated_user,
-)
+from common.audit import AuditAction, record_change
+from common.exceptions import BusinessRuleViolation
+from common.permissions import HasReadWritePermission, authenticated_user
 
-__all__ = ["ManagedOpeningHoursViewSet", "ManagedRestaurantViewSet", "StaffViewSet"]
+__all__ = [
+    "ManagedOpeningHoursViewSet",
+    "ManagedRestaurantViewSet",
+    "ManagedRestaurantZoneViewSet",
+    "StaffViewSet",
+]
 
 RESTAURANT_PERMISSION = HasReadWritePermission.of(
     read="restaurants.read", write="restaurants.write"
@@ -126,6 +139,7 @@ class StaffViewSet(
             return
 
         self._assert_within_scope(acteur, data.get("restaurants"))
+        self._assert_areas_within_scope(acteur, data.get("_countries"), data.get("_cities"))
         self._assert_not_escalating(acteur, data.get("roles"))
 
     def _assert_within_scope(self, acteur: User, restaurants: Any) -> None:
@@ -137,6 +151,45 @@ class StaffViewSet(
             raise PermissionDenied(
                 "Rattachement hors périmètre : "
                 + ", ".join(sorted(etablissement.name for etablissement in hors))
+            )
+
+    def _assert_areas_within_scope(self, acteur: User, pays: Any, villes: Any) -> None:
+        """On n'accorde pas un marché qu'on ne couvre pas soi-même.
+
+        C'est le pendant de `_assert_not_escalating`, sur l'autre axe. Sans
+        cette garde, `roles.write` suffirait à s'attribuer un pays entier : le
+        rattachement de périmètre est plus large que le rattachement
+        d'établissement, et la garde qui protège le second ne dit rien du
+        premier.
+
+        Un directeur du Togo peut nommer un responsable de Lomé — la ville est
+        dans son marché — mais pas un directeur de Côte d'Ivoire. Le siège, lui,
+        n'est pas concerné : `_assert_grantable` sort avant.
+        """
+        if pays is None and villes is None:
+            return
+
+        couverts = AreaMembership.objects.filter(user=acteur)
+        pays_couverts = set(couverts.values_list("country_id", flat=True)) - {None}
+        villes_couvertes = set(couverts.values_list("city_id", flat=True)) - {None}
+
+        hors_pays = [marche for marche in (pays or []) if marche.pk not in pays_couverts]
+        if hors_pays:
+            raise PermissionDenied(
+                "Marché hors périmètre : " + ", ".join(sorted(marche.name for marche in hors_pays))
+            )
+
+        # Une ville est couverte par elle-même **ou par son pays** : un
+        # directeur pays qui ne pourrait pas nommer de responsable de ville
+        # devrait passer par le siège pour chacune des siennes.
+        hors_villes = [
+            ville
+            for ville in (villes or [])
+            if ville.pk not in villes_couvertes and ville.country_id not in pays_couverts
+        ]
+        if hors_villes:
+            raise PermissionDenied(
+                "Ville hors périmètre : " + ", ".join(sorted(ville.name for ville in hors_villes))
             )
 
     def _assert_not_escalating(self, acteur: User, roles: Any) -> None:
@@ -159,6 +212,47 @@ class StaffViewSet(
             )
 
 
+def _empreinte_geographique(etablissement: Restaurant) -> dict[str, Any]:
+    """Ce qu'on compare pour décider s'il faut journaliser.
+
+    La position est arrondie à six décimales — onze centimètres environ. En
+    deçà, l'écart vient de la représentation en flottant et non d'un geste :
+    consigner un « déplacement » de trois millimètres remplirait le journal de
+    bruit, et un journal bruyant ne s'ouvre plus.
+    """
+    return {
+        "location": [round(etablissement.location.y, 6), round(etablissement.location.x, 6)],
+        "address": etablissement.address,
+        "zone": str(etablissement.zone_id),
+    }
+
+
+def _avec_compteurs() -> QuerySet[Restaurant]:
+    """Établissements, chacun avec ses trois compteurs d'exploitation.
+
+    `distinct=True` sur les trois, et ce n'est pas une précaution de style :
+    trois `Count` sur trois relations inverses dans la même requête produisent
+    un produit cartésien, et un établissement de 4 commandes, 2 livreurs et
+    10 articles annoncerait 80 de chaque. Le défaut ne se voit pas sur un jeu de
+    démonstration où l'une des trois vaut 1.
+
+    Les articles supprimés sont exclus : la suppression du catalogue est douce
+    (`deleted_at`), et « 43 produits » dont la moitié ne sont plus à la carte
+    n'aide personne à décider si un établissement est prêt à ouvrir.
+    """
+    return (
+        Restaurant.objects.select_related("zone__city__country")
+        .annotate(
+            orders_count=Count("orders", distinct=True),
+            couriers_count=Count("couriers", distinct=True),
+            menu_items_count=Count(
+                "items", filter=Q(items__deleted_at__isnull=True), distinct=True
+            ),
+        )
+        .order_by("name")
+    )
+
+
 class ManagedRestaurantViewSet(
     ListModelMixin,
     RetrieveModelMixin,
@@ -168,10 +262,16 @@ class ManagedRestaurantViewSet(
 ):
     """Établissements — ouverture, coordonnées, suspension de la prise de commande.
 
-    **Ouvrir un établissement relève du siège.** Un gérant modifie le sien —
+    **Ouvrir un établissement relève du marché.** Un gérant modifie le sien —
     horaires, téléphone, délai de préparation, « on arrête les commandes une
     heure » — mais n'en crée pas : une création s'attribuerait un périmètre
     qu'on ne lui a pas donné, et le cloisonnement n'aurait plus de sens.
+
+    Le siège ouvre partout ; un directeur de marché ouvre **chez lui**, et
+    l'établissement neuf tombe dans son périmètre parce qu'il est dans son pays,
+    non parce qu'il vient de le créer (`AreaMembership`). C'est la différence
+    qui rend le geste sûr, et c'est pourquoi la garde porte sur la zone visée
+    plutôt que sur le compte.
 
     Aucune suppression. Des commandes, un catalogue et des dossiers livreurs y
     renvoient ; `is_active` retire l'établissement de l'application sans rendre
@@ -181,7 +281,7 @@ class ManagedRestaurantViewSet(
     serializer_class = ManagedRestaurantSerializer
     permission_classes = (RESTAURANT_PERMISSION,)
     lookup_field = "slug"
-    queryset = Restaurant.objects.select_related("zone__city__country").order_by("name")
+    queryset = _avec_compteurs()
     filterset_fields: ClassVar[dict[str, list[str]]] = {
         "zone__city__slug": ["exact"],
         "zone__city__country__iso_code": ["exact"],
@@ -193,26 +293,77 @@ class ManagedRestaurantViewSet(
 
     def get_queryset(self) -> QuerySet[Restaurant]:
         user = authenticated_user(self.request)
-        base = Restaurant.objects.select_related("zone__city__country").order_by("name")
+        base = _avec_compteurs()
         if is_unscoped(user):
             return base
         return base.filter(pk__in=staff_restaurant_ids(user))
 
     def perform_create(self, serializer: Any) -> None:
-        assert_unscoped(authenticated_user(self.request), "L'ouverture d'un établissement")
+        """Ouvrir relève du siège — ou du directeur du marché visé.
+
+        Le contrôle porte sur la **zone**, pas sur l'utilisateur seul : c'est
+        elle qui emporte la ville et le pays, donc le périmètre dans lequel
+        l'établissement neuf tombera. Un directeur du Togo ouvre à Kara ; il
+        n'ouvre pas à Abidjan.
+        """
+        assert_can_open_in_zone(authenticated_user(self.request), serializer.validated_data["zone"])
         serializer.save()
 
     def perform_update(self, serializer: Any) -> None:
+        avant = _empreinte_geographique(serializer.instance)
+
         # L'établissement est déjà dans le périmètre — `get_queryset` l'a
         # filtré. Ce qui reste à garder, c'est la zone : la changer change la
         # ville, donc le pays, donc la devise et le barème. Un gérant corrige
         # ses horaires, il ne déménage pas son restaurant dans un autre marché.
         zone = serializer.validated_data.get("zone")
         if zone is not None and zone.pk != serializer.instance.zone_id:
-            assert_unscoped(
-                authenticated_user(self.request), "Le changement de zone d'un établissement"
+            # Déplacer un restaurant vers une autre zone, c'est l'ouvrir dans le
+            # marché d'arrivée : même écriture, donc même garde. Un gérant
+            # corrige ses horaires, il ne déménage pas son restaurant dans un
+            # autre marché — et un directeur pays ne l'exporte pas hors du sien.
+            assert_can_open_in_zone(authenticated_user(self.request), zone)
+
+        etablissement = serializer.save()
+        self._journaliser(avant, etablissement)
+
+    def _journaliser(self, avant: dict[str, Any], etablissement: Restaurant) -> None:
+        """Consigne un déplacement ou un changement de marché.
+
+        Deux entrées distinctes plutôt qu'une : déplacer un restaurant de trois
+        cents mètres et le rattacher à une autre zone n'ont ni la même cause ni
+        les mêmes conséquences — le premier corrige une saisie, le second change
+        la devise et le barème. Les fondre en « géographie modifiée » obligerait
+        à lire les deux valeurs pour savoir laquelle a bougé.
+
+        Rien n'est écrit quand rien n'a changé : un formulaire renvoie tous ses
+        champs à chaque validation, et corriger un numéro de téléphone
+        consignerait sinon « position inchangée » à chaque fois.
+        """
+        acteur = authenticated_user(self.request)
+        apres = _empreinte_geographique(etablissement)
+
+        if avant["location"] != apres["location"]:
+            record_change(
+                actor=acteur,
+                action=AuditAction.RESTAURANT_LOCATION,
+                target_type="restaurant",
+                target_id=etablissement.pk,
+                target_label=etablissement.name,
+                before={"location": avant["location"], "address": avant["address"]},
+                after={"location": apres["location"], "address": apres["address"]},
             )
-        serializer.save()
+
+        if avant["zone"] != apres["zone"]:
+            record_change(
+                actor=acteur,
+                action=AuditAction.RESTAURANT_ZONE,
+                target_type="restaurant",
+                target_id=etablissement.pk,
+                target_label=etablissement.name,
+                before={"zone": avant["zone"]},
+                after={"zone": apres["zone"]},
+            )
 
     # ------------------------------------------------------- cycle de vie
 
@@ -232,12 +383,12 @@ class ManagedRestaurantViewSet(
         de complétude s'exécuteraient à chaque enregistrement d'un champ de
         contact.
 
-        **La mise en service relève du siège.** Le reste du cycle — passer en
+        **La mise en service relève du marché.** Le reste du cycle — passer en
         configuration, se déclarer prêt, suspendre pour la journée — est ouvert
         au gérant de l'établissement : ce sont les gestes de l'exploitation.
         Ouvrir au public ne l'est pas, pour la même raison que la création :
-        cela engage l'enseigne, et un compte cloisonné s'attribuerait un
-        marché.
+        cela engage l'enseigne. Le siège et le directeur du marché où se trouve
+        l'établissement le peuvent ; un gérant, non.
 
         Une transition refusée sort en 409 avec les cibles autorisées
         (`IllegalTransition`), et un établissement incomplet en 409 avec la
@@ -248,12 +399,112 @@ class ManagedRestaurantViewSet(
         payload.is_valid(raise_exception=True)
         cible = payload.validated_data["status"]
 
-        if cible == RestaurantStatus.ACTIVE:
-            assert_unscoped(authenticated_user(request), "La mise en service d'un établissement")
-
         etablissement = self.get_object()
+
+        if cible == RestaurantStatus.ACTIVE:
+            # Publier engage l'enseigne : réservé au siège, ou au directeur du
+            # marché où se trouve l'établissement. Un gérant, lui, dispose du
+            # reste du cycle — passer en configuration, se déclarer prêt,
+            # suspendre pour la journée : ce sont les gestes de l'exploitation.
+            assert_can_open_in_zone(
+                authenticated_user(request),
+                etablissement.zone,
+                "La mise en service d'un établissement",
+            )
+
         etablissement.transition_to(cible)
         return Response(ManagedRestaurantSerializer(etablissement).data)
+
+    @extend_schema(
+        request=RestaurantDuplicationSerializer,
+        responses={201: ManagedRestaurantSerializer},
+        tags=["restaurants"],
+    )
+    @action(detail=True, methods=["post"], url_path="duplicate", url_name="duplicate")
+    def duplicate(self, request: Request, slug: str) -> Response:
+        """Ouvre un établissement en repartant d'un autre.
+
+        **Relève du siège**, comme la création dont c'est une variante : un
+        compte cloisonné qui dupliquerait s'attribuerait un second périmètre en
+        une requête, ce qui viderait le cloisonnement de son sens.
+
+        Le nouvel établissement naît en **brouillon**, quel que soit l'état de
+        la source. Hériter d'« en service » publierait une fiche dont personne
+        n'a encore vérifié l'adresse, et la carte recopiée lui donnerait
+        justement l'air complète.
+
+        Tout se fait dans une transaction : une duplication interrompue à
+        mi-chemin laisserait un établissement avec la moitié de sa carte, état
+        qu'aucun écran ne sait montrer comme anormal.
+        """
+        payload = RestaurantDuplicationSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        donnees = payload.validated_data
+
+        # Dupliquer, c'est ouvrir : même garde que la création, et sur la zone
+        # d'arrivée. Elle est vérifiée **avant** de lire la source, pour qu'un
+        # refus de périmètre ne dépende pas de l'existence du modèle.
+        assert_can_open_in_zone(authenticated_user(request), donnees["zone"])
+
+        source = self.get_object()
+        sections = set(donnees["sections"])
+        self._assert_meme_devise(source, donnees["zone"], sections)
+
+        with transaction.atomic():
+            cible = Restaurant.objects.create(
+                name=donnees["name"],
+                slug=donnees["slug"],
+                zone=donnees["zone"],
+                address=donnees["address"],
+                location=donnees["location"],
+                phone=donnees["phone"],
+                email=donnees.get("email", ""),
+                # Les champs de « informations générales », copiés seulement
+                # s'ils sont demandés. Le délai de préparation en fait partie :
+                # c'est une caractéristique de la cuisine, pas de l'enseigne.
+                description=source.description if SECTION_GENERAL in sections else "",
+                default_preparation_minutes=(
+                    source.default_preparation_minutes
+                    if SECTION_GENERAL in sections
+                    else Restaurant._meta.get_field("default_preparation_minutes").default
+                ),
+                status=RestaurantStatus.DRAFT,
+            )
+            copies = copy_sections(source=source, cible=cible, sections=sections)
+
+        # Relu à travers `_avec_compteurs` pour que la réponse porte les mêmes
+        # champs qu'une lecture ordinaire — sans quoi l'écran qui reçoit la
+        # fiche créée afficherait « — » là où la liste affiche « 0 ».
+        cible = _avec_compteurs().get(pk=cible.pk)
+        corps = ManagedRestaurantSerializer(cible).data
+        return Response({**corps, "copied": copies}, status=201)
+
+    @staticmethod
+    def _assert_meme_devise(source: Restaurant, zone: Any, sections: set[str]) -> None:
+        """Refuse de recopier une carte dans une autre devise.
+
+        Un prix est un montant **et** une devise (ADR-007). Recopier 2 500 XOF
+        vers un marché en NGN produirait des articles à 2 500 nairas — un prix
+        plausible, faux d'un facteur cinq, et que rien n'afficherait comme
+        anormal puisque la fiche serait par ailleurs complète.
+
+        Convertir automatiquement serait pire : le taux du jour n'a pas à
+        décider d'une politique tarifaire. Le refus est explicite, et la
+        duplication reste possible sans la carte — c'est ce que dit le message.
+        """
+        if not sections - {SECTION_GENERAL}:
+            return
+        devise_source = source.currency
+        devise_cible = zone.city.country.currency
+        if devise_source != devise_cible:
+            raise BusinessRuleViolation(
+                f"« {source.name} » facture en {devise_source} et la zone visée "
+                f"en {devise_cible}. Une carte recopiée garderait ses montants "
+                "sans changer d'unité. Dupliquez sans le catalogue, puis "
+                "saisissez les prix du nouveau marché.",
+                source_currency=devise_source,
+                target_currency=devise_cible,
+            )
 
 
 class ManagedOpeningHoursViewSet(ModelViewSet[OpeningHours]):
@@ -293,3 +544,122 @@ class ManagedOpeningHoursViewSet(ModelViewSet[OpeningHours]):
         if restaurant is not None:
             assert_in_scope(authenticated_user(self.request), restaurant.pk)
         serializer.save()
+
+
+class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
+    """Zones **propres à un établissement** — `/restaurants/manage/zones/`.
+
+    ## Pourquoi ces zones-là vivent ici
+
+    Une zone municipale s'administre depuis la géographie : elle appartient à
+    une ville, elle vaut pour toutes ses cuisines, et son ouverture relève du
+    siège. Une zone propre à un établissement est un autre geste — c'est le
+    gérant qui décide jusqu'où *sa* cuisine livre — et elle ne peut pas
+    s'écrire depuis `geography`, qui n'a pas le droit de connaître les
+    établissements (ADR-002).
+
+    Les deux partagent le même contrat, par héritage de sérialiseur : les trois
+    modes de saisie, la validation de devise et le calcul du contour sont écrits
+    une fois. Ce qui s'ajoute ici est le rattachement, et la vérification qu'il
+    a un sens — une zone de Douala ne se rattache pas à la cuisine de Lomé.
+
+    ## Le cloisonnement s'applique
+
+    Un gérant ne voit et n'écrit que les zones de ses établissements. Le
+    contrôle passe par `staff_restaurant_ids`, le même point que partout
+    ailleurs : une zone est un levier tarifaire, et l'ouvrir plus largement que
+    les commandes n'aurait aucun sens.
+
+    ## La suppression est réelle
+
+    Contrairement aux établissements et aux villes, une zone d'établissement
+    n'est référencée par rien : les commandes figent leurs montants, elles ne
+    pointent pas la zone qui les a produits. La retirer ne rend donc aucun
+    historique illisible, et une zone désactivée qu'on ne pourrait pas effacer
+    encombrerait l'écran qui sert à en dessiner.
+    """
+
+    serializer_class = ManagedRestaurantZoneSerializer
+    permission_classes = (RESTAURANT_PERMISSION,)
+    queryset = (
+        DeliveryZone.objects.filter(restaurant__isnull=False)
+        .select_related("city__country", "restaurant")
+        .order_by("restaurant__name", "name")
+    )
+    filterset_fields: ClassVar[dict[str, list[str]]] = {
+        "restaurant__slug": ["exact"],
+        "city__slug": ["exact"],
+        "shape": ["exact"],
+        "is_active": ["exact"],
+    }
+    search_fields: ClassVar[list[str]] = ["name"]
+
+    def get_queryset(self) -> QuerySet[DeliveryZone]:
+        user = authenticated_user(self.request)
+        base = (
+            DeliveryZone.objects.filter(restaurant__isnull=False)
+            .select_related("city__country", "restaurant")
+            .order_by("restaurant__name", "name")
+        )
+        if is_unscoped(user):
+            return base
+        return base.filter(restaurant_id__in=staff_restaurant_ids(user))
+
+    def perform_create(self, serializer: Any) -> None:
+        assert_in_scope(
+            authenticated_user(self.request), serializer.validated_data["restaurant"].pk
+        )
+        zone = serializer.save()
+        record_change(
+            actor=authenticated_user(self.request),
+            action=AuditAction.ZONE_BOUNDARY,
+            target_type="zone",
+            target_id=zone.pk,
+            target_label=f"{zone.name} — {zone.restaurant.name}",
+            before={},
+            after={"shape": zone.shape, "radius_meters": zone.radius_meters},
+        )
+
+    def perform_update(self, serializer: Any) -> None:
+        # Deux périmètres à garder, et non un : celui de la zone telle qu'elle
+        # est, et celui de l'établissement vers lequel on voudrait la déplacer.
+        # Ne vérifier que le premier laisserait un gérant offrir sa zone — donc
+        # son barème — à une cuisine qu'il n'administre pas.
+        acteur = authenticated_user(self.request)
+        assert_in_scope(acteur, serializer.instance.restaurant_id)
+        cible = serializer.validated_data.get("restaurant")
+        if cible is not None:
+            assert_in_scope(acteur, cible.pk)
+
+        avant = {
+            "shape": serializer.instance.shape,
+            "radius_meters": serializer.instance.radius_meters,
+            "base_fee": str(serializer.instance.base_fee),
+        }
+        zone = serializer.save()
+        record_change(
+            actor=acteur,
+            action=AuditAction.ZONE_TARIFF,
+            target_type="zone",
+            target_id=zone.pk,
+            target_label=f"{zone.name} — {zone.restaurant.name}",
+            before=avant,
+            after={
+                "shape": zone.shape,
+                "radius_meters": zone.radius_meters,
+                "base_fee": str(zone.base_fee),
+            },
+        )
+
+    def perform_destroy(self, instance: DeliveryZone) -> None:
+        assert_in_scope(authenticated_user(self.request), instance.restaurant_id)
+        record_change(
+            actor=authenticated_user(self.request),
+            action=AuditAction.ZONE_ACTIVATION,
+            target_type="zone",
+            target_id=instance.pk,
+            target_label=f"{instance.name} — {instance.restaurant.name}",
+            before={"exists": True},
+            after={"exists": False},
+        )
+        instance.delete()

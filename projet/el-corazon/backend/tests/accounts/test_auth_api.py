@@ -442,6 +442,64 @@ class TestMiseAJourDeSonProfil:
         customer.refresh_from_db()
         assert customer.email == avant
 
+    def test_un_telephone_efface_vaut_null(self, client: APIClient, customer: User) -> None:
+        """Et non la chaîne vide, qui se heurterait à l'unicité de la colonne.
+
+        `phone` est `unique` et `null=True`. Deux `NULL` cohabitent en SQL, deux
+        chaînes vides non : sans cette conversion, le **premier** compte qui
+        efface son numéro passe et le second reçoit une 500 — sur un écran de
+        profil, pour un champ que rien n'oblige à remplir.
+        """
+        customer.phone = "+22890111111"
+        customer.save(update_fields=["phone"])
+        client.force_authenticate(customer)
+
+        response = client.patch(reverse("v1:accounts:me"), {"phone": ""}, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        customer.refresh_from_db()
+        assert customer.phone is None
+
+    def test_deux_comptes_peuvent_n_avoir_aucun_telephone(
+        self, client: APIClient, customer: User
+    ) -> None:
+        """La démonstration du cas précédent, sur les deux comptes qui collidaient.
+
+        `Dely` envoie le contenu du champ tel quel : un livreur qui n'a pas
+        déclaré de numéro envoie `""`. Le deuxième à le faire tombait sur la
+        contrainte d'unicité.
+        """
+        second = User.objects.create_user(
+            "second@elcorazon.test", "motdepasse", full_name="Yao Adjo"
+        )
+        for compte in (customer, second):
+            client.force_authenticate(compte)
+            reponse = client.patch(reverse("v1:accounts:me"), {"phone": ""}, format="json")
+            assert reponse.status_code == status.HTTP_200_OK
+
+        customer.refresh_from_db()
+        second.refresh_from_db()
+        assert customer.phone is None
+        assert second.phone is None
+
+    def test_un_telephone_deja_pris_est_refuse_lisiblement(
+        self, client: APIClient, customer: User
+    ) -> None:
+        """400 et non 500 : l'unicité se dit avant d'atteindre la base."""
+        User.objects.create_user(
+            "occupe@elcorazon.test",
+            "motdepasse",
+            full_name="Yao Adjo",
+            phone="+22890333333",
+        )
+        client.force_authenticate(customer)
+
+        reponse = client.patch(
+            reverse("v1:accounts:me"), {"phone": "+22890333333"}, format="json"
+        )
+
+        assert reponse.status_code == status.HTTP_400_BAD_REQUEST
+
     def test_sans_jeton_rien_ne_change(self, client: APIClient, customer: User) -> None:
         response = client.patch(reverse("v1:accounts:me"), {"full_name": "Intrus"}, format="json")
 

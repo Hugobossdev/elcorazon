@@ -72,6 +72,7 @@ import 'package:elcora_fast/screens/client/product_reviews_screen.dart';
 import 'package:elcora_fast/screens/client/profile_screen.dart';
 import 'package:elcora_fast/screens/client/promo_codes_screen.dart';
 import 'package:elcora_fast/screens/client/rewards_screen.dart';
+import 'package:elcora_fast/screens/client/selecteur_etablissement_sheet.dart';
 import 'package:elcora_fast/screens/client/shared_payment_screen.dart';
 import 'package:elcora_fast/screens/client/social_feed_screen.dart';
 import 'package:elcora_fast/screens/client/social_groups_screen.dart';

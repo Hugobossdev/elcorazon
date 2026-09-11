@@ -7,7 +7,7 @@ un test d'architecture le signale.
 
 from __future__ import annotations
 
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 from django.db import models
 from django.utils import timezone
@@ -158,3 +158,50 @@ def state_check_constraint(machine: StateMachine, field: str, name: str) -> mode
         condition=models.Q(**{f"{field}__in": sorted(machine.states)}),
         name=name,
     )
+
+
+class AuditEntry(UUIDModel, TimeStampedModel):
+    """Une décision d'exploitation, avec sa valeur d'avant.
+
+    **Le seul modèle concret de `common`.** Il y vit parce qu'il est
+    véritablement transverse — un pays, une zone et un établissement s'y
+    consignent de la même façon — et parce qu'aucune autre application ne peut
+    l'héberger sans que les deux autres aient à en dépendre.
+
+    Voir `common.audit` pour ce qui est journalisé, ce qui ne l'est pas, et
+    pourquoi la cible n'est pas une clé étrangère.
+    """
+
+    # `SET_NULL` : un compte du personnel se désactive mais ne se supprime pas,
+    # et si l'exception arrivait, le journal doit survivre à son auteur — c'est
+    # précisément dans ce cas qu'on l'ouvre.
+    actor = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, related_name="audit_entries"
+    )
+
+    action = models.CharField(max_length=64, help_text="Par exemple `zone.tariff`.")
+
+    target_type = models.CharField(max_length=32)
+    target_id = models.CharField(max_length=64)
+
+    #: Libellé figé au moment du changement — « zone Cocody », « El Corazón
+    #: Lomé ». Recopié plutôt que joint : il doit rester lisible même si la
+    #: cible a depuis été renommée ou retirée.
+    target_label = models.CharField(max_length=200)
+
+    before = models.JSONField(default=dict)
+    after = models.JSONField(default=dict)
+
+    class Meta:
+        verbose_name = "entrée de journal"
+        verbose_name_plural = "entrées de journal"
+        ordering: ClassVar[list[str]] = ["-created_at"]
+        indexes: ClassVar[list[models.Index]] = [
+            # La lecture courante est « l'historique de cet objet » : on ouvre
+            # le journal depuis une fiche, jamais en balayant la table.
+            models.Index(fields=["target_type", "target_id", "-created_at"]),
+            models.Index(fields=["action", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.action} — {self.target_label}"

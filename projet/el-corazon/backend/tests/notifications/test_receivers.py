@@ -24,6 +24,7 @@ import pytest
 from apps.accounts.models import Role, User, UserType
 from apps.delivery.models import Assignment, CourierProfile
 from apps.delivery.services import AssignmentService
+from apps.delivery.states import DeliveryStatus
 from apps.notifications.models import Notification, NotificationKind
 from apps.notifications.services import staff_to_alert
 from apps.orders.models import Order
@@ -31,7 +32,9 @@ from apps.orders.services import OrderService
 from apps.orders.states import OrderStatus
 from apps.payments.models import PaymentProvider, Transaction
 from apps.payments.signals import payment_transaction_failed
-from apps.restaurants.models import Restaurant, StaffMembership
+from apps.restaurants.models import AreaMembership, Restaurant, StaffMembership
+from apps.restaurants.signals import restaurant_status_changed
+from apps.restaurants.states import RestaurantStatus
 from common.money import Money
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
@@ -268,6 +271,103 @@ class TestCourseAcceptee:
         assert notifications_de(courier.user, NotificationKind.DELIVERY_OFFER)
 
 
+class TestAnnulationDeCourse:
+    """Le pendant de la proposition, qui manquait.
+
+    L'annulation par le personnel diffusait bien un événement — mais sur le
+    canal de la **commande**, celui que le client écoute. Le livreur n'écoute
+    que sa propre file. Il continuait donc vers le restaurant et l'apprenait de
+    la cuisine en arrivant.
+    """
+
+    @staticmethod
+    def _course_engagee(order: Order, courier: CourierProfile) -> Assignment:
+        for etape in (OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY):
+            OrderService.transition_to(order=order, target=etape)
+        assignment: Assignment = AssignmentService.offer(order=order, courier=courier)
+        return AssignmentService.accept(assignment=assignment, courier=courier)
+
+    def test_le_livreur_est_prevenu(self, order: Order, courier: CourierProfile) -> None:
+        assignment = self._course_engagee(order, courier)
+
+        AssignmentService.transition_to(
+            assignment=assignment,
+            target=DeliveryStatus.CANCELLED,
+            actor=None,
+            reason="Le client a annulé.",
+        )
+
+        recues = notifications_de(courier.user, NotificationKind.DELIVERY_OFFER)
+        assert any(n.title == "Course annulée" for n in recues)
+
+    def test_le_motif_est_repris(self, order: Order, courier: CourierProfile) -> None:
+        """Une annulation sans raison se lit comme une sanction."""
+        assignment = self._course_engagee(order, courier)
+
+        AssignmentService.transition_to(
+            assignment=assignment,
+            target=DeliveryStatus.CANCELLED,
+            actor=None,
+            reason="Panne du véhicule signalée par téléphone.",
+        )
+
+        annulation = next(
+            n
+            for n in notifications_de(courier.user, NotificationKind.DELIVERY_OFFER)
+            if n.title == "Course annulée"
+        )
+        assert "Panne du véhicule" in annulation.body
+
+    def test_sans_motif_on_ne_pretend_pas_en_avoir_un(
+        self, order: Order, courier: CourierProfile
+    ) -> None:
+        assignment = self._course_engagee(order, courier)
+
+        AssignmentService.transition_to(
+            assignment=assignment, target=DeliveryStatus.CANCELLED, actor=None, reason=""
+        )
+
+        annulation = next(
+            n
+            for n in notifications_de(courier.user, NotificationKind.DELIVERY_OFFER)
+            if n.title == "Course annulée"
+        )
+        assert "retirée" in annulation.body
+
+    def test_la_charge_ouvre_la_course_et_la_commande(
+        self, order: Order, courier: CourierProfile
+    ) -> None:
+        assignment = self._course_engagee(order, courier)
+
+        AssignmentService.transition_to(
+            assignment=assignment, target=DeliveryStatus.CANCELLED, actor=None, reason="x"
+        )
+
+        annulation = next(
+            n
+            for n in notifications_de(courier.user, NotificationKind.DELIVERY_OFFER)
+            if n.title == "Course annulée"
+        )
+        assert annulation.data == {"assignment": str(assignment.pk), "order": str(order.pk)}
+
+    def test_un_refus_du_livreur_ne_le_notifie_pas(
+        self, order: Order, courier: CourierProfile
+    ) -> None:
+        """Personne n'a besoin d'être prévenu de sa propre décision.
+
+        C'est la distinction que porte le signal : `declined` est le geste du
+        livreur, `cancelled` celui du personnel.
+        """
+        for etape in (OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY):
+            OrderService.transition_to(order=order, target=etape)
+        assignment = AssignmentService.offer(order=order, courier=courier)
+
+        AssignmentService.decline(assignment=assignment, courier=courier, reason="Trop loin.")
+
+        recues = notifications_de(courier.user, NotificationKind.DELIVERY_OFFER)
+        assert not any(n.title == "Course annulée" for n in recues)
+
+
 class TestChargeUtile:
     def test_la_charge_ne_porte_que_de_quoi_ouvrir_un_ecran(
         self, order: Order, operateur: User
@@ -298,3 +398,134 @@ class TestChargeUtile:
         assert notification is not None
         assert notification.data["assignment"] == str(assignment.pk)
         assert notification.data["order"] == str(order.pk)
+
+
+class TestCycleDeVieEtablissement:
+    """Suspendre un établissement est une décision, pas un incident.
+
+    Personne n'était prévenu : l'équipe l'apprenait en constatant que les
+    commandes ne rentraient plus, et cherchait la panne du côté du réseau.
+    """
+
+    def _gerant(self, restaurant: Restaurant) -> User:
+        membre = User.objects.create_user(
+            "gerant-cycle@elcorazon.test",
+            "motdepasse",
+            full_name="Gérante",
+            user_type=UserType.STAFF,
+        )
+        membre.roles.add(
+            Role.objects.create(name="Exploitation cycle", permissions=["restaurants.read"])
+        )
+        StaffMembership.objects.create(user=membre, restaurant=restaurant)
+        return membre
+
+    def test_une_suspension_previent_le_personnel(self, restaurant: Restaurant) -> None:
+        gerant = self._gerant(restaurant)
+
+        restaurant.transition_to(RestaurantStatus.INACTIVE)
+
+        notification = Notification.objects.filter(user=gerant).latest("created_at")
+        assert "suspendu" in notification.title.lower()
+        assert notification.data["slug"] == restaurant.slug
+
+    def test_une_reouverture_ne_se_dit_pas_comme_une_inauguration(
+        self, restaurant: Restaurant
+    ) -> None:
+        """Le sens du geste est dans la paire (précédent, cible).
+
+        « suspendu → en service » est une réouverture ; le mot compte pour qui
+        relit ses notifications après coup.
+        """
+        gerant = self._gerant(restaurant)
+
+        # Le signal est émis directement plutôt que par `transition_to` : la
+        # remise en service exige une configuration complète — carte, horaires,
+        # flotte — et monter ce décor ici ne testerait pas la règle visée, qui
+        # est le **choix du mot** selon l'état précédent. La complétude a ses
+        # propres tests, dans `tests/restaurants`.
+        restaurant_status_changed.send(
+            sender=Restaurant,
+            restaurant=restaurant,
+            previous=RestaurantStatus.INACTIVE,
+            target=RestaurantStatus.ACTIVE,
+        )
+
+        notification = Notification.objects.filter(user=gerant).latest("created_at")
+        assert "rouvre" in notification.title.lower()
+
+    def test_le_client_n_est_pas_prevenu(self, restaurant: Restaurant, customer: User) -> None:
+        """Il voit la conséquence dans l'application.
+
+        Une notification « le restaurant est suspendu » sur le téléphone de
+        quelqu'un qui n'y commande pas serait du bruit.
+        """
+        self._gerant(restaurant)
+
+        restaurant.transition_to(RestaurantStatus.INACTIVE)
+
+        assert not Notification.objects.filter(user=customer).exists()
+
+    def test_le_personnel_d_un_autre_etablissement_n_est_pas_prevenu(
+        self, restaurant: Restaurant
+    ) -> None:
+        etranger = User.objects.create_user(
+            "ailleurs@elcorazon.test", "motdepasse", user_type=UserType.STAFF
+        )
+        etranger.roles.add(Role.objects.create(name="Ailleurs", permissions=["restaurants.read"]))
+
+        restaurant.transition_to(RestaurantStatus.INACTIVE)
+
+        assert not Notification.objects.filter(user=etranger).exists()
+
+    def test_un_directeur_de_marche_est_prevenu(self, restaurant: Restaurant) -> None:
+        """Le palier pays/ville doit être suivi par les alertes comme par les écrans.
+
+        Sinon le directeur voit les commandes de son marché au back-office sans
+        jamais être prévenu de ce qui s'y passe.
+        """
+        directeur = User.objects.create_user(
+            "directeur-cycle@elcorazon.test", "motdepasse", user_type=UserType.STAFF
+        )
+        directeur.roles.add(
+            Role.objects.create(name="Marché cycle", permissions=["restaurants.read"])
+        )
+        AreaMembership.objects.create(user=directeur, country=restaurant.zone.city.country)
+
+        restaurant.transition_to(RestaurantStatus.INACTIVE)
+
+        assert Notification.objects.filter(user=directeur).exists()
+
+    def test_un_etablissement_neuf_n_a_pas_deja_ete_configure(self, restaurant: Restaurant) -> None:
+        """« Repasse en configuration » sur un brouillon ferait croire à un retour.
+
+        Le sens du geste est dans la paire (précédent, cible) : « brouillon →
+        en configuration » est un début, « prêt → en configuration » un retour
+        en arrière. Le même mot pour les deux se relit mal trois jours plus
+        tard.
+        """
+        gerant = self._gerant(restaurant)
+
+        restaurant_status_changed.send(
+            sender=Restaurant,
+            restaurant=restaurant,
+            previous=RestaurantStatus.DRAFT,
+            target=RestaurantStatus.CONFIGURING,
+        )
+
+        notification = Notification.objects.filter(user=gerant).latest("created_at")
+        assert "entre en configuration" in notification.title
+        assert "repasse" not in notification.title
+
+    def test_un_retour_en_arriere_se_dit_comme_un_retour(self, restaurant: Restaurant) -> None:
+        gerant = self._gerant(restaurant)
+
+        restaurant_status_changed.send(
+            sender=Restaurant,
+            restaurant=restaurant,
+            previous=RestaurantStatus.READY,
+            target=RestaurantStatus.CONFIGURING,
+        )
+
+        notification = Notification.objects.filter(user=gerant).latest("created_at")
+        assert "repasse en configuration" in notification.title

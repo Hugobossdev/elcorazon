@@ -64,6 +64,18 @@ ROUTES_PUBLIQUES: set[str] = {
     "v1:geography:city-list",
     "v1:geography:city-detail",
     "v1:geography:zone-resolve",
+    # Devises et fuseaux disponibles. Des constantes publiques, pas l'état du
+    # réseau : elles ne disent ni où l'enseigne opère, ni combien
+    # d'établissements existent. L'écran d'ouverture de marché les lit avant
+    # d'avoir écrit quoi que ce soit, et les fermer obligerait à authentifier
+    # une réponse identique pour tout le monde.
+    "v1:geography:reference",
+    # Livrabilité d'une position — « me livrez-vous ici, par qui, à quel prix ».
+    # Ouverte pour la même raison que la géographie : exiger une inscription
+    # pour répondre « non, pas encore chez vous » est le meilleur moyen de ne
+    # jamais revoir la personne. Rien de personnel n'en sort — zones, barèmes et
+    # établissements sont publics.
+    "v1:restaurants:delivery-check",
     "v1:restaurants:restaurant-list",
     "v1:restaurants:restaurant-detail",
     "v1:catalog:category-list",

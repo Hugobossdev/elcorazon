@@ -97,6 +97,19 @@ GIS_ENABLED: bool = config("GIS_ENABLED", default=True, cast=bool)
 # vivait auparavant dans le `.env` des apps Flutter, c'est-à-dire dans un
 # binaire distribué : quiconque l'en extrayait pouvait rejoindre n'importe quel
 # canal.
+# Clé Google Maps **du serveur**, distincte de celles des applications.
+#
+# Elle sert au géocodage inverse du back-office (`apps.geography.geocoding`) et
+# n'a pas à être la même que la clé embarquée dans les binaires Flutter : celle
+# du serveur se restreint par adresse IP, les autres par empreinte
+# d'application. Les confondre reviendrait à donner à un APK les droits d'un
+# serveur.
+#
+# Vide, le géocodage répond 503 avec une phrase qui dit quoi faire — plutôt que
+# de tomber en 500 ou de rendre une adresse vide qui ferait croire à une
+# position sans pays.
+GOOGLE_MAPS_API_KEY: str = config("GOOGLE_MAPS_API_KEY", default="")
+
 AGORA_APP_ID: str = config("AGORA_APP_ID", default="")
 AGORA_APP_CERTIFICATE: str = config("AGORA_APP_CERTIFICATE", default="")
 # Un appel dure quelques minutes ; une heure couvre celui qui s'éternise sans
@@ -109,6 +122,11 @@ if GIS_ENABLED:
 # --------------------------------------------------------------- middleware
 
 MIDDLEWARE = [
+    # En tête, avant tout le reste : une exception levée par un middleware
+    # situé plus bas doit encore porter son identifiant de requête, faute de
+    # quoi les incidents les plus graves seraient ceux qu'on ne saurait pas
+    # relier. Voir `common/observabilite.py`.
+    "common.observabilite.MiddlewareDIdentifiant",
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -644,8 +662,17 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {"json": {"()": "config.logging.JSONFormatter"}},
+    # Ajoute `request_id` à **toute** ligne journalisée pendant le traitement
+    # d'une requête, y compris celles de Django et des bibliothèques tierces.
+    # Sans lui, les traces d'un incident se mêlent à celles de tout le monde et
+    # reconstituer ce qui est arrivé à un client demande de deviner.
+    "filters": {"correlation": {"()": "common.observabilite.FiltreDeCorrelation"}},
     "handlers": {
-        "console": {"class": "logging.StreamHandler", "formatter": "json"},
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+            "filters": ["correlation"],
+        },
     },
     "root": {"handlers": ["console"], "level": config("LOG_LEVEL", default="INFO")},
     "loggers": {

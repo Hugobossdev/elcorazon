@@ -50,6 +50,12 @@ dependencies = [
     # où nous ne posons pas notre propre reverse proxy, c'est lui ou rien — sans
     # lui, l'admin, l'API navigable de DRF et Swagger arrivent sans CSS.
     "whitenoise[brotli]==6.*",
+    # Remontée des exceptions. Le projet journalisait en JSON sur la sortie
+    # standard et n'avait **aucun agrégateur** : une 500 en production ne se
+    # découvrait que par l'appel d'un client. Le SDK ne fait rien tant que
+    # `SENTRY_DSN` est vide — voir `config/settings/prod.py`, qui l'initialise
+    # avec un filtrage explicite des données sensibles.
+    "sentry-sdk[django,celery]==2.*",
 ]
 
 [project.optional-dependencies]

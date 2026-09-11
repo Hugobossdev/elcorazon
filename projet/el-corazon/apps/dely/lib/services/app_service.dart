@@ -682,6 +682,60 @@ class AppService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Dépose des pièces justificatives (`POST /delivery/me/`).
+  ///
+  /// ## Ce que ce geste change au dossier
+  ///
+  /// Le serveur **rouvre l'instruction** quand le dossier était validé ou
+  /// refusé (L5), et remet le livreur hors ligne. Le dossier rendu remplace
+  /// donc l'ancien intégralement — y compris `verificationStatus` et
+  /// `isOnline` — et c'est pour cela qu'il est réaffecté ici plutôt que
+  /// fusionné : supposer que seules les URL des pièces ont changé laisserait
+  /// l'application afficher « validé » sur un dossier qui vient de repartir en
+  /// attente, et proposer des courses que le serveur refuserait.
+  ///
+  /// [DriverGate] observe ce service : le changement d'état repeint l'écran de
+  /// lui-même, sans qu'aucun appelant ait à naviguer.
+  ///
+  /// Aucun `catch` : l'`ApiException` remonte telle quelle, avec son statut et
+  /// son code, pour que l'écran distingue une panne réseau d'un refus métier.
+  Future<void> deposerPieces({
+    eccore.PieceJustificative? identite,
+    eccore.PieceJustificative? permis,
+    eccore.PieceJustificative? carteGrise,
+  }) async {
+    _courierProfile = await _delivery.deposerPieces(
+      identite: identite,
+      permis: permis,
+      carteGrise: carteGrise,
+    );
+    notifyListeners();
+  }
+
+  /// Corrige les champs descriptifs du dossier (`PATCH /delivery/me/`).
+  ///
+  /// Le véhicule, la plaque, les deux numéros de pièces. **Ne rouvre pas
+  /// l'instruction** : c'est la pièce qu'un instructeur lit, pas le champ texte
+  /// à côté, et remettre un dossier en attente parce qu'une plaque a perdu un
+  /// tiret suspendrait un livreur en pleine tournée.
+  ///
+  /// Le nom et le téléphone ne passent pas par ici — ils appartiennent au
+  /// compte, et [updateOwnProfile] les porte déjà.
+  Future<void> corrigerDossier({
+    String? vehicleType,
+    String? vehiclePlate,
+    String? nationalIdNumber,
+    String? licenceNumber,
+  }) async {
+    _courierProfile = await _delivery.corrigerDossier(
+      vehicleType: vehicleType,
+      vehiclePlate: vehiclePlate,
+      nationalIdNumber: nationalIdNumber,
+      licenceNumber: licenceNumber,
+    );
+    notifyListeners();
+  }
+
   /// Solde réellement disponible au retrait, tel que le serveur le tient.
   ///
   /// C'est `total_earnings` du dossier livreur, débité sous verrou à chaque

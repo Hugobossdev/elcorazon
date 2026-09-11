@@ -17,6 +17,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import Role, User, UserType
 from apps.analytics.models import AnalyticsEvent
+from apps.analytics.perimetre import Perimetre
 from apps.analytics.reports import ReportingService
 from apps.analytics.services import AnalyticsService
 from apps.delivery.models import Assignment, CourierProfile
@@ -24,7 +25,7 @@ from apps.delivery.states import DeliveryStatus
 from apps.orders.models import Order
 from apps.orders.services import OrderService
 from apps.orders.states import OrderStatus
-from apps.restaurants.models import Restaurant
+from apps.restaurants.models import Restaurant, StaffMembership
 from common.money import Money
 from tests.fixtures import build_order
 
@@ -56,14 +57,23 @@ def as_customer(customer: User) -> APIClient:
 
 
 @pytest.fixture
-def as_analyst() -> APIClient:
+def as_analyst(restaurant: Restaurant) -> APIClient:
     analyste = User.objects.create_user(
         "analyste@elcorazon.test", "motdepasse", full_name="Analyste", user_type=UserType.STAFF
     )
     analyste.roles.add(Role.objects.create(name="Analytics", permissions=["analytics.read"]))
+    StaffMembership.objects.create(user=analyste, restaurant=restaurant)
     client = APIClient()
     client.force_authenticate(analyste)
     return client
+
+
+#: Toute l'enseigne — le périmètre d'un compte du siège.
+#:
+#: Les appels directs au service le passent explicitement : depuis que les
+#: rapports sont cloisonnés, « sans périmètre » n'est plus une valeur par
+#: défaut qu'on peut omettre, et c'est précisément ce qu'on veut voir écrit.
+ENSEIGNE = Perimetre(restaurant_ids=None)
 
 
 class TestEvenements:
@@ -120,7 +130,7 @@ class TestRapports:
         deliver(commande)
 
         aujourdhui = commande.delivered_at.date()
-        rows = ReportingService.revenue_by_day(start=aujourdhui, end=aujourdhui)
+        rows = ReportingService.revenue_by_day(start=aujourdhui, end=aujourdhui, perimetre=ENSEIGNE)
 
         assert len(rows) == 1
         assert rows[0].orders_count == 1
@@ -131,7 +141,9 @@ class TestRapports:
     ) -> None:
         build_order(restaurant, customer, reference="EC000011")
 
-        rows = ReportingService.revenue_by_day(start=TODAY, end=TODAY + dt.timedelta(days=1))
+        rows = ReportingService.revenue_by_day(
+            start=TODAY, end=TODAY + dt.timedelta(days=1), perimetre=ENSEIGNE
+        )
 
         assert rows == []
 
@@ -152,7 +164,7 @@ class TestRapports:
         deliver(commande)
 
         aujourdhui = commande.delivered_at.date()
-        rows = ReportingService.top_products(start=aujourdhui, end=aujourdhui)
+        rows = ReportingService.top_products(start=aujourdhui, end=aujourdhui, perimetre=ENSEIGNE)
 
         assert rows[0].item_name == "Burger Corazón"
         assert rows[0].quantity_sold == 2
@@ -171,7 +183,9 @@ class TestRapports:
             courier_fee=Money(600, XOF),
         )
 
-        rows = ReportingService.courier_performance(start=maintenant.date(), end=maintenant.date())
+        rows = ReportingService.courier_performance(
+            start=maintenant.date(), end=maintenant.date(), perimetre=ENSEIGNE
+        )
 
         assert rows[0].courier_id == str(courier.pk)
         assert rows[0].deliveries == 1

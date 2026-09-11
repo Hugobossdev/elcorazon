@@ -26,7 +26,7 @@ from apps.delivery.models import CourierProfile
 from apps.orders.models import Order, OrderLine
 from apps.orders.services import OrderService
 from apps.orders.states import OrderStatus
-from apps.restaurants.models import Restaurant
+from apps.restaurants.models import Restaurant, StaffMembership
 from common.money import Money
 from tests.fixtures import build_order
 
@@ -58,11 +58,12 @@ def fenetre() -> dict[str, str]:
 
 
 @pytest.fixture
-def as_analyst() -> APIClient:
+def as_analyst(restaurant: Restaurant) -> APIClient:
     analyste = User.objects.create_user(
         "tableau@elcorazon.test", "motdepasse", full_name="Analyste", user_type=UserType.STAFF
     )
     analyste.roles.add(Role.objects.create(name="Tableau", permissions=["analytics.read"]))
+    StaffMembership.objects.create(user=analyste, restaurant=restaurant)
     client = APIClient()
     client.force_authenticate(analyste)
     return client

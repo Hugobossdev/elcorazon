@@ -50,6 +50,21 @@ class ProfileUpdateSerializer(serializers.ModelSerializer[User]):
         model = User
         fields = ["full_name", "phone"]
 
+    def validate_phone(self, value: str | None) -> str | None:
+        """Un numéro effacé vaut `NULL`, et non la chaîne vide.
+
+        `phone` est `unique` et `null=True`. Deux `NULL` cohabitent en SQL, deux
+        chaînes vides non : le **premier** compte qui efface son numéro passe,
+        le second se heurte à la contrainte d'unicité — c'est-à-dire une 500 sur
+        un écran de profil, pour un champ que rien n'oblige à remplir.
+
+        Le cas n'est pas théorique : `Dely` envoie le contenu du champ tel quel,
+        et un livreur qui n'a pas déclaré de numéro le laisse vide. Le
+        sérialiseur du back-office (`CourierUpdateSerializer`) fait la même
+        conversion depuis l'origine ; celui-ci ne la faisait pas.
+        """
+        return (value or "").strip() or None
+
 
 class UserSerializer(serializers.ModelSerializer[User]):
     """Représentation publique d'un compte.

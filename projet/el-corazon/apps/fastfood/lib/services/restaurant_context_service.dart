@@ -188,6 +188,45 @@ class RestaurantContextService extends ChangeNotifier {
     }
   }
 
+  /// Villes desservies, dans l'ordre d'apparition de l'annuaire.
+  ///
+  /// Sert au sélecteur : quand l'enseigne couvre deux villes, « choisir une
+  /// cuisine » commence par « choisir une ville ». Dérivée de l'annuaire plutôt
+  /// que lue sur `/geography/cities/` — cette route-là rend les villes *où
+  /// l'enseigne pourrait ouvrir*, pas celles où elle sert réellement, et
+  /// proposer une ville sans restaurant serait une impasse.
+  List<String> get villesDesservies {
+    final vues = <String>{};
+    final ordonnees = <String>[];
+    for (final etablissement in _etablissements) {
+      if (etablissement.cityName.isNotEmpty && vues.add(etablissement.cityName)) {
+        ordonnees.add(etablissement.cityName);
+      }
+    }
+    return List.unmodifiable(ordonnees);
+  }
+
+  /// Établissements d'une ville donnée.
+  List<eccore.Restaurant> etablissementsDe(String cityName) => List.unmodifiable(
+    _etablissements.where((etablissement) => etablissement.cityName == cityName),
+  );
+
+  /// Recharge l'annuaire en le faisant trier par proximité côté serveur.
+  ///
+  /// **Ne change pas le choix explicite du client.** `resolve` restaure le slug
+  /// mémorisé, si bien que trier ne fait que réordonner l'affichage : quelqu'un
+  /// qui a choisi un restaurant précis le garde même en changeant de quartier.
+  /// C'est voulu — le tri est une aide à la découverte, pas une décision prise
+  /// à la place du client.
+  ///
+  /// Le tri est fait par PostGIS sur un index géographique, pas ici : la
+  /// variante locale — tout charger, calculer, trier — donnerait le même
+  /// résultat sur dix restaurants et deviendrait impraticable à mille.
+  Future<void> trierParProximite({
+    required double latitude,
+    required double longitude,
+  }) => resolve(force: true, latitude: latitude, longitude: longitude);
+
   /// Slug à écrire, en résolvant l'annuaire si ce n'est pas déjà fait.
   ///
   /// Rend `null` quand rien n'est disponible : l'appelant doit alors refuser sa

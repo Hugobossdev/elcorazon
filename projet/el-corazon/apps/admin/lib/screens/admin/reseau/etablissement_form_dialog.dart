@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:admin/screens/admin/reseau/champs_reseau.dart';
+import 'package:admin/screens/admin/reseau/selecteur_de_lieu.dart';
 import 'package:admin/screens/admin/reseau/zone_creation_dialog.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/services/network_service.dart';
@@ -107,6 +108,41 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
       champ.dispose();
     }
     super.dispose();
+  }
+
+  /// Code pays du marché visé, pour borner la recherche de lieux.
+  ///
+  /// Il vient de la zone choisie — laquelle emporte la ville, donc le pays
+  /// (ADR-006). Nul tant qu'aucune zone n'est retenue : la recherche est alors
+  /// mondiale, ce qui est le bon défaut quand on ne sait pas encore où l'on
+  /// ouvre.
+  String? _paysDeLaZoneChoisie(DeliveryZoneService zones, NetworkService reseau) {
+    final zone = zones.zoneById(_zoneId ?? '');
+    if (zone == null) return null;
+    final ville = reseau.cities.where((v) => v.id == zone.cityId).firstOrNull;
+    return ville?.countryIsoCode;
+  }
+
+  /// Applique ce que le sélecteur a rapporté.
+  ///
+  /// **L'adresse n'est écrasée que si elle est vide.** Quelqu'un qui a saisi
+  /// « Entrée de service, portail bleu » ne doit pas la perdre parce qu'il
+  /// ajuste le marqueur de trois mètres — c'est la règle « rien n'écrase une
+  /// donnée validée à la main ». Les coordonnées, elles, sont précisément ce
+  /// qu'on vient chercher : elles sont remplacées.
+  void _appliquerLeLieu(LieuChoisi lieu) {
+    setState(() {
+      _latitude.text = lieu.latitude.toStringAsFixed(6);
+      _longitude.text = lieu.longitude.toStringAsFixed(6);
+
+      final proposee = lieu.address;
+      if (_adresse.text.trim().isEmpty && proposee != null && proposee.isNotEmpty) {
+        _adresse.text = proposee;
+      }
+      if (_nom.text.trim().isEmpty && (lieu.name ?? '').isNotEmpty) {
+        _nom.text = lieu.name!;
+      }
+    });
   }
 
   Future<void> _ouvrirUneZone() async {
@@ -255,34 +291,24 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
                       (v == null || v.trim().isEmpty) ? 'Adresse obligatoire' : null,
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: CustomTextField(
-                        label: 'Latitude',
-                        hint: '5.3600',
-                        controller: _latitude,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                          signed: true,
-                        ),
-                        validator: (v) => _coordonnee(v, -90, 90),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: CustomTextField(
-                        label: 'Longitude',
-                        hint: '-4.0083',
-                        controller: _longitude,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                          signed: true,
-                        ),
-                        validator: (v) => _coordonnee(v, -180, 180),
-                      ),
-                    ),
-                  ],
+                // **La position se pose sur une carte, plus au clavier.**
+                //
+                // Deux champs « Latitude » et « Longitude » restaient la seule
+                // façon de placer un établissement. Personne ne connaît par
+                // cœur les coordonnées d'une adresse : on les copiait depuis un
+                // autre onglet, avec une chance sur deux de les intervertir —
+                // et une longitude saisie en latitude place un restaurant de
+                // Lomé au pôle, ce qui ne se voit qu'à la mise en service.
+                //
+                // Les champs restent lisibles, et modifiables : quelqu'un qui a
+                // un relevé GPS exact doit pouvoir le saisir sans passer par
+                // une carte.
+                _ChoixDeLaPosition(
+                  latitude: _latitude,
+                  longitude: _longitude,
+                  adresse: _adresse,
+                  countryCode: _paysDeLaZoneChoisie(zones, reseau),
+                  onLieuChoisi: _appliquerLeLieu,
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -376,12 +402,22 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
     );
   }
 
-  static String? _coordonnee(String? valeur, double min, double max) {
-    final nombre = double.tryParse((valeur ?? '').trim());
-    if (nombre == null) return 'Nombre décimal attendu';
-    if (nombre < min || nombre > max) return 'Entre $min et $max';
-    return null;
-  }
+}
+
+/// Valide une coordonnée : présente, numérique, dans les bornes.
+///
+/// Les bornes ne sont pas décoratives. Une longitude saisie à la place d'une
+/// latitude passe silencieusement au-delà de 90, et l'établissement se retrouve
+/// au pôle — hors de sa zone, donc invalide, mais seulement au moment de la
+/// mise en service.
+///
+/// Fonction de fichier et non méthode statique : deux widgets l'utilisent
+/// depuis que la position se pose aussi sur une carte.
+String? _coordonnee(String? valeur, double min, double max) {
+  final nombre = double.tryParse((valeur ?? '').trim());
+  if (nombre == null) return 'Nombre décimal attendu';
+  if (nombre < min || nombre > max) return 'Entre $min et $max';
+  return null;
 }
 
 /// Sélecteur de zone, avec la sortie de secours qui manquait.
@@ -513,6 +549,106 @@ class _Titre extends StatelessWidget {
           color: scheme.primary,
         ),
       ),
+    );
+  }
+}
+
+
+/// Position de l'établissement : une carte, et les coordonnées qu'elle produit.
+///
+/// Les deux champs restent affichés et modifiables. Ce n'est pas une
+/// concession : un relevé GPS exact se saisit plus vite qu'il ne se pointe, et
+/// une carte indisponible — clé absente, réseau coupé — ne doit pas empêcher
+/// d'ouvrir un établissement.
+class _ChoixDeLaPosition extends StatelessWidget {
+  const _ChoixDeLaPosition({
+    required this.latitude,
+    required this.longitude,
+    required this.adresse,
+    required this.countryCode,
+    required this.onLieuChoisi,
+  });
+
+  final TextEditingController latitude;
+  final TextEditingController longitude;
+  final TextEditingController adresse;
+  final String? countryCode;
+  final ValueChanged<LieuChoisi> onLieuChoisi;
+
+  eccore.GeoPoint? get _positionCourante {
+    final lat = double.tryParse(latitude.text.trim());
+    final lon = double.tryParse(longitude.text.trim());
+    if (lat == null || lon == null) return null;
+    return eccore.GeoPoint(lat, lon);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.tonalIcon(
+            onPressed: () async {
+              final lieu = await SelecteurDeLieu.ouvrir(
+                context,
+                titre: 'Position de l’établissement',
+                positionInitiale: _positionCourante,
+                countryCode: countryCode,
+              );
+              if (lieu != null) onLieuChoisi(lieu);
+            },
+            icon: const Icon(Icons.map_outlined),
+            label: Text(
+              _positionCourante == null
+                  ? 'Placer sur la carte'
+                  : 'Ajuster sur la carte',
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: CustomTextField(
+                label: 'Latitude',
+                hint: '5.3600',
+                controller: latitude,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                validator: (v) => _coordonnee(v, -90, 90),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: CustomTextField(
+                label: 'Longitude',
+                hint: '-4.0083',
+                controller: longitude,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                validator: (v) => _coordonnee(v, -180, 180),
+              ),
+            ),
+          ],
+        ),
+        if (countryCode == null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'Choisissez d’abord une zone : la recherche de lieux se bornera '
+              'alors au marché visé.',
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
+          ),
+      ],
     );
   }
 }

@@ -56,6 +56,8 @@ class CourierProfile {
     this.verificationNotes = '',
     this.verifiedAt,
     this.vehiclePlate = '',
+    this.nationalIdNumber = '',
+    this.licenceNumber = '',
     this.lastLatitude,
     this.lastLongitude,
     this.lastLocationAt,
@@ -84,6 +86,8 @@ class CourierProfile {
       verifiedAt: _parseDate(json['verified_at']),
       vehicleType: json['vehicle_type'] as String,
       vehiclePlate: json['vehicle_plate'] as String? ?? '',
+      nationalIdNumber: json['national_id_number'] as String? ?? '',
+      licenceNumber: json['licence_number'] as String? ?? '',
       isOnline: json['is_online'] as bool,
       canAcceptOrders: json['can_accept_orders'] as bool,
       lastLatitude: location == null ? null : (location['lat'] as num).toDouble(),
@@ -132,11 +136,38 @@ class CourierProfile {
   final String? vehicleDocument;
 
   /// Le dossier porte-t-il ses trois pièces ?
-  bool get hasAllDocuments =>
-      idDocument != null && licenceDocument != null && vehicleDocument != null;
+  bool get hasAllDocuments => piecesManquantes.isEmpty;
+
+  /// Les pièces qui manquent encore, par leur nom de champ au contrat.
+  ///
+  /// Ce que l'écran de dépôt affiche, et ce qui décide s'il y a lieu de le
+  /// proposer. Les valeurs sont celles qu'attend `DocumentsSerializer` —
+  /// `id_document`, `licence_document`, `vehicle_document` — et non des
+  /// libellés : ce sont des identifiants d'API, et les traduire ici ferait
+  /// refuser le dépôt.
+  ///
+  /// L'ordre est celui dans lequel on les demande : la pièce d'identité
+  /// d'abord, parce qu'elle conditionne l'examen des deux autres.
+  List<String> get piecesManquantes => [
+    if (idDocument == null || idDocument!.isEmpty) 'id_document',
+    if (licenceDocument == null || licenceDocument!.isEmpty) 'licence_document',
+    if (vehicleDocument == null || vehicleDocument!.isEmpty) 'vehicle_document',
+  ];
+
   final DateTime? verifiedAt;
   final String vehicleType;
   final String vehiclePlate;
+
+  /// Numéro de la pièce d'identité, tel qu'il a été enregistré. Vide s'il ne
+  /// l'a pas été.
+  ///
+  /// Distinct de [idDocument], qui est la **photo** de la pièce : le numéro se
+  /// relit et se compare, l'image se regarde. Les deux se saisissent
+  /// séparément, et le second ne remplace pas le premier.
+  final String nationalIdNumber;
+
+  /// Numéro du permis de conduire — même distinction avec [licenceDocument].
+  final String licenceNumber;
 
   /// Bascule volontaire du livreur — ce qu'il déclare, pas ce qu'il peut.
   final bool isOnline;

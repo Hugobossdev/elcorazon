@@ -64,6 +64,12 @@
 		<string>location</string>
 		<string>remote-notification</string>
 	</array>
+	<!-- Choix d'une piece justificative dans la pellicule. Sans cette cle, iOS
+	     tue l'application au moment ou le selecteur s'ouvre — pas au demarrage,
+	     et pas en debug de facon systematique : la panne se decouvre en
+	     production, sur le geste qui debloque le dossier du livreur. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Cette application a besoin d'acceder a vos photos pour joindre vos pieces justificatives (piece d'identite, permis, carte grise) a votre dossier de livreur.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Cette application a besoin d'accéder à votre caméra pour les appels vidéo et la vérification d'identité.</string>
 	<key>NSMicrophoneUsageDescription</key>

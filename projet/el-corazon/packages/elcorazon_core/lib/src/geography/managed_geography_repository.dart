@@ -184,27 +184,59 @@ class ManagedGeographyRepository {
     );
   }
 
-  /// Crée une zone.
+  /// Crée une zone — **par l'un des trois modes de saisie**.
   ///
-  /// [boundary] est du GeoJSON (`Polygon` ou `MultiPolygon`) — la forme que
-  /// produisent les outils de dessin cartographique.
+  /// Exactement un des trois doit être fourni :
+  ///
+  /// * [center] et [radiusMeters] — un disque. Le serveur le discrétise en
+  ///   contour, ce qui est la raison d'être de ce mode : la conversion vit
+  ///   **une fois**, côté serveur, plutôt que dans chaque écran qui dessine un
+  ///   cercle. Deux écrans en auraient deux différentes, donc deux zones pour
+  ///   la même saisie ;
+  /// * [polygonCoordinates] — des sommets `[[lon, lat], …]`, ce que rend une
+  ///   carte sur laquelle on vient de tracer ;
+  /// * [boundary] — un GeoJSON complet, le bon chemin pour un contour
+  ///   administratif importé d'un outil cartographique.
+  ///
+  /// [shape] dit avec quel outil on a dessiné, et c'est ce qui permet de
+  /// **rouvrir** la bonne saisie : sans lui, un disque de 5 km se rouvrirait en
+  /// éditeur de polygone, avec les soixante-quatre sommets de sa
+  /// discrétisation — illisibles, et impossibles à ramener à « 5 km ».
   Future<DeliveryZone> createZone({
     required String cityId,
     required String name,
-    required Map<String, dynamic> boundary,
     required Money baseFee,
     required Money feePerKm,
+    String shape = 'polygon',
+    ({double latitude, double longitude})? center,
+    int? radiusMeters,
+    List<List<double>>? polygonCoordinates,
+    Map<String, dynamic>? boundary,
     Money? freeDeliveryThreshold,
     Money? minOrderAmount,
     double maxDistanceKm = 15,
     int estimatedDeliveryMinutes = 30,
+    int priority = 0,
   }) async {
+    _assertUnSeulMode(
+      shape: shape,
+      center: center,
+      radiusMeters: radiusMeters,
+      polygonCoordinates: polygonCoordinates,
+      boundary: boundary,
+    );
+
     final response = await apiClient.post(
       '/geography/manage/zones/',
       data: {
         'city': cityId,
         'name': name,
-        'boundary': boundary,
+        'shape': shape,
+        if (center != null)
+          'center': {'lat': center.latitude, 'lon': center.longitude},
+        if (radiusMeters != null) 'radius_meters': radiusMeters,
+        if (polygonCoordinates != null) 'polygon_coordinates': polygonCoordinates,
+        if (boundary != null) 'boundary': boundary,
         'base_fee': baseFee.toJson(),
         'fee_per_km': feePerKm.toJson(),
         if (freeDeliveryThreshold != null)
@@ -212,9 +244,55 @@ class ManagedGeographyRepository {
         if (minOrderAmount != null) 'min_order_amount': minOrderAmount.toJson(),
         'max_distance_km': maxDistanceKm,
         'estimated_delivery_minutes': estimatedDeliveryMinutes,
+        'priority': priority,
       },
     );
     return DeliveryZone.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Refuse une saisie ambiguë **avant** l'appel réseau.
+  ///
+  /// Le serveur tranche déjà — il applique le mode que `shape` désigne — mais
+  /// une requête qui porte un rayon *et* des sommets trahit un écran qui n'a
+  /// pas nettoyé son état. Laisser passer produirait une zone silencieusement
+  /// différente de ce que l'administrateur croit avoir dessiné, ce qui est le
+  /// pire résultat possible pour un contour de livraison.
+  void _assertUnSeulMode({
+    required String shape,
+    required ({double latitude, double longitude})? center,
+    required int? radiusMeters,
+    required List<List<double>>? polygonCoordinates,
+    required Map<String, dynamic>? boundary,
+  }) {
+    if (shape == 'circle') {
+      if (center == null || radiusMeters == null || radiusMeters <= 0) {
+        throw ArgumentError(
+          'Une zone circulaire demande un centre et un rayon strictement positif.',
+        );
+      }
+      if (polygonCoordinates != null || boundary != null) {
+        throw ArgumentError(
+          'Un disque ne se saisit pas aussi par ses sommets : nettoyez le mode précédent.',
+        );
+      }
+      return;
+    }
+
+    if (center != null || radiusMeters != null) {
+      throw ArgumentError(
+        "Un centre et un rayon ne s'appliquent qu'à une zone circulaire.",
+      );
+    }
+    if (polygonCoordinates == null && boundary == null) {
+      throw ArgumentError(
+        'Un contour est nécessaire : des sommets, ou un GeoJSON.',
+      );
+    }
+    if (polygonCoordinates != null && boundary != null) {
+      throw ArgumentError(
+        'Des sommets et un GeoJSON désignent deux contours : choisissez-en un.',
+      );
+    }
   }
 
   /// Modification partielle d'une zone.

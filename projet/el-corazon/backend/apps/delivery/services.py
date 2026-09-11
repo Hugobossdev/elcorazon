@@ -28,7 +28,11 @@ from django.utils import timezone
 
 from apps.accounts.models import User, UserType
 from apps.delivery.models import Assignment, CourierProfile, CourierRating
-from apps.delivery.signals import assignment_accepted, assignment_offered
+from apps.delivery.signals import (
+    assignment_accepted,
+    assignment_cancelled,
+    assignment_offered,
+)
 from apps.delivery.states import (
     DELIVERY_MACHINE,
     ENGAGED_STATUSES,
@@ -296,24 +300,51 @@ class CourierService:
         courier.save(update_fields=["is_online", "updated_at"])
         return courier
 
+    #: Statuts qu'un dépôt de pièces ramène à `pending` — et pourquoi ces deux-là.
+    #:
+    #: `approved` y est depuis l'origine : un dossier validé sur des pièces
+    #: qu'on a ensuite remplacées n'est plus un dossier validé, et laisser
+    #: l'approbation en place reviendrait à valider des documents que personne
+    #: n'a lus. C'est une règle de conformité (L5).
+    #:
+    #: `rejected` **manquait**, et son absence fermait la seule issue d'un
+    #: dossier refusé. La machine l'autorise pourtant explicitement
+    #: (`REJECTED → PENDING`), l'écran du livreur le lui promet — « déposez de
+    #: nouvelles pièces pour que votre dossier soit réexaminé » — et le
+    #: back-office ne liste comme « à instruire » que les dossiers `pending`.
+    #: Un livreur refusé pour une photo illisible pouvait donc en redéposer
+    #: dix : elles arrivaient bien en base, son dossier restait `rejected`, et
+    #: personne ne les regardait jamais.
+    #:
+    #: `suspended` n'y est **pas**, et c'est délibéré : une suspension est une
+    #: sanction d'exploitation, pas un défaut de pièce. S'en relever en
+    #: téléversant une carte grise ferait de la sanction une formalité — et la
+    #: machine refuse d'ailleurs `SUSPENDED → PENDING`.
+    ROUVRE_L_INSTRUCTION = (VerificationStatus.APPROVED, VerificationStatus.REJECTED)
+
     @staticmethod
     @transaction.atomic
     def replace_documents(*, courier: CourierProfile, **documents: object) -> CourierProfile:
-        """Remplace des pièces justificatives — **et repasse le dossier en attente** (L5).
+        """Remplace des pièces justificatives — **et rouvre l'instruction** (L5).
 
-        C'est une règle de conformité, pas une commodité : un dossier validé
-        sur des pièces qu'on a ensuite remplacées n'est plus un dossier validé.
-        Laisser l'approbation en place reviendrait à valider des documents que
-        personne n'a lus.
+        Voir [`ROUVRE_L_INSTRUCTION`] pour les statuts concernés et le motif de
+        chacun. Le livreur repasse hors ligne du même geste : son dossier
+        n'étant plus validé, `can_accept_orders` est faux de toute façon, et le
+        laisser « en ligne » le maintiendrait dans les listes d'affectation où
+        seule cette garde-là l'écarterait.
         """
         for field, value in documents.items():
             setattr(courier, field, value)
 
         touched = [*documents]
-        if courier.verification_status == VerificationStatus.APPROVED:
+        if courier.verification_status in CourierService.ROUVRE_L_INSTRUCTION:
             courier.verification_status = VerificationStatus.PENDING
             courier.is_online = False
-            touched += ["verification_status", "is_online"]
+            # Le motif du refus précédent porte sur des pièces qui ne sont plus
+            # là. Le garder ferait lire au livreur, sur un dossier qu'il vient
+            # de corriger, le reproche auquel il vient de répondre.
+            courier.verification_notes = ""
+            touched += ["verification_status", "is_online", "verification_notes"]
 
         courier.save(update_fields=[*touched, "updated_at"])
         return courier
@@ -599,6 +630,13 @@ class AssignmentService:
             # livreur mentirait sans que rien ne le signale.
             CourierProfile.objects.filter(pk=locked.courier_id).update(
                 deliveries_cancelled=F("deliveries_cancelled") + 1
+            )
+            # Le livreur doit l'apprendre de nous, pas de la cuisine en
+            # arrivant. La diffusion faite plus haut porte sur le canal de la
+            # **commande**, que le client écoute et que le livreur n'écoute
+            # pas : sans ce signal, il roulait vers une course annulée.
+            assignment_cancelled.send(
+                sender=Assignment, assignment=locked, reason=reason
             )
 
         return locked

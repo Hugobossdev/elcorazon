@@ -49,7 +49,14 @@ Map<String, dynamic> _assignmentJson({
   };
 }
 
-Map<String, dynamic> _courierJson({bool isOnline = false, String verification = 'approved'}) {
+Map<String, dynamic> _courierJson({
+  bool isOnline = false,
+  String verification = 'approved',
+  String? idDocument,
+  String? licenceDocument,
+  String? vehicleDocument,
+  String vehicleType = 'moto',
+}) {
   return {
     'id': 'courier-1',
     'full_name': 'Kofi A.',
@@ -58,7 +65,14 @@ Map<String, dynamic> _courierJson({bool isOnline = false, String verification = 
     'verification_status': verification,
     'verification_notes': '',
     'verified_at': '2026-07-20T08:00:00Z',
-    'vehicle_type': 'moto',
+    'national_id_number': 'TG-CNI-4417',
+    'licence_number': 'PC-2291-B',
+    // URL **signées** : le stockage est privé, ces adresses expirent. Le client
+    // ne les fabrique pas, il les reçoit.
+    'id_document': idDocument,
+    'licence_document': licenceDocument,
+    'vehicle_document': vehicleDocument,
+    'vehicle_type': vehicleType,
     'vehicle_plate': 'TG-1234',
     'is_online': isOnline,
     // L1 : le serveur décide de l'éligibilité. Le test la met délibérément en
@@ -83,6 +97,10 @@ class _FakeServer implements HttpClientAdapter {
   final List<Map<String, dynamic>> bodies = [];
   final List<Map<String, dynamic>> queries = [];
 
+  /// Les corps `multipart`, que [bodies] ne peut pas retenir : un [FormData]
+  /// n'est pas une `Map`.
+  final List<FormData> formulaires = [];
+
   @override
   void close({bool force = false}) {}
 
@@ -97,6 +115,9 @@ class _FakeServer implements HttpClientAdapter {
     if (options.data is Map) {
       bodies.add(Map<String, dynamic>.from(options.data as Map));
     }
+    if (options.data is FormData) {
+      formulaires.add(options.data as FormData);
+    }
 
     if (options.path.endsWith('/delivery/me/online/')) {
       final asked = (options.data as Map)['is_online'] as bool;
@@ -104,6 +125,28 @@ class _FakeServer implements HttpClientAdapter {
     }
 
     if (options.path.endsWith('/delivery/me/')) {
+      // Trois verbes, trois effets. Le dépôt de pièces rouvre l'instruction du
+      // dossier (L5) et remet le livreur hors ligne ; la correction des champs
+      // descriptifs ne le fait pas. La simulation les distingue parce que
+      // c'est exactement ce que le client doit relire dans la réponse au lieu
+      // de le supposer.
+      if (options.method == 'POST') {
+        return _json(
+          _courierJson(
+            verification: 'pending',
+            idDocument: 'https://cdn.test/documents/cni.jpg?sig=abc',
+            licenceDocument: 'https://cdn.test/documents/permis.jpg?sig=def',
+          ),
+          200,
+        );
+      }
+      if (options.method == 'PATCH') {
+        final demande = options.data as Map;
+        return _json(
+          _courierJson(vehicleType: (demande['vehicle_type'] as String?) ?? 'moto'),
+          200,
+        );
+      }
       return _json(_courierJson(), 200);
     }
 
@@ -183,6 +226,27 @@ void main() {
       expect(courier.lastLatitude, 6.14);
     });
 
+    test('me rend les deux numéros de pièces', () async {
+      // Ils s'écrivaient déjà côté serveur et ne se relisaient nulle part : le
+      // sérialiseur ne les exposait pas. Un formulaire de correction ne pouvait
+      // donc pas préremplir les champs qu'il proposait de corriger.
+      final courier = await repository.me();
+
+      expect(courier.nationalIdNumber, 'TG-CNI-4417');
+      expect(courier.licenceNumber, 'PC-2291-B');
+    });
+
+    test('un dossier sans pièce les énumère toutes comme manquantes', () async {
+      final courier = await repository.me();
+
+      expect(courier.hasAllDocuments, isFalse);
+      expect(courier.piecesManquantes, [
+        'id_document',
+        'licence_document',
+        'vehicle_document',
+      ]);
+    });
+
     test('setOnline lit can_accept_orders du serveur, ne le déduit pas', () async {
       final courier = await repository.setOnline(isOnline: true);
 
@@ -191,6 +255,98 @@ void main() {
       // aussi compte du dossier et de l'activité du compte.
       expect(courier.canAcceptOrders, isFalse);
       expect(server.bodies.last, {'is_online': true});
+    });
+  });
+
+  group('DeliveryRepository — pièces justificatives', () {
+    test('submitDocuments part en multipart sur POST /delivery/me/', () async {
+      await repository.submitDocuments(
+        idDocument: const PieceJustificative(
+          filename: 'cni.jpg',
+          bytes: [1, 2, 3],
+          contentType: 'image/jpeg',
+        ),
+      );
+
+      expect(server.requests.last, 'POST /delivery/me/');
+      expect(server.formulaires, hasLength(1));
+      expect(server.formulaires.last.files.map((f) => f.key), ['id_document']);
+    });
+
+    test('les trois pièces partent dans un seul envoi', () async {
+      await repository.submitDocuments(
+        idDocument: const PieceJustificative(filename: 'cni.jpg', bytes: [1]),
+        licenceDocument: const PieceJustificative(filename: 'permis.jpg', bytes: [2]),
+        vehicleDocument: const PieceJustificative(filename: 'carte.jpg', bytes: [3]),
+      );
+
+      expect(server.requests.where((r) => r.startsWith('POST')), hasLength(1));
+      expect(server.formulaires.last.files.map((f) => f.key), [
+        'id_document',
+        'licence_document',
+        'vehicle_document',
+      ]);
+    });
+
+    test('une pièce omise n\'est pas envoyée vide', () async {
+      // « On remplace ce qu'on remplace » : un champ absent laisse la pièce en
+      // place côté serveur. L'envoyer vide l'effacerait.
+      await repository.submitDocuments(
+        licenceDocument: const PieceJustificative(filename: 'permis.jpg', bytes: [1]),
+      );
+
+      expect(server.formulaires.last.files.map((f) => f.key), ['licence_document']);
+    });
+
+    test('un dépôt sans aucune pièce ne part pas', () async {
+      // Le serveur refuserait en 400 ; l'aller-retour est inutile, et le
+      // message d'un `ArgumentError` dit ce qui manque là où l'appel est écrit.
+      expect(repository.submitDocuments(), throwsArgumentError);
+      expect(server.requests, isEmpty);
+    });
+
+    test('le dossier rendu après dépôt est relu, pas supposé', () async {
+      // L5 — déposer rouvre l'instruction. Le client ne doit pas conserver le
+      // « validé » qu'il affichait juste avant.
+      final courier = await repository.submitDocuments(
+        idDocument: const PieceJustificative(filename: 'cni.jpg', bytes: [1]),
+      );
+
+      expect(courier.verificationStatus, 'pending');
+      expect(courier.idDocument, isNotNull);
+      expect(courier.piecesManquantes, ['vehicle_document']);
+    });
+  });
+
+  group('DeliveryRepository — correction du dossier', () {
+    test('updateMe part en PATCH sur /delivery/me/', () async {
+      final courier = await repository.updateMe(
+        vehicleType: 'car',
+        vehiclePlate: 'TG-4242-AB',
+      );
+
+      expect(server.requests.last, 'PATCH /delivery/me/');
+      expect(server.bodies.last, {'vehicle_type': 'car', 'vehicle_plate': 'TG-4242-AB'});
+      expect(courier.vehicleType, 'car');
+    });
+
+    test('un champ non fourni n\'entre pas dans le corps', () async {
+      // `null` signifie « ne pas y toucher ». L'envoyer ferait écrire une
+      // chaîne vide, donc effacer une valeur que personne n'a demandé d'effacer.
+      await repository.updateMe(licenceNumber: 'PC-2291-B');
+
+      expect(server.bodies.last, {'licence_number': 'PC-2291-B'});
+    });
+
+    test('une chaîne vide est transmise — elle efface', () async {
+      await repository.updateMe(vehiclePlate: '');
+
+      expect(server.bodies.last, {'vehicle_plate': ''});
+    });
+
+    test('une correction sans champ ne part pas', () async {
+      expect(repository.updateMe(), throwsArgumentError);
+      expect(server.requests, isEmpty);
     });
   });
 

@@ -18,17 +18,23 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.models import Role, User, UserType
-from apps.geography.models import DeliveryZone
-from apps.restaurants.models import OpeningHours, Restaurant, StaffMembership
+from apps.geography.models import City, Country, DeliveryZone
+from apps.geography.serializers import DeliveryZoneSerializer, ManagedDeliveryZoneSerializer
+from apps.restaurants.duplication import known_sections
+from apps.restaurants.models import AreaMembership, OpeningHours, Restaurant, StaffMembership
 from apps.restaurants.states import RestaurantStatus
 from common.serializers import LocationField, MoneyField
 
 __all__ = [
+    "DeliveryCheckQuerySerializer",
+    "DeliveryCheckSerializer",
     "ManagedOpeningHoursSerializer",
     "ManagedRestaurantSerializer",
+    "ManagedRestaurantZoneSerializer",
     "NearbyQuerySerializer",
     "OpeningHoursSerializer",
     "RestaurantDetailSerializer",
+    "RestaurantDuplicationSerializer",
     "RestaurantSerializer",
     "RestaurantStatusTransitionSerializer",
     "StaffSerializer",
@@ -138,6 +144,55 @@ class RestaurantDetailSerializer(RestaurantSerializer):
         read_only_fields = fields
 
 
+class DeliveryCheckQuerySerializer(serializers.Serializer[Any]):
+    """Corps de `POST /restaurants/delivery-check/`.
+
+    Une position, et deux facultatifs qui changent la question posée :
+
+    * `restaurant` la restreint à *cet* établissement — le cas du panier déjà
+      ouvert, où en changer changerait le catalogue et les prix. Omis, le
+      serveur choisit le plus proche qui dessert, ce qui évite au client de
+      désigner une cuisine que la géographie détermine ;
+    * `subtotal` déclenche la tarification. Sans lui, la réponse dit si
+      l'adresse est desservie sans chiffrer : un montant minimum ou un franco
+      ne veulent rien dire face à un panier vide.
+    """
+
+    lat = serializers.FloatField(min_value=-90, max_value=90)
+    lon = serializers.FloatField(min_value=-180, max_value=180)
+    restaurant = serializers.SlugRelatedField[Restaurant](
+        slug_field="slug",
+        queryset=Restaurant.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
+    subtotal = MoneyField(required=False, allow_null=True)
+
+
+class DeliveryCheckSerializer(serializers.Serializer[Any]):
+    """Réponse de la vérification de livrabilité.
+
+    Rendue **entière dans tous les cas** — y compris quand la réponse est non.
+    L'écran a besoin de savoir *pourquoi* pour proposer le bon geste : changer
+    d'adresse, ajouter un article, ou attendre l'ouverture. Un corps réduit à
+    `{"available": false}` obligerait chacune des trois applications à inventer
+    son message, et elles en inventeraient trois différents.
+    """
+
+    is_available = serializers.BooleanField()
+    reason = serializers.CharField(allow_null=True)
+
+    restaurant = RestaurantSerializer(allow_null=True)
+    zone = DeliveryZoneSerializer(allow_null=True)
+
+    distance_m = serializers.FloatField(allow_null=True)
+    estimated_minutes = serializers.IntegerField(allow_null=True)
+
+    delivery_fee = MoneyField(allow_null=True)
+    gross_delivery_fee = MoneyField(allow_null=True)
+    is_free_delivery = serializers.BooleanField(allow_null=True)
+
+
 class NearbyQuerySerializer(serializers.Serializer[Any]):
     """Point de référence facultatif de `GET /restaurants/`.
 
@@ -188,6 +243,20 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
 
     configuration_gaps = serializers.SerializerMethodField()
 
+    # Compteurs d'exploitation — la ligne de tableau du back-office (§6).
+    #
+    # Annotés par la vue, jamais calculés ici : un `SerializerMethodField` qui
+    # ferait `obj.orders.count()` déclencherait trois requêtes **par
+    # établissement**, soit trente sur une liste de dix. Le défaut ne se verrait
+    # pas en développement, avec un seul restaurant et une base vide.
+    #
+    # `default=0` couvre le cas où le sérialiseur est utilisé hors de cette vue
+    # — la réponse d'une transition de statut, par exemple, qui rend l'objet tel
+    # qu'il vient d'être sauvé et n'a donc pas d'annotation.
+    orders_count = serializers.IntegerField(read_only=True, default=0)
+    couriers_count = serializers.IntegerField(read_only=True, default=0)
+    menu_items_count = serializers.IntegerField(read_only=True, default=0)
+
     class Meta:
         model = Restaurant
         fields = [
@@ -212,6 +281,9 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
             "is_active",
             "accepts_orders",
             "default_preparation_minutes",
+            "orders_count",
+            "couriers_count",
+            "menu_items_count",
             "created_at",
             "updated_at",
         ]
@@ -234,6 +306,9 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
             "status",
             "configuration_gaps",
             "is_active",
+            "orders_count",
+            "couriers_count",
+            "menu_items_count",
             "created_at",
             "updated_at",
         ]
@@ -259,6 +334,75 @@ class RestaurantStatusTransitionSerializer(serializers.Serializer[Any]):
     """
 
     status = serializers.ChoiceField(choices=RestaurantStatus.choices)
+
+
+class RestaurantDuplicationSerializer(serializers.Serializer[Any]):
+    """Corps de `POST /restaurants/manage/{slug}/duplicate/`.
+
+    ## Pourquoi tant de champs obligatoires
+
+    Un établissement dupliqué est un établissement **neuf** : il a sa propre
+    adresse, ses propres coordonnées, son propre numéro. Les hériter de la
+    source produirait une fiche qui semble complète et pointe sur une autre
+    ville — le pire état possible, parce qu'il passe la validation et se
+    découvre à la première course.
+
+    `zone` est ce qui emporte tout le reste : la ville, le pays, la devise et
+    le fuseau (ADR-006). C'est aussi pourquoi les zones ne se dupliquent pas —
+    voir `apps.restaurants.duplication`.
+
+    ## `sections` vide est une réponse valable
+
+    Dupliquer la seule fiche, sans carte ni horaires, sert à ouvrir une
+    succursale qui aura son propre menu. Ce n'est pas un cas dégénéré : c'est
+    le raccourci « repartir de la même identité de marque ».
+    """
+
+    name = serializers.CharField(max_length=120)
+    slug = serializers.SlugField(max_length=120)
+    zone = serializers.PrimaryKeyRelatedField[DeliveryZone](queryset=DeliveryZone.objects.all())
+    address = serializers.CharField()
+    location = LocationField()
+    phone = serializers.CharField(max_length=16)
+    email = serializers.EmailField(required=False, allow_blank=True, default="")
+
+    sections = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+        help_text=(
+            "Ce qui est recopié : "
+            + ", ".join(f"`{nom}`" for nom in sorted(known_sections()))
+            + ". Commandes, clients, livreurs, paiements et statistiques ne "
+            "sont copiables par aucune valeur — il n'existe pas de section "
+            "pour eux."
+        ),
+    )
+
+    def validate_slug(self, value: str) -> str:
+        """Un slug déjà pris est refusé ici, pas par la base.
+
+        Sans ce contrôle, la contrainte d'unicité remonterait en 500 au milieu
+        de la transaction de duplication — après la création des catégories,
+        donc avec un message qui ne dit rien de ce qu'il faut corriger.
+        """
+        if Restaurant.objects.filter(slug=value).exists():
+            raise serializers.ValidationError(
+                f"Le slug « {value} » est déjà pris par un autre établissement."
+            )
+        return value
+
+    def validate_sections(self, value: list[str]) -> list[str]:
+        inconnues = sorted(set(value) - known_sections())
+        if inconnues:
+            raise serializers.ValidationError(
+                "Sections inconnues : "
+                + ", ".join(inconnues)
+                + ". Attendues : "
+                + ", ".join(sorted(known_sections()))
+                + "."
+            )
+        return value
 
 
 class ManagedOpeningHoursSerializer(serializers.ModelSerializer[OpeningHours]):
@@ -328,6 +472,32 @@ class StaffSerializer(serializers.ModelSerializer[User]):
         required=False,
         help_text="Établissements sur lesquels ce compte travaille.",
     )
+
+    # Périmètres de marché et de ville — le palier entre « le siège » et « un
+    # restaurant ». Sans eux, un directeur pays devait être rattaché à chacun
+    # de ses établissements un par un, et cessait silencieusement de voir le
+    # suivant qu'on ouvrait.
+    #
+    # Deux listes plates plutôt qu'une liste d'objets `{type, valeur}` : l'écran
+    # qui les édite est un sélecteur de pays et un sélecteur de villes, pas un
+    # constructeur de couples. Les clés sont celles que le back-office a déjà en
+    # main — le code ISO, le slug de ville.
+    countries = serializers.SlugRelatedField[Country](
+        many=True,
+        slug_field="iso_code",
+        queryset=Country.objects.all(),
+        required=False,
+        source="_countries",
+        help_text="Marchés dont ce compte est directeur : tous leurs établissements.",
+    )
+    cities = serializers.SlugRelatedField[City](
+        many=True,
+        slug_field="slug",
+        queryset=City.objects.all(),
+        required=False,
+        source="_cities",
+        help_text="Villes dont ce compte est responsable : tous leurs établissements.",
+    )
     permissions = serializers.SerializerMethodField()
 
     class Meta:
@@ -341,6 +511,8 @@ class StaffSerializer(serializers.ModelSerializer[User]):
             "is_active",
             "roles",
             "restaurants",
+            "countries",
+            "cities",
             "permissions",
             "last_seen_at",
             "created_at",
@@ -350,6 +522,29 @@ class StaffSerializer(serializers.ModelSerializer[User]):
 
     def get_permissions(self, obj: User) -> list[str]:
         return sorted(obj.permission_codes())
+
+    def to_representation(self, instance: User) -> dict[str, Any]:
+        """Complète la lecture des périmètres.
+
+        Les deux champs déclarent une `source` privée parce qu'ils sont
+        **écrits** vers une table intermédiaire (`AreaMembership`) que DRF ne
+        sait pas remplir seul — exactement la raison qui fait reprendre
+        `restaurants` à la main. Il n'existe donc pas d'accesseur à lire côté
+        `User`, et la lecture est posée ici.
+
+        Un accesseur inverse sur `User` aurait été plus court, mais `accounts`
+        est le socle : lui faire connaître les pays et les villes inverserait le
+        graphe de l'ADR-002.
+        """
+        donnees = super().to_representation(instance)
+        perimetres = AreaMembership.objects.filter(user=instance).select_related("country", "city")
+        donnees["countries"] = sorted(
+            zone.country.iso_code for zone in perimetres if zone.country_id is not None
+        )
+        donnees["cities"] = sorted(
+            zone.city.slug for zone in perimetres if zone.city_id is not None
+        )
+        return donnees
 
     def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
         fields = super().get_fields()
@@ -370,6 +565,8 @@ class StaffSerializer(serializers.ModelSerializer[User]):
     def create(self, validated_data: dict[str, Any]) -> User:
         roles = validated_data.pop("roles", [])
         restaurants = validated_data.pop("restaurants", [])
+        pays = validated_data.pop("_countries", [])
+        villes = validated_data.pop("_cities", [])
         password = validated_data.pop("password")
 
         # `user_type` n'est pas un champ d'entrée : cette ressource crée des
@@ -384,12 +581,15 @@ class StaffSerializer(serializers.ModelSerializer[User]):
         )
         member.roles.set(roles)
         _align_memberships(member, restaurants)
+        _align_areas(member, pays, villes)
         return member
 
     @transaction.atomic
     def update(self, instance: User, validated_data: dict[str, Any]) -> User:
         roles = validated_data.pop("roles", None)
         restaurants = validated_data.pop("restaurants", None)
+        pays = validated_data.pop("_countries", None)
+        villes = validated_data.pop("_cities", None)
         password = validated_data.pop("password", None)
 
         for champ, valeur in validated_data.items():
@@ -402,6 +602,8 @@ class StaffSerializer(serializers.ModelSerializer[User]):
             instance.roles.set(roles)
         if restaurants is not None:
             _align_memberships(instance, restaurants)
+        if pays is not None or villes is not None:
+            _align_areas(instance, pays, villes)
         return instance
 
 
@@ -424,3 +626,95 @@ def _align_memberships(member: User, restaurants: list[Restaurant]) -> None:
         for etablissement in restaurants
         if etablissement.pk not in actuels
     )
+
+
+def _align_areas(member: User, pays: list[Country] | None, villes: list[City] | None) -> None:
+    """Aligne les rattachements de périmètre, par différence comme les autres.
+
+    `None` veut dire « ce champ n'était pas dans la requête » et laisse
+    l'existant intact ; une liste vide veut dire « retire-les tous ». Confondre
+    les deux ferait perdre son marché à un directeur pays chaque fois qu'on
+    corrige son numéro de téléphone depuis un formulaire partiel.
+
+    Les deux axes sont traités séparément parce qu'ils sont indépendants :
+    envoyer `cities` sans `countries` ne doit pas effacer les marchés.
+    """
+    if pays is not None:
+        _aligner(member, "country", {objet.pk for objet in pays})
+    if villes is not None:
+        _aligner(member, "city", {objet.pk for objet in villes})
+
+
+def _aligner(member: User, champ: str, voulus: set[Any]) -> None:
+    """Retire ce qui n'est plus voulu, ajoute ce qui manque.
+
+    Et non « tout effacer puis tout recréer » : un rattachement porte sa date de
+    création, qui dit depuis quand quelqu'un couvre ce marché. La remise à zéro
+    à chaque enregistrement l'effacerait sans que personne ne le remarque —
+    même raison que pour `_align_memberships`.
+    """
+    existants = AreaMembership.objects.filter(**{"user": member, f"{champ}__isnull": False})
+    actuels = set(existants.values_list(f"{champ}_id", flat=True))
+
+    existants.filter(**{f"{champ}_id__in": actuels - voulus}).delete()
+    AreaMembership.objects.bulk_create(
+        AreaMembership(user=member, **{f"{champ}_id": identifiant})
+        for identifiant in voulus - actuels
+    )
+
+
+class ManagedRestaurantZoneSerializer(ManagedDeliveryZoneSerializer):
+    """Zone **propre à un établissement** — l'écriture que `geography` ne peut pas porter.
+
+    ## Pourquoi cette classe existe ici et non là-bas
+
+    Rendre `restaurant` inscriptible depuis `ManagedDeliveryZoneSerializer`
+    demanderait un jeu de requête sur `Restaurant`, donc un import
+    `geography → restaurants`. L'arête inverse existe déjà — `Restaurant.zone` —
+    et la refermer ferait un cycle que le test d'architecture refuse. Il l'a
+    d'ailleurs refusé : c'est ainsi que ce sérialiseur a trouvé sa place.
+
+    L'héritage va dans le sens autorisé : `restaurants` connaît `geography`,
+    reprend son contrat entier — les trois modes de saisie, la validation de
+    devise, le calcul du contour — et n'y ajoute que le rattachement. Écrire un
+    second sérialiseur complet aurait produit deux validations de barème, qui
+    auraient divergé au premier correctif.
+    """
+
+    restaurant = serializers.SlugRelatedField[Restaurant](
+        slug_field="slug",
+        queryset=Restaurant.objects.all(),
+        help_text="Établissement auquel cette zone est propre.",
+    )
+
+    class Meta(ManagedDeliveryZoneSerializer.Meta):
+        read_only_fields = ["id", "overlaps", "created_at", "updated_at"]
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Une zone d'établissement se pose dans la ville de cet établissement.
+
+        Sans ce contrôle, on rattacherait une zone de Douala à la cuisine de
+        Lomé : elle n'aurait alors aucune chance de couvrir une adresse que
+        cette cuisine dessert, et l'erreur ne se verrait qu'à la première
+        commande refusée — sans que rien n'en donne la raison.
+        """
+        attrs = super().validate(attrs)
+
+        etablissement = attrs.get("restaurant") or (
+            self.instance.restaurant if self.instance else None
+        )
+        ville = attrs.get("city") or (self.instance.city if self.instance else None)
+        if etablissement is None or ville is None:
+            return attrs
+
+        if etablissement.zone.city_id != ville.pk:
+            raise serializers.ValidationError(
+                {
+                    "restaurant": (
+                        f"« {etablissement.name} » est à {etablissement.zone.city.name} ; "
+                        f"une zone qui lui est propre ne peut pas être posée sur "
+                        f"{ville.name}."
+                    )
+                }
+            )
+        return attrs

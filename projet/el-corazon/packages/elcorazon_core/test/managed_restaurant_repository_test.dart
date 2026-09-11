@@ -44,6 +44,9 @@ Map<String, dynamic> _restaurantJson({
     'is_active': status == 'active',
     'accepts_orders': acceptsOrders,
     'default_preparation_minutes': 20,
+    'orders_count': 42,
+    'couriers_count': 3,
+    'menu_items_count': 17,
     'created_at': '2026-07-31T10:00:00Z',
     'updated_at': '2026-07-31T10:00:00Z',
   };
@@ -66,6 +69,22 @@ class _FakeServer implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     requests.add(options);
+
+    if (options.path.contains('/duplicate/')) {
+      return ResponseBody.fromString(
+        jsonEncode({
+          ..._restaurantJson(
+            id: 'rest-copie',
+            name: 'El Corazón Abidjan',
+            slug: 'el-corazon-abidjan',
+            status: 'draft',
+          ),
+          'copied': {'catalog': 12, 'opening_hours': 7},
+        }),
+        201,
+        headers: _jsonHeaders,
+      );
+    }
 
     if (options.path.contains('/restaurants/manage/')) {
       final page = int.tryParse(options.uri.queryParameters['page'] ?? '1') ?? 1;
@@ -158,6 +177,118 @@ void main() {
 
       expect(etablissements, hasLength(3));
       expect(server.requests, hasLength(3));
+    });
+
+    test('les filtres partent au serveur, pas au client', () async {
+      // Filtrer après coup demanderait de tout charger d'abord, et le compteur
+      // affiché ne porterait que sur les pages déjà rendues.
+      final server = _FakeServer();
+
+      await _repository(server).list(
+        countryIsoCode: 'CI',
+        citySlug: 'abidjan',
+        status: RestaurantLifecycle.active,
+        search: 'plateau',
+      );
+
+      final parametres = server.requests.first.uri.queryParameters;
+      expect(parametres['zone__city__country__iso_code'], 'CI');
+      expect(parametres['zone__city__slug'], 'abidjan');
+      expect(parametres['status'], 'active');
+      expect(parametres['search'], 'plateau');
+    });
+
+    test('une recherche vide n’envoie pas de paramètre', () async {
+      // Un `search=` vide fait faire au serveur un travail de filtrage qui ne
+      // filtre rien.
+      final server = _FakeServer();
+
+      await _repository(server).list(search: '   ');
+
+      expect(server.requests.first.uri.queryParameters, isEmpty);
+    });
+
+    test('les compteurs d’exploitation sont lus', () async {
+      // Comptés par le serveur en une requête annotée. Le tableau de bord
+      // précédent téléchargeait les commandes pour les compter à l'écran.
+      final etablissements = await _repository(_FakeServer()).list();
+
+      expect(etablissements.single.ordersCount, 42);
+      expect(etablissements.single.couriersCount, 3);
+      expect(etablissements.single.menuItemsCount, 17);
+    });
+
+    test('un contrat sans compteurs rend zéro, pas une erreur', () {
+      // La réponse d'une transition de statut rend l'objet sans annotations :
+      // l'écran doit montrer « 0 » plutôt que disparaître.
+      final sans = Map<String, dynamic>.from(_restaurantJson())
+        ..remove('orders_count')
+        ..remove('couriers_count')
+        ..remove('menu_items_count');
+
+      expect(ManagedRestaurant.fromJson(sans).ordersCount, 0);
+    });
+
+    test('duplicate ouvre la copie en brouillon', () async {
+      // Hériter d'« en service » publierait une fiche dont personne n'a vérifié
+      // l'adresse — et la carte recopiée lui donnerait l'air complète.
+      final server = _FakeServer();
+
+      final copie = await _repository(server).duplicate(
+        sourceSlug: 'el-corazon-lome',
+        name: 'El Corazón Abidjan',
+        slug: 'el-corazon-abidjan',
+        zoneId: 'zone-ci',
+        address: 'Plateau, Abidjan',
+        latitude: 5.36,
+        longitude: -4.0083,
+        phone: '+22507000000',
+        sections: const ['general', 'catalog'],
+      );
+
+      expect(copie.status, RestaurantLifecycle.draft);
+      expect(copie.slug, 'el-corazon-abidjan');
+    });
+
+    test('duplicate transmet les sections demandées, et rien d’autre', () async {
+      // Commandes, clients et livreurs ne sont copiables par aucune valeur : il
+      // n'existe pas de section pour eux côté serveur.
+      final server = _FakeServer();
+
+      await _repository(server).duplicate(
+        sourceSlug: 'el-corazon-lome',
+        name: 'El Corazón Abidjan',
+        slug: 'el-corazon-abidjan',
+        zoneId: 'zone-ci',
+        address: 'Plateau, Abidjan',
+        latitude: 5.36,
+        longitude: -4.0083,
+        phone: '+22507000000',
+        sections: const ['catalog'],
+      );
+
+      final corps = server.requests.single.data as Map<String, dynamic>;
+      expect(corps['sections'], ['catalog']);
+      expect(corps['location'], {'lat': 5.36, 'lon': -4.0083});
+    });
+
+    test('duplicate sans section duplique la seule identité de marque', () async {
+      // Ce n'est pas un cas dégénéré : la succursale aura son propre menu.
+      final server = _FakeServer();
+
+      await _repository(server).duplicate(
+        sourceSlug: 'el-corazon-lome',
+        name: 'El Corazón Abidjan',
+        slug: 'el-corazon-abidjan',
+        zoneId: 'zone-ci',
+        address: 'Plateau, Abidjan',
+        latitude: 5.36,
+        longitude: -4.0083,
+        phone: '+22507000000',
+      );
+
+      final corps = server.requests.single.data as Map<String, dynamic>;
+      expect(corps['sections'], isEmpty);
     });
   });
 }

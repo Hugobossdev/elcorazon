@@ -41,38 +41,44 @@ class _PaysFormDialogState extends State<PaysFormDialog> {
   final _iso = TextEditingController();
   final _indicatif = TextEditingController();
 
-  /// Devises et fuseaux de la sous-région, plutôt qu'un champ libre.
+  /// Noms lisibles de quelques devises — **de l'habillage, pas une liste
+  /// d'autorisation.**
   ///
-  /// Listes courtes et fermées à dessein : `XOF` tapé `XAF` est une faute
-  /// qu'aucun écran ne rattrape ensuite, et un fuseau mal orthographié
-  /// (`Africa/Lomé`, avec l'accent) n'est refusé qu'à l'enregistrement. Un
-  /// champ libre serait plus général et strictement plus fragile.
-  static const Map<String, String> _devises = {
-    'XOF': 'Franc CFA (UEMOA) — XOF',
-    'XAF': 'Franc CFA (CEMAC) — XAF',
-    'GHS': 'Cedi ghanéen — GHS',
-    'NGN': 'Naira — NGN',
-    'EUR': 'Euro — EUR',
-    'USD': 'Dollar américain — USD',
+  /// La liste des devises acceptées vient du serveur
+  /// (`GET /geography/reference/`) ; cette table ne fait qu'écrire « Franc CFA
+  /// (UEMOA) » à côté de `XOF`. Une devise absente d'ici s'affiche sous son
+  /// code seul et reste parfaitement choisissable : c'est ce qui distingue un
+  /// libellé d'un plafond.
+  static const Map<String, String> _libelles = {
+    'XOF': 'Franc CFA (UEMOA)',
+    'XAF': 'Franc CFA (CEMAC)',
+    'GHS': 'Cedi ghanéen',
+    'NGN': 'Naira',
+    'GNF': 'Franc guinéen',
+    'EUR': 'Euro',
+    'USD': 'Dollar américain',
   };
 
-  static const List<String> _fuseaux = [
-    'Africa/Abidjan',
-    'Africa/Lome',
-    'Africa/Accra',
-    'Africa/Porto-Novo',
-    'Africa/Ouagadougou',
-    'Africa/Bamako',
-    'Africa/Dakar',
-    'Africa/Niamey',
-    'Africa/Lagos',
-    'Africa/Douala',
-    'UTC',
-  ];
-
-  String _devise = 'XOF';
-  String _fuseau = 'Africa/Abidjan';
+  /// Devise retenue, ou `null` tant que rien n'est choisi.
+  ///
+  /// **Sans valeur par défaut**, contrairement à l'ancien `XOF` : une devise
+  /// pré-choisie se valide sans qu'on l'ait lue, et elle est ensuite figée sur
+  /// chaque commande du pays. Le champ vaut la peine d'un geste explicite.
+  String? _devise;
+  String? _fuseau;
   bool _envoiEnCours = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Les valeurs disponibles viennent du serveur — celui-là même qui les fera
+    // respecter. Chargées ici et non au démarrage : c'est le seul écran qui
+    // s'en sert, et six cents fuseaux n'ont pas à voyager pour quelqu'un qui
+    // vient regarder ses commandes.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<NetworkService>().chargerLaReference();
+    });
+  }
 
   @override
   void dispose() {
@@ -84,15 +90,19 @@ class _PaysFormDialogState extends State<PaysFormDialog> {
 
   Future<void> _enregistrer() async {
     if (!_formKey.currentState!.validate()) return;
+    final devise = _devise;
+    final fuseau = _fuseau;
+    if (devise == null || fuseau == null) return;
+
     setState(() => _envoiEnCours = true);
 
     final reseau = context.read<NetworkService>();
     final cree = await reseau.createCountry(
       isoCode: _iso.text.trim(),
       name: _nom.text.trim(),
-      currency: _devise,
+      currency: devise,
       phonePrefix: _indicatif.text.trim(),
-      timezone: _fuseau,
+      timezone: fuseau,
     );
 
     if (!mounted) return;
@@ -145,20 +155,42 @@ class _PaysFormDialogState extends State<PaysFormDialog> {
                       : 'Format attendu : +225',
                 ),
                 const SizedBox(height: 16),
-                DeroulantReseau<String>(
-                  label: 'Devise',
-                  valeur: _devise,
-                  entrees: [
-                    for (final entree in _devises.entries) (entree.key, entree.value),
-                  ],
-                  onChanged: (valeur) => setState(() => _devise = valeur),
-                ),
-                const SizedBox(height: 12),
-                DeroulantReseau<String>(
-                  label: 'Fuseau horaire',
-                  valeur: _fuseau,
-                  entrees: [for (final fuseau in _fuseaux) (fuseau, fuseau)],
-                  onChanged: (valeur) => setState(() => _fuseau = valeur),
+                Consumer<NetworkService>(
+                  builder: (context, reseau, _) {
+                    final reference = reseau.reference;
+
+                    if (reference.isEmpty) {
+                      return const _ReferenceIndisponible();
+                    }
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DeroulantReseau<String>(
+                          label: 'Devise',
+                          valeur: _devise,
+                          entrees: [
+                            for (final devise in reference.currencies)
+                              (
+                                devise.code,
+                                _libelles.containsKey(devise.code)
+                                    ? '${_libelles[devise.code]} — ${devise.code}'
+                                    : devise.code,
+                              ),
+                          ],
+                          aide: 'Figée sur chaque commande passée dans ce pays.',
+                          onChanged: (valeur) => setState(() => _devise = valeur),
+                        ),
+                        const SizedBox(height: 12),
+                        _ChampFuseau(
+                          fuseaux: reference.timezones,
+                          chercher: reference.chercherFuseau,
+                          valeur: _fuseau,
+                          onChanged: (valeur) => setState(() => _fuseau = valeur),
+                        ),
+                      ],
+                    );
+                  },
                 ),
                 const SizedBox(height: 16),
                 Container(
@@ -196,7 +228,9 @@ class _PaysFormDialogState extends State<PaysFormDialog> {
         CustomButton(
           text: 'Ouvrir le marché',
           isLoading: _envoiEnCours,
-          onPressed: _envoiEnCours ? null : _enregistrer,
+          onPressed: (_envoiEnCours || _devise == null || _fuseau == null)
+              ? null
+              : _enregistrer,
           width: 170,
         ),
       ],
@@ -242,6 +276,112 @@ class _ChampIso extends StatelessWidget {
               return 'Deux lettres, par exemple CI ou TG';
             }
             return null;
+          },
+        ),
+      ],
+    );
+  }
+}
+
+
+/// Le serveur n'a pas rendu les valeurs disponibles.
+///
+/// Aucune liste de repli n'est proposée : ce serait réintroduire exactement le
+/// hardcoding qu'on retire, et proposer une devise que le serveur pourrait
+/// refuser fait échouer le formulaire après sa saisie complète. Mieux vaut dire
+/// que rien n'est choisissable pour l'instant.
+class _ReferenceIndisponible extends StatelessWidget {
+  const _ReferenceIndisponible();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.cloud_off, size: 18, color: scheme.onErrorContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Devises et fuseaux disponibles non chargés. Vérifiez la connexion '
+              'au serveur, puis rouvrez ce formulaire.',
+              style: TextStyle(fontSize: 12, color: scheme.onErrorContainer),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Choix d'un fuseau parmi les six cents identifiants IANA.
+///
+/// Un champ de recherche et non une liste déroulante : six cents entrées dans
+/// un `DropdownButton` se parcourent au pixel près, et c'est précisément la
+/// raison pour laquelle la version précédente n'en proposait que dix — un
+/// plafond posé pour rendre l'écran utilisable, au prix d'une republication à
+/// chaque nouveau marché.
+///
+/// La recherche ignore la casse et la ponctuation : « porto novo » trouve
+/// `Africa/Porto-Novo`. Personne ne tape un identifiant IANA à la lettre près.
+class _ChampFuseau extends StatelessWidget {
+  const _ChampFuseau({
+    required this.fuseaux,
+    required this.chercher,
+    required this.valeur,
+    required this.onChanged,
+  });
+
+  final List<String> fuseaux;
+  final List<String> Function(String) chercher;
+  final String? valeur;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Fuseau horaire',
+          style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        Autocomplete<String>(
+          initialValue: TextEditingValue(text: valeur ?? ''),
+          optionsBuilder: (saisie) {
+            // Au-delà de quelques dizaines, la liste flottante devient un mur :
+            // on borne l'affichage sans borner la recherche, qui porte bien sur
+            // les six cents.
+            final trouves = chercher(saisie.text);
+            return trouves.length > 40 ? trouves.take(40) : trouves;
+          },
+          onSelected: onChanged,
+          fieldViewBuilder: (context, controller, focusNode, onSubmit) {
+            return TextFormField(
+              controller: controller,
+              focusNode: focusNode,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                hintText: 'Rechercher — par exemple « lome »',
+                helperText: "Décide de l'heure d'ouverture des restaurants du pays.",
+                helperMaxLines: 2,
+              ),
+              validator: (saisi) => fuseaux.contains((saisi ?? '').trim())
+                  ? null
+                  : 'Choisissez un fuseau dans la liste',
+            );
           },
         ),
       ],

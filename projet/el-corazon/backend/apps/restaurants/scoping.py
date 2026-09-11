@@ -16,13 +16,22 @@ from __future__ import annotations
 
 import uuid
 
+from django.db.models import Q
 from rest_framework.exceptions import PermissionDenied
 
 from apps.accounts.models import User
-from apps.restaurants.models import StaffMembership
+from apps.geography.models import DeliveryZone
+from apps.restaurants.models import AreaMembership, Restaurant, StaffMembership
 from common.permissions import is_unscoped
 
-__all__ = ["assert_in_scope", "is_in_scope", "is_unscoped", "staff_restaurant_ids"]
+__all__ = [
+    "assert_can_open_in_zone",
+    "assert_in_scope",
+    "is_in_scope",
+    "is_unscoped",
+    "staff_restaurant_ids",
+    "staff_user_ids_for",
+]
 
 # `is_unscoped` vit dans le socle depuis que la géographie en a eu besoin : un
 # pays n'appartient à aucun établissement, et `geography` ne connaît pas
@@ -33,11 +42,51 @@ __all__ = ["assert_in_scope", "is_in_scope", "is_unscoped", "staff_restaurant_id
 def staff_restaurant_ids(user: User) -> set[uuid.UUID]:
     """Établissements sur lesquels ce compte a un rattachement.
 
+    **Le point de passage unique du cloisonnement.** Commandes, catalogue,
+    flotte, promotions, fidélité, paiements et rapports le consultent tous ;
+    c'est pourquoi le palier pays/ville s'ajoute ici et nulle part ailleurs —
+    un directeur pays gagne d'un coup les huit écrans, et un neuvième écrit
+    demain en héritera sans qu'on y pense.
+
+    L'union est calculée à la lecture plutôt que recopiée dans une table de
+    rattachements : un établissement ouvert ce matin dans le pays d'un
+    directeur doit être dans son périmètre cet après-midi, sans qu'on ait à
+    repasser sur les comptes. C'était le défaut exact du palier manquant — on
+    rattachait le directeur à chacun de ses restaurants, et le suivant lui
+    échappait en silence.
+
     Ensemble vide pour un membre du personnel non rattaché : il ne verra rien,
     et c'est le bon défaut. Une panne visible se corrige en une ligne de
     back-office ; un accès trop large, silencieux, ne se découvre pas.
     """
-    return set(StaffMembership.objects.filter(user=user).values_list("restaurant_id", flat=True))
+    directs = set(StaffMembership.objects.filter(user=user).values_list("restaurant_id", flat=True))
+    return directs | _restaurants_des_perimetres(user)
+
+
+def _restaurants_des_perimetres(user: User) -> set[uuid.UUID]:
+    """Établissements couverts par les rattachements de marché ou de ville.
+
+    Une seule requête, en `OR` : deux requêtes — l'une par pays, l'autre par
+    ville — feraient deux allers-retours à chaque contrôle de périmètre, c'est-
+    à-dire à chaque requête de back-office d'un compte cloisonné.
+
+    Sortie immédiate quand le compte n'a aucun rattachement de périmètre : le
+    cas est de loin le plus fréquent, et il ne doit rien coûter.
+    """
+    perimetres = list(AreaMembership.objects.filter(user=user).values_list("country_id", "city_id"))
+    if not perimetres:
+        return set()
+
+    pays = [country_id for country_id, _ in perimetres if country_id is not None]
+    villes = [city_id for _, city_id in perimetres if city_id is not None]
+
+    condition = Q()
+    if pays:
+        condition |= Q(zone__city__country_id__in=pays)
+    if villes:
+        condition |= Q(zone__city_id__in=villes)
+
+    return set(Restaurant.objects.filter(condition).values_list("pk", flat=True))
 
 
 def is_in_scope(user: User, restaurant_id: uuid.UUID) -> bool:
@@ -64,3 +113,77 @@ def assert_in_scope(user: User, restaurant_id: uuid.UUID) -> None:
             "Cet établissement n'est pas dans votre périmètre : "
             "un rattachement est nécessaire pour y écrire."
         )
+
+
+def assert_can_open_in_zone(
+    user: User, zone: DeliveryZone, quoi: str = "L'ouverture d'un établissement"
+) -> None:
+    """Refuse d'ouvrir un établissement hors de son marché.
+
+    Ouvrir relevait du siège **et de lui seul**, et c'était la bonne règle tant
+    que le seul autre palier était l'établissement : une création par un compte
+    rattaché à un restaurant lui aurait attribué un second périmètre en une
+    requête, ce qui vide le cloisonnement de son sens.
+
+    Un rattachement de marché change la donne, parce qu'il ne s'élargit pas :
+    un directeur du Togo qui ouvre à Kara reste dans le périmètre qu'on lui a
+    donné — l'établissement neuf y tombe **parce qu'il est au Togo**, pas parce
+    qu'il vient de le créer. Ouvrir en Côte d'Ivoire, en revanche, lui est
+    refusé exactement comme avant.
+
+    Le contrôle porte sur la **zone visée** et non sur l'utilisateur seul : la
+    zone emporte la ville, donc le pays. C'est aussi ce qui rend le changement
+    de zone d'un établissement existant sûr — déplacer un restaurant vers un
+    autre marché est la même écriture qu'une ouverture dans ce marché.
+    """
+    if is_unscoped(user):
+        return
+
+    perimetres = AreaMembership.objects.filter(user=user)
+    autorise = perimetres.filter(
+        Q(country_id=zone.city.country_id) | Q(city_id=zone.city_id)
+    ).exists()
+
+    if not autorise:
+        raise PermissionDenied(
+            f"{quoi} à {zone.city.name} ({zone.city.country.iso_code}) sort de votre périmètre."
+        )
+
+
+def staff_user_ids_for(restaurant_id: uuid.UUID) -> set[uuid.UUID]:
+    """Comptes du personnel dont le périmètre couvre cet établissement.
+
+    **Le miroir de `staff_restaurant_ids`.** Celui-ci répond « quels
+    établissements pour ce compte », celui-là « quels comptes pour cet
+    établissement ». La même relation, lue dans l'autre sens — et il faut les
+    deux, parce que les vues partent du compte tandis que les notifications
+    partent de l'établissement.
+
+    Écrire la seconde en oubliant les rattachements de marché est le défaut que
+    l'ajout du palier pays/ville rendait possible : un directeur pays aurait vu
+    les commandes de son marché dans le back-office sans jamais être prévenu
+    qu'il en arrivait une. Les deux lectures doivent désigner la même
+    population, sans quoi la notification renvoie vers un écran qui refuse, ou
+    se tait sur un écran qui accepte.
+    """
+    directs = set(
+        StaffMembership.objects.filter(restaurant_id=restaurant_id).values_list(
+            "user_id", flat=True
+        )
+    )
+
+    situation = (
+        Restaurant.objects.filter(pk=restaurant_id)
+        .values_list("zone__city_id", "zone__city__country_id")
+        .first()
+    )
+    if situation is None:
+        return directs
+
+    city_id, country_id = situation
+    par_perimetre = set(
+        AreaMembership.objects.filter(Q(city_id=city_id) | Q(country_id=country_id)).values_list(
+            "user_id", flat=True
+        )
+    )
+    return directs | par_perimetre

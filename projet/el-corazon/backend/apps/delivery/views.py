@@ -28,7 +28,7 @@ from rest_framework.mixins import (
     RetrieveModelMixin,
     UpdateModelMixin,
 )
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -48,6 +48,7 @@ from apps.delivery.serializers import (
     CourierRatingSerializer,
     CourierRatingWriteSerializer,
     CourierSelfApplicationSerializer,
+    CourierSelfUpdateSerializer,
     CourierUpdateSerializer,
     DeclineSerializer,
     DeliveryTransitionSerializer,
@@ -186,10 +187,30 @@ def courier_of(request: Request) -> CourierProfile:
 
 
 class CourierProfileView(APIView):
-    """`/delivery/me/` — le dossier du livreur, par lui-même."""
+    """`/delivery/me/` — le dossier du livreur, par lui-même.
+
+    Trois verbes, trois natures :
+
+    * `GET` — le dossier tel qu'il est, pièces comprises (en URL signées) ;
+    * `POST` — le dépôt de **pièces**, en `multipart`, qui rouvre l'instruction
+      (L5) ;
+    * `PATCH` — la correction des champs **descriptifs** du dossier, en JSON,
+      qui ne la rouvre pas.
+
+    La séparation des deux écritures suit celle de leurs effets, pas celle de
+    leurs formats : téléverser une carte grise remet le dossier dans la file
+    d'instruction, corriger la plaque qui y figure ne le fait pas. Les réunir
+    sous un seul verbe obligerait à deviner l'intention d'après les clés
+    présentes.
+
+    `JSONParser` est déclaré **en plus** des deux parseurs de formulaire. Il
+    manquait, et son absence n'avait aucun effet visible tant que la vue
+    n'acceptait que du `multipart` : elle en a un dès qu'un verbe attend du
+    JSON, et c'est un 415 que rien dans le corps de la requête n'explique.
+    """
 
     permission_classes = [IsCourier]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @extend_schema(responses={200: CourierProfileSerializer}, tags=["delivery"])
     def get(self, request: Request) -> Response:
@@ -199,13 +220,40 @@ class CourierProfileView(APIView):
         request=DocumentsSerializer, responses={200: CourierProfileSerializer}, tags=["delivery"]
     )
     def post(self, request: Request) -> Response:
-        """Dépôt de pièces — repasse le dossier en attente (L5)."""
+        """Dépôt de pièces — rouvre l'instruction du dossier (L5)."""
         serializer = DocumentsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         courier = CourierService.replace_documents(
             courier=courier_of(request), **serializer.validated_data
         )
+        return Response(CourierProfileSerializer(courier).data)
+
+    @extend_schema(
+        request=CourierSelfUpdateSerializer,
+        responses={200: CourierProfileSerializer},
+        tags=["delivery"],
+    )
+    def patch(self, request: Request) -> Response:
+        """Correction du véhicule et des numéros de pièces, par le livreur.
+
+        Le dossier corrigé est celui du jeton : il n'y a pas d'identifiant en
+        entrée, donc pas de dossier d'autrui à viser. Même forme de réponse que
+        `GET`, pour que l'appelant n'ait qu'une seule lecture à savoir faire.
+
+        Cette route manquait, et son absence se voyait à l'écran : `Dely`
+        affichait le véhicule et la plaque dans des champs grisés avec, en
+        commentaire, « on ne permet pas de modifier ici pour l'instant ». Un
+        livreur qui changeait de véhicule n'avait aucune issue depuis son
+        application — et le back-office, seul à disposer de `PATCH
+        /delivery/couriers/{id}/`, n'apprenait le changement que par téléphone.
+        """
+        serializer = CourierSelfUpdateSerializer(
+            courier_of(request), data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        courier = serializer.save()
+
         return Response(CourierProfileSerializer(courier).data)
 
 

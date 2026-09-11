@@ -16,14 +16,16 @@ from django.contrib.gis.db import models as gis
 from django.db import models
 
 from apps.accounts.models import User
-from apps.geography.models import DeliveryZone
+from apps.geography.models import City, Country, DeliveryZone
 from apps.restaurants.readiness import gaps_from_registry
+from apps.restaurants.signals import restaurant_status_changed
 from apps.restaurants.states import RESTAURANT_MACHINE, RestaurantStatus
 from common.exceptions import BusinessRuleViolation
 from common.models import TimeStampedModel, UUIDModel
 from common.storage import banners
 
 __all__ = [
+    "AreaMembership",
     "IncompleteConfiguration",
     "OpeningHours",
     "Restaurant",
@@ -210,8 +212,18 @@ class Restaurant(UUIDModel, TimeStampedModel):
             if manques:
                 raise IncompleteConfiguration(manques)
 
+        precedent = self.status
         self.status = target
         self.save(update_fields=["status", "updated_at"])
+
+        # Émis **après** l'enregistrement et dans la même transaction : un
+        # abonné qui relirait l'établissement avant le `save` verrait l'ancien
+        # état, et un abonné qui écrit doit le faire de façon atomique avec la
+        # transition. Ce qui sort vers le réseau est reporté après le commit par
+        # l'abonné lui-même.
+        restaurant_status_changed.send(
+            sender=Restaurant, restaurant=self, previous=precedent, target=target
+        )
 
     @property
     def currency(self) -> str:
@@ -293,6 +305,81 @@ class StaffMembership(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.user.full_name} — {self.restaurant.name}"
+
+
+class AreaMembership(UUIDModel, TimeStampedModel):
+    """Rattachement d'un membre du personnel à un **marché** ou à une ville.
+
+    ## Le palier qui manquait
+
+    Le cloisonnement n'avait que deux étages : le siège, qui voit tout, et le
+    rattachement à un établissement, qui ne voit que lui. Rien entre les deux.
+    Un directeur pays devait donc être rattaché à chacun de ses établissements,
+    un par un — et le jour où l'on en ouvrait un nouveau, il cessait
+    silencieusement de le voir. Un responsable de ville avait le même problème,
+    en plus fréquent.
+
+    L'alternative retenue ailleurs — faire du directeur pays un
+    superutilisateur — donne accès aux autres pays, aux rôles et à
+    `django-admin`. Elle transforme un besoin de périmètre en escalade de
+    privilèges.
+
+    ## Pourquoi une table à part de `StaffMembership`
+
+    Les deux disent « sur quoi », mais pas avec la même granularité, et surtout
+    pas avec la même **durée de validité** : un rattachement d'établissement
+    désigne une ligne qui existe, un rattachement de pays désigne un ensemble
+    qui grandit. Les fondre dans une table à trois clés étrangères nullables
+    ferait porter à `StaffMembership.restaurant` — aujourd'hui non nul, et lu
+    partout — une nullité qu'il faudrait vérifier à chaque appel.
+
+    ## Ce que ce rattachement n'accorde pas
+
+    Des permissions. Elles restent portées par les rôles (ADR-005), et un
+    directeur pays sans `orders.refund` ne rembourse pas plus qu'avant. Ce
+    rattachement dit **sur quoi** s'appliquent celles qu'on a déjà — la même
+    séparation que pour `StaffMembership`, pour la même raison.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="area_memberships")
+
+    # Exactement l'un des deux — voir la contrainte. Une ligne portant les deux
+    # serait ambiguë (le pays gagne-t-il sur la ville ?) et une ligne n'en
+    # portant aucun accorderait un périmètre vide, ce qui est un rattachement
+    # qui ne rattache à rien : un défaut de saisie qu'aucun écran ne montrerait.
+    country = models.ForeignKey(
+        Country, on_delete=models.CASCADE, related_name="staff_areas", null=True, blank=True
+    )
+    city = models.ForeignKey(
+        City, on_delete=models.CASCADE, related_name="staff_areas", null=True, blank=True
+    )
+
+    class Meta:
+        verbose_name = "rattachement de périmètre"
+        verbose_name_plural = "rattachements de périmètre"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(country__isnull=False, city__isnull=True)
+                    | models.Q(country__isnull=True, city__isnull=False)
+                ),
+                name="area_membership_exactly_one_target",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "country"],
+                condition=models.Q(country__isnull=False),
+                name="one_area_per_user_and_country",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "city"],
+                condition=models.Q(city__isnull=False),
+                name="one_area_per_user_and_city",
+            ),
+        ]
+        indexes = [models.Index(fields=["user"])]
+
+    def __str__(self) -> str:
+        return f"{self.user.full_name} — {self.country or self.city}"
 
 
 class Weekday(models.IntegerChoices):

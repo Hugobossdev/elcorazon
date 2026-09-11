@@ -15,9 +15,19 @@ formulaire de création de `Refund`.
 
 from __future__ import annotations
 
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.db.models import QuerySet
+from django.http import HttpRequest
 
-from apps.payments.models import Refund, SplitPayment, SplitShare, Transaction, WebhookEvent
+from apps.payments.models import (
+    PaymentStatus,
+    Refund,
+    SplitPayment,
+    SplitShare,
+    Transaction,
+    WebhookEvent,
+)
+from apps.payments.services import RefundService
 from common.admin import ReadOnlyAdmin, money_display
 
 __all__ = [
@@ -70,8 +80,49 @@ class RefundAdmin(ReadOnlyAdmin):
     search_fields = ("order__reference", "reason", "requested_by__email")
     list_select_related = ("order", "transaction", "requested_by")
     date_hierarchy = "created_at"
+    actions = ("constater_le_virement",)
 
     amount_display = money_display("amount", "Montant")
+
+    @admin.action(description="Constater le virement (le remboursement a été versé)")
+    def constater_le_virement(self, request: HttpRequest, queryset: QuerySet[Refund]) -> None:
+        """Enregistre qu'un virement déjà effectué a bien eu lieu.
+
+        ## Pourquoi une action et non un automatisme
+
+        PayDunya n'expose **aucune** API de remboursement : le virement part de
+        leur tableau de bord, à la main. `RefundService.refund` n'écrit donc
+        qu'une intention, et rien — aucune route, aucune action, aucun service —
+        ne la ramenait ensuite hors de `pending`.
+
+        Les remboursements s'accumulaient dans une attente perpétuelle, et
+        `PaymentStatus.REFUNDED` n'était atteint par personne. Ce qui manquait
+        n'était pas l'automatisation, qui n'est pas réalisable : c'était le
+        moyen de **constater** ce qu'un humain venait de faire.
+
+        Cette action ne verse rien et ne prétend pas le contraire. Elle
+        enregistre un fait extérieur, et son libellé le dit.
+        """
+        constates = 0
+        for refund in queryset:
+            if refund.status != PaymentStatus.PENDING:
+                continue
+            RefundService.settle(refund=refund)
+            constates += 1
+
+        ignores = len(queryset) - constates
+        if constates:
+            self.message_user(
+                request,
+                f"{constates} remboursement(s) constaté(s) comme versé(s).",
+                messages.SUCCESS,
+            )
+        if ignores:
+            self.message_user(
+                request,
+                f"{ignores} ligne(s) ignorée(s) : seul un remboursement en attente se constate.",
+                messages.WARNING,
+            )
 
 
 @admin.register(WebhookEvent)

@@ -178,3 +178,128 @@ if config("PUSH_BACKEND", default="apps.notifications.push.ConsolePushBackend").
         "pourtant tout livré. En production, poser "
         "PUSH_BACKEND=apps.notifications.fcm.FirebaseCloudMessagingBackend."
     )
+
+# Le connecteur de **paiement** est le même piège, en plus coûteux.
+#
+# `base.py` fait retomber `PAYDUNYA_GATEWAY` sur `apps.payments.gateway.
+# SandboxGateway`. Ce connecteur n'est pas une maquette inerte : il ouvre des
+# paiements, accepte des notifications et solde des commandes. Il diffère du
+# vrai sur les deux points qui comptent :
+#
+# * `open_checkout` rend une adresse fabriquée localement — aucune facture n'est
+#   ouverte chez le prestataire, donc aucun argent n'est jamais encaissé ;
+# * `parse` lit le statut **dans le corps posté**, là où `PayDunyaGateway` le
+#   relit chez PayDunya (`_confirm`). Un corps qui affirme « encaissé » est donc
+#   cru sur parole.
+#
+# Le blueprint ne déclarait aucune de ces variables. La production encaissait
+# donc par le bac à sable, et `PAYMENT_WEBHOOK_SECRET` valait la chaîne vide —
+# c'est-à-dire que n'importe qui pouvait calculer une signature valide, la clé
+# étant le défaut publiquement lisible dans ce dépôt.
+#
+# Ce que cela ouvrait n'avait rien de théorique :
+# `POST /payments/{order}/initiate/` rend au client sa propre
+# `provider_reference` (`TransactionSerializer`), et la route de webhook est
+# `AllowAny`. Il ne restait donc rien à deviner — un client pouvait signer
+# lui-même une notification « encaissé » et faire confirmer sa commande sans
+# payer.
+#
+# Comme pour le push, le contrôle porte sur la **classe** et non sur les
+# identifiants : ce sont eux qui sont vérifiés à l'usage, par le connecteur, et
+# un jeu d'identifiants valide branché sur le bac à sable resterait sans effet.
+#
+# Le défaut répété ici est celui de `base` — et non `""` : c'est **l'absence**
+# de la variable qui constitue le défaut qu'on attrape, et c'est le seul cas
+# qui se soit réellement produit.
+if config(
+    "PAYDUNYA_GATEWAY", default="apps.payments.gateway.SandboxGateway"
+).endswith("SandboxGateway"):
+    raise RuntimeError(
+        "PAYDUNYA_GATEWAY pointe sur SandboxGateway, qui n'encaisse rien et croit "
+        "sur parole le statut posté dans la notification. En production, poser "
+        "PAYDUNYA_GATEWAY=apps.payments.paydunya.PayDunyaGateway."
+    )
+
+# Le secret des notifications, lui, s'oublie en restant **vide** — et un HMAC
+# calculé avec une clé vide se recalcule par quiconque lit ce dépôt.
+#
+# Il reste nécessaire même avec le vrai connecteur PayDunya branché : les
+# espèces et le portefeuille passent par `SandboxGateway`
+# (`PAYMENT_GATEWAYS` dans `base.py`), dont `authenticate` s'appuie sur lui.
+#
+# Vérifié séparément des quatre secrets de la boucle ci-dessus parce que le
+# message doit dire ce qui se joue : ce n'est pas « une variable manque », c'est
+# « la porte du webhook est ouverte ».
+if not config("PAYMENT_WEBHOOK_SECRET", default=""):
+    raise RuntimeError(
+        "PAYMENT_WEBHOOK_SECRET est vide : une signature de webhook calculée "
+        "avec une clé vide est reproductible par n'importe qui, et une "
+        "notification forgée solderait une commande impayée. Poser une valeur "
+        "aléatoire longue, la même que celle du prestataire de test."
+    )
+
+# --------------------------------------------------------------- observabilité
+
+# Remontée des exceptions.
+#
+# Le projet journalisait en JSON sur la sortie standard et n'avait **aucun
+# agrégateur** : une 500 en production ne se découvrait que par l'appel d'un
+# client. Les journaux de Render sont consultables, pas surveillés — personne
+# ne lit un flux qui défile.
+#
+# Le SDK reste inerte tant que `SENTRY_DSN` est vide, ce qui est le cas par
+# défaut. Aucun réglage à retirer pour déployer sans, et rien à ajouter au code
+# pour déployer avec.
+SENTRY_DSN: str = config("SENTRY_DSN", default="")
+
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    def _expurger(evenement: dict[str, object], _indice: dict[str, object]) -> dict[str, object]:
+        """Retire des événements ce qui ne doit jamais quitter le serveur.
+
+        `send_default_pii=False` couvre déjà l'adresse IP, l'identité et les
+        cookies. Il ne couvre **pas** le corps des requêtes ni les en-têtes, or
+        c'est précisément là que vivent les choses à ne pas envoyer :
+
+        * `Authorization` porte un jeton d'accès utilisable pendant quinze
+          minutes — capturé dans un incident, il donne la session à qui lit
+          l'incident ;
+        * `X-Signature` est l'empreinte d'une notification de paiement ;
+        * le corps de `POST /auth/login/` contient un mot de passe en clair,
+          celui de `/auth/verify/` un code à usage unique, et celui de
+          `/payments/webhook/` la charge du prestataire.
+
+        Le corps est retiré **entièrement** plutôt que champ par champ : une
+        liste de clés sensibles s'oublie au premier champ ajouté, et l'oubli ne
+        se voit pas. Ce qui reste — méthode, chemin, code de statut, trace — est
+        ce dont on a besoin pour diagnostiquer.
+        """
+        requete = evenement.get("request")
+        if isinstance(requete, dict):
+            requete.pop("data", None)
+            requete.pop("cookies", None)
+            entetes = requete.get("headers")
+            if isinstance(entetes, dict):
+                for interdit in ("Authorization", "Cookie", "X-Signature", "X-Csrftoken"):
+                    entetes.pop(interdit, None)
+        return evenement
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration(), CeleryIntegration()],
+        # Jamais d'identité ni d'adresse IP : le projet traite des adresses de
+        # livraison et des numéros de téléphone, et un agrégateur d'incidents
+        # n'a aucune raison d'en accumuler.
+        send_default_pii=False,
+        before_send=_expurger,
+        # Échantillonnage des traces de performance. Nul par défaut : elles se
+        # facturent, et l'urgence est de voir les erreurs, pas de mesurer les
+        # latences. Se relève par l'environnement quand le besoin vient.
+        traces_sample_rate=config("SENTRY_TRACES_SAMPLE_RATE", default=0.0, cast=float),
+        # Distingue les incidents d'un déploiement de démonstration de ceux
+        # d'une exploitation réelle.
+        environment=config("SENTRY_ENVIRONMENT", default="production"),
+    )

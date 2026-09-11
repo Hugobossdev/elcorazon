@@ -43,15 +43,84 @@ Country (ISO-3166, devise, fuseau, langue par défaut)
   incohérente et sert immédiatement, même avec un seul restaurant.
 - Un jeu de données initial : un pays (Togo), une ville, une zone, un restaurant.
 
+### Ce qui a été ajouté depuis (septembre 2026)
+
+La hiérarchie n'a pas bougé ; ce qui manquait, c'est ce qui la rendait
+exploitable. Quatre ajouts, tous sans reprise de schéma sur l'existant.
+
+- **Périmètre de marché et de ville** (`AreaMembership`). Le cloisonnement
+  n'avait que deux étages : le siège, qui voit tout, et le rattachement à un
+  établissement, qui ne voit que lui. Un directeur pays devait donc être
+  rattaché à chacun de ses établissements un par un — et cessait
+  **silencieusement** de voir le suivant qu'on ouvrait. Le palier s'ajoute au
+  point de passage unique (`staff_restaurant_ids`), si bien que les huit écrans
+  qui le consultent — commandes, catalogue, flotte, promotions, fidélité,
+  paiements, rapports, personnel — en héritent d'un coup, et qu'un neuvième
+  écrit demain en héritera sans qu'on y pense.
+- **Cloisonnement des rapports.** Les agrégats d'`analytics` ignoraient le
+  périmètre : un gérant rattaché au seul établissement de Lomé, muni de
+  `analytics.read`, lisait le chiffre d'affaires d'Abidjan. Le défaut était
+  silencieux — la réponse rendait des chiffres justes, simplement pas les
+  siens. Le filtre du compte et le filtre demandé (`?country=`, `?city=`,
+  `?restaurant=`) se composent par **intersection** : le second restreint,
+  jamais il n'élargit.
+- **Duplication d'un établissement.** Par registre d'abonnement, comme la
+  vérification de complétude : `catalog` s'abonne depuis son `ready()`, et
+  `restaurants` ne le connaît pas. Commandes, clients, livreurs et historiques
+  n'ont **aucune section** — il n'existe pas de chemin de code pour les copier,
+  ce qui est plus fort qu'une case décochée par défaut. La duplication d'une
+  carte est refusée entre deux devises : recopier 2 500 XOF vers un marché en
+  NGN produirait un prix plausible et faux d'un facteur cinq.
+- **Devises et fuseaux servis par l'API** (`GET /geography/reference/`). Le
+  formulaire d'ouverture de marché portait dix fuseaux écrits en dur ; ouvrir un
+  onzième marché demandait de republier l'application, ce qui contredisait la
+  promesse même de cet ADR. Les deux listes viennent maintenant de la source qui
+  les fait respecter — `CURRENCY_EXPONENTS` et `available_timezones()`.
+
+### Géographie assistée, et règle de résolution unique (septembre 2026)
+
+Quatre ajouts, tous additifs.
+
+- **Une seule règle décide de la zone.** Elle était écrite **deux fois, et
+  différemment** : l'écran qui annonce un tarif retenait la zone de plus petite
+  surface, la commande qui le facture retenait celle de plus petit
+  `max_distance_km`. Les deux coïncidaient tant qu'une ville n'avait qu'une
+  zone, et divergeaient dès qu'une zone en contenait une autre — l'écran
+  annonçait un prix, la facture en appliquait un autre, et rien ne le signalait
+  puisque les deux réponses étaient individuellement cohérentes. Elles appellent
+  désormais `apps.geography.resolution.resolve_zone`, et la règle est *la plus
+  spécifique gagne*.
+- **Un référentiel unique de livrabilité** (`POST /restaurants/delivery-check/`).
+  `zones/resolve/` rendait la zone seule ; le devis complet n'existait qu'à
+  l'intérieur du passage de commande. Chaque écran recomposait donc le reste à
+  sa façon. La route rend établissement, zone, distance, délai, frais — et, en
+  cas de refus, **lequel** des quatre.
+- **Trois modes de saisie de zone** — cercle, polygone, contour administratif —
+  avec le disque discrétisé **par le serveur**, géodésiquement. L'approximation
+  par conversion en degrés s'écarte de 0,5 % à Lomé et de 35 % à Paris : elle
+  était acceptable pour un produit mono-marché, elle ne l'est pas ici. Une zone
+  peut désormais être rattachée à un établissement, ce qui permet à deux
+  cuisines d'une même ville de facturer différemment.
+- **Un journal d'audit** sur les trois écritures silencieuses et coûteuses :
+  déplacement d'un établissement, contour d'une zone, barème. Il n'y en avait
+  aucun.
+
+Le géocodage inverse passe par le serveur (`POST /geography/geocode/reverse/`) :
+la clé y reste restreinte par adresse IP, les réponses s'y mettent en cache, et
+les composants d'adresse sont extraits **une fois** — l'implémentation Flutter
+cherchait le nom de la ville *dans le texte* de l'adresse, et trouvait « Lomé »
+dans « Rue de Lomé, Cotonou ».
+
 ### Ce qui est reporté, sans obstacle futur
 
 | Reporté | Débloqué par |
 |---|---|
-| Sélection de restaurant par le client | Un écran, la donnée est déjà là |
-| Catalogues réellement divergents | Le catalogue est déjà rattaché au restaurant |
-| Multi-devises effectif (conversion, affichage) | La devise est déjà portée par `Country` et figée sur chaque commande (ADR-007) |
+| ~~Sélection de restaurant par le client~~ | **Fait** — sélecteur ville puis cuisine, tri par proximité facultatif |
+| ~~Catalogues réellement divergents~~ | **Fait** — isolés par restaurant, et duplication explicite quand on veut les rapprocher |
+| ~~Périmètre du personnel par restaurant~~ | **Fait** — et étendu aux paliers ville et marché |
+| Multi-devises effectif (conversion, affichage) | La devise est déjà portée par `Country` et figée sur chaque commande (ADR-007). Aucune conversion n'est faite nulle part, et c'est délibéré : un taux du jour n'a pas à décider d'une politique tarifaire. |
 | Fiscalité et entités juridiques par pays | Nouvelle app, aucune reprise du modèle existant |
-| Périmètre du personnel par restaurant | Le champ existe, le filtrage sera activé quand il y aura plus d'un site |
+| Barème par paliers de distance (0–3 km, 3–6 km…) | Le barème reste affine (base + prix au kilomètre, plafonné par `max_distance_km`). Des paliers se posent aujourd'hui en **empilant des zones circulaires concentriques** de barèmes différents — la plus petite gagne, ce qui donne exactement le comportement voulu. Un second mode de calcul sur le même champ n'est donc plus nécessaire. |
 
 ### Filtrage
 

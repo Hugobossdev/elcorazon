@@ -1,3 +1,5 @@
+import 'package:dio/dio.dart';
+
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/delivery/assignment.dart';
 import 'package:elcorazon_core/src/delivery/courier_application.dart';
@@ -24,6 +26,39 @@ import 'package:elcorazon_core/src/delivery/earnings.dart';
 ///   projection déclarée côté serveur (`ORDER_STATUS_PROJECTION`) quand la
 ///   course avance. C'est une projection écrite à la main côté client qui
 ///   avait produit C4.
+/// Une pièce justificative prête à partir — des **octets**, pas un chemin.
+///
+/// `MultipartFile.fromFile` échoue sur le web, où un fichier choisi n'a pas de
+/// chemin lisible, et le projet vise aussi le navigateur. Lire les octets
+/// fonctionne partout, au prix de tenir la pièce en mémoire — ce qui est sans
+/// conséquence pour une photo de permis, et ce que fait déjà l'envoi d'image du
+/// catalogue.
+///
+/// [contentType] est facultatif mais utile : sans lui le serveur reçoit
+/// `application/octet-stream`, que le stockage range comme un fichier brut
+/// plutôt que comme une image — et l'écran de validation du back-office ne sait
+/// alors plus l'afficher en vignette.
+class PieceJustificative {
+  const PieceJustificative({
+    required this.filename,
+    required this.bytes,
+    this.contentType,
+  });
+
+  final String filename;
+  final List<int> bytes;
+
+  /// `image/jpeg`, `image/png`, `application/pdf`…
+  final String? contentType;
+
+  MultipartFile versMultipart() => MultipartFile.fromBytes(
+    bytes,
+    filename: filename,
+    contentType: contentType == null ? null : DioMediaType.parse(contentType!),
+  );
+}
+
+
 class DeliveryRepository {
   DeliveryRepository({required this.apiClient});
 
@@ -48,6 +83,89 @@ class DeliveryRepository {
   /// Le dossier du livreur qui appelle (`/delivery/me/`).
   Future<CourierProfile> me() async {
     final response = await apiClient.get('/delivery/me/');
+    return CourierProfile.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Dépose des pièces justificatives (`POST /delivery/me/`, `multipart`).
+  ///
+  /// ## Pourquoi cette méthode a manqué si longtemps
+  ///
+  /// La route existe côté serveur depuis l'origine et n'avait **aucun
+  /// appelant** : aucune des trois applications ne savait téléverser une pièce.
+  /// Le dossier d'un livreur ne pouvait donc jamais être complété — l'écran
+  /// d'attente lui annonçait qu'El Corazón vérifiait des pièces qui n'avaient
+  /// jamais été envoyées, et l'écran de validation du back-office montrait trois
+  /// emplacements vides pour tout le monde.
+  ///
+  /// ## Ce que le dépôt déclenche
+  ///
+  /// **Il rouvre l'instruction du dossier** quand celui-ci était validé ou
+  /// refusé (L5), et remet le livreur hors ligne. Ce n'est pas un effet de
+  /// bord : un dossier validé sur des pièces qu'on a remplacées n'est plus
+  /// validé, et un dossier refusé qui ne repasserait pas en attente resterait
+  /// hors de la file d'instruction — le livreur corrigerait dans le vide.
+  ///
+  /// Un dossier **suspendu** reste suspendu : une sanction ne se lève pas en
+  /// téléversant une carte grise.
+  ///
+  /// Les trois pièces sont facultatives — on remplace ce qu'on remplace — mais
+  /// il en faut au moins une, sinon le serveur refuse en 400 plutôt que de
+  /// rendre 200 sur un dépôt qui n'a rien déposé.
+  ///
+  /// Rend le dossier à jour : y lire `verificationStatus` plutôt que de
+  /// supposer ce que le dépôt a produit.
+  Future<CourierProfile> submitDocuments({
+    PieceJustificative? idDocument,
+    PieceJustificative? licenceDocument,
+    PieceJustificative? vehicleDocument,
+  }) async {
+    final champs = <String, MultipartFile>{
+      if (idDocument != null) 'id_document': idDocument.versMultipart(),
+      if (licenceDocument != null) 'licence_document': licenceDocument.versMultipart(),
+      if (vehicleDocument != null) 'vehicle_document': vehicleDocument.versMultipart(),
+    };
+    if (champs.isEmpty) {
+      throw ArgumentError('Aucune pièce à déposer : fournissez-en au moins une.');
+    }
+
+    final response = await apiClient.post('/delivery/me/', data: FormData.fromMap(champs));
+    return CourierProfile.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Corrige les champs **descriptifs** du dossier (`PATCH /delivery/me/`).
+  ///
+  /// Le véhicule qu'il conduit, sa plaque, et les deux numéros que portent ses
+  /// pièces : ce que le livreur est seul à connaître. Le reste du dossier lui
+  /// est fermé côté serveur — en particulier `verificationStatus`, dont
+  /// dépend l'invariant L1, et les compteurs, qui sont des agrégats de faits.
+  ///
+  /// **Ne rouvre pas l'instruction**, contrairement à [submitDocuments] : c'est
+  /// la pièce qu'un instructeur lit, pas le champ texte à côté. Remettre un
+  /// dossier en attente parce qu'une plaque a perdu un tiret suspendrait un
+  /// livreur en pleine tournée.
+  ///
+  /// Le nom et le téléphone ne passent **pas** par ici : ils appartiennent au
+  /// compte, et `PATCH /auth/me/` les porte pour tous les types de comptes.
+  ///
+  /// Une chaîne vide efface la valeur ; `null` signifie « ne pas y toucher ».
+  /// Au moins un champ doit être fourni.
+  Future<CourierProfile> updateMe({
+    String? vehicleType,
+    String? vehiclePlate,
+    String? nationalIdNumber,
+    String? licenceNumber,
+  }) async {
+    final champs = <String, String>{
+      if (vehicleType != null) 'vehicle_type': vehicleType,
+      if (vehiclePlate != null) 'vehicle_plate': vehiclePlate,
+      if (nationalIdNumber != null) 'national_id_number': nationalIdNumber,
+      if (licenceNumber != null) 'licence_number': licenceNumber,
+    };
+    if (champs.isEmpty) {
+      throw ArgumentError('Aucun champ à corriger.');
+    }
+
+    final response = await apiClient.patch('/delivery/me/', data: champs);
     return CourierProfile.fromJson(response.data as Map<String, dynamic>);
   }
 

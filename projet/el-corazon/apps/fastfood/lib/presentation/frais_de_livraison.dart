@@ -39,6 +39,9 @@ class FraisDeLivraison {
     this.estimatedDeliveryTime,
     this.minOrderAmount,
     this.freeDeliveryThreshold,
+    this.restaurantName,
+    this.distanceLabel,
+    this.raison,
   });
 
   /// Devis d'une commande — la réponse qui fait foi, celle qui sera facturée.
@@ -71,10 +74,44 @@ class FraisDeLivraison {
     );
   }
 
-  /// Le point n'est couvert par aucune zone. Ce n'est pas une erreur : c'est
-  /// la réponse du serveur à « livrez-vous ici ? ».
-  factory FraisDeLivraison.horsZone() =>
-      const FraisDeLivraison(totalFee: 0, isInServiceableZone: false);
+  /// Livrabilité complète d'un point — **la réponse du référentiel unique**.
+  ///
+  /// Elle porte ce que la seule zone ne pouvait pas dire : quel établissement
+  /// dessert, à quelle distance, en combien de temps au total — préparation
+  /// comprise — et, quand la réponse est non, **pourquoi**.
+  ///
+  /// Le délai vient de la réponse et non de la zone : la zone ne connaît que le
+  /// trajet, et l'annoncer seul promettait un repas en trente minutes là où la
+  /// cuisine en demande vingt de plus.
+  factory FraisDeLivraison.depuisLivrabilite(eccore.DeliveryAvailability reponse) {
+    if (!reponse.isAvailable) {
+      return FraisDeLivraison.horsZone(raison: reponse.reason);
+    }
+
+    final zone = reponse.zone;
+    return FraisDeLivraison(
+      // Le montant chiffré quand un panier a été fourni ; à défaut le forfait
+      // de base de la zone, qui est l'ordre de grandeur que la carte annonce
+      // pendant qu'on déplace le repère.
+      totalFee: (reponse.deliveryFee ?? zone?.baseFee)?.toMajorUnits() ?? 0,
+      isFreeDelivery: reponse.isFreeDelivery ?? false,
+      zoneName: zone?.name,
+      estimatedDeliveryTime: reponse.estimatedMinutes ?? zone?.estimatedDeliveryMinutes,
+      minOrderAmount: zone?.minOrderAmount?.toMajorUnits(),
+      freeDeliveryThreshold: zone?.freeDeliveryThreshold?.toMajorUnits(),
+      restaurantName: reponse.restaurant?.name,
+      distanceLabel: reponse.distanceLabel,
+    );
+  }
+
+  /// Le point n'est pas livrable. Ce n'est pas une erreur : c'est la réponse du
+  /// serveur à « livrez-vous ici ? ».
+  ///
+  /// [raison] dit **laquelle** des quatre : hors zone, trop loin, panier trop
+  /// léger, aucune cuisine ouverte. Les quatre appellent quatre gestes
+  /// distincts, et un écran qui ne saurait pas laquelle proposerait le mauvais.
+  factory FraisDeLivraison.horsZone({String? raison}) =>
+      FraisDeLivraison(totalFee: 0, isInServiceableZone: false, raison: raison);
 
   /// Frais facturés au client, en unité majeure (F CFA à Lomé).
   final double totalFee;
@@ -94,6 +131,20 @@ class FraisDeLivraison {
 
   /// Seuil au-delà duquel la zone offre la livraison.
   final double? freeDeliveryThreshold;
+
+  /// Établissement qui dessert ce point, quand le serveur l'a désigné.
+  ///
+  /// Le client n'a plus à choisir une cuisine que la géographie détermine ; il
+  /// lui suffit de savoir laquelle a été retenue.
+  final String? restaurantName;
+
+  /// Distance lisible depuis cet établissement — « 1,2 km ». Nulle quand le
+  /// serveur n'a pas mesuré : afficher « 0 km » ferait croire à une proximité
+  /// qu'on n'a pas établie.
+  final String? distanceLabel;
+
+  /// Pourquoi ce n'est pas livrable, quand ça ne l'est pas.
+  final String? raison;
 
   @override
   String toString() {

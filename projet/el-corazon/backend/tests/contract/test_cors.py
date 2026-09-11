@@ -80,11 +80,16 @@ class TestEntetesAutorises:
 def reglages_de_production(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     """Charge `config.settings.prod` comme module, sans l'activer.
 
-    Les huit variables posées ici sont le prix à payer pour vérifier la valeur
+    Les variables posées ici sont le prix à payer pour vérifier la valeur
     **réellement livrée** plutôt qu'une copie recopiée dans le test, qui
-    dériverait sans rien casser. Quatre sont exigées par les garde-fous de
-    `prod.py`, quatre autres par sa messagerie, et la CI n'en fournit aucune :
-    sans elles l'import lève, et ce module échouerait en CI seulement.
+    dériverait sans rien casser. Quatre sont exigées par les garde-fous
+    historiques de `prod.py`, quatre par sa messagerie, et les trois dernières
+    par les garde-fous de paiement et de push — la CI n'en fournit aucune, et
+    sans elles l'import lève.
+
+    Aucune n'a de valeur réaliste : ce module vérifie les origines CORS, pas la
+    validité d'identifiants. Elles n'existent que pour que `prod.py` aille au
+    bout de son chargement.
     """
     for nom, valeur in {
         "DJANGO_SECRET_KEY": "test-only",
@@ -95,6 +100,12 @@ def reglages_de_production(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
         "EMAIL_HOST_USER": "test-only",
         "EMAIL_HOST_PASSWORD": "test-only",
         "DEFAULT_FROM_EMAIL": "test@example.invalid",
+        # Le connecteur réel et un secret non vide : `prod.py` refuse de
+        # démarrer sur le bac à sable ou sur une clé de webhook vide, parce que
+        # la production le faisait sans que rien ne le signale.
+        "PAYDUNYA_GATEWAY": "apps.payments.paydunya.PayDunyaGateway",
+        "PAYMENT_WEBHOOK_SECRET": "test-only",
+        "PUSH_BACKEND": "apps.notifications.fcm.FirebaseCloudMessagingBackend",
     }.items():
         monkeypatch.setenv(nom, valeur)
 

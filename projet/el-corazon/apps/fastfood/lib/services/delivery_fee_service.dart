@@ -16,8 +16,10 @@ import 'package:elcora_fast/services/restaurant_context_service.dart';
 ///
 /// Deux questions, deux routes :
 ///
-/// * [resolveZone] / [breakdownForPoint] — « livrez-vous ici ? », posée par la
-///   carte pendant qu'on déplace le repère, avant qu'un panier existe ;
+/// * [breakdownForPoint] — « livrez-vous ici, par qui, à quel prix, en combien
+///   de temps ? », posée par la carte pendant qu'on déplace le repère, avant
+///   qu'un panier existe. Elle passe par `delivery-check`, **la même règle de
+///   résolution que celle qui facturera** ;
 /// * [quoteOrder] / [breakdownForAddress] — « combien coûte cette commande ? »,
 ///   posée au moment de commander. Même chemin de calcul que la création :
 ///   franco, minimum de commande et code promotionnel compris.
@@ -38,6 +40,8 @@ class DeliveryFeeService extends ChangeNotifier {
       eccore.OrderRepository(apiClient: apiClient);
   late final eccore.GeographyRepository _geography =
       eccore.GeographyRepository(apiClient: apiClient);
+  late final eccore.DeliveryCheckRepository _livrabilite =
+      eccore.DeliveryCheckRepository(apiClient: apiClient);
 
   eccore.OrderQuote? _lastQuote;
   FraisDeLivraison? _lastBreakdown;
@@ -57,22 +61,43 @@ class DeliveryFeeService extends ChangeNotifier {
     return _geography.resolveZone(lat: latitude, lon: longitude);
   }
 
-  /// Barème applicable à un point de la carte.
+  /// Livrabilité d'un point de la carte — **par le référentiel unique**.
   ///
-  /// Le montant rendu est le **forfait de base** de la zone : la part liée à
-  /// la distance et l'effet du panier ne sont connus que du devis. L'écran de
-  /// choix d'adresse n'a pas besoin de plus — il répond « on livre ici, à peu
-  /// près à ce prix, en tant de minutes ».
+  /// ## Ce que ce passage change
+  ///
+  /// La méthode interrogeait `zones/resolve/`, qui rend **la zone seule**.
+  /// L'écran savait donc « oui, une zone couvre ce point » et rien de plus : ni
+  /// quel établissement dessert, ni à quelle distance, ni combien de temps au
+  /// total, ni — quand la réponse était non — pourquoi. Il affichait « hors
+  /// zone » dans les quatre cas de refus, dont trois n'ont rien à voir avec la
+  /// zone.
+  ///
+  /// `delivery-check` répond à la question entière, et c'est la **même** règle
+  /// de résolution que celle qui facturera la commande. C'était le défaut le
+  /// plus coûteux du couple précédent : l'écran et la facture choisissaient
+  /// leur zone par deux critères différents.
+  ///
+  /// ## Pourquoi l'établissement courant est transmis
+  ///
+  /// Un panier est ouvert **sur un établissement** : en changer changerait le
+  /// catalogue et les prix. On demande donc « cet établissement me livre-t-il
+  /// ici ? » et non « quelqu'un me livre-t-il ici ? », dont la réponse pourrait
+  /// désigner une autre cuisine et rendre un tarif qui ne sera pas appliqué.
+  ///
+  /// Tant que rien n'est résolu, le slug est nul et le serveur choisit le plus
+  /// proche : c'est le bon comportement au tout premier écran, avant qu'une
+  /// cuisine ait été retenue.
   Future<FraisDeLivraison> breakdownForPoint({
     required double latitude,
     required double longitude,
   }) async {
-    final resolution = await resolveZone(latitude: latitude, longitude: longitude);
+    final reponse = await _livrabilite.check(
+      latitude: latitude,
+      longitude: longitude,
+      restaurantSlug: RestaurantContextService().slug,
+    );
 
-    final breakdown = resolution.zone == null
-        ? FraisDeLivraison.horsZone()
-        : FraisDeLivraison.depuisZone(resolution.zone!);
-
+    final breakdown = FraisDeLivraison.depuisLivrabilite(reponse);
     _lastBreakdown = breakdown;
     notifyListeners();
     return breakdown;
@@ -108,21 +133,25 @@ class DeliveryFeeService extends ChangeNotifier {
 
     eccore.DeliveryZone? zone;
     try {
-      final resolution = await resolveZone(
+      final reponse = await _livrabilite.check(
         latitude: address.latitude,
         longitude: address.longitude,
+        restaurantSlug: RestaurantContextService().slug,
       );
-      if (!resolution.isCovered) {
-        final breakdown = FraisDeLivraison.horsZone();
+      if (!reponse.isAvailable) {
+        // Le refus est relayé **avec sa raison** : « trop loin » et « hors
+        // zone » appellent deux gestes différents, et l'écran ne peut plus les
+        // confondre.
+        final breakdown = FraisDeLivraison.horsZone(raison: reponse.reason);
         _lastBreakdown = breakdown;
         notifyListeners();
         return breakdown;
       }
-      zone = resolution.zone;
+      zone = reponse.zone;
     } catch (e) {
       // Le devis, lui, a abouti : c'est lui qui fait foi. L'absence de nom
       // de zone n'est pas une raison de renoncer au montant exact.
-      eccore.Journal.trace('DeliveryFeeService: zone non résolue — $e');
+      eccore.Journal.trace('DeliveryFeeService: livrabilité non résolue — $e');
     }
 
     final breakdown = FraisDeLivraison.depuisDevis(quote, zone: zone);
