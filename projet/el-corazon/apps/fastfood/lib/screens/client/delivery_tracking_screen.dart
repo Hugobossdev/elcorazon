@@ -32,7 +32,7 @@ import 'package:elcora_fast/presentation/suivi_commande.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/widgets/loading_widget.dart' as etats;
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Écran de suivi de livraison en temps réel
 class DeliveryTrackingScreen extends StatefulWidget {
@@ -392,7 +392,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
           position: _restaurantLatLng!,
           infoWindow: InfoWindow(
             title: _order?.items.isNotEmpty == true
-                ? 'Restaurant'
+                ? 'Cuisine El Corazón'
                 : 'Point de retrait',
             snippet: 'Votre commande part d’ici',
           ),
@@ -1841,7 +1841,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
   /// commande en cours désigne son propre restaurant, qui n'est pas forcément
   /// celui qu'on parcourt en ce moment.
   LatLng? get _repliDuRestaurant {
-    final contexte = RestaurantContextService();
+    final contexte = KitchenContextService();
     final latitude = contexte.latitude;
     final longitude = contexte.longitude;
     if (latitude == null || longitude == null) return null;

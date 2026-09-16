@@ -1,3 +1,4 @@
+import 'package:elcorazon_core/src/models/money.dart';
 import 'package:elcorazon_core/src/restaurants/restaurant_lifecycle.dart';
 
 /// Établissement vu de l'exploitation — miroir de `ManagedRestaurantSerializer`
@@ -44,6 +45,14 @@ class ManagedRestaurant {
     this.countryIsoCode = '',
     this.zoneName = '',
     this.configurationGaps = const [],
+    this.stockAdjustmentCeiling,
+    this.unavailableCode = '',
+    this.unavailableReason = '',
+    this.isTemporarilyClosed = false,
+    this.closureReason = '',
+    this.reopensAt,
+    this.reopensLabel = '',
+    this.autoDispatchCouriers = true,
   });
 
   factory ManagedRestaurant.fromJson(Map<String, dynamic> json) {
@@ -76,10 +85,20 @@ class ManagedRestaurant {
           .toList(growable: false),
       isActive: json['is_active'] as bool? ?? false,
       acceptsOrders: json['accepts_orders'] as bool? ?? true,
+      unavailableCode: json['unavailable_code'] as String? ?? '',
+      unavailableReason: json['unavailable_reason'] as String? ?? '',
+      isTemporarilyClosed: json['is_temporarily_closed'] as bool? ?? false,
+      closureReason: json['closure_reason'] as String? ?? '',
+      reopensAt: DateTime.tryParse(json['reopens_at'] as String? ?? ''),
+      reopensLabel: json['reopens_label'] as String? ?? '',
+      autoDispatchCouriers: json['auto_dispatch_couriers'] as bool? ?? true,
       defaultPreparationMinutes: json['default_preparation_minutes'] as int,
       ordersCount: json['orders_count'] as int? ?? 0,
       couriersCount: json['couriers_count'] as int? ?? 0,
       menuItemsCount: json['menu_items_count'] as int? ?? 0,
+      stockAdjustmentCeiling: json['stock_adjustment_ceiling'] == null
+          ? null
+          : Money.fromJson(json['stock_adjustment_ceiling'] as Map<String, dynamic>),
     );
   }
 
@@ -141,7 +160,51 @@ class ManagedRestaurant {
   /// pas celui de la fermeture définitive.
   final bool acceptsOrders;
 
+  /// **Ce que voit le client, à cet instant** — le verdict du juge que la
+  /// commande consulte, et non une composition de [status] et [acceptsOrders].
+  ///
+  /// [status] dit la décision de l'exploitation. Il ne dit pas qu'une cuisine
+  /// « en service » est invisible parce que sa ville a été désactivée, ni
+  /// qu'elle est hors de ses horaires : le back-office affichait les deux
+  /// « En service », et la cuisine restait introuvable côté client sans que
+  /// personne ne le voie.
+  ///
+  /// Vide quand la cuisine peut commander — et vide aussi d'un serveur
+  /// antérieur à ce champ, qui ne déclenche donc aucune fausse alerte.
+  final String unavailableCode;
+
+  /// La phrase qui accompagne [unavailableCode].
+  final String unavailableReason;
+
+  /// Un client peut-il commander chez elle maintenant ?
+  bool get canOrderNow => unavailableCode.isEmpty;
+
+  /// Dans une fermeture exceptionnelle datée (`/restaurants/manage/closures/`).
+  final bool isTemporarilyClosed;
+
+  /// Le motif de cette fermeture, tel que le client le lit — vide sans fermeture.
+  final String closureReason;
+
+  /// Réouverture, quand la cuisine est fermée — voir `Restaurant.reopensAt`.
+  final DateTime? reopensAt;
+
+  /// « demain à 11 h 00 », composée par le serveur dans le fuseau du pays.
+  final String reopensLabel;
+
+  /// Proposer d'elle-même la course au livreur compatible le plus proche dès
+  /// qu'une commande est prête. Faux : la cuisine affecte à la main.
+  final bool autoDispatchCouriers;
+
   final int defaultPreparationMinutes;
+
+  /// Plafond de valeur au-delà duquel une perte ou une correction de stock
+  /// attend la validation d'une autre personne.
+  ///
+  /// **Nul veut dire : tout se valide**, et non « rien ne se valide ». Tant que
+  /// personne n'a décidé ce qui peut passer seul, rien ne passe seul. Seul un
+  /// compte muni de `restaurants.write` le fixe — le siège, pas le gérant dont
+  /// il encadre les écritures.
+  final Money? stockAdjustmentCeiling;
 
   /// Compteurs d'exploitation — la ligne de tableau du back-office.
   ///

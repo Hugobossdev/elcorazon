@@ -16,12 +16,33 @@ class ApiException implements Exception {
     this.members = const {},
   });
 
-  /// Réponse qui n'est pas au format `problem+json` (panne réseau, timeout,
-  /// erreur 5xx sans corps exploitable, HTML d'un proxy...).
+  /// **Aucune réponse** : serveur injoignable, délai dépassé, requête annulée
+  /// par le navigateur (CORS, schéma manquant).
+  ///
+  /// Réservée à ce cas-là. Elle couvrait aussi, jusqu'ici, toute réponse dont
+  /// le corps n'était pas du JSON — un 500 en page HTML de Django, un 502 de
+  /// proxy. Le 2026-09-13, l'annuaire rendait **500 `ProgrammingError`** (une
+  /// migration non appliquée) : l'application l'a rapporté en
+  /// `network_error`, puis en « aucun restaurant en service ». Le serveur avait
+  /// répondu ; on cherchait du côté du Wi-Fi. Voir [ApiException.unreadable].
   factory ApiException.network(String detail) => ApiException(
     status: 0,
     code: 'network_error',
     detail: detail,
+  );
+
+  /// Le serveur **a répondu**, avec un statut, mais sans corps `problem+json`
+  /// lisible : page HTML d'erreur, proxy, corps vide.
+  ///
+  /// Le statut est conservé — c'est la seule information fiable qu'on ait, et
+  /// c'est elle qui distingue « serveur en panne » (5xx) de « route absente »
+  /// (404 d'un préfixe `/api/v1` oublié) ou d'un refus d'un intermédiaire.
+  factory ApiException.unreadable(int status) => ApiException(
+    status: status,
+    code: status >= 500 ? 'server_error' : 'unreadable_response',
+    detail: status >= 500
+        ? 'Le serveur a rencontré une erreur ($status).'
+        : 'Réponse inattendue du serveur ($status).',
   );
 
   factory ApiException.fromProblemDetail(int status, Map<String, dynamic> body) {
@@ -90,6 +111,14 @@ class ApiException implements Exception {
 
   bool get isThrottled => status == 429;
   bool get isUnauthorized => status == 401;
+  bool get isForbidden => status == 403;
+
+  /// Aucune réponse n'est arrivée. Seul cas où « vérifiez votre connexion » est
+  /// un conseil juste.
+  bool get isNetworkError => status == 0;
+
+  /// Le serveur a répondu, et c'est lui qui est en défaut.
+  bool get isServerError => status >= 500;
 
   @override
   String toString() => 'ApiException($status, $code, $detail)';

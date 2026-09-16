@@ -555,6 +555,20 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               ),
             ),
             const SizedBox(height: 16),
+            // Où il roule : ses zones, ou toutes celles de sa cuisine. Réglé par
+            // l'exploitation, en lecture seule ici — c'est ce qui décide des
+            // courses qu'on lui propose.
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.map_outlined),
+              title: const Text('Zones de livraison'),
+              subtitle: Text(
+                (_courier?.serviceZones ?? const []).isEmpty
+                    ? 'Toutes les zones de votre cuisine'
+                    : _courier!.serviceZones.map((zone) => zone.name).join(', '),
+              ),
+            ),
+            const SizedBox(height: 8),
             _buildPiecesTile(),
             const SizedBox(height: 16),
              _buildVerificationStatus(),

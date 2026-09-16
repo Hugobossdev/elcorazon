@@ -22,6 +22,8 @@ from rest_framework.test import APIClient
 from apps.accounts.models import Role, User, UserType
 from apps.carts.services import CartService
 from apps.catalog.models import MenuItem, VerifiedPurchase
+from apps.delivery.models import Assignment
+from apps.delivery.states import DeliveryStatus
 from apps.geography.models import DeliveryZone
 from apps.orders.models import Order, PaymentMethod
 from apps.orders.states import OrderStatus
@@ -455,6 +457,30 @@ class TestCloisonnement:
         response = client.get(reverse("v1:orders:order-detail", args=[order.pk]))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_le_livreur_lit_sa_course_sans_lire_la_commande_cliente(
+        self, client: APIClient, courier, order: Order
+    ) -> None:
+        """Une course acceptée donne les informations de remise par sa propre
+        route ; la fiche de commande reste exclusivement celle du client.
+
+        Sans cette frontière, `/orders/{id}/` contournait le masquage appliqué
+        à une proposition et livrait immédiatement le téléphone du client.
+        """
+        course = Assignment.objects.create(
+            order=order, courier=courier, status=DeliveryStatus.ACCEPTED
+        )
+        client.force_authenticate(courier.user)
+
+        commande = client.get(reverse("v1:orders:order-detail", args=[order.pk]))
+        liste = client.get(reverse("v1:orders:order-list"))
+        affectation = client.get(reverse("v1:delivery:assignment-detail", args=[course.pk]))
+
+        assert commande.status_code == status.HTTP_404_NOT_FOUND
+        assert liste.status_code == status.HTTP_200_OK
+        assert liste.data["count"] == 0
+        assert affectation.status_code == status.HTTP_200_OK
+        assert affectation.data["recipient_phone"] == order.recipient_phone
 
 
 class TestAnnulation:

@@ -36,8 +36,9 @@ import 'package:elcora_fast/widgets/service_initialization_widget.dart';
 import 'package:elcora_fast/widgets/incoming_call_handler.dart';
 import 'package:elcora_fast/widgets/push_notification_router.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
+import 'package:elcora_fast/presentation/changement_de_cuisine.dart';
 import 'package:elcora_fast/services/social_service.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Backend Django v2 (Phase 6). L'app n'a plus aucun accès direct à une base de
 /// données : tout passe par `/api/v1/` et les WebSockets `ws/`.
@@ -206,6 +207,15 @@ String adresseWebSocket(String? valeurDeclaree, String chemin) {
   ).toString();
 }
 
+/// Le point de livraison que le client a retenu : l'adresse choisie pour la
+/// commande en cours, à défaut son adresse par défaut.
+PointDeLivraison? _adresseRetenue() {
+  final carnet = AddressService();
+  final adresse = carnet.selectedAddress ?? carnet.defaultAddress;
+  if (adresse == null) return null;
+  return (latitude: adresse.latitude, longitude: adresse.longitude);
+}
+
 Future<void> _initializeEssentialServices() async {
   // Firebase (Phase 6) — requis avant tout usage de `FirebaseMessaging`.
   // Non bloquant : aucun projet Firebase réel n'est encore configuré (voir
@@ -275,17 +285,22 @@ class ClientApp extends StatelessWidget {
         // à `connectivity_plus`. C'était une seconde implémentation du même
         // guet, initialisée à chaque démarrage pour personne.
         ChangeNotifierProvider(create: (_) => AppService(container)),
-        // Sur quel restaurant porte l'application — lu sur `GET /restaurants/`.
+        // Quelle cuisine livre ce client — lue sur `GET /restaurants/`, puis
+        // ajustée à son adresse de livraison par `POST /restaurants/delivery-check/`.
         //
         // Construit sans attendre qu'un écran le demande (`lazy: false`) : le
-        // catalogue, le panier et les adresses le lisent dès le premier écran,
-        // et le résoudre à la demande ferait attendre chacun d'eux à son tour.
+        // catalogue, le panier et les adresses le lisent dès le premier écran.
+        // Ils attendent tous **la même** résolution : le service est à vol
+        // unique, et c'est ce qui empêche le catalogue, lancé en parallèle, de
+        // conclure « aucune cuisine » avant que l'annuaire ait répondu.
         //
-        // Il remplace six constantes qui décrivaient l'établissement de Lomé et
-        // rendaient impossible l'ouverture d'un second sans republier
-        // l'application.
+        // Le carnet d'adresses est suivi : quand le client retient une adresse,
+        // la cuisine devient celle que la géographie désigne pour elle — sauf
+        // s'il en a choisi une explicitement.
         ChangeNotifierProvider(
-          create: (_) => RestaurantContextService()..resolve(),
+          create: (_) => KitchenContextService()
+            ..suivreLeCarnet(AddressService(), _adresseRetenue)
+            ..resolve(),
           lazy: false,
         ),
         ChangeNotifierProvider(create: (_) => CartService()),
@@ -351,6 +366,7 @@ class ClientApp extends StatelessWidget {
             initialRoute: AppRouter.splash,
             onGenerateRoute: AppRouter.generateRoute,
             debugShowCheckedModeBanner: false,
+            scaffoldMessengerKey: messagerDeLApplication,
             builder: (context, child) {
               return ErrorBoundary(
                 child: IncomingCallHandler(

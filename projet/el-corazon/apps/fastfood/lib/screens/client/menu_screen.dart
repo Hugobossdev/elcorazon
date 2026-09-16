@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/catalogue.dart';
+import 'package:elcora_fast/presentation/situation_cuisine.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/services/app_service.dart';
@@ -458,26 +459,33 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
           );
         }
 
-        // La carte n'a pas pu être lue : le dire, et proposer de réessayer.
+        // La carte n'a pas pu être lue : dire **pourquoi**, et ne proposer de
+        // réessayer que si réessayer peut aboutir.
         //
         // Cet écran ne connaissait qu'un seul vide et l'imputait aux filtres.
-        // Un backend arrêté, une coupure réseau ou un 500 s'affichaient donc
-        // « Aucun plat ne correspond à ces filtres », avec pour seul recours un
-        // bouton qui n'y pouvait rien.
-        if (appService.erreurCatalogue != null &&
-            appService.menuItems.isEmpty) {
+        // Il a ensuite connu un seul échec, « vérifiez votre connexion », qu'il
+        // disait aussi à quelqu'un dont le quartier n'a pas de cuisine ou dont
+        // le serveur rendait 500. Chaque situation a désormais sa phrase
+        // (`PresentationSituation`).
+        final situation = appService.erreurCatalogue;
+        if (situation != null && appService.menuItems.isEmpty) {
+          final presentation = PresentationSituation.de(
+            situation,
+            motifServeur: appService.motifErreurCatalogue,
+          );
           return SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(
                 vertical: DesignConstants.spacingXL,
               ),
               child: EmptyStateWidget(
-                title: 'Carte indisponible',
-                message: '${appService.erreurCatalogue!} '
-                    'Vérifiez votre connexion, puis réessayez.',
-                icon: Icons.cloud_off_rounded,
-                actionText: 'Réessayer',
-                onAction: () => appService.rechargerLeCatalogue(),
+                title: presentation.titre,
+                message: presentation.message,
+                icon: presentation.icone,
+                actionText: presentation.reessayable ? 'Réessayer' : null,
+                onAction: presentation.reessayable
+                    ? () => appService.rechargerLeCatalogue()
+                    : null,
               ),
             ),
           );

@@ -1,126 +1,117 @@
 import 'package:flutter/material.dart';
 
-/// Dialogue affiché quand aucune zone ne couvre l'adresse choisie.
+/// Dialogue affiché quand aucune cuisine ne livre l'adresse choisie.
 ///
 /// Il annonçait auparavant une distance et un maximum — tous deux calculés sur
 /// le téléphone, à vol d'oiseau, depuis une position de restaurant en dur. Le
-/// serveur ne refuse pas sur une distance : il refuse parce qu'aucun contour
-/// de zone ne couvre le point. Dire « 12,4 km, maximum 25 km » à un client
-/// qu'on vient de refuser était une explication fausse d'un refus juste.
+/// serveur ne refuse pas sur une distance : il refuse parce qu'aucune zone ne
+/// couvre le point, ou parce que le point sort du rayon de la cuisine. Dire
+/// « 12,4 km, maximum 25 km » à un client qu'on vient de refuser était une
+/// explication fausse d'un refus juste.
+///
+/// ## Les deux gestes proposés, et pourquoi pas « Réessayer »
+///
+/// La réponse ne changera pas en réessayant : c'est une réponse, pas une panne.
+/// Le client peut **changer d'adresse** — livrer au bureau plutôt qu'à la
+/// maison — ou **changer de ville**, s'il commande pour quelqu'un d'autre.
+///
+/// Le bouton principal fermait jusqu'ici le dialogue… sans le fermer : il
+/// appelait l'action pendant que le dialogue restait ouvert par-dessus l'écran
+/// qu'elle ouvrait. Chaque action ferme désormais d'abord.
 class ZoneNotServiceableDialog extends StatelessWidget {
-  final VoidCallback? onChooseAnotherAddress;
-  final VoidCallback? onViewServiceableZones;
-
   const ZoneNotServiceableDialog({
     super.key,
+    this.raison,
     this.onChooseAnotherAddress,
+    this.onChangeCity,
     this.onViewServiceableZones,
   });
+
+  /// La phrase du serveur, plus précise que la nôtre quand il en donne une —
+  /// « Adresse à 18,2 km, au-delà des 15 km desservis depuis cette cuisine ».
+  final String? raison;
+
+  final VoidCallback? onChooseAnotherAddress;
+  final VoidCallback? onChangeCity;
+  final VoidCallback? onViewServiceableZones;
+
+  static const titre = 'Nous ne livrons pas encore dans cette zone.';
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final motif = (raison == null || raison!.trim().isEmpty) ? null : raison!.trim();
+
+    void fermerPuis(VoidCallback? action) {
+      Navigator.of(context).pop();
+      action?.call();
+    }
 
     return AlertDialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      title: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.orange.shade100,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              Icons.warning_amber_rounded,
-              color: Colors.orange.shade700,
-              size: 28,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Zone Non Desservie',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      icon: Icon(Icons.wrong_location_outlined, color: theme.colorScheme.error, size: 32),
+      title: const Text(titre, textAlign: TextAlign.center),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Désolé, nous ne livrons pas encore à cette adresse.',
+            motif ??
+                'Aucune cuisine El Corazón ne livre encore cette adresse. '
+                    'Vous ne pouvez pas commander pour elle pour le moment.',
             style: theme.textTheme.bodyLarge,
           ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  color: Colors.blue.shade700,
-                  size: 20,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Astuce : Choisissez une adresse plus proche du restaurant pour bénéficier de la livraison.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.blue.shade900,
-                    ),
-                  ),
-                ),
-              ],
+          const SizedBox(height: 12),
+          Text(
+            'Choisissez une autre adresse de livraison, ou une autre ville où '
+            'El Corazón est présent.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ],
       ),
+      actionsOverflowDirection: VerticalDirection.up,
       actions: [
         if (onViewServiceableZones != null)
           TextButton.icon(
-            onPressed: () {
-              Navigator.of(context).pop();
-              onViewServiceableZones!();
-            },
-            icon: const Icon(Icons.map),
+            onPressed: () => fermerPuis(onViewServiceableZones),
+            icon: const Icon(Icons.map_outlined),
             label: const Text('Voir les zones'),
+          ),
+        if (onChangeCity != null)
+          TextButton.icon(
+            onPressed: () => fermerPuis(onChangeCity),
+            icon: const Icon(Icons.location_city_outlined),
+            label: const Text('Changer de ville'),
           ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+          child: const Text('Fermer'),
         ),
-        FilledButton.icon(
-          onPressed:
-              onChooseAnotherAddress ?? () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.location_searching),
-          label: const Text('Choisir une autre adresse'),
-        ),
+        if (onChooseAnotherAddress != null)
+          FilledButton.icon(
+            onPressed: () => fermerPuis(onChooseAnotherAddress),
+            icon: const Icon(Icons.location_searching),
+            label: const Text('Changer d’adresse'),
+          ),
       ],
     );
   }
 
-  /// Méthode statique pour afficher le dialog facilement
   static Future<void> show(
     BuildContext context, {
+    String? raison,
     VoidCallback? onChooseAnotherAddress,
+    VoidCallback? onChangeCity,
     VoidCallback? onViewServiceableZones,
   }) {
     return showDialog(
       context: context,
-      barrierDismissible: false,
       builder: (context) => ZoneNotServiceableDialog(
+        raison: raison,
         onChooseAnotherAddress: onChooseAnotherAddress,
+        onChangeCity: onChangeCity,
         onViewServiceableZones: onViewServiceableZones,
       ),
     );

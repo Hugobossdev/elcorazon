@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -53,13 +54,15 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
   /// demandé.
   StatutLivreur? _statutInitial;
 
-  // Le bloc « Zones assignées » a été retiré. Il proposait cinq zones écrites
-  // dans le code — « Zone Centre », « Zone Nord »… — que rien n'envoyait au
-  // serveur et que rien ne relisait : `CourierProfile` n'a pas de zone, et le
-  // rattachement d'un livreur se fait à un **établissement**. C'était un
-  // contrôle décoratif, du même genre que le filtre par zone de l'ancien écran
-  // des commandes. Les vraies zones de livraison vivent dans
-  // `DeliveryZoneService`, et servent aux barèmes.
+  /// Zones où le livreur roule, par identifiant. **Vide : toutes celles de sa
+  /// cuisine.**
+  ///
+  /// Un bloc « Zones assignées » avait existé ici avec cinq zones écrites dans
+  /// le code, que rien n'envoyait. Celui-ci lit les vraies zones de la ville de
+  /// la cuisine et écrit sur `POST /delivery/couriers/{id}/zones/`, que la
+  /// proposition de course relit.
+  Set<String> _zones = {};
+  Set<String> _zonesInitiales = {};
 
   @override
   void initState() {
@@ -82,6 +85,8 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
     _selectedStatus = driver.statut;
     _statutInitial = driver.statut;
     _selectedVehicleType = driver.vehicleType;
+    _zones = {for (final zone in driver.serviceZones) zone.id};
+    _zonesInitiales = {..._zones};
   }
 
   @override
@@ -224,22 +229,16 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                               border: OutlineInputBorder(),
                             ),
                             initialValue: _selectedVehicleType,
+                            // Les **codes** du serveur en valeur, les libellés à
+                            // l'écran. Les libellés servaient de valeurs : un
+                            // dossier existant (`motorcycle`) ne figurait dans
+                            // aucun choix, et le menu refusait de s'ouvrir.
                             items: [
                               const DropdownMenuItem(
                                 child: Text('Sélectionner un type'),
                               ),
-                              ...['Moto', 'Vélo', 'Voiture', 'Scooter'].map((type) {
-                                return DropdownMenuItem<String>(
-                                  value: type,
-                                  child: Row(
-                                    children: [
-                                      Text(type),
-                                      const SizedBox(width: 8),
-                                      Text(type),
-                                    ],
-                                  ),
-                                );
-                              }),
+                              for (final (code, libelle) in _vehicules)
+                                DropdownMenuItem<String>(value: code, child: Text(libelle)),
                             ],
                             onChanged: (value) {
                               setState(() {
@@ -316,16 +315,15 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
                           const SizedBox(height: 24),
                         ],
 
-                        // Préférences
                         Text(
-                          'Préférences',
+                          'Zones de livraison',
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.bold,
                               ),
                         ),
                         const SizedBox(height: 16),
 
-                        _buildPreferencesSection(),
+                        _buildZonesSection(),
                       ],
                     ),
                   ),
@@ -365,75 +363,80 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
     );
   }
 
-  Widget _buildPreferencesSection() {
-    return Card(
-      color: Colors.grey[50],
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.settings, size: 20, color: Colors.grey[600]),
-                const SizedBox(width: 8),
-                Text(
-                  'Préférences de livraison',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _buildPreferenceItem(
-              'Distance maximale (km)',
-              '20',
-              Icons.straighten,
-            ),
-            _buildPreferenceItem(
-              'Heures de travail',
-              '8h - 20h',
-              Icons.schedule,
-            ),
-            _buildPreferenceItem(
-              'Jours de travail',
-              'Lun - Dim',
-              Icons.calendar_today,
-            ),
-            _buildPreferenceItem(
-              'Type de commandes préférées',
-              'Toutes',
-              Icons.restaurant,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  /// Types de véhicule : code du serveur (`VehicleType`), libellé affiché.
+  static const List<(String, String)> _vehicules = [
+    ('motorcycle', 'Moto'),
+    ('scooter', 'Scooter'),
+    ('bicycle', 'Vélo'),
+    ('car', 'Voiture'),
+  ];
 
-  Widget _buildPreferenceItem(String label, String value, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: Colors.grey[600]),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
+  /// Les zones de la ville de la cuisine du livreur, à cocher.
+  ///
+  /// Rien de coché : il roule dans toutes les zones de sa cuisine — le cas
+  /// courant, et le seul qui existait. À l'embauche, les zones se règlent une
+  /// fois le dossier créé : il faut une cuisine pour savoir lesquelles proposer.
+  Widget _buildZonesSection() {
+    final scheme = Theme.of(context).colorScheme;
+    final driver = widget.driver;
+    if (driver == null) {
+      return Text(
+        'Le livreur roulera dans toutes les zones de sa cuisine. Vous pourrez '
+        'restreindre ses zones une fois le dossier créé.',
+        style: TextStyle(color: scheme.onSurfaceVariant),
+      );
+    }
+
+    final cuisine = _scope.restaurants.where((r) => r.slug == driver.restaurantSlug).firstOrNull;
+    final zonesService = context.watch<DeliveryZoneService>();
+    final candidates = cuisine == null
+        ? const <DeliveryZone>[]
+        : (zonesService.zones
+            .where((zone) => zonesService.cityName(zone.cityId) == cuisine.cityName)
+            .toList()
+          ..sort((a, b) => a.name.compareTo(b.name)));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _zones.isEmpty
+              ? 'Toutes les zones de ${cuisine?.name ?? 'sa cuisine'}.'
+              : 'Seulement les zones cochées : il ne reçoit aucune course ailleurs.',
+          style: TextStyle(color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 12),
+        if (candidates.isEmpty)
           Text(
-            value,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.primary,
+            zonesService.isLoading
+                ? 'Chargement des zones…'
+                : 'Aucune zone connue pour cette ville.',
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final zone in candidates)
+                FilterChip(
+                  label: Text(zone.name),
+                  selected: _zones.contains(zone.id),
+                  onSelected: (coche) => setState(() {
+                    coche ? _zones.add(zone.id) : _zones.remove(zone.id);
+                  }),
                 ),
+            ],
+          ),
+        if (_zones.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: () => setState(_zones.clear),
+            icon: const Icon(Icons.public, size: 18),
+            label: const Text('Toutes les zones de sa cuisine'),
           ),
         ],
-      ),
+      ],
     );
   }
 
@@ -492,6 +495,13 @@ class _DriverFormDialogState extends State<DriverFormDialog> {
           vehicleType: _selectedVehicleType,
           vehiclePlate: _vehicleNumberController.text.trim(),
         );
+
+        // Les zones suivent leur route, et seulement si elles ont changé.
+        final zonesChangees =
+            _zones.length != _zonesInitiales.length || !_zones.containsAll(_zonesInitiales);
+        if (success && zonesChangees) {
+          success = await driverService.setServiceZones(widget.driver!.id, _zones.toList());
+        }
 
         // Le statut du dossier suit **sa** route, et seulement s'il a changé.
         // Deux gestes, deux permissions : corriger une plaque demande

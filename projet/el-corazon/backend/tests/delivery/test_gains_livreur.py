@@ -28,6 +28,7 @@ compteur du dossier plutôt qu'une seconde source qui divergerait.
 from __future__ import annotations
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.urls import reverse
@@ -180,19 +181,37 @@ class TestLesBornesDePeriode:
     def test_les_bornes_suivent_le_fuseau_de_l_etablissement(
         self, courier_client: APIClient, courier, restaurant, customer
     ) -> None:
-        """Une course livrée à 23 h 30 à Lomé appartient à cette journée-là.
+        """Une course livrée juste après minuit appartient à cette journée-là.
 
         Lomé est à UTC+0, ce qui rendrait le cas invisible : le pays est donc
-        déplacé à UTC+2 le temps du test, et la course posée à un instant qui
+        déplacé à l'est le temps du test, et la course posée à un instant qui
         tombe la veille en temps universel. Compter en UTC la ferait disparaître
         du total du jour, sous les yeux du livreur qui vient de la faire.
+
+        ## Pourquoi l'heure locale est dérivée du fuseau, et non écrite en dur
+
+        Ce cas a d'abord employé `Africa/Cairo` avec un décalage de `+2` écrit
+        en dur, sur la foi d'un commentaire affirmant « sans heure d'été depuis
+        2015 ». **L'Égypte l'a rétablie en 2023** : Le Caire est à `+3` de fin
+        avril à fin octobre. Le décalage que le test appliquait et celui que la
+        vue lisait divergeaient donc d'une heure, et « aujourd'hui » cessait de
+        désigner la même journée pour les deux — l'échec ne survenant qu'entre
+        21 h et 22 h UTC, une heure par jour, une moitié d'année.
+
+        Deux corrections, et la seconde est la vraie :
+
+        * `Africa/Nairobi` est à `+3` **toute l'année** — ce que le commentaire
+          précédent croyait de son propre fuseau ;
+        * l'heure locale est **dérivée du fuseau du pays** au lieu d'être
+          recopiée. Un test qui réécrit la règle qu'il vérifie ne la vérifie
+          plus, et la prochaine réforme horaire le ferait mentir de nouveau.
         """
         pays = restaurant.zone.city.country
-        pays.timezone = "Africa/Cairo"  # UTC+2, sans heure d'été depuis 2015
+        pays.timezone = "Africa/Nairobi"  # UTC+3 toute l'année, sans heure d'été
         pays.save(update_fields=["timezone"])
 
-        local = timezone.localtime(timezone.now(), dt.timezone(dt.timedelta(hours=2)))
-        # 00 h 30 heure locale — donc 22 h 30 la veille, en UTC.
+        local = timezone.now().astimezone(ZoneInfo(pays.timezone))
+        # 00 h 30 heure locale — donc la veille en UTC, quel que soit le décalage.
         debut_de_journee = local.replace(hour=0, minute=30, second=0, microsecond=0)
 
         livraison(

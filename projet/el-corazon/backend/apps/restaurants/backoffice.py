@@ -23,10 +23,12 @@ Deux garde-fous y sont tenus par le code :
 
 from __future__ import annotations
 
+import logging
 from typing import Any, ClassVar
 
 from django.db import transaction
 from django.db.models import Count, Q, QuerySet
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -44,7 +46,13 @@ from apps.accounts.models import User, UserType
 from apps.accounts.services import AuthService
 from apps.geography.models import DeliveryZone
 from apps.restaurants.duplication import SECTION_GENERAL, copy_sections
-from apps.restaurants.models import AreaMembership, OpeningHours, Restaurant
+from apps.restaurants.models import (
+    AreaMembership,
+    KitchenClosure,
+    OpeningHours,
+    Restaurant,
+    kitchen_state_prefetches,
+)
 from apps.restaurants.scoping import (
     assert_can_open_in_zone,
     assert_in_scope,
@@ -52,6 +60,7 @@ from apps.restaurants.scoping import (
     staff_restaurant_ids,
 )
 from apps.restaurants.serializers import (
+    ManagedKitchenClosureSerializer,
     ManagedOpeningHoursSerializer,
     ManagedRestaurantSerializer,
     ManagedRestaurantZoneSerializer,
@@ -70,6 +79,8 @@ __all__ = [
     "ManagedRestaurantZoneViewSet",
     "StaffViewSet",
 ]
+
+logger = logging.getLogger(__name__)
 
 RESTAURANT_PERMISSION = HasReadWritePermission.of(
     read="restaurants.read", write="restaurants.write"
@@ -242,6 +253,9 @@ def _avec_compteurs() -> QuerySet[Restaurant]:
     """
     return (
         Restaurant.objects.select_related("zone__city__country")
+        # Le verdict « commandable maintenant » que rend la fiche lit les plages
+        # d'ouverture : sans ce préchargement, une requête de plus par ligne.
+        .prefetch_related(*kitchen_state_prefetches())
         .annotate(
             orders_count=Count("orders", distinct=True),
             couriers_count=Count("couriers", distinct=True),
@@ -546,6 +560,82 @@ class ManagedOpeningHoursViewSet(ModelViewSet[OpeningHours]):
         serializer.save()
 
 
+class ManagedKitchenClosureViewSet(ModelViewSet[KitchenClosure]):
+    """Fermetures exceptionnelles — `/restaurants/manage/closures/`.
+
+    Même permission et même cloisonnement que les horaires, dont c'est
+    l'exception datée. La suppression est réelle, comme pour une plage : une
+    fermeture annulée n'a jamais fermé la cuisine, et une fermeture passée
+    reste lisible tant qu'on ne l'efface pas.
+
+    `?upcoming=true` ne rend que ce qui n'est pas terminé — ce que l'écran
+    affiche par défaut ; l'historique complet reste accessible sans filtre.
+    """
+
+    serializer_class = ManagedKitchenClosureSerializer
+    permission_classes = (RESTAURANT_PERMISSION,)
+    queryset = KitchenClosure.objects.none()
+    filterset_fields: ClassVar[dict[str, list[str]]] = {"restaurant": ["exact"]}
+
+    def get_queryset(self) -> QuerySet[KitchenClosure]:
+        user = authenticated_user(self.request)
+        base = KitchenClosure.objects.select_related("restaurant").order_by("starts_at")
+        if str(self.request.query_params.get("upcoming", "")).lower() == "true":
+            base = base.filter(ends_at__gt=timezone.now())
+        if is_unscoped(user):
+            return base
+        return base.filter(restaurant_id__in=staff_restaurant_ids(user))
+
+    def perform_create(self, serializer: Any) -> None:
+        acteur = authenticated_user(self.request)
+        restaurant = serializer.validated_data["restaurant"]
+        assert_in_scope(acteur, restaurant.pk)
+        fermeture = serializer.save(created_by=acteur)
+        logger.info(
+            "kitchen.closure.created",
+            extra={
+                "kitchen": restaurant.slug,
+                "starts_at": fermeture.starts_at.isoformat(),
+                "ends_at": fermeture.ends_at.isoformat(),
+            },
+        )
+
+    def perform_update(self, serializer: Any) -> None:
+        restaurant = serializer.validated_data.get("restaurant")
+        if restaurant is not None:
+            assert_in_scope(authenticated_user(self.request), restaurant.pk)
+        serializer.save()
+
+    def perform_destroy(self, instance: KitchenClosure) -> None:
+        logger.info("kitchen.closure.deleted", extra={"kitchen": instance.restaurant.slug})
+        instance.delete()
+
+
+def _etablissement_proprietaire(zone: DeliveryZone) -> Restaurant:
+    """L'établissement d'une zone propre — jamais nul sur ce jeu de requête.
+
+    `DeliveryZone.restaurant` est nullable : une zone sans établissement est
+    **municipale** et vaut pour toutes les cuisines de sa ville. Le jeu de
+    requête de la vue ci-dessous les écarte (`restaurant__isnull=False`), si
+    bien que l'attribut y est toujours renseigné.
+
+    Le vérificateur de types, lui, ne lit pas ce filtre. Écrire
+    `zone.restaurant.name` directement le laisserait passer — et le jour où
+    quelqu'un élargirait le jeu de requête, la suppression d'une zone
+    municipale rendrait un 500 au lieu d'un refus lisible.
+
+    La levée n'est donc pas une garde défensive : c'est le filet qui attrape
+    cet élargissement-là.
+    """
+    if zone.restaurant is None:  # pragma: no cover - le jeu de requête l'exclut
+        raise BusinessRuleViolation(
+            f"La zone « {zone.name} » est municipale : elle vaut pour toute la "
+            "ville et ne se gère pas depuis les zones propres d'un établissement.",
+            code="municipal_zone",
+        )
+    return zone.restaurant
+
+
 class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
     """Zones **propres à un établissement** — `/restaurants/manage/zones/`.
 
@@ -652,13 +742,14 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
         )
 
     def perform_destroy(self, instance: DeliveryZone) -> None:
-        assert_in_scope(authenticated_user(self.request), instance.restaurant_id)
+        etablissement = _etablissement_proprietaire(instance)
+        assert_in_scope(authenticated_user(self.request), etablissement.pk)
         record_change(
             actor=authenticated_user(self.request),
             action=AuditAction.ZONE_ACTIVATION,
             target_type="zone",
             target_id=instance.pk,
-            target_label=f"{instance.name} — {instance.restaurant.name}",
+            target_label=f"{instance.name} — {etablissement.name}",
             before={"exists": True},
             after={"exists": False},
         )

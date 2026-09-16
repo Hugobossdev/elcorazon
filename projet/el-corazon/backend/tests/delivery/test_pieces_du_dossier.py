@@ -76,12 +76,8 @@ def as_courier(courier: CourierProfile) -> APIClient:
 class TestDepotDePieces:
     """`POST /delivery/me/` — le téléversement, et ce qu'il déclenche."""
 
-    def test_la_piece_est_enregistree(
-        self, as_courier: APIClient, courier: CourierProfile
-    ) -> None:
-        reponse = as_courier.post(
-            _url(), {"licence_document": _piece()}, format="multipart"
-        )
+    def test_la_piece_est_enregistree(self, as_courier: APIClient, courier: CourierProfile) -> None:
+        reponse = as_courier.post(_url(), {"licence_document": _piece()}, format="multipart")
 
         assert reponse.status_code == status.HTTP_200_OK
         courier.refresh_from_db()
@@ -283,9 +279,7 @@ class TestLectureDuDossier:
 class TestCorrectionParLeLivreur:
     """`PATCH /delivery/me/` — et surtout, ce qu'il refuse."""
 
-    def test_le_vehicule_se_corrige(
-        self, as_courier: APIClient, courier: CourierProfile
-    ) -> None:
+    def test_le_vehicule_se_corrige(self, as_courier: APIClient, courier: CourierProfile) -> None:
         reponse = as_courier.patch(
             _url(), {"vehicle_type": VehicleType.CAR, "vehicle_plate": "TG-4242-AB"}, format="json"
         )

@@ -15,14 +15,24 @@ from typing import Any
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.accounts.models import Role, User, UserType
 from apps.geography.models import City, Country, DeliveryZone
 from apps.geography.serializers import DeliveryZoneSerializer, ManagedDeliveryZoneSerializer
+from apps.restaurants.availability import KitchenState, kitchen_state
 from apps.restaurants.duplication import known_sections
-from apps.restaurants.models import AreaMembership, OpeningHours, Restaurant, StaffMembership
+from apps.restaurants.models import (
+    AreaMembership,
+    KitchenClosure,
+    OpeningHours,
+    Restaurant,
+    StaffMembership,
+    zone_anchoring_problem,
+)
 from apps.restaurants.states import RestaurantStatus
+from common.availability import Unavailability
 from common.serializers import LocationField, MoneyField
 
 __all__ = [
@@ -84,6 +94,17 @@ class RestaurantSerializer(serializers.ModelSerializer[Restaurant]):
 
     is_open = serializers.SerializerMethodField()
     can_order_now = serializers.SerializerMethodField()
+    # Pourquoi `can_order_now` est faux — vides sinon. Le code est stable
+    # (`common.availability.UnavailabilityCode`) ; la phrase est affichable.
+    unavailable_code = serializers.SerializerMethodField()
+    unavailable_reason = serializers.SerializerMethodField()
+    # « Fermé — réouverture demain à 11 h 00 ». L'instant, et sa phrase composée
+    # dans le fuseau du pays — jamais sur le téléphone, dont l'horloge et le
+    # fuseau ne sont pas ceux de la cuisine. Nuls quand la cuisine est ouverte
+    # ou que sa réouverture sort de l'horizon connu.
+    is_temporarily_closed = serializers.SerializerMethodField()
+    reopens_at = serializers.SerializerMethodField()
+    reopens_label = serializers.SerializerMethodField()
     distance_m = serializers.SerializerMethodField()
 
     class Meta:
@@ -108,11 +129,32 @@ class RestaurantSerializer(serializers.ModelSerializer[Restaurant]):
             "is_open",
             "accepts_orders",
             "can_order_now",
+            "unavailable_code",
+            "unavailable_reason",
+            "is_temporarily_closed",
+            "reopens_at",
+            "reopens_label",
             "distance_m",
             "created_at",
             "updated_at",
         ]
         read_only_fields = fields
+
+    def _verdict(self, obj: Restaurant) -> Unavailability | None:
+        """Le verdict du juge, calculé **une fois** par établissement et par réponse.
+
+        Trois champs le lisent ; le recalculer trois fois relirait trois fois
+        les plages d'ouverture — et, à la seconde d'une ouverture, pourrait
+        rendre `can_order_now` vrai et `unavailable_code` non vide.
+        """
+        return self._etat(obj).unavailability
+
+    def _etat(self, obj: Restaurant) -> KitchenState:
+        """L'état de la cuisine, relevé une fois par établissement et par réponse."""
+        cache: dict[object, KitchenState] = self.context.setdefault("kitchen_states", {})
+        if obj.pk not in cache:
+            cache[obj.pk] = kitchen_state(obj, self._now())
+        return cache[obj.pk]
 
     def _now(self) -> dt.datetime:
         """Instant de référence, calculé **une fois** par réponse.
@@ -129,7 +171,30 @@ class RestaurantSerializer(serializers.ModelSerializer[Restaurant]):
         return obj.is_open_at(self._now())
 
     def get_can_order_now(self, obj: Restaurant) -> bool:
-        return obj.is_active and obj.accepts_orders and obj.is_open_at(self._now())
+        # La composition vivait ici, et **seulement** ici : la création de
+        # commande ne la lisait pas. Elle vit désormais dans le juge, que la
+        # commande consulte aussi — l'écran et le serveur ne peuvent plus dire
+        # deux choses différentes.
+        return self._verdict(obj) is None
+
+    def get_unavailable_code(self, obj: Restaurant) -> str:
+        verdict = self._verdict(obj)
+        return str(verdict.code) if verdict is not None else ""
+
+    def get_unavailable_reason(self, obj: Restaurant) -> str:
+        verdict = self._verdict(obj)
+        return verdict.message if verdict is not None else ""
+
+    def get_is_temporarily_closed(self, obj: Restaurant) -> bool:
+        return self._etat(obj).is_temporarily_closed
+
+    @extend_schema_field(serializers.DateTimeField(allow_null=True))
+    def get_reopens_at(self, obj: Restaurant) -> str | None:
+        instant = self._etat(obj).reopens_at
+        return instant.isoformat() if instant is not None else None
+
+    def get_reopens_label(self, obj: Restaurant) -> str:
+        return self._etat(obj).reopens_label
 
     def get_distance_m(self, obj: Restaurant) -> float | None:
         distance = getattr(obj, "distance", None)
@@ -181,6 +246,12 @@ class DeliveryCheckSerializer(serializers.Serializer[Any]):
 
     is_available = serializers.BooleanField()
     reason = serializers.CharField(allow_null=True)
+    # Motif stable du refus : `no_kitchen_available`, `address_not_served`, ou
+    # le code d'un refus de panier. L'application compare ce code, jamais
+    # `reason`. L'état de la cuisine, lui, voyage dans `restaurant`
+    # (`can_order_now`, `unavailable_code`) : être livrable et pouvoir
+    # commander maintenant sont deux réponses.
+    unavailable_code = serializers.CharField(allow_null=True)
 
     restaurant = RestaurantSerializer(allow_null=True)
     zone = DeliveryZoneSerializer(allow_null=True)
@@ -243,6 +314,28 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
 
     configuration_gaps = serializers.SerializerMethodField()
 
+    # **Ce que voit le client, à cet instant** — le verdict du juge que la
+    # commande consulte.
+    #
+    # `status` dit la décision de l'exploitation ; il ne dit pas si quelqu'un
+    # peut commander. Une cuisine « En service » dont la ville a été désactivée
+    # est invisible de l'application cliente, et une cuisine « En service » hors
+    # de ses horaires refuse toute commande. Le back-office affichait les deux
+    # comme en service, sans rien de plus : configurée ici, introuvable là-bas,
+    # et personne pour le voir.
+    is_open = serializers.SerializerMethodField()
+    can_order_now = serializers.SerializerMethodField()
+    unavailable_code = serializers.SerializerMethodField()
+    unavailable_reason = serializers.SerializerMethodField()
+    is_temporarily_closed = serializers.SerializerMethodField()
+    closure_reason = serializers.SerializerMethodField()
+    reopens_at = serializers.SerializerMethodField()
+    reopens_label = serializers.SerializerMethodField()
+
+    # Plafond des pertes et corrections de stock passant sans seconde validation.
+    # Nul : toutes demandent une validation — voir le modèle.
+    stock_adjustment_ceiling = MoneyField(required=False, allow_null=True)
+
     # Compteurs d'exploitation — la ligne de tableau du back-office (§6).
     #
     # Annotés par la vue, jamais calculés ici : un `SerializerMethodField` qui
@@ -280,7 +373,17 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
             "configuration_gaps",
             "is_active",
             "accepts_orders",
+            "is_open",
+            "can_order_now",
+            "unavailable_code",
+            "unavailable_reason",
+            "is_temporarily_closed",
+            "closure_reason",
+            "reopens_at",
+            "reopens_label",
             "default_preparation_minutes",
+            "auto_dispatch_couriers",
+            "stock_adjustment_ceiling",
             "orders_count",
             "couriers_count",
             "menu_items_count",
@@ -306,6 +409,14 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
             "status",
             "configuration_gaps",
             "is_active",
+            "is_open",
+            "can_order_now",
+            "unavailable_code",
+            "unavailable_reason",
+            "is_temporarily_closed",
+            "closure_reason",
+            "reopens_at",
+            "reopens_label",
             "orders_count",
             "couriers_count",
             "menu_items_count",
@@ -322,6 +433,87 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
         supprimée ailleurs.
         """
         return obj.configuration_gaps()
+
+    def _etat(self, obj: Restaurant) -> KitchenState:
+        """L'état de la cuisine, relevé **une fois** par ligne et par réponse.
+
+        Quatre champs le lisent ; le relever quatre fois pourrait, à la seconde
+        d'une ouverture, rendre `can_order_now` vrai et `unavailable_code` non
+        vide — la même précaution que `RestaurantSerializer._verdict`.
+        """
+        cache: dict[object, KitchenState] = self.context.setdefault("kitchen_states", {})
+        if obj.pk not in cache:
+            instant: dt.datetime = self.context.setdefault("now", timezone.now())
+            cache[obj.pk] = kitchen_state(obj, instant)
+        return cache[obj.pk]
+
+    def get_is_open(self, obj: Restaurant) -> bool:
+        return self._etat(obj).is_open
+
+    def get_can_order_now(self, obj: Restaurant) -> bool:
+        return self._etat(obj).can_accept_orders
+
+    def get_unavailable_code(self, obj: Restaurant) -> str:
+        verdict = self._etat(obj).unavailability
+        return str(verdict.code) if verdict is not None else ""
+
+    def get_unavailable_reason(self, obj: Restaurant) -> str:
+        verdict = self._etat(obj).unavailability
+        return verdict.message if verdict is not None else ""
+
+    def get_is_temporarily_closed(self, obj: Restaurant) -> bool:
+        return self._etat(obj).is_temporarily_closed
+
+    def get_closure_reason(self, obj: Restaurant) -> str:
+        return self._etat(obj).closure_reason
+
+    @extend_schema_field(serializers.DateTimeField(allow_null=True))
+    def get_reopens_at(self, obj: Restaurant) -> str | None:
+        instant = self._etat(obj).reopens_at
+        return instant.isoformat() if instant is not None else None
+
+    def get_reopens_label(self, obj: Restaurant) -> str:
+        return self._etat(obj).reopens_label
+
+    def validate_zone(self, zone: DeliveryZone) -> DeliveryZone:
+        """Une cuisine se pose sur une zone municipale, ou sur l'une des siennes.
+
+        Refusé à la saisie plutôt que laissé à `configuration_gaps` : une zone
+        propre à un autre établissement n'est pas un manque qu'on comble plus
+        tard, c'est un rattachement faux dès l'écriture.
+        """
+        instance = self.instance if isinstance(self.instance, Restaurant) else None
+        if (
+            probleme := zone_anchoring_problem(zone, instance.pk if instance else None)
+        ) is not None:
+            raise serializers.ValidationError(probleme)
+        return zone
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Le plafond se tient dans la devise de l'établissement.
+
+        La devise vient du pays, à travers la zone — celle de la requête si elle
+        change, sinon celle de l'établissement. Un plafond en euros sur une
+        cuisine de Lomé se comparerait à des pertes en francs par leur seul
+        nombre, et laisserait passer 655 fois trop.
+        """
+        plafond = attrs.get("stock_adjustment_ceiling")
+        if plafond is not None:
+            zone = attrs.get("zone") or (self.instance.zone if self.instance else None)
+            if zone is not None and plafond.currency != zone.city.country.currency:
+                raise serializers.ValidationError(
+                    {
+                        "stock_adjustment_ceiling": (
+                            f"Le plafond se fixe en {zone.city.country.currency}, "
+                            "la devise de l'établissement."
+                        )
+                    }
+                )
+            if plafond.amount_minor < 0:
+                raise serializers.ValidationError(
+                    {"stock_adjustment_ceiling": "Un plafond ne peut pas être négatif."}
+                )
+        return attrs
 
 
 class RestaurantStatusTransitionSerializer(serializers.Serializer[Any]):
@@ -379,6 +571,12 @@ class RestaurantDuplicationSerializer(serializers.Serializer[Any]):
         ),
     )
 
+    def validate_zone(self, zone: DeliveryZone) -> DeliveryZone:
+        """Même règle que la création : pas sur la zone propre d'une autre cuisine."""
+        if (probleme := zone_anchoring_problem(zone, None)) is not None:
+            raise serializers.ValidationError(probleme)
+        return zone
+
     def validate_slug(self, value: str) -> str:
         """Un slug déjà pris est refusé ici, pas par la base.
 
@@ -403,6 +601,59 @@ class RestaurantDuplicationSerializer(serializers.Serializer[Any]):
                 + "."
             )
         return value
+
+
+class ManagedKitchenClosureSerializer(serializers.ModelSerializer[KitchenClosure]):
+    """Fermeture exceptionnelle d'une cuisine — `/restaurants/manage/closures/`.
+
+    Les instants s'envoient en ISO 8601 **avec leur décalage** : le back-office
+    les saisit dans le fuseau du pays, et un instant sans fuseau serait lu dans
+    celui du serveur — une heure d'écart à Lagos, deux à Kinshasa en été
+    européen.
+    """
+
+    restaurant = serializers.PrimaryKeyRelatedField[Restaurant](queryset=Restaurant.objects.all())
+    restaurant_name = serializers.CharField(source="restaurant.name", read_only=True)
+    is_current = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KitchenClosure
+        fields = [
+            "id",
+            "restaurant",
+            "restaurant_name",
+            "starts_at",
+            "ends_at",
+            "reason",
+            "is_current",
+            "created_at",
+        ]
+        read_only_fields = ["id", "restaurant_name", "is_current", "created_at"]
+
+    def get_is_current(self, obj: KitchenClosure) -> bool:
+        maintenant: dt.datetime = self.context.setdefault("now", timezone.now())
+        return obj.starts_at <= maintenant < obj.ends_at
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Une fermeture a une fin postérieure à son début, et une fin à venir.
+
+        La contrainte `CHECK` tient la première règle en base ; elle sortirait
+        en 500. La seconde n'est pas une règle de base : une fermeture déjà
+        terminée ne ferme rien, et l'accepter laisserait croire à l'exploitant
+        qu'il vient de fermer sa cuisine.
+        """
+        instance = self.instance if isinstance(self.instance, KitchenClosure) else None
+        debut = attrs.get("starts_at", getattr(instance, "starts_at", None))
+        fin = attrs.get("ends_at", getattr(instance, "ends_at", None))
+        if debut is not None and fin is not None and fin <= debut:
+            raise serializers.ValidationError(
+                {"ends_at": "La réouverture doit suivre le début de la fermeture."}
+            )
+        if fin is not None and "ends_at" in attrs and fin <= timezone.now():
+            raise serializers.ValidationError(
+                {"ends_at": "Cette fermeture est déjà terminée : elle ne fermerait rien."}
+            )
+        return attrs
 
 
 class ManagedOpeningHoursSerializer(serializers.ModelSerializer[OpeningHours]):
@@ -538,12 +789,17 @@ class StaffSerializer(serializers.ModelSerializer[User]):
         """
         donnees = super().to_representation(instance)
         perimetres = AreaMembership.objects.filter(user=instance).select_related("country", "city")
+        # Le filtre porte sur l'**objet** et non sur `*_id` : les deux disent la
+        # même chose à l'exécution — la contrainte `area_membership_exactly_one_target`
+        # garantit qu'exactement l'un des deux est renseigné —, mais seul le
+        # premier apprend au vérificateur que l'attribut n'est plus nul. Sur
+        # `*_id`, il voyait encore `Country | None` et refusait `.iso_code`.
+        #
+        # Aucune requête supplémentaire : `select_related` a déjà chargé les deux.
         donnees["countries"] = sorted(
-            zone.country.iso_code for zone in perimetres if zone.country_id is not None
+            zone.country.iso_code for zone in perimetres if zone.country is not None
         )
-        donnees["cities"] = sorted(
-            zone.city.slug for zone in perimetres if zone.city_id is not None
-        )
+        donnees["cities"] = sorted(zone.city.slug for zone in perimetres if zone.city is not None)
         return donnees
 
     def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
@@ -681,7 +937,16 @@ class ManagedRestaurantZoneSerializer(ManagedDeliveryZoneSerializer):
     auraient divergé au premier correctif.
     """
 
-    restaurant = serializers.SlugRelatedField[Restaurant](
+    # Redéclaration **volontaire** d'un champ hérité, et changement de nature :
+    # la classe mère l'expose en `CharField` lisible seule, parce que `geography`
+    # n'a pas le droit d'importer `Restaurant` (le cycle que le test
+    # d'architecture refuse). Ici, du côté qui connaît les deux, il devient
+    # inscriptible.
+    #
+    # `type: ignore[assignment]` — le vérificateur signale à juste titre que le
+    # type diffère de celui de la base ; c'est précisément l'intention, et elle
+    # est la seule façon d'écrire ce rattachement sans inverser le graphe.
+    restaurant = serializers.SlugRelatedField[Restaurant](  # type: ignore[assignment]
         slug_field="slug",
         queryset=Restaurant.objects.all(),
         help_text="Établissement auquel cette zone est propre.",

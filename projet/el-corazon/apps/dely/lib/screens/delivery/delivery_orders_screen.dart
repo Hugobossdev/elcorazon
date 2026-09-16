@@ -8,7 +8,7 @@ import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
 import 'package:elcorazon_core/elcorazon_core.dart'
-    show AppEmoji, AppEmojiToken;
+    show AppEmoji, AppEmojiToken, Money;
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/delivery/real_time_tracking_screen.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
@@ -377,6 +377,20 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
               ),
             ],
           ),
+          if (order.zoneLivraison.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 24),
+              child: Text(
+                'Zone ${order.zoneLivraison}',
+                style: TextStyle(color: Colors.grey[700], fontSize: 12),
+              ),
+            ),
+          ],
+          if (order.aEncaisser case final montant?) ...[
+            const SizedBox(height: 8),
+            _AEncaisser(montant: montant),
+          ],
           if (order.consignes != null) ...[
             const SizedBox(height: 8),
             Row(
@@ -665,6 +679,40 @@ class DeliveryDetailsSheet extends StatefulWidget {
   State<DeliveryDetailsSheet> createState() => _DeliveryDetailsSheetState();
 }
 
+/// Le montant à encaisser, en évidence : c'est la seule information de la
+/// course qui, oubliée, coûte de l'argent au livreur.
+class _AEncaisser extends StatelessWidget {
+  const _AEncaisser({required this.montant});
+
+  final Money montant;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.payments_outlined, size: 18, color: scheme.onTertiaryContainer),
+          const SizedBox(width: 8),
+          Text(
+            'À encaisser : ${montant.format()}',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: scheme.onTertiaryContainer,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
   /// La course de cette fiche. Raccourci de lecture : la moitié des méthodes
   /// de cette classe la désignaient, chacune par `widget.order`.
@@ -757,6 +805,10 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
               widget.order.moyenPaiement.libelle,
               icone: widget.order.moyenPaiement.icone,
             ),
+            if (widget.order.aEncaisser case final montant?)
+              _buildInfoRow('À encaisser', montant.format()),
+            if (widget.order.zoneLivraison.isNotEmpty)
+              _buildInfoRow('Zone', widget.order.zoneLivraison),
             if (widget.order.livraisonEstimeeA != null)
               _buildInfoRow(
                 'Livraison prévue',

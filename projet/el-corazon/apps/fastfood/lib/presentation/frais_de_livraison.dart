@@ -48,6 +48,7 @@ class FraisDeLivraison {
   factory FraisDeLivraison.depuisDevis(
     eccore.OrderQuote quote, {
     eccore.DeliveryZone? zone,
+    String? restaurantName,
   }) {
     return FraisDeLivraison(
       totalFee: quote.deliveryFee.toMajorUnits(),
@@ -57,6 +58,7 @@ class FraisDeLivraison {
       estimatedDeliveryTime: zone?.estimatedDeliveryMinutes,
       minOrderAmount: zone?.minOrderAmount?.toMajorUnits(),
       freeDeliveryThreshold: zone?.freeDeliveryThreshold?.toMajorUnits(),
+      restaurantName: restaurantName,
     );
   }
 

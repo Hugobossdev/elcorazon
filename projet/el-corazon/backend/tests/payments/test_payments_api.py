@@ -26,8 +26,7 @@ from apps.accounts.models import Role, User, UserType
 from apps.orders.models import Order, PaymentMethod
 from apps.orders.states import OrderStatus
 from apps.payments.models import PaymentProvider, PaymentStatus, Refund, Transaction
-from apps.payments.services import RefundService
-from apps.payments.services import PaymentService
+from apps.payments.services import PaymentService, RefundService
 from apps.restaurants.models import Restaurant, StaffMembership
 from common.money import Money
 from common.state_machine import IllegalTransition

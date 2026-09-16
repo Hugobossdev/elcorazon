@@ -131,6 +131,9 @@ def source_garnie(restaurant: Restaurant) -> Restaurant:
     Option.objects.create(group=cuisson, name="À point", price_delta=Money(0, XOF))
     Option.objects.create(group=cuisson, name="Bien cuit", price_delta=Money(0, XOF))
 
+    # Horaires propres à ce décor, à la place de l'ouverture permanente de la
+    # fixture commune : ce qu'on vérifie, c'est que ces sept plages-là suivent.
+    restaurant.opening_hours.all().delete()
     for jour in range(7):
         OpeningHours.objects.create(
             restaurant=restaurant, weekday=jour, opens_at="11:00", closes_at="23:00"

@@ -27,6 +27,7 @@ from apps.delivery.states import (
     DeliveryStatus,
     VerificationStatus,
 )
+from apps.geography.models import DeliveryZone
 from apps.orders.models import Order
 from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
@@ -53,6 +54,25 @@ class CourierProfile(UUIDModel, TimeStampedModel):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="courier_profile")
     restaurant = models.ForeignKey(Restaurant, on_delete=models.PROTECT, related_name="couriers")
+
+    # Zones où ce livreur accepte de rouler, **à l'intérieur** de la desserte de
+    # sa cuisine.
+    #
+    # **Vide veut dire : toutes les zones de sa cuisine**, et c'est le cas
+    # courant — le seul qui existait avant ce champ, si bien qu'aucun livreur
+    # en poste ne perd une course à son ajout. Renseigné, il restreint : un
+    # livreur affecté à Cocody et Riviera ne reçoit pas une course pour
+    # Yopougon, même partie de la même cuisine.
+    #
+    # Le rattachement à la cuisine reste la frontière dure (L1, cloisonnement du
+    # personnel) ; la zone l'affine, elle ne l'élargit jamais — une zone d'une
+    # autre ville est refusée à la saisie (`CourierService.set_service_zones`).
+    service_zones = models.ManyToManyField(
+        DeliveryZone,
+        blank=True,
+        related_name="couriers",
+        help_text="Vide : toutes les zones desservies par sa cuisine.",
+    )
 
     # --- Dossier ---------------------------------------------------------
     verification_status = models.CharField(
@@ -125,6 +145,19 @@ class CourierProfile(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.user.full_name} ({self.get_vehicle_type_display()})"
+
+    def serves_zone(self, zone_id: object) -> bool:
+        """Ce livreur roule-t-il dans cette zone ?
+
+        Sans restriction, oui partout. Restreint, seulement dans ses zones — et
+        **jamais** pour une commande dont la zone est inconnue (antérieure à la
+        géographie figée) : on ne l'envoie pas là où l'on ne sait pas qu'il
+        accepte d'aller.
+        """
+        zones = {zone.pk for zone in self.service_zones.all()}
+        if not zones:
+            return True
+        return zone_id is not None and zone_id in zones
 
     @property
     def can_accept_orders(self) -> bool:

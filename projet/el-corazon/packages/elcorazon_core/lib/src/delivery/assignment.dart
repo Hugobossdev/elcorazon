@@ -15,6 +15,42 @@ abstract final class DeliveryStatus {
   static const cancelled = 'cancelled';
 }
 
+/// Un article du sac, tel que le livreur le vérifie au retrait.
+class AssignmentItem {
+  const AssignmentItem({
+    required this.name,
+    required this.quantity,
+    this.itemImage = '',
+    this.options = const [],
+    this.notes = '',
+  });
+
+  factory AssignmentItem.fromJson(Map<String, dynamic> json) => AssignmentItem(
+    name: json['name'] as String? ?? '',
+    quantity: json['quantity'] as int? ?? 1,
+    itemImage: json['item_image'] as String? ?? '',
+    options: (json['options'] as List<dynamic>? ?? const [])
+        .map((option) => option.toString())
+        .where((option) => option.isNotEmpty)
+        .toList(growable: false),
+    notes: json['notes'] as String? ?? '',
+  );
+
+  final String name;
+  final int quantity;
+  final String itemImage;
+  final List<String> options;
+  final String notes;
+
+  /// Alias aligné sur [OrderLine] : les écrans livreur manipulent un article
+  /// de course sans avoir à relire la commande client.
+  String get itemName => name;
+
+  /// « 2 × Poulet braisé (Fort) ».
+  String get label =>
+      '$quantity × $name${options.isEmpty ? '' : ' (${options.join(', ')})'}';
+}
+
 /// Course affectée à un livreur — miroir de `AssignmentSerializer`
 /// (`backend/apps/delivery/serializers.py`).
 ///
@@ -47,12 +83,22 @@ class Assignment {
     this.pickedUpAt,
     this.deliveredAt,
     this.declineReason = '',
+    this.deliveryInstructions = '',
+    this.deliveryZoneName = '',
+    this.cityName = '',
+    this.paymentMethod = '',
+    this.orderTotal,
+    this.estimatedDeliveryAt,
+    this.amountToCollect,
+    this.items = const [],
   });
 
   factory Assignment.fromJson(Map<String, dynamic> json) {
     final pickup = json['pickup_location'] as Map<String, dynamic>;
     final dropoff = json['delivery_location'] as Map<String, dynamic>;
     final fee = json['courier_fee'] as Map<String, dynamic>?;
+    final total = json['order_total'] as Map<String, dynamic>?;
+    final aEncaisser = json['amount_to_collect'] as Map<String, dynamic>?;
     return Assignment(
       id: json['id'] as String,
       orderId: json['order'] as String,
@@ -77,6 +123,18 @@ class Assignment {
       pickedUpAt: _parseDate(json['picked_up_at']),
       deliveredAt: _parseDate(json['delivered_at']),
       declineReason: json['decline_reason'] as String? ?? '',
+      // Tous facultatifs : un serveur antérieur rend une course sans eux, et
+      // elle doit rester lisible.
+      deliveryInstructions: json['delivery_instructions'] as String? ?? '',
+      deliveryZoneName: json['delivery_zone_name'] as String? ?? '',
+      cityName: json['city_name'] as String? ?? '',
+      paymentMethod: json['payment_method'] as String? ?? '',
+      orderTotal: total == null ? null : Money.fromJson(total),
+      estimatedDeliveryAt: _parseDate(json['estimated_delivery_at']),
+      amountToCollect: aEncaisser == null ? null : Money.fromJson(aEncaisser),
+      items: (json['items'] as List<dynamic>? ?? const [])
+          .map((item) => AssignmentItem.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );
@@ -113,6 +171,30 @@ class Assignment {
   final DateTime? pickedUpAt;
   final DateTime? deliveredAt;
   final String declineReason;
+
+  /// La consigne du client — « portail bleu, sonnez deux fois ».
+  final String deliveryInstructions;
+
+  /// Zone et ville de livraison, figées sur la commande.
+  final String deliveryZoneName;
+  final String cityName;
+
+  /// `cash` | `mobile_money` | … — et, en espèces, **ce qu'il faut encaisser**.
+  final String paymentMethod;
+  final Money? orderTotal;
+
+  /// Promesse calculée sur la commande au moment de l'affectation.
+  final DateTime? estimatedDeliveryAt;
+
+  /// Le montant à encaisser à la porte ; nul quand la commande est déjà payée.
+  final Money? amountToCollect;
+
+  /// Ce qu'il y a dans le sac, pour le vérifier au retrait — sans les prix.
+  final List<AssignmentItem> items;
+
+  /// Le livreur doit-il encaisser à la livraison ?
+  bool get collectsCash => amountToCollect != null;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 

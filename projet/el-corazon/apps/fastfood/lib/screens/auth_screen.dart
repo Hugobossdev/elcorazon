@@ -9,7 +9,7 @@ import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/utils/input_sanitizer.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
 /// Connexion et inscription.
@@ -148,7 +148,7 @@ class _AuthScreenState extends State<AuthScreen> {
           _isLogin
               ? 'Connectez-vous pour retrouver vos commandes et vos adresses.'
               : 'Créez votre compte pour commander les saveurs grillées '
-                  'de ${RestaurantContextService().cityName ?? 'votre ville'}.',
+                  'de ${KitchenContextService().cityName ?? 'votre ville'}.',
           textAlign: TextAlign.center,
           style: AppTypography.bodyMd(color: theme.colorScheme.onSurfaceVariant),
         ),

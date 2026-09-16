@@ -144,6 +144,21 @@ class ManagedCourierRepository {
     return CourierProfile.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// Affecte le livreur à des zones de sa cuisine — **la liste entière**.
+  ///
+  /// Une liste vide lève la restriction. Une zone que sa cuisine ne dessert
+  /// pas est refusée par le serveur (409), sans rien écrire.
+  Future<CourierProfile> setServiceZones({
+    required String courierId,
+    required List<String> zoneIds,
+  }) async {
+    final response = await apiClient.post(
+      '/delivery/couriers/$courierId/zones/',
+      data: {'zones': zoneIds},
+    );
+    return CourierProfile.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// Livreurs éligibles pour une commande, **du plus proche au plus loin**.
   ///
   /// L'éligibilité (L1 : en ligne, dossier validé, compte actif) est calculée

@@ -1,3 +1,4 @@
+import 'package:elcorazon_core/src/models/money.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/restaurants/managed_restaurant.dart';
 import 'package:elcorazon_core/src/restaurants/restaurant_lifecycle.dart';
@@ -143,7 +144,10 @@ class ManagedRestaurantRepository {
     String? phone,
     String? email,
     bool? acceptsOrders,
+    bool? autoDispatchCouriers,
     int? defaultPreparationMinutes,
+    Money? stockAdjustmentCeiling,
+    bool clearStockAdjustmentCeiling = false,
   }) async {
     if ((latitude == null) != (longitude == null)) {
       throw ArgumentError(
@@ -163,8 +167,16 @@ class ManagedRestaurantRepository {
         if (phone != null) 'phone': phone,
         if (email != null) 'email': email,
         if (acceptsOrders != null) 'accepts_orders': acceptsOrders,
+        if (autoDispatchCouriers != null) 'auto_dispatch_couriers': autoDispatchCouriers,
         if (defaultPreparationMinutes != null)
           'default_preparation_minutes': defaultPreparationMinutes,
+        // Deux paramètres et non un seul nullable : « ne pas toucher au
+        // plafond » et « retirer le plafond » sont deux écritures différentes,
+        // et la seconde fait passer toute perte par une validation.
+        if (stockAdjustmentCeiling != null)
+          'stock_adjustment_ceiling': stockAdjustmentCeiling.toJson()
+        else if (clearStockAdjustmentCeiling)
+          'stock_adjustment_ceiling': null,
       },
     );
     return ManagedRestaurant.fromJson(response.data as Map<String, dynamic>);

@@ -31,6 +31,8 @@ from apps.analytics.serializers import (
     CategoryRowSerializer,
     CourierPerformanceRowSerializer,
     EventWriteSerializer,
+    NetworkQuerySerializer,
+    NetworkRowSerializer,
     OverviewSerializer,
     ReportQuerySerializer,
     RevenueRowSerializer,
@@ -38,13 +40,14 @@ from apps.analytics.serializers import (
     TopProductRowSerializer,
 )
 from apps.analytics.services import AnalyticsService
-from common.permissions import HasPermission, active_user
+from common.permissions import HasPermission, active_user, authenticated_user
 
 __all__ = [
     "CategoryReportView",
     "CourierPerformanceReportView",
     "CustomerStatsView",
     "EventIngestView",
+    "NetworkReportView",
     "OrderStatusReportView",
     "OverviewView",
     "RevenueReportView",
@@ -92,7 +95,13 @@ def _perimetre(request: Request) -> Perimetre:
     """
     query = PerimetreQuerySerializer(data=request.query_params)
     query.is_valid(raise_exception=True)
-    return resolve_perimetre(user=active_user(request), params=query.validated_data)
+    # `authenticated_user` et non `active_user` : les six vues de rapport portent
+    # `HasPermission`, donc l'anonyme est déjà écarté — mais `active_user` rend
+    # `User | None`, et `resolve_perimetre` attend un utilisateur. Le repli sur
+    # `None` aurait résolu un périmètre vide, c'est-à-dire un rapport muet, là où
+    # l'on veut une erreur franche si une vue était un jour publiée sans
+    # permission. C'est exactement le filet que cet assistant documente.
+    return resolve_perimetre(user=authenticated_user(request), params=query.validated_data)
 
 
 #: Les trois filtres de réseau, documentés une fois pour les six rapports.
@@ -280,6 +289,51 @@ class CategoryReportView(APIView):
             start=start, end=end, perimetre=_perimetre(request)
         )
         return _rendu(request, rows, CategoryRowSerializer, f"categories-{start}-{end}")
+
+
+class NetworkReportView(APIView):
+    """`GET /analytics/reports/network/?start=&end=&level=` — le réseau de cuisines chiffré.
+
+    `level` vaut `country`, `city`, `zone` ou `kitchen` (défaut). Les filtres de
+    réseau habituels (`country`, `city`, `restaurant`) se composent avec le
+    périmètre du compte, et `zone` restreint à une zone de livraison.
+    """
+
+    permission_classes = [HasPermission.of("analytics.read")]
+
+    @extend_schema(
+        responses={200: NetworkRowSerializer(many=True)},
+        parameters=[
+            EXPORT,
+            *PERIMETRE,
+            OpenApiParameter(
+                name="level",
+                type=OpenApiTypes.STR,
+                enum=["country", "city", "zone", "kitchen"],
+                description="Étage du réseau sur lequel regrouper. Défaut : `kitchen`.",
+            ),
+            OpenApiParameter(
+                name="zone",
+                type=OpenApiTypes.UUID,
+                description="Restreint à une zone de livraison (zone figée sur la commande).",
+            ),
+        ],
+        tags=["analytics"],
+    )
+    def get(self, request: Request) -> Response | HttpResponse:
+        start, end, _ = _period(request)
+        query = NetworkQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        niveau = query.validated_data["level"]
+        zone = query.validated_data["zone"]
+        rows = ReportingService.network(
+            start=start,
+            end=end,
+            perimetre=_perimetre(request),
+            level=niveau,
+            zone_id=zone,
+        )
+        return _rendu(request, rows, NetworkRowSerializer, f"reseau-{niveau}-{start}-{end}")
 
 
 class OverviewView(APIView):

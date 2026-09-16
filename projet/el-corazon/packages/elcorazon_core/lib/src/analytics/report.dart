@@ -76,6 +76,56 @@ class CourierPerformanceRow {
   final int earningsMinor;
 }
 
+/// Une ligne du rapport réseau — un pays, une ville, une zone ou une cuisine.
+///
+/// [revenueMinor] porte sur les commandes **livrées** ; [ordersCount] sur tout
+/// ce qui a été commandé dans la fenêtre. Une ligne par devise : on
+/// n'additionne pas des francs CFA et des nairas.
+class NetworkRow {
+  const NetworkRow({
+    required this.key,
+    required this.name,
+    required this.currency,
+    required this.ordersCount,
+    required this.inProgressCount,
+    required this.deliveredCount,
+    required this.cancelledCount,
+    required this.revenueMinor,
+    this.cityName = '',
+    this.countryIsoCode = '',
+  });
+
+  factory NetworkRow.fromJson(Map<String, dynamic> json) {
+    return NetworkRow(
+      key: json['key'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      cityName: json['city'] as String? ?? '',
+      countryIsoCode: json['country'] as String? ?? '',
+      currency: json['currency'] as String? ?? '',
+      ordersCount: json['orders_count'] as int? ?? 0,
+      inProgressCount: json['in_progress_count'] as int? ?? 0,
+      deliveredCount: json['delivered_count'] as int? ?? 0,
+      cancelledCount: json['cancelled_count'] as int? ?? 0,
+      revenueMinor: json['revenue_minor'] as int? ?? 0,
+    );
+  }
+
+  /// Identifiant de l'entité regroupée — vide pour les commandes non situées.
+  final String key;
+  final String name;
+  final String cityName;
+  final String countryIsoCode;
+  final String currency;
+  final int ordersCount;
+  final int inProgressCount;
+  final int deliveredCount;
+  final int cancelledCount;
+  final int revenueMinor;
+
+  /// Part des commandes annulées, de 0 à 1 — zéro sans commande.
+  double get cancellationRate => ordersCount == 0 ? 0 : cancelledCount / ordersCount;
+}
+
 /// Commandes rangées par statut.
 class StatusRow {
   const StatusRow({

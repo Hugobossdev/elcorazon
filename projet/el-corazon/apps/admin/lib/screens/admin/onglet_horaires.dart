@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/screens/admin/fermetures_exceptionnelles.dart';
 import 'package:admin/services/opening_hours_service.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/ui/ui.dart';
@@ -92,6 +93,10 @@ class _OngletHorairesState extends State<OngletHoraires> {
                 '22:00 → 02:00 — et vaut pour la nuit qui suit le jour choisi.',
                 style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
+              if (perimetre.current case final cuisine?) ...[
+                const SizedBox(height: 24),
+                FermeturesExceptionnelles(restaurantId: cuisine.id, nomCuisine: cuisine.name),
+              ],
             ],
           ),
         );

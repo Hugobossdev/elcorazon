@@ -2,14 +2,17 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:elcora_fast/presentation/changement_de_cuisine.dart';
+import 'package:elcora_fast/presentation/situation_cuisine.dart';
+import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// **Choisir sa ville, puis sa cuisine.**
 ///
 /// ## Ce que cet écran comble
 ///
-/// `RestaurantContextService` savait depuis l'origine lister les
+/// `KitchenContextService` savait depuis l'origine lister les
 /// établissements, en désigner un et prévenir les caches du changement —
 /// `hasChoice` et `select()` existaient. **Aucun écran ne les appelait.** Le
 /// client se voyait donc attribuer le premier établissement rendu par le
@@ -87,7 +90,7 @@ class _SelecteurEtablissementSheetState extends State<SelecteurEtablissementShee
         return;
       }
 
-      await context.read<RestaurantContextService>().trierParProximite(
+      await context.read<KitchenContextService>().trierParProximite(
         latitude: position.latitude,
         longitude: position.longitude,
       );
@@ -97,8 +100,23 @@ class _SelecteurEtablissementSheetState extends State<SelecteurEtablissementShee
   }
 
   Future<void> _choisir(eccore.Restaurant etablissement) async {
-    final contexte = context.read<RestaurantContextService>();
+    final contexte = context.read<KitchenContextService>();
+    final panier = context.read<CartService>();
     final avant = contexte.slug;
+
+    // Changer de cuisine, c'est changer de carte et de prix : le panier ne
+    // suit pas. On le demande quand il y a quelque chose à laisser derrière.
+    if (avant != null && avant != etablissement.slug && panier.itemCount > 0) {
+      final accepte = await ChangementDeCuisine.confirmer(
+        context,
+        ancienne: contexte.name ?? 'votre cuisine',
+        nouvelle: etablissement.name,
+        articles: panier.itemCount,
+      );
+      if (!accepte || !mounted) return;
+      panier.changementDeCuisineConfirme();
+    }
+
     await contexte.select(etablissement.slug);
     if (mounted) Navigator.of(context).pop(avant != contexte.slug);
   }
@@ -107,7 +125,7 @@ class _SelecteurEtablissementSheetState extends State<SelecteurEtablissementShee
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return Consumer<RestaurantContextService>(
+    return Consumer<KitchenContextService>(
       builder: (context, contexte, _) {
         final villes = contexte.villesDesservies;
         // La ville retenue peut avoir disparu entre deux chargements — son
@@ -115,8 +133,8 @@ class _SelecteurEtablissementSheetState extends State<SelecteurEtablissementShee
         // « toutes » plutôt que d'afficher une liste vide inexplicable.
         final villeActive = (_ville != null && villes.contains(_ville)) ? _ville : null;
         final etablissements = villeActive == null
-            ? contexte.restaurants
-            : contexte.etablissementsDe(villeActive);
+            ? contexte.cuisines
+            : contexte.cuisinesDe(villeActive);
 
         return DraggableScrollableSheet(
           initialChildSize: 0.75,
@@ -167,7 +185,7 @@ class _SelecteurEtablissementSheetState extends State<SelecteurEtablissementShee
               if (contexte.isLoading) const LinearProgressIndicator(minHeight: 2),
               Expanded(
                 child: etablissements.isEmpty
-                    ? const _AucunEtablissement()
+                    ? _ListeVide(contexte: contexte, villeFiltree: villeActive != null)
                     : ListView.separated(
                         controller: scrollController,
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
@@ -287,10 +305,10 @@ class _CarteEtablissement extends StatelessWidget {
               style: const TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 4),
-            // Les trois états sont rendus séparément par le serveur
-            // (`is_open`, `accepts_orders`, `can_order_now`) précisément pour
-            // qu'on puisse dire *pourquoi* on ne peut pas commander : « fermé,
-            // ouvre à 11 h » n'est pas « débordé, réessayez ».
+            // Le serveur rend un verdict et son motif (`can_order_now`,
+            // `unavailable_code`) précisément pour qu'on puisse dire *pourquoi*
+            // on ne peut pas commander : « fermé » n'est pas « débordé,
+            // réessayez ».
             _Etat(etablissement: etablissement),
           ],
         ),
@@ -311,10 +329,19 @@ class _Etat extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    final (texte, couleur) = switch (etablissement) {
-      final r when r.canOrderNow => ('Ouvert', scheme.primary),
-      final r when !r.isOpen => ('Fermé pour le moment', scheme.onSurfaceVariant),
-      _ => ('Ne prend pas de commandes', scheme.error),
+    // Lu depuis le motif du serveur, et non recomposé à partir de `isOpen` et
+    // `acceptsOrders` : c'était la règle du juge écrite une seconde fois, ici,
+    // et elle ignorait déjà la fermeture d'un marché.
+    //
+    // L'étiquette dit **jusqu'à quand** : « Fermé — réouverture demain à
+    // 11 h 00 », phrase composée par le serveur dans le fuseau de la cuisine.
+    final texte = etablissement.statusLabel;
+    final couleur = switch (etablissement) {
+      final r when r.canOrderNow => scheme.primary,
+      final r when r.unavailableCode == eccore.MotifIndisponibilite.cuisineEnPause ||
+          r.unavailableCode == eccore.MotifIndisponibilite.cuisineSuspendue =>
+        scheme.error,
+      _ => scheme.onSurfaceVariant,
     };
 
     return Text(
@@ -324,12 +351,28 @@ class _Etat extends StatelessWidget {
   }
 }
 
-class _AucunEtablissement extends StatelessWidget {
-  const _AucunEtablissement();
+/// La liste est vide — **et pourquoi**.
+///
+/// Ce widget ne savait dire qu'une chose : « Aucune cuisine dans cette ville ».
+/// Il le disait aussi quand l'annuaire n'avait pas pu être lu, si bien qu'un
+/// serveur en panne se présentait comme une ville sans cuisine. Seul un annuaire
+/// qui a répondu vide — ou un filtre de ville sans résultat — le dit encore.
+class _ListeVide extends StatelessWidget {
+  const _ListeVide({required this.contexte, required this.villeFiltree});
+
+  final KitchenContextService contexte;
+  final bool villeFiltree;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final presentation = villeFiltree
+        ? const PresentationSituation(
+            titre: 'Aucune cuisine dans cette ville',
+            message: 'Choisissez une autre ville, ou revenez plus tard.',
+            icone: Icons.soup_kitchen_outlined,
+          )
+        : PresentationSituation.de(contexte.situation, motifServeur: contexte.motifDesserte);
 
     return Center(
       child: Padding(
@@ -337,19 +380,27 @@ class _AucunEtablissement extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.storefront_outlined, size: 48, color: scheme.onSurfaceVariant),
+            Icon(presentation.icone, size: 48, color: scheme.onSurfaceVariant),
             const SizedBox(height: 16),
             Text(
-              'Aucune cuisine dans cette ville',
+              presentation.titre,
               style: Theme.of(context).textTheme.titleMedium,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              'Choisissez une autre ville, ou revenez plus tard.',
+              presentation.message,
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
             ),
+            if (presentation.reessayable && !villeFiltree) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: contexte.isLoading ? null : () => contexte.resolve(force: true),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Réessayer'),
+              ),
+            ],
           ],
         ),
       ),

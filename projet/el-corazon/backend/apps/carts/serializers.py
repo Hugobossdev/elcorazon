@@ -48,10 +48,21 @@ class PricedLineSerializer(serializers.Serializer[Any]):
     unit_price = MoneyField(read_only=True)
     total = MoneyField(read_only=True)
     is_orderable = serializers.BooleanField(read_only=True)
+    # Motif stable (`common.availability.UnavailabilityCode`), vide si la ligne
+    # est commandable. C'est lui que le client compare, jamais la phrase.
+    unavailable_code = serializers.CharField(read_only=True)
     unavailable_reason = serializers.CharField(read_only=True)
 
 
 class CartSerializer(serializers.Serializer[Any]):
+    """Panier valorisé.
+
+    `unavailable_code` et `unavailable_reason` disent pourquoi **la cuisine**
+    ne prend pas la commande — fermée, suspendue. Les motifs propres à chaque
+    article sont sur ses lignes. `is_orderable` compose les deux, pour que le
+    bouton de validation n'ait qu'une question à poser.
+    """
+
     id = serializers.UUIDField(source="cart.id", read_only=True)
     restaurant = serializers.CharField(source="cart.restaurant.slug", read_only=True)
     restaurant_name = serializers.CharField(source="cart.restaurant.name", read_only=True)
@@ -59,6 +70,8 @@ class CartSerializer(serializers.Serializer[Any]):
     lines = PricedLineSerializer(many=True, read_only=True)
     subtotal = MoneyField(read_only=True)
     is_orderable = serializers.BooleanField(read_only=True)
+    unavailable_code = serializers.CharField(read_only=True)
+    unavailable_reason = serializers.CharField(read_only=True)
     updated_at = serializers.DateTimeField(source="cart.updated_at", read_only=True)
 
 

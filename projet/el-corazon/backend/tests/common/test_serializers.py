@@ -12,7 +12,8 @@ import pytest
 from rest_framework.exceptions import ValidationError
 
 from common.money import Money
-from common.serializers import LocationField, MoneyField
+from common.quantities import Quantity
+from common.serializers import LocationField, MoneyField, QuantityField
 
 
 class TestMontantEnSortie:
@@ -87,3 +88,48 @@ class TestPosition:
     def test_refuse_une_position_impossible(self, payload: object) -> None:
         with pytest.raises(ValidationError):
             LocationField().to_internal_value(payload)
+
+
+class TestQuantite:
+    """`{"amount": "1.5", "unit": "kg"}` — le pendant de `MoneyField` pour la matière."""
+
+    def test_en_entree_l_unite_est_libre_et_la_conversion_exacte(self) -> None:
+        assert QuantityField().to_internal_value({"amount": "1.5", "unit": "kg"}) == (
+            Quantity.from_unit("1500", "g")
+        )
+
+    def test_un_nombre_json_se_lit_par_sa_representation_ecrite(self) -> None:
+        """`Decimal(0.1)` vaut 0.1000000000000000055…, que `from_unit` refuserait
+        à juste titre ; c'est `0.1`, tel qu'écrit, qui est reçu."""
+        assert QuantityField().to_internal_value({"amount": 0.1, "unit": "kg"}) == (
+            Quantity.from_unit("100", "g")
+        )
+
+    def test_en_sortie_toujours_l_unite_de_reference(self) -> None:
+        """Deux clients qui trient ne comparent pas « 1.5 kg » et « 900 g »."""
+        sortie = QuantityField().to_representation(Quantity.from_unit("1.5", "kg"))
+
+        assert sortie == {"amount": "1500", "unit": "g", "dimension": "mass"}
+
+    def test_les_millieme_d_unite_sortent_en_decimal(self) -> None:
+        sortie = QuantityField().to_representation(Quantity.from_unit("0.5", "unit"))
+
+        assert sortie == {"amount": "0.5", "unit": "unit", "dimension": "count"}
+
+    @pytest.mark.parametrize(
+        "donnee",
+        [
+            "1.5 kg",
+            {"amount": "1.5"},
+            {"amount": "beaucoup", "unit": "kg"},
+            {"amount": "NaN", "unit": "kg"},
+            {"amount": "1", "unit": "livre"},
+            {"amount": "0.0001", "unit": "g"},
+        ],
+    )
+    def test_ce_qui_n_est_pas_une_quantite_exacte_est_refuse(self, donnee: object) -> None:
+        """Une précision plus fine que l'unité de base est **refusée**, pas
+        arrondie : l'arrondir à zéro ferait disparaître une ligne de recette
+        sans que rien ne le dise."""
+        with pytest.raises(ValidationError):
+            QuantityField().to_internal_value(donnee)

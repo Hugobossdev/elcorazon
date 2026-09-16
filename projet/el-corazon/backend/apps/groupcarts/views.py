@@ -91,6 +91,8 @@ class GroupCartViewSet(GenericViewSet[GroupCart]):
             "currency": selection.currency,
             "subtotal": selection.subtotal,
             "is_orderable": selection.is_orderable,
+            "unavailable_code": str(selection.kitchen.code) if selection.kitchen else "",
+            "unavailable_reason": selection.kitchen.message if selection.kitchen else "",
         }
         return Response(GroupCartSerializer(payload).data, status=http_status)
 

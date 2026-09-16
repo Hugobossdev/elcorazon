@@ -3,13 +3,12 @@ import 'package:flutter/foundation.dart';
 
 import 'package:elcora_dely/presentation/libelles_course.dart';
 
-/// Une course telle que l'app la manipule : l'affectation Django, et le détail
-/// de la commande quand il a pu être lu.
+/// Une course telle que l'app la manipule : l'affectation Django.
 ///
-/// Les deux voyagent ensemble parce que les écrans montrent une commande
-/// (articles, montants, adresse) alors que **toutes les actions du livreur
-/// s'adressent à la course** (`/delivery/assignments/{id}/...`). Garder
-/// l'affectation sous la main évite de la rechercher à chaque geste.
+/// L'affectation transporte les articles, le total, l'adresse et les consignes
+/// dont le livreur a besoin. Toutes ses actions s'adressent à elle
+/// (`/delivery/assignments/{id}/...`) ; la commande cliente n'est jamais
+/// relue.
 ///
 /// Jusqu'au lot 3, cette classe portait en plus une **copie locale** de la
 /// commande, de forme héritée de Supabase, que l'adaptateur recomposait champ
@@ -17,18 +16,9 @@ import 'package:elcora_dely/presentation/libelles_course.dart';
 /// ce que l'affichage réclame en propre est calculé ici, une fois.
 @immutable
 class Course {
-  const Course({required this.assignment, this.commande});
+  const Course({required this.assignment});
 
   final eccore.Assignment assignment;
-
-  /// Détail de la commande — articles, montants, moyen de paiement.
-  ///
-  /// `null` pour les courses **livrées** : leur détail n'est pas relu, ce qui
-  /// coûterait une requête par ligne d'historique pour des articles que plus
-  /// personne ne regarde. `null` aussi quand la lecture a échoué, auquel cas la
-  /// course reste affichable — mieux vaut une course incomplète qu'une course
-  /// disparue de l'écran.
-  final eccore.Order? commande;
 
   String get assignmentId => assignment.id;
 
@@ -119,8 +109,23 @@ class Course {
       assignment.status == eccore.DeliveryStatus.onTheWay ||
       assignment.status == eccore.DeliveryStatus.delivered;
 
-  MoyenPaiement get moyenPaiement =>
-      MoyenPaiement.depuisServeur(commande?.paymentMethod);
+  MoyenPaiement get moyenPaiement => MoyenPaiement.depuisServeur(
+    assignment.paymentMethod.isNotEmpty ? assignment.paymentMethod : commande?.paymentMethod,
+  );
+
+  /// Ce qu'il faut encaisser à la porte — nul quand la commande est déjà payée.
+  ///
+  /// Porté par la course elle-même : une course proposée ou livrée n'a pas
+  /// toujours sa commande relue, et un livreur qui part sans connaître le
+  /// montant l'apprend du client, sur le pas de la porte.
+  eccore.Money? get aEncaisser => assignment.amountToCollect;
+
+  /// Zone et ville de livraison, figées sur la commande — vides d'un serveur
+  /// antérieur.
+  String get zoneLivraison => [
+    assignment.deliveryZoneName,
+    assignment.cityName,
+  ].where((partie) => partie.isNotEmpty).join(', ');
 
   /// Ce que le livreur touche pour cette course, tel que le serveur le calcule.
   ///
@@ -140,22 +145,19 @@ class Course {
   /// Consignes de livraison, ou `null` s'il n'y en a pas — pour que l'écran
   /// n'affiche pas un encart vide.
   String? get consignes {
-    final texte = commande?.deliveryInstructions ?? '';
+    final texte = assignment.deliveryInstructions;
     return texte.isEmpty ? null : texte;
   }
 
-  List<eccore.OrderLine> get articles => commande?.lines ?? const [];
+  List<eccore.AssignmentItem> get articles => assignment.items;
 
-  eccore.Money? get total => commande?.total;
-  eccore.Money? get sousTotal => commande?.subtotal;
-  eccore.Money? get fraisLivraison => commande?.deliveryFee;
-  eccore.Money? get remise => commande?.discount;
+  eccore.Money? get total => assignment.orderTotal;
 
   /// Moment où la commande a été passée, à défaut celui où la course a été
   /// proposée — l'historique n'a que le second.
-  DateTime get passeeLe => commande?.placedAt ?? assignment.offeredAt;
+  DateTime get passeeLe => assignment.offeredAt;
 
-  DateTime? get livraisonEstimeeA => commande?.estimatedDeliveryAt;
+  DateTime? get livraisonEstimeeA => assignment.estimatedDeliveryAt;
 
   /// Moment où la course a été **livrée**, tel que le serveur l'a horodaté.
   ///
@@ -193,11 +195,9 @@ class Course {
 class DjangoDeliveryRepository {
   DjangoDeliveryRepository({required eccore.ApiClient apiClient})
     : _delivery = eccore.DeliveryRepository(apiClient: apiClient),
-      _orders = eccore.OrderRepository(apiClient: apiClient),
       _tracking = eccore.TrackingRepository(apiClient: apiClient);
 
   final eccore.DeliveryRepository _delivery;
-  final eccore.OrderRepository _orders;
   final eccore.TrackingRepository _tracking;
 
   /// Dépose une candidature de livreur — **la seule méthode sans session**.
@@ -273,27 +273,27 @@ class DjangoDeliveryRepository {
       _delivery.recentlyDelivered(),
     ]);
     final assignments = [for (final batch in batches) ...batch];
-    return Future.wait(assignments.map(_toCourse));
+    return assignments.map((assignment) => Course(assignment: assignment)).toList(growable: false);
   }
 
   Future<Course> loadCourse(String assignmentId) async {
-    return _toCourse(await _delivery.getById(assignmentId));
+    return Course(assignment: await _delivery.getById(assignmentId));
   }
 
   /// L2 — l'acceptation est exclusive côté serveur : deux livreurs sur la même
   /// commande, le second reçoit un refus métier. L'appelant ne doit donc rien
   /// afficher comme acquis avant que ce futur ne soit résolu.
   Future<Course> accept(String assignmentId) async {
-    return _toCourse(await _delivery.accept(assignmentId));
+    return Course(assignment: await _delivery.accept(assignmentId));
   }
 
   Future<Course> decline(String assignmentId, {String reason = ''}) async {
-    return _toCourse(await _delivery.decline(assignmentId, reason: reason));
+    return Course(assignment: await _delivery.decline(assignmentId, reason: reason));
   }
 
   /// Fait avancer la course. [target] doit venir de [Course.allowedTransitions].
   Future<Course> advanceTo(String assignmentId, String target) async {
-    return _toCourse(await _delivery.transitionTo(assignmentId, target));
+    return Course(assignment: await _delivery.transitionTo(assignmentId, target));
   }
 
   /// Dépose une position sur une course en cours. Rend `false` quand
@@ -320,26 +320,4 @@ class DjangoDeliveryRepository {
     return ping != null;
   }
 
-  /// Assemble la course et, quand elle est en cours, le détail de sa commande.
-  ///
-  /// L'affectation ne porte ni les articles, ni les montants, ni le moyen de
-  /// paiement — or un livreur qui encaisse en espèces a besoin de savoir
-  /// combien, et de vérifier le sac avant de partir. Le contrat le lui
-  /// permet : `OrderViewSet` rend au livreur les commandes qui lui sont
-  /// confiées, et rien d'autre.
-  ///
-  /// L'échec de cette lecture n'emporte pas la course : voir [Course.commande].
-  Future<Course> _toCourse(eccore.Assignment assignment) async {
-    if (!assignment.isActive) return Course(assignment: assignment);
-
-    try {
-      return Course(
-        assignment: assignment,
-        commande: await _orders.getById(assignment.orderId),
-      );
-    } catch (e) {
-      eccore.Journal.trace('⚠️ Commande ${assignment.orderId} illisible : $e');
-      return Course(assignment: assignment);
-    }
-  }
 }

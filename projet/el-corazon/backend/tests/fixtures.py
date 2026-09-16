@@ -9,6 +9,8 @@ trous.
 
 from __future__ import annotations
 
+import datetime as dt
+
 import pytest
 from django.contrib.gis.geos import MultiPolygon, Point, Polygon
 
@@ -19,7 +21,7 @@ from apps.delivery.states import VerificationStatus
 from apps.geography.models import City, Country, DeliveryZone
 from apps.orders.models import Order, PaymentMethod
 from apps.profiles.models import Address
-from apps.restaurants.models import Restaurant, RestaurantStatus
+from apps.restaurants.models import OpeningHours, Restaurant, RestaurantStatus, Weekday
 from common.money import Money
 
 LOME = Point(1.2255, 6.1319, srid=4326)
@@ -52,24 +54,50 @@ def zone(city: City) -> DeliveryZone:
     )
 
 
+def ouvert_en_permanence(restaurant: Restaurant) -> Restaurant:
+    """Ouvre l'établissement à toute heure, tous les jours.
+
+    Deux plages par jour, `00:00 → 12:00` puis `12:00 → 00:00` — la seconde
+    franchit minuit. Une plage unique ne peut pas couvrir la journée :
+    `opening_hours_not_empty` interdit `opens_at == closes_at`, et
+    `00:00 → 23:59:59.999999` laisserait une microseconde fermée par jour, où un
+    test finirait un jour par tomber.
+    """
+    OpeningHours.objects.bulk_create(
+        OpeningHours(restaurant=restaurant, weekday=jour, opens_at=ouvre, closes_at=ferme)
+        for jour in Weekday
+        for ouvre, ferme in ((dt.time(0), dt.time(12)), (dt.time(12), dt.time(0)))
+    )
+    return restaurant
+
+
 @pytest.fixture
 def restaurant(zone: DeliveryZone) -> Restaurant:
-    """Établissement **en service**.
+    """Établissement **en service**, et ouvert.
 
     `status` est posé explicitement depuis que le cycle de vie existe : le
     défaut du modèle est « brouillon », ce qui est le bon défaut pour une
     création par l'API — on ne publie pas ce qu'on vient de saisir — mais pas
     pour un décor de test, dont la quasi-totalité suppose un restaurant qui
     prend des commandes.
+
+    Les horaires, eux, manquaient — et ce manque cachait un défaut. Sans aucune
+    plage, l'établissement était **fermé** au sens de `is_open_at`, affiché
+    « Fermé » par l'application… et des centaines de tests y passaient commande
+    avec succès, parce que la création de commande ne consultait pas l'ouverture.
+    Depuis que le juge de disponibilité la consulte, un établissement qui prend
+    des commandes doit être ouvert, ici comme en production.
     """
-    return Restaurant.objects.create(
-        name="El Corazón",
-        slug="el-corazon-lome",
-        zone=zone,
-        address="Lomé",
-        location=LOME,
-        phone="+22890000000",
-        status=RestaurantStatus.ACTIVE,
+    return ouvert_en_permanence(
+        Restaurant.objects.create(
+            name="El Corazón",
+            slug="el-corazon-lome",
+            zone=zone,
+            address="Lomé",
+            location=LOME,
+            phone="+22890000000",
+            status=RestaurantStatus.ACTIVE,
+        )
     )
 
 

@@ -396,8 +396,16 @@ class _EnhancedItemCustomizationScreenState
                 ),
                 const SizedBox(height: DesignConstants.spacingXS),
                 Text(
-                  'La cuisine ne sert plus ce plat pour l’instant. '
-                  'Vous pouvez consulter ses options, mais pas le commander.',
+                  // La phrase du serveur quand il en rend une : « en rupture »
+                  // et « plus au menu » ne disent pas la même chose, et c'est
+                  // le juge de disponibilité qui sait laquelle s'applique. Le
+                  // texte générique ne sert qu'aux articles lus dans un cache
+                  // antérieur à ce champ.
+                  widget.item.unavailableReason.isNotEmpty
+                      ? '${widget.item.unavailableReason} '
+                          'Vous pouvez consulter ses options, mais pas le commander.'
+                      : 'La cuisine ne sert plus ce plat pour l’instant. '
+                          'Vous pouvez consulter ses options, mais pas le commander.',
                   style: AppTypography.bodyMd(
                     color: theme.colorScheme.onErrorContainer,
                   ),

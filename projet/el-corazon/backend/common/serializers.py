@@ -10,6 +10,7 @@ l'autre. Ils sont donc définis **une fois**, ici.
 from __future__ import annotations
 
 import json
+from decimal import Decimal, InvalidOperation
 from typing import Any, ClassVar
 
 from django.contrib.gis.geos import GEOSGeometry, MultiPolygon, Point, Polygon
@@ -18,8 +19,9 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from common.money import Money, UnknownCurrency
+from common.quantities import UNITS_IN_BASE, Dimension, Quantity
 
-__all__ = ["BoundaryField", "LocationField", "MoneyField"]
+__all__ = ["BoundaryField", "LocationField", "MoneyField", "QuantityField"]
 
 
 @extend_schema_field(
@@ -182,3 +184,91 @@ class BoundaryField(serializers.Field[MultiPolygon, Any, dict[str, Any], Any]):
             self.fail("invalid", reason=geometry.valid_reason)
 
         return geometry
+
+
+@extend_schema_field(
+    {
+        "type": "object",
+        "properties": {
+            "amount": {
+                "type": "string",
+                "description": (
+                    "Valeur décimale exacte, en chaîne. En sortie, dans l'unité de "
+                    "référence de la dimension (g, ml, unit)."
+                ),
+                "example": "1.5",
+            },
+            "unit": {
+                "type": "string",
+                "enum": sorted(UNITS_IN_BASE),
+                "example": "kg",
+            },
+            "dimension": {
+                "type": "string",
+                "enum": list(Dimension.ALL),
+                "readOnly": True,
+                "example": "mass",
+            },
+        },
+        "required": ["amount", "unit"],
+    }
+)
+class QuantityField(serializers.Field[Quantity, Any, dict[str, str], Any]):
+    """Quantité de matière — `{"amount": "1.5", "unit": "kg"}`.
+
+    Le pendant de `MoneyField`, pour la même raison : un seul endroit décide de
+    la forme JSON d'une quantité, sans quoi chaque route en inventerait une.
+
+    **En entrée**, l'unité est libre parmi celles de la table — on reçoit en
+    kilogrammes, on retire vingt grammes — et la conversion est exacte : une
+    précision plus fine que l'unité de base est refusée plutôt qu'arrondie.
+
+    **En sortie**, toujours l'unité de référence de la dimension (`g`, `ml`,
+    `unit`), et la dimension en clair. Rendre l'unité de saisie obligerait à la
+    stocker ; rendre une unité choisie selon la taille ferait comparer « 1.5 kg »
+    et « 900 g » à des clients qui trient. L'affichage « 1,5 kg » appartient à
+    l'écran.
+
+    La valeur voyage en **chaîne**, comme un montant : un `double` JavaScript ne
+    représente pas `0.1` exactement, et ce module existe pour que la matière ne
+    dérive pas au dernier mètre.
+    """
+
+    default_error_messages: ClassVar[dict[str, Any]] = {
+        "not_an_object": 'Une quantité s\'écrit {{"amount": "1.5", "unit": "kg"}}.',
+        "not_a_number": "La quantité doit être un nombre décimal, en chaîne : « 1.5 ».",
+        "unknown_unit": "Unité inconnue : {unit}. Connues : {known}.",
+        "too_precise": "{detail}",
+    }
+
+    def to_representation(self, value: Quantity) -> dict[str, str]:
+        return {
+            "amount": f"{value.as_reference.normalize():f}",
+            "unit": value.reference_unit,
+            "dimension": value.dimension,
+        }
+
+    def to_internal_value(self, data: Any) -> Quantity:
+        if not isinstance(data, dict) or "amount" not in data or "unit" not in data:
+            self.fail("not_an_object")
+
+        unit = str(data["unit"])
+        if unit not in UNITS_IN_BASE:
+            self.fail("unknown_unit", unit=unit, known=", ".join(sorted(UNITS_IN_BASE)))
+
+        try:
+            # `str()` avant `Decimal` : un nombre JSON arrive en `float`, et
+            # `Decimal(0.1)` vaut 0.1000000000000000055…, que `from_unit`
+            # refuserait à juste titre. Sa représentation textuelle, elle, est
+            # celle que le client a écrite.
+            valeur = Decimal(str(data["amount"]))
+        except (InvalidOperation, ValueError):
+            self.fail("not_a_number")
+
+        if not valeur.is_finite():
+            self.fail("not_a_number")
+
+        try:
+            return Quantity.from_unit(valeur, unit)
+        except ValueError as exc:
+            self.fail("too_precise", detail=str(exc))

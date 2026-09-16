@@ -25,6 +25,22 @@ PERMISSIONS: Final[dict[str, str]] = {
     # Catalogue
     "catalog.read": "Consulter le catalogue et les stocks",
     "catalog.write": "Créer et modifier articles, catégories et options",
+    # Inventaire — la matière. Cinq permissions et non deux, parce que ce sont
+    # cinq métiers : consulter, configurer, recevoir une livraison, déclarer une
+    # perte ou un écart, et **valider** celles qui dépassent le plafond. Les deux
+    # derniers sont des écritures de valeur — une perte fait sortir un actif du
+    # bilan sans transaction — et le quatre-yeux n'a de sens que si déclarer et
+    # valider ne sont pas la même permission.
+    "inventory.read": "Consulter les ingrédients, les stocks et le journal des mouvements",
+    "inventory.write": "Gérer les ingrédients et les lignes de stock d'une cuisine",
+    "inventory.receive": "Enregistrer une réception de marchandise",
+    "inventory.adjust": "Déclarer une perte ou corriger un stock",
+    "inventory.approve": "Valider une perte ou une correction au-delà du plafond",
+    # Recettes — distinctes du catalogue : changer une recette change le coût
+    # matière et ce que la cuisine sort de sa chambre froide, pas ce que voit le
+    # client.
+    "recipes.read": "Consulter les recettes",
+    "recipes.write": "Créer et modifier les recettes",
     # Commandes
     "orders.read": "Consulter les commandes",
     "orders.update_status": "Faire avancer le statut d'une commande",
@@ -69,6 +85,13 @@ SYSTEM_ROLES: Final[dict[str, tuple[str, ...]]] = {
     "Manager": (
         "catalog.read",
         "catalog.write",
+        "inventory.read",
+        "inventory.write",
+        "inventory.receive",
+        "inventory.adjust",
+        "inventory.approve",
+        "recipes.read",
+        "recipes.write",
         "orders.read",
         "orders.update_status",
         "orders.assign_courier",
@@ -91,6 +114,13 @@ SYSTEM_ROLES: Final[dict[str, tuple[str, ...]]] = {
     ),
     "Opérateur": (
         "catalog.read",
+        # Le poste de cuisine reçoit les livraisons et déclare ce qu'il jette ;
+        # au-delà du plafond, c'est un gérant qui valide. Il ne valide rien
+        # lui-même, et ne touche ni au référentiel ni aux recettes.
+        "inventory.read",
+        "inventory.receive",
+        "inventory.adjust",
+        "recipes.read",
         "orders.read",
         "orders.update_status",
         "orders.assign_courier",

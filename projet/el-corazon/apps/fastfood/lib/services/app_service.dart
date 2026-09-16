@@ -16,6 +16,7 @@ import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/menu_item_cache_service.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
 import 'package:elcora_fast/services/push_notification_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 
@@ -60,7 +61,19 @@ class AppService extends ChangeNotifier {
         unawaited(_registerPushDeviceBestEffort());
       }
     });
+
+    // La carte est **celle de la cuisine courante**. Elle change quand le
+    // client en choisit une autre, mais aussi quand la géographie en désigne
+    // une autre pour son adresse, ou quand celle qu'il parcourait est
+    // suspendue. Seul le sélecteur rechargeait la carte : les deux autres
+    // changements laissaient les plats de l'ancienne cuisine sous le nom de la
+    // nouvelle.
+    _finDuSuiviDeCuisine = KitchenContextService().ecouterLeChangement(
+      (_, __) => unawaited(rechargerLeCatalogue()),
+    );
   }
+
+  late final VoidCallback _finDuSuiviDeCuisine;
 
   final ProviderContainer _container;
   late final ProviderSubscription<AsyncValue<eccore.User?>> _sessionSubscription;
@@ -100,8 +113,36 @@ class AppService extends ChangeNotifier {
   /// « Réinitialiser les filtres ». Une coupure réseau, un backend arrêté ou un
   /// 500 se lisaient donc comme une erreur de manipulation du client, et le
   /// seul recours proposé — retirer des filtres — n'y pouvait rien.
-  String? get erreurCatalogue => _erreurCatalogue;
-  String? _erreurCatalogue;
+  ///
+  /// C'est une [SituationCuisine] et non plus une phrase. La phrase unique
+  /// — « la carte n'a pas pu être chargée, vérifiez votre connexion » —
+  /// envoyait vérifier le Wi-Fi quelqu'un dont le quartier n'a pas de cuisine,
+  /// ou dont le serveur rendait 500.
+  SituationCuisine? get erreurCatalogue => _erreurCatalogue;
+  SituationCuisine? _erreurCatalogue;
+
+  /// La phrase du serveur qui accompagne [erreurCatalogue], quand il en a donné
+  /// une qui s'adresse au client.
+  String? get motifErreurCatalogue => _motifErreurCatalogue;
+  String? _motifErreurCatalogue;
+
+  /// La situation qui correspond à un échec du catalogue.
+  ///
+  /// `CuisineIndisponible` porte déjà la sienne — c'est le contexte de cuisine
+  /// qui sait si l'annuaire a répondu vide ou n'a pas répondu. Tout autre échec
+  /// est classé **par sa nature**, jamais présumé « aucune cuisine ».
+  static ({SituationCuisine situation, String? motif}) situationDeLEchec(Object erreur) {
+    if (erreur is CuisineIndisponible) {
+      return (situation: erreur.situation, motif: null);
+    }
+    final nature = eccore.ApiFailure.of(erreur);
+    return (
+      situation: SituationCuisine.depuisEchec(nature),
+      motif: nature == eccore.ApiFailure.rejected && erreur is eccore.ApiException
+          ? erreur.detail
+          : null,
+    );
+  }
 
   /// Pourquoi l'historique est vide, quand il l'est parce que le chargement a
   /// échoué. `null` quand il a abouti — fût-ce sur un historique réellement
@@ -140,6 +181,7 @@ class AppService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _finDuSuiviDeCuisine();
     _sessionSubscription.close();
     unawaited(_tokenRefreshSubscription.cancel());
     super.dispose();
@@ -596,6 +638,7 @@ class AppService extends ChangeNotifier {
       _menuItems =
           await _menuItemCache.getMenuItems(forceRefresh: forcerLeReseau);
       _erreurCatalogue = null;
+      _motifErreurCatalogue = null;
 
       // Plus de recollement de catégorie : le contrat rend `category` et
       // `category_name` sur l'article lui-même. La boucle qui rattachait
@@ -608,8 +651,23 @@ class AppService extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      eccore.Journal.trace('❌ Error loading menu items: $e');
+      final echec = situationDeLEchec(e);
+      eccore.Journal.trace(
+        '❌ Catalogue illisible (GET /catalog/items/) — ${echec.situation.code} : $e',
+      );
       _errorHandler.logError('Erreur lors du chargement du menu', details: e);
+
+      // Le repli hors ligne ne vaut que pour une **panne**. Servir la carte de la
+      // veille à quelqu'un dont l'adresse n'est plus desservie, ou dont la
+      // cuisine a été suspendue, lui ferait composer un panier qu'aucune cuisine
+      // ne préparera.
+      if (!echec.situation.estUnePanne) {
+        _menuItems = [];
+        _erreurCatalogue = echec.situation;
+        _motifErreurCatalogue = echec.motif;
+        notifyListeners();
+        return;
+      }
 
       // Le cache hors ligne était **écrit à chaque succès et relu par
       // personne** : `loadCachedMenuItems` n'avait aucun appelant dans toute
@@ -620,6 +678,7 @@ class AppService extends ChangeNotifier {
       if (replis != null && replis.isNotEmpty) {
         _menuItems = replis;
         _erreurCatalogue = null;
+        _motifErreurCatalogue = null;
         eccore.Journal.trace(
           '📦 Carte servie depuis le cache local (${replis.length} articles) '
           '— le serveur n’a pas répondu.',
@@ -633,7 +692,8 @@ class AppService extends ChangeNotifier {
       // conservée, pour que l'écran dise « la carte n'a pas pu être chargée »
       // plutôt que « aucun plat ne correspond à vos filtres ».
       _menuItems = [];
-      _erreurCatalogue = 'La carte n’a pas pu être chargée.';
+      _erreurCatalogue = echec.situation;
+      _motifErreurCatalogue = echec.motif;
       notifyListeners();
     }
   }
@@ -669,15 +729,20 @@ class AppService extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      eccore.Journal.trace('❌ Error loading menu categories: $e');
+      eccore.Journal.trace(
+        '❌ Catégories illisibles (GET /catalog/categories/) — '
+        '${situationDeLEchec(e).situation.code} : $e',
+      );
       _errorHandler.logError(
         'Erreur lors du chargement des catégories',
         details: e,
       );
 
-      // Même repli que pour les articles, et pour la même raison : le cache
-      // était rempli sans jamais être relu.
-      final replis = await _offlineSyncService.loadCachedCategories();
+      // Même repli que pour les articles, et pour les mêmes raisons : le cache
+      // était rempli sans jamais être relu — et il ne sert que pour une panne.
+      final replis = situationDeLEchec(e).situation.estUnePanne
+          ? await _offlineSyncService.loadCachedCategories()
+          : null;
       if (replis != null && replis.isNotEmpty) {
         _menuCategories = replis;
         _menuCategoryDisplayNames = replis

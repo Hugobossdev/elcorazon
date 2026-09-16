@@ -34,6 +34,7 @@ from django.db import models
 from common.state_machine import StateMachine
 
 __all__ = [
+    "KNOWN_TO_CUSTOMERS",
     "RESTAURANT_MACHINE",
     "RESTAURANT_TRANSITIONS",
     "RestaurantStatus",
@@ -46,6 +47,19 @@ class RestaurantStatus(models.TextChoices):
     READY = "ready", "Prêt à ouvrir"
     ACTIVE = "active", "En service"
     INACTIVE = "inactive", "Suspendu"
+
+
+#: États qu'un client a pu connaître : en service, ou suspendu **après** l'avoir
+#: été.
+#:
+#: Sert à la création de commande. Filtrée sur `is_active`, elle répondait à une
+#: cuisine suspendue pendant que le client payait par un `400` « objet
+#: introuvable » sur le champ `restaurant` — une erreur de saisie, pour une
+#: cuisine que le client venait de voir. Elle laisse maintenant le juge répondre
+#: `409 kitchen_suspended`. Un brouillon, jamais publié, reste introuvable : dire
+#: « suspendu » d'un établissement qui n'a jamais ouvert révélerait son
+#: existence.
+KNOWN_TO_CUSTOMERS = frozenset({RestaurantStatus.ACTIVE, RestaurantStatus.INACTIVE})
 
 
 #: Transitions autorisées.

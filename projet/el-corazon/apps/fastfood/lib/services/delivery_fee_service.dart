@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/presentation/frais_de_livraison.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Frais de livraison — **demandés au serveur**, jamais calculés ici.
 ///
@@ -94,7 +94,7 @@ class DeliveryFeeService extends ChangeNotifier {
     final reponse = await _livrabilite.check(
       latitude: latitude,
       longitude: longitude,
-      restaurantSlug: RestaurantContextService().slug,
+      restaurantSlug: KitchenContextService().slug,
     );
 
     final breakdown = FraisDeLivraison.depuisLivrabilite(reponse);
@@ -111,7 +111,7 @@ class DeliveryFeeService extends ChangeNotifier {
   /// n'est choisie.
   Future<eccore.OrderQuote> quoteOrder({String? addressId, String promoCode = ''}) async {
     final quote = await _orders.preview(
-      restaurantSlug: await RestaurantContextService().exigerSlug(),
+      restaurantSlug: await KitchenContextService().exigerSlug(),
       addressId: addressId,
       promoCode: promoCode,
     );
@@ -132,11 +132,12 @@ class DeliveryFeeService extends ChangeNotifier {
     final quote = await quoteOrder(addressId: address.id, promoCode: promoCode);
 
     eccore.DeliveryZone? zone;
+    String? cuisine;
     try {
       final reponse = await _livrabilite.check(
         latitude: address.latitude,
         longitude: address.longitude,
-        restaurantSlug: RestaurantContextService().slug,
+        restaurantSlug: KitchenContextService().slug,
       );
       if (!reponse.isAvailable) {
         // Le refus est relayé **avec sa raison** : « trop loin » et « hors
@@ -148,13 +149,14 @@ class DeliveryFeeService extends ChangeNotifier {
         return breakdown;
       }
       zone = reponse.zone;
+      cuisine = reponse.restaurant?.name;
     } catch (e) {
       // Le devis, lui, a abouti : c'est lui qui fait foi. L'absence de nom
       // de zone n'est pas une raison de renoncer au montant exact.
       eccore.Journal.trace('DeliveryFeeService: livrabilité non résolue — $e');
     }
 
-    final breakdown = FraisDeLivraison.depuisDevis(quote, zone: zone);
+    final breakdown = FraisDeLivraison.depuisDevis(quote, zone: zone, restaurantName: cuisine);
     _lastBreakdown = breakdown;
     notifyListeners();
     return breakdown;

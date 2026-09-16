@@ -161,6 +161,11 @@ class Order {
     this.statusEvents = const [],
     this.restaurantLatitude,
     this.restaurantLongitude,
+    this.countryIsoCode = '',
+    this.cityName = '',
+    this.citySlug = '',
+    this.deliveryZoneId,
+    this.deliveryZoneName = '',
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -193,6 +198,13 @@ class Order {
           pickup == null ? null : (pickup['lon'] as num).toDouble(),
       recipientName: json['recipient_name'] as String,
       recipientPhone: json['recipient_phone'] as String,
+      // Vides sur une commande antérieure que la reprise n'a pas su situer, ou
+      // venue d'un serveur qui ne les rend pas encore.
+      countryIsoCode: json['country'] as String? ?? '',
+      cityName: json['city'] as String? ?? '',
+      citySlug: json['city_slug'] as String? ?? '',
+      deliveryZoneId: json['delivery_zone']?.toString(),
+      deliveryZoneName: json['delivery_zone_name'] as String? ?? '',
       // Comptés **par le serveur**, et présents sur les deux formes.
       //
       // C'est ce qui permet à une liste d'annoncer « 6 articles » sans porter
@@ -231,6 +243,16 @@ class Order {
   /// deviendrait faux au deuxième.
   final double? restaurantLatitude;
   final double? restaurantLongitude;
+
+  /// Où la commande a été prise — **figé à sa création** : code pays, ville, et
+  /// zone de livraison qui a tarifé la course (celle de l'adresse, pas celle où
+  /// la cuisine est posée). Une cuisine rattachée ailleurs depuis ne déplace
+  /// pas la commande.
+  final String countryIsoCode;
+  final String cityName;
+  final String citySlug;
+  final String? deliveryZoneId;
+  final String deliveryZoneName;
 
   /// `pending` | `confirmed` | ... (`OrderStatus` côté serveur, ADR-010).
   final String status;

@@ -26,6 +26,89 @@ import 'package:admin/screens/admin/driver_map_screen.dart';
 import 'package:admin/screens/admin/global_search_screen.dart';
 import 'package:admin/screens/admin/active_deliveries_screen.dart';
 import 'package:admin/screens/admin/driver_documents_dashboard_screen.dart';
+import 'package:admin/screens/inventaire/ingredients_screen.dart';
+import 'package:admin/screens/inventaire/recettes_screen.dart';
+import 'package:admin/screens/inventaire/stock_screen.dart';
+import 'package:admin/screens/inventaire/validations_screen.dart';
+import 'package:admin/screens/kitchen/kitchen_screen.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
+
+/// Ce que le poste de cuisine affiche quand aucun établissement n'est résolu.
+///
+/// Trois causes distinctes, trois messages. Les confondre est le défaut que
+/// `6dddb74` a corrigé ailleurs dans ce back-office : un refus de permission et
+/// une panne réseau se lisaient pareil, et l'opérateur réessayait indéfiniment
+/// ce qui ne pouvait pas marcher.
+///
+/// * **En cours de lecture** — le périmètre arrive, il n'y a rien à faire.
+/// * **En erreur** — le serveur n'a pas répondu ; réessayer a du sens.
+/// * **Vide** — le compte ne supervise aucun établissement. Réessayer n'y
+///   changera rien, et c'est au siège de rattacher la personne.
+class _CuisineSansEtablissement extends StatelessWidget {
+  const _CuisineSansEtablissement({this.quoi = 'le poste puisse afficher un service'});
+
+  /// Ce que l'écran ne peut pas montrer sans établissement — la fin de la
+  /// phrase « un responsable doit l'y rattacher avant que … ».
+  final String quoi;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final perimetre = context.watch<RestaurantScopeService>();
+
+    if (perimetre.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final erreur = perimetre.error;
+    final (icone, titre, detail) = erreur != null
+        ? (
+            Icons.cloud_off_rounded,
+            'Périmètre illisible',
+            erreur,
+          )
+        : (
+            Icons.soup_kitchen_outlined,
+            'Aucun établissement rattaché',
+            'Ce compte ne supervise aucune cuisine. Un responsable du siège doit '
+                'l’y rattacher avant que $quoi.',
+          );
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icone, size: 48, color: theme.hintColor),
+              const SizedBox(height: 16),
+              Text(titre, style: theme.textTheme.titleMedium, textAlign: TextAlign.center),
+              const SizedBox(height: 8),
+              Text(
+                detail,
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                textAlign: TextAlign.center,
+              ),
+              // Le bouton n'apparaît que sur l'erreur : proposer « Réessayer »
+              // à qui n'est rattaché à rien ferait boucler sur une réponse qui
+              // ne changera pas.
+              if (erreur != null) ...[
+                const SizedBox(height: 16),
+                FilledButton.tonalIcon(
+                  onPressed: () => unawaited(perimetre.resolve(force: true)),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Réessayer'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 // Modèle de données pour les groupes de navigation
 class NavigationGroup {
@@ -117,6 +200,21 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
     NavigationGroup(
       title: 'OPÉRATIONS',
       items: [
+        // En tête, et avant « Commandes » : c'est l'écran du coup de feu.
+        //
+        // Le poste existait depuis `42f24b0` et n'était atteignable que par un
+        // bouton posé dans la barre d'outils de l'écran d'administration qu'il
+        // remplaçait — mille sept cents lignes de filtres, d'exports et de
+        // statistiques qu'un cuisinier devait traverser pour arriver chez lui.
+        //
+        // Même permission que les commandes : le poste les lit et les fait
+        // avancer par `POST /orders/manage/{id}/status/`, sans autre droit.
+        NavigationItem(
+          title: 'Poste de cuisine',
+          icon: Icons.soup_kitchen_outlined,
+          index: 18,
+          permission: 'orders.read',
+        ),
         NavigationItem(
           title: 'Commandes',
           icon: Icons.shopping_cart_rounded,
@@ -168,6 +266,44 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           icon: Icons.tune_rounded,
           index: 13,
           permission: 'catalog.read',
+        ),
+      ],
+    ),
+    // La matière — ce que la cuisine détient, consomme et perd.
+    //
+    // Recettes, réservation et rupture existaient côté serveur, et aucune
+    // entrée n'y menait : personne ne pouvait enregistrer une livraison
+    // autrement que par un `shell`. Le groupe vient après le catalogue parce
+    // qu'il en est l'envers — ce qu'on vend, puis ce qu'il faut pour le faire.
+    NavigationGroup(
+      title: 'INVENTAIRE',
+      items: [
+        NavigationItem(
+          title: 'Stock',
+          icon: Icons.inventory_2_rounded,
+          index: 19,
+          // Lire suffit à ouvrir l'écran ; recevoir, déclarer une perte et
+          // configurer demandent chacun leur permission, que le serveur vérifie
+          // geste par geste et que l'écran suit pour ses boutons.
+          permission: 'inventory.read',
+        ),
+        NavigationItem(
+          title: 'Validations',
+          icon: Icons.fact_check_rounded,
+          index: 20,
+          permission: 'inventory.read',
+        ),
+        NavigationItem(
+          title: 'Recettes',
+          icon: Icons.menu_book_rounded,
+          index: 21,
+          permission: 'recipes.read',
+        ),
+        NavigationItem(
+          title: 'Ingrédients',
+          icon: Icons.egg_alt_rounded,
+          index: 22,
+          permission: 'inventory.read',
         ),
       ],
     ),
@@ -339,6 +475,42 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
         break;
       case 17:
         screen = const ReseauScreen();
+        break;
+      case 18:
+        // Le seul écran de cette liste qui dépende du périmètre courant : le
+        // poste est **mono-établissement**, un cuisinier est dans une cuisine,
+        // et mêler deux cartes ferait préparer un plat pour l'autre bout de la
+        // ville.
+        //
+        // `watch` et non `read` : quand on change d'établissement depuis le
+        // sélecteur de la barre supérieure, le poste doit suivre. Avec `read`,
+        // il continuerait d'afficher les commandes de la cuisine précédente
+        // sans que son titre cesse pour autant d'être juste.
+        final etablissement = context.watch<RestaurantScopeService>().current;
+        screen = etablissement == null
+            ? const _CuisineSansEtablissement()
+            : KitchenScreen(restaurant: etablissement);
+        break;
+      case 19:
+      case 20:
+      case 21:
+        // Le stock, sa file de validation et les recettes sont ceux **d'une**
+        // cuisine, comme le poste : ils suivent le sélecteur d'établissement.
+        final cuisine = context.watch<RestaurantScopeService>().current;
+        if (cuisine == null) {
+          screen = const _CuisineSansEtablissement(quoi: 'son inventaire puisse s’afficher');
+        } else if (_selectedIndex == 19) {
+          screen = StockScreen(restaurant: cuisine);
+        } else if (_selectedIndex == 20) {
+          screen = ValidationsScreen(restaurant: cuisine);
+        } else {
+          screen = RecettesScreen(restaurant: cuisine);
+        }
+        break;
+      case 22:
+        // Le référentiel, lui, est celui de l'enseigne : il ne dépend
+        // d'aucune cuisine.
+        screen = const IngredientsScreen();
         break;
       default:
         screen = const AdminDashboardScreen();

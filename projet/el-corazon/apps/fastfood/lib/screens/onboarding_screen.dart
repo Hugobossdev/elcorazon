@@ -6,7 +6,7 @@ import 'package:elcora_fast/services/onboarding_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Présentation d'ouverture, au tout premier lancement.
 ///
@@ -239,7 +239,7 @@ class _PageAccueil extends StatelessWidget {
         ),
       ),
       titre: 'Le goût du soin,\nla vitesse en prime.',
-      texte: 'La cuisine de ${RestaurantContextService().cityName ?? 'chez nous'} grillée au feu '
+      texte: 'La cuisine de ${KitchenContextService().cityName ?? 'chez nous'} grillée au feu '
           'de bois, livrée chaude jusque chez vous.',
     );
   }

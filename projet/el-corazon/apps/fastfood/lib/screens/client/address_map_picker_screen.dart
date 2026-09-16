@@ -11,7 +11,7 @@ import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/places_service.dart';
 import 'package:elcora_fast/utils/price_formatter.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal, LocationAvailability;
 
 /// Résultat de la sélection de position
@@ -64,7 +64,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
   /// dessiné. Un point de repli inventé serait pire — il désignerait un lieu
   /// où il n'y a pas de restaurant.
   LatLng? get _restaurantLocation {
-    final contexte = RestaurantContextService();
+    final contexte = KitchenContextService();
     final latitude = contexte.latitude;
     final longitude = contexte.longitude;
     if (latitude == null || longitude == null) return null;
@@ -135,7 +135,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
     // L'annuaire d'abord : la position de l'établissement en dépend, et sans
     // elle la carte s'ouvrirait au large du golfe de Guinée — le point nul,
     // qui est ce qu'on obtient faute de mieux à la construction de l'état.
-    await RestaurantContextService().resolve();
+    await KitchenContextService().resolve();
     if (!mounted) return;
     _poserLeRepereDuRestaurant();
 
@@ -165,7 +165,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
         markerId: const MarkerId('restaurant'),
         position: etablissement,
         infoWindow: InfoWindow(
-          title: RestaurantContextService().name ?? 'Restaurant',
+          title: KitchenContextService().name ?? 'Cuisine El Corazón',
         ),
       ),
     );
@@ -328,7 +328,7 @@ class _EnhancedMapPickerScreenState extends State<EnhancedMapPickerScreen> {
       final results = await _placesService.autocomplete(
         query,
         language: 'fr',
-        countryCode: RestaurantContextService().countryCode,
+        countryCode: KitchenContextService().countryCode,
         // Biaisé autour de l'établissement : sans cela, « rue du marché »
         // proposait des résultats de l'autre bout du pays avant ceux d'ici.
         locationBias: _restaurantLocation,

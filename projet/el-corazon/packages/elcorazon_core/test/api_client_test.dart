@@ -80,6 +80,36 @@ class _FakeServer implements HttpClientAdapter {
       );
     }
 
+    // La panne du 2026-09-13 : Django rend sa page d'erreur HTML sur un
+    // `ProgrammingError` (migration non appliquée), en 500.
+    if (options.path.contains('/panne-html')) {
+      return ResponseBody.fromString(
+        '<!DOCTYPE html><title>ProgrammingError at /api/v1/restaurants/</title>',
+        500,
+        headers: {
+          Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+        },
+      );
+    }
+
+    // Un préfixe `/api/v1` oublié : le serveur répond 404 en HTML.
+    if (options.path.contains('/route-html')) {
+      return ResponseBody.fromString(
+        '<h1>Not Found</h1>',
+        404,
+        headers: {
+          Headers.contentTypeHeader: ['text/html'],
+        },
+      );
+    }
+
+    if (options.path.contains('/injoignable')) {
+      throw DioException.connectionError(
+        requestOptions: options,
+        reason: 'Connection refused',
+      );
+    }
+
     throw UnimplementedError('Route non simulée : ${options.path}');
   }
 }
@@ -188,6 +218,45 @@ void main() {
       );
 
       expect(server.lastLoginAuthorization, isNull);
+    });
+  });
+
+  group('ApiClient — une réponse reçue n’est jamais une panne réseau', () {
+    // Le 2026-09-13, l'annuaire rendait 500 en page HTML. Le client l'a
+    // rapporté `network_error`, puis « aucun restaurant en service » : on a
+    // cherché du côté du Wi-Fi un défaut qui était dans le schéma de la base.
+
+    test('un 500 en HTML garde son statut et se dit erreur serveur', () async {
+      final erreur = await apiClient
+          .get('/panne-html')
+          .then<ApiException?>((_) => null, onError: (Object e) => e as ApiException);
+
+      expect(erreur, isNotNull);
+      expect(erreur!.status, 500);
+      expect(erreur.code, 'server_error');
+      expect(erreur.isNetworkError, isFalse);
+      expect(erreur.isServerError, isTrue);
+      expect(ApiFailure.of(erreur), ApiFailure.server);
+    });
+
+    test('un 404 en HTML garde son statut', () async {
+      final erreur = await apiClient
+          .get('/route-html')
+          .then<ApiException?>((_) => null, onError: (Object e) => e as ApiException);
+
+      expect(erreur!.status, 404);
+      expect(erreur.isNetworkError, isFalse);
+      expect(ApiFailure.of(erreur), ApiFailure.notFound);
+    });
+
+    test('sans réponse, c’est une panne réseau', () async {
+      final erreur = await apiClient
+          .get('/injoignable')
+          .then<ApiException?>((_) => null, onError: (Object e) => e as ApiException);
+
+      expect(erreur!.status, 0);
+      expect(erreur.code, 'network_error');
+      expect(ApiFailure.of(erreur), ApiFailure.network);
     });
   });
 }

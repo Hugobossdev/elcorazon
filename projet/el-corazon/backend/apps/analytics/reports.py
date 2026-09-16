@@ -15,6 +15,7 @@ grandit.
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -33,9 +34,11 @@ from apps.profiles.models import Address
 from common.money import Money
 
 __all__ = [
+    "NETWORK_LEVELS",
     "CategoryRow",
     "CourierPerformanceRow",
     "CustomerStats",
+    "NetworkRow",
     "Overview",
     "ReportingService",
     "RevenueRow",
@@ -79,6 +82,42 @@ class CategoryRow:
     category_id: str
     category_name: str
     quantity_sold: int
+    revenue_minor: int
+
+
+#: Les quatre étages du réseau, et ce qui identifie une ligne à chacun.
+#:
+#: Tous lus sur la géographie **figée** de la commande (`Order.country`,
+#: `city`, `delivery_zone`) : une cuisine rattachée ailleurs depuis ne fait pas
+#: migrer son chiffre d'affaires d'une ville à l'autre. La cuisine, elle, est
+#: une clé stable — son nom est lu tel qu'il est aujourd'hui.
+NETWORK_LEVELS: dict[str, tuple[str, str]] = {
+    "country": ("country_id", "country__name"),
+    "city": ("city_id", "city__name"),
+    "zone": ("delivery_zone_id", "delivery_zone_name"),
+    "kitchen": ("restaurant_id", "restaurant__name"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkRow:
+    """Une ligne du rapport réseau : un pays, une ville, une zone ou une cuisine.
+
+    `revenue_minor` porte sur les commandes **livrées** seulement — ce qui est
+    encaissé —, `orders_count` sur tout ce qui a été commandé dans la fenêtre :
+    la différence est ce qu'on vient chercher. Une ligne par devise : on
+    n'additionne pas des francs CFA et des nairas.
+    """
+
+    key: str
+    name: str
+    city: str
+    country: str
+    currency: str
+    orders_count: int
+    in_progress_count: int
+    delivered_count: int
+    cancelled_count: int
     revenue_minor: int
 
 
@@ -280,6 +319,66 @@ class ReportingService:
                 category_id=str(row["menu_item__category_id"]),
                 category_name=row["menu_item__category__name"],
                 quantity_sold=row["quantity_sold"],
+                revenue_minor=row["revenue_minor"] or 0,
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def network(
+        *,
+        start: dt.date,
+        end: dt.date,
+        perimetre: Perimetre,
+        level: str,
+        zone_id: uuid.UUID | None = None,
+    ) -> list[NetworkRow]:
+        """Commandes et chiffre d'affaires par pays, ville, zone ou cuisine — une requête.
+
+        Datées sur `placed_at`, comme la répartition par statut : la question
+        est « qu'est devenu ce qui a été commandé ici cette semaine ». Le
+        périmètre du compte s'applique d'abord, sur les cuisines ; `zone_id`
+        affine ensuite, sur la zone figée de la commande.
+
+        Une commande antérieure que la reprise n'a pas su situer tombe dans une
+        ligne sans clé plutôt que de disparaître : un total qui ne retombe pas
+        sur celui des commandes serait une réponse fausse.
+        """
+        cle, libelle = NETWORK_LEVELS[level]
+        commandes = Order.objects.filter(
+            placed_at__date__range=(start, end), **perimetre.filtre("restaurant_id")
+        )
+        if zone_id:
+            commandes = commandes.filter(delivery_zone_id=zone_id)
+
+        en_cours = [
+            s for s in OrderStatus.values if s not in {OrderStatus.DELIVERED, OrderStatus.CANCELLED}
+        ]
+        rows = (
+            commandes.values(cle, libelle, "city__name", "country__iso_code", "total_currency")
+            .annotate(
+                orders_count=Count("id"),
+                in_progress_count=Count("id", filter=Q(status__in=en_cours)),
+                delivered_count=Count("id", filter=Q(status=OrderStatus.DELIVERED)),
+                cancelled_count=Count("id", filter=Q(status=OrderStatus.CANCELLED)),
+                revenue_minor=Sum("total_minor", filter=Q(status=OrderStatus.DELIVERED)),
+            )
+            .order_by("-orders_count")
+        )
+
+        # Au niveau du pays et de la ville, la ville (ou le pays) de la ligne
+        # n'a pas à se répéter dans la colonne voisine.
+        return [
+            NetworkRow(
+                key=str(row[cle]) if row[cle] is not None else "",
+                name=row[libelle] or "Non situé",
+                city="" if level == "country" else (row["city__name"] or ""),
+                country=row["country__iso_code"] or "",
+                currency=row["total_currency"],
+                orders_count=row["orders_count"],
+                in_progress_count=row["in_progress_count"],
+                delivered_count=row["delivered_count"],
+                cancelled_count=row["cancelled_count"],
                 revenue_minor=row["revenue_minor"] or 0,
             )
             for row in rows

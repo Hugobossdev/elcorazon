@@ -2,6 +2,8 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:admin/presentation/disponibilite_cuisine.dart';
+import 'package:admin/screens/admin/reseau/activite_reseau.dart';
 import 'package:admin/screens/admin/reseau/duplication_dialog.dart';
 import 'package:admin/screens/admin/reseau/etablissement_form_dialog.dart';
 import 'package:admin/screens/admin/reseau/pays_form_dialog.dart';
@@ -35,7 +37,7 @@ class _ReseauScreenState extends State<ReseauScreen> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
-    _onglets = TabController(length: 3, vsync: this)
+    _onglets = TabController(length: 4, vsync: this)
       ..addListener(() {
         if (mounted) setState(() {});
       });
@@ -75,6 +77,7 @@ class _ReseauScreenState extends State<ReseauScreen> with SingleTickerProviderSt
                 Tab(icon: Icon(Icons.public), text: 'Marchés'),
                 Tab(icon: Icon(Icons.location_city), text: 'Villes'),
                 Tab(icon: Icon(Icons.storefront), text: 'Établissements'),
+                Tab(icon: Icon(Icons.insights), text: 'Activité'),
               ],
             ),
             actions: [
@@ -96,12 +99,16 @@ class _ReseauScreenState extends State<ReseauScreen> with SingleTickerProviderSt
                     _OngletPays(),
                     _OngletVilles(),
                     _OngletEtablissements(),
+                    OngletActiviteReseau(),
                   ],
                 ),
               ),
             ],
           ),
-          floatingActionButton: FloatingActionButton.extended(
+          // L'onglet d'activité se lit ; il n'ouvre rien.
+          floatingActionButton: _onglets.index == 3
+              ? null
+              : FloatingActionButton.extended(
             onPressed: reseau.isLoading ? null : _ajouter,
             icon: const Icon(Icons.add),
             label: Text(
@@ -150,8 +157,8 @@ class _OngletPays extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<NetworkService>(
-      builder: (context, reseau, _) {
+    return Consumer2<NetworkService, DeliveryZoneService>(
+      builder: (context, reseau, zones, _) {
         if (reseau.countries.isEmpty) {
           return const _Vide(
             icone: Icons.public_off,
@@ -167,15 +174,23 @@ class _OngletPays extends StatelessWidget {
           separatorBuilder: (_, __) => const SizedBox(height: 8),
           itemBuilder: (context, index) {
             final pays = reseau.countries[index];
-            final villes = reseau.citiesOf(pays.isoCode).length;
+            final villesDuPays = reseau.citiesOf(pays.isoCode);
+            final villes = villesDuPays.length;
+            final idsVilles = {for (final ville in villesDuPays) ville.id};
+            final nbZones = zones.zones.where((zone) => idsVilles.contains(zone.cityId)).length;
+            final cuisines = [
+              for (final ville in villesDuPays) ...reseau.restaurantsOf(ville.slug),
+            ];
+            final enService = cuisines.where((cuisine) => cuisine.isActive).length;
 
             return Card(
               child: ListTile(
                 leading: CircleAvatar(child: Text(pays.isoCode)),
                 title: Text(pays.name),
                 subtitle: Text(
-                  '${pays.currency} · ${pays.timezone} · ${pays.phonePrefix} · '
-                  '$villes ville(s)',
+                  '${pays.currency} · ${pays.timezone} · ${pays.phonePrefix}\n'
+                  '$villes ville(s) · $nbZones zone(s) · '
+                  '${cuisines.length} cuisine(s), dont $enService en service',
                   style: const TextStyle(fontSize: 12),
                 ),
                 trailing: Switch(
@@ -605,11 +620,17 @@ class _CarteEtablissement extends StatelessWidget {
                     couleurFond: scheme.errorContainer,
                     couleurTexte: scheme.onErrorContainer,
                   ),
-                if (etablissement.status.isPublished && !etablissement.acceptsOrders)
-                  _Pastille(
-                    texte: 'Commandes suspendues',
-                    couleurFond: scheme.tertiaryContainer,
-                    couleurTexte: scheme.onTertiaryContainer,
+                // Ce que voit le client : « En service » ne disait ni qu'une
+                // cuisine était invisible (marché fermé), ni qu'elle était
+                // hors de ses horaires.
+                if (etiquetteDisponibiliteCuisine(etablissement) case final etiquette?)
+                  Tooltip(
+                    message: etablissement.unavailableReason,
+                    child: _Pastille(
+                      texte: etiquette,
+                      couleurFond: scheme.tertiaryContainer,
+                      couleurTexte: scheme.onTertiaryContainer,
+                    ),
                   ),
               ],
             ),

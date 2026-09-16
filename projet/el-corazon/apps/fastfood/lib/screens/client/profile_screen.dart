@@ -300,10 +300,21 @@ class ProfileScreen extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Vers l'**onglet**, et non vers l'historique filtré.
+        //
+        // Les deux existaient et portaient le même libellé : « Commandes »
+        // dans la barre du bas ouvrait `OrdersScreen`, « Commandes » ici
+        // ouvrait `EnhancedOrdersScreen`. Deux écrans différents sous un seul
+        // mot, avec deux mises en page et deux sources de données — le client
+        // ne pouvait pas savoir lequel il allait obtenir.
+        //
+        // Les filtres ne sont pas perdus : `OrdersScreen` les atteint par son
+        // bouton « Filtrer et rechercher », qui est leur place — on filtre une
+        // liste qu'on regarde déjà.
         tuile(
           icone: Icons.receipt_long_rounded,
           libelle: 'Commandes',
-          onTap: () => Navigator.of(context).pushNamed(AppRouter.enhancedOrders),
+          onTap: () => Navigator.of(context).pushNamed(AppRouter.orders),
         ),
         const SizedBox(width: DesignConstants.gutter),
         tuile(
@@ -544,11 +555,14 @@ class ProfileScreen extends StatelessWidget {
           onTap: () =>
               Navigator.of(context).pushNamed(AppRouter.addressManagement),
         ),
+        // Même destination que la tuile plus haut, pour la même raison : deux
+        // entrées du même écran ne peuvent pas mener à deux listes de
+        // commandes distinctes.
         _Entree(
           icone: Icons.receipt_long_outlined,
           titre: 'Mes commandes',
           sousTitre: 'Historique et détails',
-          onTap: () => Navigator.of(context).pushNamed(AppRouter.enhancedOrders),
+          onTap: () => Navigator.of(context).pushNamed(AppRouter.orders),
         ),
         _Entree(
           icone: Icons.notifications_none_rounded,

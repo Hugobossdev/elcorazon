@@ -52,6 +52,17 @@ LOCAL_APPS: list[str] = [
     "apps.restaurants",
     "apps.profiles",
     "apps.catalog",
+    # L'inventaire se place ici : il ne dépend que d'`accounts` et de
+    # `restaurants`, et `catalog` le précède parce que les deux se répondent —
+    # l'un décrit ce qu'on vend, l'autre ce qu'on consomme pour le faire.
+    "apps.inventory",
+    # `production` vient après les deux qu'elle relie : la recette dit ce que le
+    # catalogue consomme de l'inventaire. C'est le pont, et il ne pouvait pas se
+    # poser avant ses deux rives.
+    "apps.production",
+    # Le juge de disponibilité compose la cuisine, l'article et la matière : il
+    # vient donc après les trois, et avant le panier, qui l'interroge.
+    "apps.availability",
     "apps.carts",
     "apps.orders",
     # Après `orders` : le panier collaboratif se confirme *en* commande, donc il
@@ -71,9 +82,6 @@ LOCAL_APPS: list[str] = [
     # Lit quatre domaines et n'écrit nulle part — déclarée en dernier,
     # comme le sont les modules qui n'ont aucun dépendant.
     "apps.search",
-    #
-    # Second temps
-    # "apps.inventory",
 ]
 
 # `common` est déclaré comme application — non pour ses modèles, qui sont tous
@@ -413,6 +421,9 @@ SPECTACULAR_SETTINGS = {
         "RewardKindEnum": "apps.loyalty.models.RewardKind.choices",
         "AchievementConditionEnum": "apps.gamification.models.AchievementCondition.choices",
         "ChallengeKindEnum": "apps.gamification.models.ChallengeKind.choices",
+        "StockMovementKindEnum": "apps.inventory.models.MovementKind.choices",
+        "AdjustmentStatusEnum": "apps.inventory.models.AdjustmentStatus.choices",
+        "IngredientDimensionEnum": "apps.inventory.models.Dimensions.choices",
     },
 }
 
@@ -574,6 +585,13 @@ DEFAULT_CURRENCY = config("DEFAULT_CURRENCY", default="XOF")
 # la commission de la plateforme. En réglage plutôt qu'en dur : un point de
 # commission ne doit pas demander un déploiement.
 COURIER_FEE_SHARE_PERCENT: int = config("COURIER_FEE_SHARE_PERCENT", default=80, cast=int)
+
+# Délai de réponse d'un livreur à une course proposée automatiquement, en
+# secondes. Au-delà, la proposition est close et la course passe au livreur
+# compatible suivant (`apps.delivery.dispatch`). Assez long pour qu'un livreur
+# à l'arrêt au feu rouge décroche son téléphone, assez court pour que le repas
+# ne refroidisse pas au passe.
+DELIVERY_OFFER_TTL_SECONDS: int = config("DELIVERY_OFFER_TTL_SECONDS", default=90, cast=int)
 
 # Échantillonnage de l'écriture des positions. La diffusion temps réel, elle,
 # est intégrale : c'est elle qui fait l'expérience de suivi, pas la persistance.

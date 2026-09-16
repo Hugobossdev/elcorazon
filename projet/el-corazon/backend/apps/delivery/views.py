@@ -50,6 +50,7 @@ from apps.delivery.serializers import (
     CourierSelfApplicationSerializer,
     CourierSelfUpdateSerializer,
     CourierUpdateSerializer,
+    CourierZonesSerializer,
     DeclineSerializer,
     DeliveryTransitionSerializer,
     DocumentsSerializer,
@@ -307,7 +308,10 @@ class AssignmentViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Assig
     def get_queryset(self) -> QuerySet[Assignment]:
         return (
             Assignment.objects.filter(courier__user=authenticated_user(self.request))
-            .select_related("order__restaurant", "courier__user")
+            .select_related("order__restaurant", "order__city", "courier__user")
+            # Le détail des articles est rendu sur chaque course : sans ce
+            # préchargement, une file de dix propositions coûterait dix requêtes.
+            .prefetch_related("order__lines")
             .order_by("-offered_at")
         )
 
@@ -404,8 +408,10 @@ class StaffCourierViewSet(CreateModelMixin, UpdateModelMixin, ReadOnlyModelViewS
 
     def get_queryset(self) -> QuerySet[CourierProfile]:
         user = authenticated_user(self.request)
-        queryset = CourierProfile.objects.select_related("user", "restaurant").order_by(
-            "user__full_name"
+        queryset = (
+            CourierProfile.objects.select_related("user", "restaurant")
+            .prefetch_related("service_zones")
+            .order_by("user__full_name")
         )
         if is_unscoped(user):
             return queryset
@@ -518,6 +524,31 @@ class StaffCourierViewSet(CreateModelMixin, UpdateModelMixin, ReadOnlyModelViewS
         return Response(CourierProfileSerializer(courier).data)
 
     @extend_schema(
+        request=CourierZonesSerializer,
+        responses={200: CourierProfileSerializer},
+        tags=["delivery"],
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="zones",
+        permission_classes=[HasPermission.of("couriers.write")],
+    )
+    def zones(self, request: Request, pk: str) -> Response:
+        """Affecte le livreur à des zones de sa cuisine — la liste entière.
+
+        Le dossier est lu par `get_object`, donc cloisonné : un livreur hors
+        périmètre est introuvable. Les zones, elles, sont vérifiées par le
+        service contre la desserte **de la cuisine du livreur** — une zone d'une
+        autre ville est refusée en 409, sans rien écrire.
+        """
+        courier = self.get_object()
+        serializer = CourierZonesSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        CourierService.set_service_zones(courier=courier, zones=serializer.validated_data["zones"])
+        return Response(CourierProfileSerializer(courier).data)
+
+    @extend_schema(
         responses={200: CourierProfileSerializer(many=True)},
         parameters=[ORDER_ID],
         tags=["delivery"],
@@ -559,7 +590,10 @@ class OfferAssignmentView(APIView):
         assignment = AssignmentService.offer(
             order=order, courier=serializer.validated_data["courier"], actor=actor
         )
-        return Response(AssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
+        return Response(
+            AssignmentSerializer(assignment, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class CancelAssignmentView(APIView):
@@ -598,7 +632,7 @@ class CancelAssignmentView(APIView):
             actor=actor,
             reason=serializer.validated_data["reason"],
         )
-        return Response(AssignmentSerializer(cancelled).data)
+        return Response(AssignmentSerializer(cancelled, context={"request": request}).data)
 
 
 class OrderRatingView(APIView):

@@ -21,7 +21,7 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from apps.restaurants.delivery import check_delivery
-from apps.restaurants.models import Restaurant
+from apps.restaurants.models import Restaurant, kitchen_state_prefetches
 from apps.restaurants.serializers import (
     DeliveryCheckQuerySerializer,
     DeliveryCheckSerializer,
@@ -90,7 +90,7 @@ class RestaurantViewSet(ReadOnlyModelViewSet[Restaurant]):
             # `is_open` interroge les plages de chaque établissement : sans ce
             # préchargement, une page de vingt restaurants ferait vingt
             # requêtes de plus.
-            .prefetch_related("opening_hours")
+            .prefetch_related(*kitchen_state_prefetches())
         )
 
         query = NearbyQuerySerializer(data=self.request.query_params)
@@ -174,6 +174,7 @@ class DeliveryCheckView(APIView):
                 {
                     "is_available": disponibilite.is_available,
                     "reason": disponibilite.reason,
+                    "unavailable_code": disponibilite.unavailable_code,
                     "restaurant": disponibilite.restaurant,
                     "zone": disponibilite.zone,
                     "distance_m": (

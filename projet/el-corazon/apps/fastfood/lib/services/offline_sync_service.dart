@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elcora_fast/models/cart_item.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Service complet de synchronisation hors ligne avec stockage persistant
 class OfflineSyncService extends ChangeNotifier {
@@ -27,9 +27,23 @@ class OfflineSyncService extends ChangeNotifier {
   bool _isInitialized = false;
   DateTime? _lastSyncTime;
 
-  // Queues pour les opérations en attente
-  final List<Map<String, dynamic>> _pendingOrders = [];
-  final List<Map<String, dynamic>> _pendingMenuUpdates = [];
+  // Queues pour les opérations en attente.
+  //
+  // Deux files ont été retirées, et il vaut mieux dire pourquoi que laisser
+  // quelqu'un les réintroduire :
+  //
+  // * `_pendingOrders` s'appuyait sur une table `offline_orders` créée,
+  //   indexée, migrée, lue au démarrage et purgée — **jamais écrite**. Aucun
+  //   `INSERT`, aucune routine de reprise. Elle décrivait une commande hors
+  //   ligne que l'application n'a jamais su créer.
+  // * `_pendingMenuUpdates` n'avait même pas de table. Un client ne modifie
+  //   pas la carte ; la file n'avait pas de sens de ce côté-ci.
+  //
+  // La commande hors ligne reste concevable, mais c'est une fonctionnalité à
+  // part entière : elle demande de distinguer `LOCAL_PENDING`,
+  // `SERVER_PENDING`, `CONFIRMED` et `FAILED`, et une reprise idempotente —
+  // une commande n'est pas créée parce qu'elle est enregistrée sur le
+  // téléphone. Rien de cela ne se déduisait du vestige supprimé ici.
   final List<Map<String, dynamic>> _pendingUserUpdates = [];
   final List<Map<String, dynamic>> _pendingCartUpdates = [];
 
@@ -50,11 +64,9 @@ class OfflineSyncService extends ChangeNotifier {
   bool get isOnline => _isOnline;
   bool get isInitialized => _isInitialized;
   DateTime? get lastSyncTime => _lastSyncTime;
-  List<Map<String, dynamic>> get pendingOrders => List.unmodifiable(_pendingOrders);
-  List<Map<String, dynamic>> get pendingMenuUpdates => List.unmodifiable(_pendingMenuUpdates);
   List<Map<String, dynamic>> get pendingUserUpdates => List.unmodifiable(_pendingUserUpdates);
   List<Map<String, dynamic>> get pendingCartUpdates => List.unmodifiable(_pendingCartUpdates);
-  int get totalPendingOperations => _pendingOrders.length + _pendingMenuUpdates.length + _pendingUserUpdates.length + _pendingCartUpdates.length;
+  int get totalPendingOperations => _pendingUserUpdates.length + _pendingCartUpdates.length;
 
   /// Vérifie si la base de données est disponible
   bool get _isDatabaseAvailable => _database != null && !kIsWeb;
@@ -162,7 +174,10 @@ class OfflineSyncService extends ChangeNotifier {
 
       _database = await openDatabase(
         path,
-        version: 2,
+        // 3 : retrait de `offline_orders`. Ne pas se contenter de cesser de la
+        // créer — les installations existantes la portent déjà, et une table
+        // que plus rien ne lit reste une table que quelqu'un rebranchera.
+        version: 3,
         onCreate: _onCreate,
         onUpgrade: _onUpgrade,
       );
@@ -182,20 +197,6 @@ class OfflineSyncService extends ChangeNotifier {
 
   /// Crée les tables de la base de données
   Future<void> _onCreate(Database db, int version) async {
-    // Table des commandes hors ligne
-    await db.execute('''
-      CREATE TABLE offline_orders (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        data TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        created_at INTEGER NOT NULL,
-        synced INTEGER DEFAULT 0,
-        sync_attempts INTEGER DEFAULT 0,
-        last_sync_attempt INTEGER
-      )
-    ''');
-
     // Table des items du menu en cache
     await db.execute('''
       CREATE TABLE cached_menu_items (
@@ -243,8 +244,6 @@ class OfflineSyncService extends ChangeNotifier {
     ''');
 
     // Index pour améliorer les performances
-    await db.execute('CREATE INDEX idx_offline_orders_user_id ON offline_orders(user_id)');
-    await db.execute('CREATE INDEX idx_offline_orders_synced ON offline_orders(synced)');
     await db.execute('CREATE INDEX idx_pending_user_updates_user_id ON pending_user_updates(user_id)');
     await db.execute('CREATE INDEX idx_pending_cart_updates_user_id ON pending_cart_updates(user_id)');
 
@@ -254,14 +253,30 @@ class OfflineSyncService extends ChangeNotifier {
   /// Met à jour la base de données lors d'un changement de version
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Ajouter la colonne sync_attempts si elle n'existe pas
+      // Ajouter la colonne sync_attempts si elle n'existe pas.
+      //
+      // `offline_orders` n'est plus touchée ici : la version 3 la supprime
+      // juste après, et l'altérer pour la détruire dans la foulée ne ferait
+      // qu'échouer bruyamment sur une installation neuve qui ne l'a jamais eue.
       try {
-        await db.execute('ALTER TABLE offline_orders ADD COLUMN sync_attempts INTEGER DEFAULT 0');
-        await db.execute('ALTER TABLE offline_orders ADD COLUMN last_sync_attempt INTEGER');
         await db.execute('ALTER TABLE pending_user_updates ADD COLUMN sync_attempts INTEGER DEFAULT 0');
         await db.execute('ALTER TABLE pending_cart_updates ADD COLUMN sync_attempts INTEGER DEFAULT 0');
       } catch (e) {
         eccore.Journal.trace('⚠️ OfflineSyncService: Colonnes déjà présentes ou erreur: $e');
+      }
+    }
+
+    if (oldVersion < 3) {
+      // `IF EXISTS` : une installation partie de la version 3 ne l'a jamais
+      // créée, et ce chemin doit rester traversable sans exception.
+      //
+      // Rien n'est sauvegardé avant la suppression : la table n'a jamais reçu
+      // une seule ligne, faute d'`INSERT` dans tout le service.
+      try {
+        await db.execute('DROP TABLE IF EXISTS offline_orders');
+        eccore.Journal.trace('✅ OfflineSyncService: table offline_orders retirée');
+      } catch (e) {
+        eccore.Journal.trace('⚠️ OfflineSyncService: retrait de offline_orders impossible: $e');
       }
     }
   }
@@ -278,22 +293,7 @@ class OfflineSyncService extends ChangeNotifier {
     }
 
     try {
-      // Charger les commandes en attente depuis la DB
-      final pendingOrdersData = await _database!.query(
-        'offline_orders',
-        where: 'synced = ?',
-        whereArgs: [0],
-        orderBy: 'created_at ASC',
-      );
-
-      _pendingOrders.clear();
-      for (final row in pendingOrdersData) {
-        final orderData = json.decode(row['data'] as String) as Map<String, dynamic>;
-        _pendingOrders.add(orderData);
-      }
-
       // Charger les mises à jour utilisateur en attente
-      if (!_isDatabaseAvailable) return;
       final pendingUserData = await _database!.query(
         'pending_user_updates',
         where: 'synced = ?',
@@ -326,7 +326,7 @@ class OfflineSyncService extends ChangeNotifier {
           ? DateTime.fromMillisecondsSinceEpoch(_prefs!.getInt('last_sync_time')!)
           : null;
 
-      eccore.Journal.trace('✅ OfflineSyncService: Données chargées - ${_pendingOrders.length} commandes, ${_pendingUserUpdates.length} updates utilisateur, ${_pendingCartUpdates.length} updates panier');
+      eccore.Journal.trace('✅ OfflineSyncService: Données chargées - ${_pendingUserUpdates.length} updates utilisateur, ${_pendingCartUpdates.length} updates panier');
       notifyListeners();
     } catch (e) {
       eccore.Journal.trace('❌ OfflineSyncService: Erreur de chargement des données - $e');
@@ -451,7 +451,7 @@ class OfflineSyncService extends ChangeNotifier {
           // ligne par ligne rouvrirait la question au milieu d'une
           // réécriture, et un changement d'établissement entre deux lignes
           // enverrait la moitié du panier ailleurs.
-          final etablissement = await RestaurantContextService().exigerSlug();
+          final etablissement = await KitchenContextService().exigerSlug();
           await _cartRepository.clear(restaurantSlug: etablissement);
           for (final item in items) {
             await _cartRepository.addLine(
@@ -846,8 +846,6 @@ class OfflineSyncService extends ChangeNotifier {
     return {
       'isOnline': _isOnline,
       'isInitialized': _isInitialized,
-      'pendingOrders': _pendingOrders.length,
-      'pendingMenuUpdates': _pendingMenuUpdates.length,
       'pendingUserUpdates': _pendingUserUpdates.length,
       'pendingCartUpdates': _pendingCartUpdates.length,
       'totalPending': totalPendingOperations,
@@ -860,7 +858,6 @@ class OfflineSyncService extends ChangeNotifier {
   /// Vide le cache local
   Future<void> clearLocalCache() async {
     try {
-      await _database!.delete('offline_orders', where: 'synced = ?', whereArgs: [1]);
       await _database!.delete('cached_menu_items');
       await _database!.delete('cached_categories');
       
@@ -880,16 +877,13 @@ class OfflineSyncService extends ChangeNotifier {
   /// Vide toutes les données (y compris les données en attente)
   Future<void> clearAllData() async {
     try {
-      await _database!.delete('offline_orders');
       await _database!.delete('pending_user_updates');
       await _database!.delete('pending_cart_updates');
       await _database!.delete('cached_menu_items');
       await _database!.delete('cached_categories');
-      
-      _pendingOrders.clear();
+
       _pendingUserUpdates.clear();
       _pendingCartUpdates.clear();
-      _pendingMenuUpdates.clear();
       _cachedMenuItems = null;
       _cachedCategories = null;
       _menuCacheTime = null;

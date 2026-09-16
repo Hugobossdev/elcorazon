@@ -19,6 +19,7 @@ from django.db import models
 
 from apps.accounts.models import User
 from apps.catalog.models import MenuItem
+from apps.geography.models import City, Country, DeliveryZone
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
@@ -67,6 +68,35 @@ class Order(UUIDModel, TimeStampedModel):
     delivery_instructions = models.TextField(blank=True)
     recipient_name = models.CharField(max_length=150)
     recipient_phone = models.CharField(max_length=16)
+
+    # --- Géographie de la commande : figée à la création -------------------
+    #
+    # **Où la commande a été prise, et non où se trouve aujourd'hui la cuisine.**
+    # Pays et ville se déduisaient de `restaurant.zone.city` : une cuisine
+    # rattachée ensuite à une autre zone — le back-office le permet, et le
+    # journalise — faisait migrer toute son histoire avec elle, et les rapports
+    # par ville réécrivaient le passé. La zone, elle, ne se déduisait de rien :
+    # c'est celle qui couvre l'**adresse** et qui a tarifé la course, que la
+    # commande ne retenait pas. « Combien de commandes à Cocody ? » n'avait pas
+    # de réponse.
+    #
+    # Nullables pour les seules commandes antérieures à ces colonnes, que la
+    # reprise `0005` renseigne au mieux ; toute commande créée depuis les porte
+    # (`OrderService.create_from_selection`).
+    #
+    # `PROTECT` sur le pays et la ville : on ne supprime pas un marché qui a
+    # facturé. `SET_NULL` sur la zone, comme ailleurs : une zone se redessine et
+    # se retire, et son **nom** reste lisible par `delivery_zone_name`.
+    country = models.ForeignKey(
+        Country, on_delete=models.PROTECT, related_name="orders", null=True, blank=True
+    )
+    city = models.ForeignKey(
+        City, on_delete=models.PROTECT, related_name="orders", null=True, blank=True
+    )
+    delivery_zone = models.ForeignKey(
+        DeliveryZone, on_delete=models.SET_NULL, related_name="orders", null=True, blank=True
+    )
+    delivery_zone_name = models.CharField(max_length=100, blank=True)
 
     # --- Montants (C2) ----------------------------------------------------
     subtotal = MoneyField()
@@ -121,6 +151,10 @@ class Order(UUIDModel, TimeStampedModel):
             # restaurant, les plus récentes d'abord.
             models.Index(fields=["restaurant", "status", "-placed_at"]),
             models.Index(fields=["customer", "-placed_at"]),
+            # La supervision et les rapports par marché, ville et zone.
+            models.Index(fields=["country", "-placed_at"], name="order_country_placed_idx"),
+            models.Index(fields=["city", "status", "-placed_at"], name="order_city_status_idx"),
+            models.Index(fields=["delivery_zone", "-placed_at"], name="order_zone_placed_idx"),
         ]
 
     def __str__(self) -> str:

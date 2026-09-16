@@ -17,6 +17,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
+from common.quantities import DimensionMismatch
 from common.state_machine import IllegalTransition
 
 __all__ = [
@@ -260,6 +261,19 @@ def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response 
             status_code=exc.status_code,
             detail=exc.detail,
             **exc.extra,
+        )
+
+    if isinstance(exc, DimensionMismatch):
+        # « 20 ml » d'un ingrédient pesé : une donnée mal formée, pas un état du
+        # système — donc 400 et non 409. Sans cette branche, l'erreur, qui n'est
+        # pas une `BusinessRuleViolation` (`common.quantities` ne connaît pas
+        # DRF), remontait en **500** : le client lisait une panne là où il avait
+        # simplement choisi la mauvaise unité.
+        return _problem(
+            code="dimension_mismatch",
+            title="Unité incompatible",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
         )
 
     if isinstance(exc, DjangoValidationError):

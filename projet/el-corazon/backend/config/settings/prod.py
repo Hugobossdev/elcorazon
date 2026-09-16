@@ -211,9 +211,9 @@ if config("PUSH_BACKEND", default="apps.notifications.push.ConsolePushBackend").
 # Le défaut répété ici est celui de `base` — et non `""` : c'est **l'absence**
 # de la variable qui constitue le défaut qu'on attrape, et c'est le seul cas
 # qui se soit réellement produit.
-if config(
-    "PAYDUNYA_GATEWAY", default="apps.payments.gateway.SandboxGateway"
-).endswith("SandboxGateway"):
+if config("PAYDUNYA_GATEWAY", default="apps.payments.gateway.SandboxGateway").endswith(
+    "SandboxGateway"
+):
     raise RuntimeError(
         "PAYDUNYA_GATEWAY pointe sur SandboxGateway, qui n'encaisse rien et croit "
         "sur parole le statut posté dans la notification. En production, poser "
@@ -256,8 +256,13 @@ if SENTRY_DSN:
     import sentry_sdk
     from sentry_sdk.integrations.celery import CeleryIntegration
     from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.types import Event, Hint
 
-    def _expurger(evenement: dict[str, object], _indice: dict[str, object]) -> dict[str, object]:
+    # Les types viennent du SDK (`sentry_sdk.types`) et non d'un `dict[str, object]`
+    # écrit à la main : `before_send` attend `Event | None` en retour, et un
+    # rappel typé trop largement passait la vérification tout en interdisant au
+    # jour où l'on voudrait **supprimer** un événement en rendant `None`.
+    def _expurger(evenement: Event, _indice: Hint) -> Event | None:
         """Retire des événements ce qui ne doit jamais quitter le serveur.
 
         `send_default_pii=False` couvre déjà l'adresse IP, l'identité et les

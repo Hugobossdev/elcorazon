@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import django.dispatch
 
-__all__ = ["assignment_accepted", "assignment_cancelled", "assignment_offered"]
+__all__ = [
+    "assignment_accepted",
+    "assignment_cancelled",
+    "assignment_declined",
+    "assignment_offered",
+    "courier_went_online",
+]
 
 #: Arguments : `assignment`.
 assignment_offered = django.dispatch.Signal()
@@ -43,3 +49,16 @@ assignment_accepted = django.dispatch.Signal()
 #: besoin d'être prévenu de sa propre décision.
 assignment_cancelled = django.dispatch.Signal()
 
+
+#: Arguments : `assignment`.
+#:
+#: Le refus **du livreur lui-même**. Personne n'a à le prévenir de sa propre
+#: décision ; c'est l'affectation automatique qui l'écoute, pour proposer la
+#: course au suivant (`apps.delivery.dispatch`).
+assignment_declined = django.dispatch.Signal()
+
+#: Arguments : `courier`.
+#:
+#: Émis quand un livreur **passe** en ligne — pas quand il y reste. Les commandes
+#: prêtes qui attendaient faute de livreur lui sont alors proposées.
+courier_went_online = django.dispatch.Signal()

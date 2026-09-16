@@ -15,6 +15,7 @@ un statut de commande. Trois choses s'y jouent :
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable
@@ -24,13 +25,15 @@ from django.db import connection, transaction
 from django.utils import timezone
 
 from apps.accounts.models import User
+from apps.availability.services import AvailabilityService, Demand
 from apps.carts.models import Cart
-from apps.carts.services import CartService, PricedSelection, price_cart
+from apps.carts.services import CartService, PricedLine, PricedSelection, price_cart
 from apps.catalog.services import StockService, record_purchase
 from apps.geography.services import DeliveryQuote
 from apps.orders.models import Order, OrderLine, OrderStatusEvent
 from apps.orders.signals import order_created, order_status_changed
 from apps.orders.states import ORDER_MACHINE, OrderStatus
+from apps.production.services import MaterialService, ProducedLine
 from apps.profiles.models import Address
 from apps.promotions.services import PromotionService
 from apps.restaurants.delivery import check_delivery
@@ -48,6 +51,9 @@ __all__ = ["OrderService", "next_reference"]
 #: cuisine lancée, l'annulation appartient au restaurant, qui sait ce qui est
 #: déjà perdu. Le personnel muni de `orders.cancel` n'est pas concerné.
 CUSTOMER_CANCELLABLE = frozenset({OrderStatus.PENDING, OrderStatus.CONFIRMED})
+
+
+logger = logging.getLogger(__name__)
 
 
 def next_reference() -> str:
@@ -92,6 +98,66 @@ def _quantities_by_item(lines: Iterable[_HasItemAndQuantity]) -> dict[uuid.UUID,
     for line in lines:
         quantities[line.menu_item_id] += line.quantity
     return dict(quantities)
+
+
+def _a_produire_depuis_le_panier(priced: Iterable[PricedLine]) -> list[ProducedLine]:
+    """Traduit les lignes valorisées du panier en demandes de production.
+
+    La traduction vit ici, et non dans `production`, parce que c'est `orders`
+    qui connaît la forme de ses lignes — le graphe de dépendances va dans ce
+    sens et pas dans l'autre.
+    """
+    return [
+        ProducedLine(
+            menu_item_id=priced_line.line.menu_item_id,
+            quantity=priced_line.line.quantity,
+            option_ids=tuple(option.pk for option in priced_line.options),
+        )
+        for priced_line in priced
+    ]
+
+
+def _a_produire_depuis_la_commande(order: Order) -> list[ProducedLine]:
+    """Les mêmes demandes, relues depuis l'instantané de la commande.
+
+    ## Les commandes antérieures n'ont pas d'identifiant d'option
+
+    `option_id` a été ajouté à l'instantané en même temps que la consommation
+    par recette. Les commandes créées **avant** portent des options sans
+    identifiant, et elles seront encore en cours le jour du déploiement.
+
+    Elles sont donc lues sans leurs options : la recette de base rend sa
+    matière, les suppléments non. C'est inexact, et c'est le moins mauvais des
+    trois comportements possibles — refuser l'annulation bloquerait
+    l'exploitation, et deviner l'option par son libellé ferait dépendre un
+    mouvement de stock d'une chaîne de caractères que le catalogue peut
+    renommer.
+
+    L'écart s'éteint de lui-même : il ne concerne que les commandes ouvertes au
+    moment du déploiement.
+    """
+    a_produire: list[ProducedLine] = []
+    for line in order.lines.all():
+        identifiants: list[uuid.UUID] = []
+        for option in line.options:
+            brut = option.get("option_id")
+            if brut is None:
+                continue
+            try:
+                identifiants.append(uuid.UUID(brut))
+            except (ValueError, AttributeError, TypeError):
+                # Un instantané est une copie, pas une source de vérité : une
+                # valeur illisible se saute, elle ne fait pas échouer une
+                # annulation.
+                continue
+        a_produire.append(
+            ProducedLine(
+                menu_item_id=line.menu_item_id,
+                quantity=line.quantity,
+                option_ids=tuple(identifiants),
+            )
+        )
+    return a_produire
 
 
 class OrderService:
@@ -154,15 +220,37 @@ class OrderService:
         """
         priced = selection
 
-        if not priced.lines:
-            raise BusinessRuleViolation("Le panier est vide.")
-        if not priced.is_orderable:
-            indisponibles = priced.unavailable_names
-            raise BusinessRuleViolation(
-                "Certains articles ne sont plus commandables : "
-                f"{', '.join(indisponibles)}. Retirez-les du panier.",
-                unavailable=indisponibles,
-            )
+        # **La** règle, au moment d'écrire — et non d'après le verdict que la
+        # sélection a pu emporter à sa lecture : un panier collaboratif se
+        # compose en une heure, et le client a pu ouvrir la carte cuisine
+        # ouverte puis payer après sa fermeture.
+        #
+        # Elle juge dans l'ordre la cuisine (relue sous verrou), la cohérence du
+        # panier, la desserte de l'adresse, les articles et leurs
+        # personnalisations, puis le barème. Ces vérifications étaient écrites
+        # ici à la suite, et la desserte venait **après** le décompte du stock :
+        # une adresse hors zone prenait des verrous de stock pour rien.
+        acceptation = AvailabilityService.assert_can_accept_order(
+            restaurant=restaurant,
+            demands=[
+                Demand(
+                    menu_item=ligne.line.menu_item,
+                    quantity=ligne.line.quantity,
+                    options=ligne.options,
+                )
+                for ligne in priced.lines
+            ],
+            delivery_point=address.location,
+            subtotal=priced.subtotal,
+        )
+        # La cuisine relue : son délai de préparation est celui d'**à présent**.
+        restaurant = acceptation.kitchen
+        quote = acceptation.quote
+        # La zone qui a tarifé la course — celle de l'adresse, jamais celle où la
+        # cuisine est posée. Sa ville est celle de la cuisine par construction
+        # (`resolve_zone` borne les zones municipales à cette ville, et une zone
+        # propre se pose dans la ville de son établissement).
+        zone = quote.zone
 
         # Le numéro est celui du destinataire s'il diffère du titulaire —
         # livraison à un tiers — sinon celui du compte. Aucun des deux n'est
@@ -176,13 +264,11 @@ class OrderService:
             )
 
         # Le stock est décompté **dans la transaction**, avant toute écriture :
-        # si la suite échoue — adresse hors zone, code promotionnel refusé —,
-        # le retrait est annulé avec le reste. C'est ce qui permet de le faire
-        # tôt, et donc de refuser la commande avant d'avoir créé quoi que ce
-        # soit qu'il faudrait ensuite défaire.
+        # si la suite échoue — code promotionnel refusé —, le retrait est annulé
+        # avec le reste. C'est ce qui permet de le faire tôt, et donc de refuser
+        # la commande avant d'avoir créé quoi que ce soit qu'il faudrait ensuite
+        # défaire.
         StockService.consume(_quantities_by_item(line.line for line in priced.lines))
-
-        quote = OrderService._quote_for(restaurant, address, priced.subtotal)
 
         # C2 — le total est recomposé ici, à partir de valeurs dont aucune n'a
         # traversé le réseau depuis le client. Le code promo ne fait pas
@@ -215,6 +301,13 @@ class OrderService:
             delivery_instructions=instructions or address.delivery_instructions,
             recipient_name=address.recipient_name or user.full_name,
             recipient_phone=recipient_phone,
+            # Figés, comme l'adresse : la commande reste attribuée à ce marché,
+            # cette ville et cette zone même si la cuisine est rattachée ailleurs
+            # demain, ou la zone redessinée.
+            country_id=zone.city.country_id,
+            city_id=zone.city_id,
+            delivery_zone=zone,
+            delivery_zone_name=zone.name,
             subtotal=priced.subtotal,
             delivery_fee=quote.fee,
             delivery_fee_gross=quote.gross_fee,
@@ -241,10 +334,19 @@ class OrderService:
                 # Copie figée : le libellé du groupe et celui de l'option sont
                 # recopiés, pour qu'un renommage au catalogue ne réécrive pas
                 # ce que le client a commandé.
+                #
+                # `option_id` s'y ajoute au même titre que `menu_item` sur cette
+                # ligne : il sert à **retrouver l'origine** — ici la recette, donc
+                # la matière à rendre si la commande est annulée — et rien ne s'y
+                # appuie pour l'affichage ni pour la facturation. Une option
+                # supprimée du catalogue laisse donc un identifiant qui ne
+                # désigne plus rien, ce qui est sans conséquence : la
+                # nomenclature introuvable ne rend simplement aucune matière.
                 options=[
                     {
                         "group": option.group.name,
                         "option": option.name,
+                        "option_id": str(option.pk),
                         "delta": option.price_delta.amount_minor,
                         "currency": option.price_delta.currency,
                     }
@@ -253,6 +355,27 @@ class OrderService:
                 notes=priced_line.line.notes,
             )
             for priced_line in priced.lines
+        )
+
+        # La matière est **promise** ici, et pas plus tôt, pour une raison qui
+        # tient en un mot : la référence. Le journal de stock doit pouvoir dire
+        # *pourquoi* deux kilos d'oignon sont immobilisés, et `EC001234` répond
+        # là où une chaîne vide laisse un mouvement orphelin.
+        #
+        # Le décompte des plats finis, lui, reste en amont : il refuse la
+        # commande avant toute écriture. Ici, l'ordre est sans effet sur le
+        # refus — la transaction est atomique, et un manque de matière emporte
+        # la commande et ses lignes avec lui.
+        #
+        # Réserver plutôt que consommer : entre la commande et le feu, la
+        # matière est promise sans être partie. Un stock qui l'ignore annonce
+        # « il reste 3 kg » quand 2,8 sont déjà dus, et c'est la commande
+        # suivante qui découvre le mensonge.
+        MaterialService.reserve(
+            restaurant_id=order.restaurant_id,
+            lines=_a_produire_depuis_le_panier(priced.lines),
+            reference=order.reference,
+            actor=user,
         )
 
         if promotion is not None:
@@ -284,6 +407,20 @@ class OrderService:
             )
 
         transaction.on_commit(_diffuser)
+
+        # Où la commande a été prise — sans client, sans adresse, sans montant
+        # nominatif : la référence relie la ligne au reste, et le `request_id`
+        # posé par `common.observabilite` à la requête.
+        logger.info(
+            "order.created",
+            extra={
+                "reference": order.reference,
+                "kitchen": restaurant.slug,
+                "country": zone.city.country.iso_code,
+                "city": zone.city.slug,
+                "delivery_zone": zone.name,
+            },
+        )
 
         # Le signal, lui, part **dans** la transaction : son abonné écrit une
         # notification en base, qui doit vivre ou mourir avec la commande.
@@ -339,6 +476,16 @@ class OrderService:
             )
             promotion, discount = devis.promotion, devis.discount
 
+        # Le premier motif bloquant, du plus général au plus précis : la cuisine
+        # avant les articles. Un bouton « Commander » grisé sans phrase laisse
+        # le client chercher ce qu'il a mal fait.
+        if priced.kitchen is not None:
+            code, motif = priced.unavailable_code, priced.unavailable_reason
+        else:
+            bloquante = next((ligne for ligne in priced.lines if not ligne.is_orderable), None)
+            code = bloquante.unavailable_code if bloquante is not None else ""
+            motif = bloquante.unavailable_reason if bloquante is not None else ""
+
         return {
             "subtotal": priced.subtotal,
             "delivery_fee": frais,
@@ -346,6 +493,8 @@ class OrderService:
             "total": priced.subtotal + frais - discount,
             "promotion": promotion,
             "is_orderable": priced.is_orderable,
+            "unavailable_code": code,
+            "unavailable_reason": motif,
         }
 
     @staticmethod
@@ -440,7 +589,18 @@ class OrderService:
             order=locked, from_status=previous, to_status=target, actor=actor, reason=reason
         )
 
-        if target == OrderStatus.DELIVERED:
+        if target == OrderStatus.PREPARING:
+            # La cuisine allume le feu : la matière promise sort réellement du
+            # stock. C'est le moment juste — `READY` serait trop tard, le plat
+            # étant déjà fait, et la confirmation trop tôt, rien n'ayant encore
+            # été touché.
+            MaterialService.consume(
+                restaurant_id=locked.restaurant_id,
+                lines=_a_produire_depuis_la_commande(locked),
+                reference=locked.reference,
+                actor=actor,
+            )
+        elif target == OrderStatus.DELIVERED:
             OrderService._record_purchases(locked)
         elif target == OrderStatus.CANCELLED:
             # Le client ne doit pas perdre son code parce que le restaurant a
@@ -450,6 +610,24 @@ class OrderService:
             # Le rejeu est déjà écarté plus haut — une commande déjà annulée
             # sort en `is_noop`, donc rien n'est recrédité deux fois.
             StockService.restore(_quantities_by_item(locked.lines.all()))
+
+            # La matière, elle, ne se rend que si elle n'est pas encore partie.
+            #
+            # Avant la préparation, elle n'était que **promise** : l'engagement
+            # se libère, et le stock redevient disponible pour la commande
+            # suivante. Après, elle est dans la casserole — annuler ne
+            # décuisine pas un oignon, et le recréditer inventerait de la
+            # matière que l'inventaire physique démentirait.
+            #
+            # C'est la même asymétrie que le remboursement connaît déjà : on
+            # rend l'argent, jamais le travail.
+            if previous in {OrderStatus.PENDING, OrderStatus.CONFIRMED}:
+                MaterialService.release(
+                    restaurant_id=locked.restaurant_id,
+                    lines=_a_produire_depuis_la_commande(locked),
+                    reference=locked.reference,
+                    actor=actor,
+                )
 
         # La diffusion part **après le commit** et non pendant : annoncer
         # « commande confirmée » sur une transaction qui échoue ensuite laisse
@@ -505,7 +683,7 @@ class OrderService:
         if order.status not in CUSTOMER_CANCELLABLE:
             raise BusinessRuleViolation(
                 "Cette commande ne peut plus être annulée depuis l'application ; "
-                "contactez le restaurant.",
+                "contactez El Corazón.",
                 current_status=order.status,
             )
         return OrderService.transition_to(

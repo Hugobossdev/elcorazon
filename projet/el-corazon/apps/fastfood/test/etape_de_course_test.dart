@@ -49,6 +49,10 @@ void main() {
       // trois suivantes se projettent sur le statut de la commande, celle-ci
       // non.
       expect(
+        // `accepted` est la valeur par défaut de `_diffusion`, et c'est
+        // précisément l'étape que ce test vérifie : la nommer dit ce qu'on
+        // regarde, la taire le cacherait derrière un défaut de décor.
+        // ignore: avoid_redundant_argument_values
         EtapeDeCourse.depuisDiffusion(_diffusion(status: 'accepted'))!
             .vientDEtreAcceptee,
         isTrue,

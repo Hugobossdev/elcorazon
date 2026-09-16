@@ -15,6 +15,8 @@ dit que la course vient d'être prise.
 from __future__ import annotations
 
 import datetime as dt
+import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
@@ -23,7 +25,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.contrib.gis.db.models.functions import Distance
 from django.db import transaction
-from django.db.models import Count, F, QuerySet, Sum
+from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Sum
 from django.utils import timezone
 
 from apps.accounts.models import User, UserType
@@ -31,7 +33,9 @@ from apps.delivery.models import Assignment, CourierProfile, CourierRating
 from apps.delivery.signals import (
     assignment_accepted,
     assignment_cancelled,
+    assignment_declined,
     assignment_offered,
+    courier_went_online,
 )
 from apps.delivery.states import (
     DELIVERY_MACHINE,
@@ -42,6 +46,7 @@ from apps.delivery.states import (
     DeliveryStatus,
     VerificationStatus,
 )
+from apps.geography.models import DeliveryZone
 from apps.orders.models import Order
 from apps.orders.services import OrderService
 from apps.orders.states import ORDER_MACHINE, OrderStatus
@@ -49,6 +54,8 @@ from apps.restaurants.models import Restaurant
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
 from common.realtime import courier_group, order_group, publish
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "AssignmentService",
@@ -296,8 +303,55 @@ class CourierService:
         `can_accept_orders: false`, et l'application le dit — « vous êtes en
         ligne, mais votre dossier n'est pas validé ».
         """
+        passe_en_ligne = is_online and not courier.is_online
         courier.is_online = is_online
         courier.save(update_fields=["is_online", "updated_at"])
+        if passe_en_ligne:
+            courier_went_online.send(sender=CourierProfile, courier=courier)
+        return courier
+
+    @staticmethod
+    @transaction.atomic
+    def set_service_zones(
+        *, courier: CourierProfile, zones: Iterable[DeliveryZone]
+    ) -> CourierProfile:
+        """Affecte le livreur à des zones — **à l'intérieur** de la desserte de sa cuisine.
+
+        Une zone est acceptée si elle peut porter une course de sa cuisine :
+        municipale **de la ville de la cuisine**, ou propre **à cette cuisine**.
+        Une seule zone hors de ce périmètre fait tout refuser, sans rien écrire :
+        affecter un livreur de Lomé à une zone de Kara ne ferait que le rendre
+        inéligible partout, en silence.
+
+        Une liste vide lève la restriction — le livreur roule dans toutes les
+        zones de sa cuisine.
+        """
+        cuisine = courier.restaurant
+        ville = cuisine.zone.city_id
+        retenues = list(zones)
+        hors_perimetre = sorted(
+            zone.name
+            for zone in retenues
+            if not (
+                zone.restaurant_id == cuisine.pk
+                or (zone.restaurant_id is None and zone.city_id == ville)
+            )
+        )
+        if hors_perimetre:
+            raise BusinessRuleViolation(
+                f"Ces zones ne sont pas desservies par {cuisine.name} : "
+                f"{', '.join(hors_perimetre)}.",
+                zones=hors_perimetre,
+            )
+        courier.service_zones.set(retenues)
+        logger.info(
+            "delivery.courier.zones",
+            extra={
+                "courier": str(courier.pk),
+                "kitchen": cuisine.slug,
+                "zones": [zone.name for zone in retenues],
+            },
+        )
         return courier
 
     #: Statuts qu'un dépôt de pièces ramène à `pending` — et pourquoi ces deux-là.
@@ -369,6 +423,20 @@ class CourierService:
         Une proposition en attente n'exclut pas : elle n'occupe personne, et un
         livreur qui laisse traîner une offre bloquerait sinon sa propre file.
         """
+        # Le périmètre de zone : un livreur sans zone roule partout où sa
+        # cuisine livre ; restreint, seulement dans ses zones — et jamais pour
+        # une commande dont la zone est inconnue (voir `serves_zone`, la même
+        # règle en Python, que `offer` relit).
+        liaisons = CourierProfile.service_zones.through.objects
+        perimetre = Q(~Exists(liaisons.filter(courierprofile_id=OuterRef("pk"))))
+        if order.delivery_zone_id is not None:
+            perimetre |= Q(
+                Exists(
+                    liaisons.filter(
+                        courierprofile_id=OuterRef("pk"), deliveryzone_id=order.delivery_zone_id
+                    )
+                )
+            )
         return (
             CourierProfile.objects.filter(
                 restaurant=order.restaurant,
@@ -376,6 +444,7 @@ class CourierService:
                 verification_status=VerificationStatus.APPROVED,
                 user__is_active=True,
             )
+            .filter(perimetre)
             .exclude(assignments__status__in=ENGAGED_STATUSES)
             .select_related("user")
             .annotate(to_restaurant=Distance("last_location", order.restaurant.location))
@@ -415,6 +484,12 @@ class AssignmentService:
         if courier.restaurant_id != locked.restaurant_id:
             raise BusinessRuleViolation(
                 "Ce livreur n'est pas rattaché à l'établissement de la commande."
+            )
+        if not courier.serves_zone(locked.delivery_zone_id):
+            zone = f" ({locked.delivery_zone_name})" if locked.delivery_zone_name else ""
+            raise BusinessRuleViolation(
+                f"Ce livreur n'est pas affecté à la zone de livraison de cette commande{zone}.",
+                courier_id=str(courier.pk),
             )
 
         # L6 — le livreur ne porte qu'une course à la fois. Relu ici et pas
@@ -549,6 +624,7 @@ class AssignmentService:
         assignment.status = DeliveryStatus.DECLINED
         assignment.decline_reason = reason
         assignment.save(update_fields=["status", "decline_reason", "updated_at"])
+        assignment_declined.send(sender=Assignment, assignment=assignment)
         return assignment
 
     # ---------------------------------------------------------- progression
@@ -635,9 +711,7 @@ class AssignmentService:
             # arrivant. La diffusion faite plus haut porte sur le canal de la
             # **commande**, que le client écoute et que le livreur n'écoute
             # pas : sans ce signal, il roulait vers une course annulée.
-            assignment_cancelled.send(
-                sender=Assignment, assignment=locked, reason=reason
-            )
+            assignment_cancelled.send(sender=Assignment, assignment=locked, reason=reason)
 
         return locked
 

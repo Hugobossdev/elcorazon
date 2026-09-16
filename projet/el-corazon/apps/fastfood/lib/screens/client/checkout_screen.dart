@@ -5,6 +5,8 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
+import 'package:elcora_fast/screens/client/selecteur_etablissement_sheet.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/adresse.dart';
@@ -149,7 +151,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         if (!breakdown.isInServiceableZone && mounted) {
           await ZoneNotServiceableDialog.show(
             context,
+            raison: breakdown.raison,
             onChooseAnotherAddress: _selectAddress,
+            onChangeCity: () => SelecteurEtablissementSheet.ouvrir(context),
           );
         }
       }
@@ -257,6 +261,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       DesignConstants.spacingL,
                     ),
                     children: [
+                      // Le refus du serveur, **avant** que le client ne
+                      // remplisse le reste : la cuisine a fermé, un plat est en
+                      // rupture. Sans cet encart, il l'apprenait en appuyant sur
+                      // « Commander », après avoir tout saisi.
+                      if (!isGroupOrder && cartService.motifBloquant != null) ...[
+                        _BandeauCommandeImpossible(motif: cartService.motifBloquant!),
+                        const SizedBox(height: DesignConstants.spacingL),
+                      ],
                       _buildStepHeader(context, 'Adresse de livraison'),
                       _buildDeliverySection(context),
                       const SizedBox(height: DesignConstants.spacingL),
@@ -329,6 +341,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // D'où part le repas, et vers quelle zone : c'est la cuisine qui
+          // prépare, la zone qui fixe le barème. Les deux viennent du serveur —
+          // la cuisine du contexte, la zone de la desserte de cette adresse.
+          SummaryRow(
+            label: 'Cuisine',
+            icon: Icons.soup_kitchen_outlined,
+            value: _deliveryBreakdown?.restaurantName ?? KitchenContextService().name ?? '—',
+          ),
+          if (_deliveryBreakdown?.zoneName case final zone? when zone.isNotEmpty)
+            SummaryRow(label: 'Zone de livraison', icon: Icons.place_outlined, value: zone),
+          const SummaryDivider(),
           ...cartItems.map((item) => _buildOrderItem(context, item)),
           const SummaryDivider(),
           SummaryRow(
@@ -339,6 +362,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           ),
           SummaryRow(
             label: 'Livraison',
+            subtitle: _deliveryBreakdown?.zoneName == null
+                ? null
+                : 'Zone ${_deliveryBreakdown!.zoneName}',
             value: PriceFormatter.format(deliveryFee),
           ),
           if (discount > 0)
@@ -743,7 +769,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           emphasis: ActionEmphasis.gradient,
           trailingIcon: Icons.arrow_forward_rounded,
           isLoading: _isLoading,
-          onPressed: _isLoading
+          // Neutralisé quand le devis du serveur dit que la commande est
+          // impossible : l'encart en tête d'écran a déjà dit pourquoi, et aucune
+          // saisie ici n'y remédie. Sans devis, le bouton reste actif — c'est
+          // la création qui tranchera, et elle rend le même motif.
+          onPressed: _isLoading || cartService.motifBloquant != null
               ? null
               : () => _placeOrder(context, appService, cartService, total),
         ),
@@ -883,5 +913,63 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       return erreur.detail;
     }
     return 'Commande impossible pour le moment. Réessayez.';
+  }
+}
+
+/// Encart « commande impossible » — le motif du serveur, tel quel.
+///
+/// Même forme que l'avis de plat indisponible de la fiche article : un refus
+/// qui se voit au même endroit, de la même façon, où qu'on le rencontre.
+class _BandeauCommandeImpossible extends StatelessWidget {
+  const _BandeauCommandeImpossible({required this.motif});
+
+  final String motif;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: 'Commande impossible. $motif',
+      child: SectionCard(
+        color: theme.colorScheme.errorContainer,
+        shadow: false,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.storefront_rounded,
+              size: DesignConstants.iconSizeMedium,
+              color: theme.colorScheme.onErrorContainer,
+            ),
+            const SizedBox(width: DesignConstants.spacingM),
+            Expanded(
+              child: ExcludeSemantics(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Commande impossible pour le moment',
+                      style: AppTypography.titleLg(
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                    const SizedBox(height: DesignConstants.spacingXS),
+                    Text(
+                      motif,
+                      style: AppTypography.bodyMd(
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

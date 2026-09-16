@@ -1,6 +1,9 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
+import 'package:elcora_fast/presentation/situation_cuisine.dart';
 import 'package:elcora_fast/services/address_service.dart' show AddressSessionRequired;
+import 'package:elcora_fast/services/kitchen_context_service.dart'
+    show CuisineIndisponible, SituationCuisine;
 
 /// Ce qu'on dit au client quand une action échoue.
 ///
@@ -18,6 +21,17 @@ String messageErreur(Object erreur) {
   // enregistrer une adresse, par exemple. Le message porte déjà l'invitation à
   // se connecter ; le reformuler ici la dédoublerait.
   if (erreur is AddressSessionRequired) return erreur.toString();
+
+  // Aucune cuisine ne peut servir la demande : la phrase dépend de **pourquoi**
+  // — une panne ne se dit pas « aucune cuisine ne vous livre ».
+  if (erreur is CuisineIndisponible) {
+    return PresentationSituation.de(
+      erreur.situation,
+      // Seul un refus argumenté porte une phrase destinée au client. Le détail
+      // d'une panne de transport est technique, et reste au journal.
+      motifServeur: erreur.situation == SituationCuisine.erreurApi ? erreur.detail : null,
+    ).message;
+  }
 
   return eccore.messageErreurApi(erreur, compteAttendu: 'client');
 }

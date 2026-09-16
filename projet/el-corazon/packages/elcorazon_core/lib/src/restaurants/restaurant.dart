@@ -13,12 +13,15 @@
 ///
 /// Tout ce que ces constantes disaient est ici, rendu par le serveur.
 ///
-/// ## Les trois booléens
+/// ## Un verdict et son motif
 ///
-/// `isOpen`, `acceptsOrders` et `canOrderNow` sortent séparément, et les
-/// confondre ferait perdre l'information qui compte : « fermé, ouvre à 11 h »
-/// n'est pas « débordé, réessayez dans dix minutes », et les deux n'appellent
-/// pas le même geste de la part du client.
+/// [canOrderNow] est la réponse du juge de disponibilité du serveur, et
+/// [unavailableCode] dit pourquoi elle est négative : « fermé » n'est pas
+/// « débordé, réessayez dans dix minutes », et les deux n'appellent pas le même
+/// geste de la part du client. L'application compare le code ; elle ne
+/// recompose plus la règle à partir de [isOpen] et [acceptsOrders], qui restent
+/// des informations — les horaires, le drapeau du coup de feu — et non des
+/// conditions à assembler.
 class Restaurant {
   const Restaurant({
     required this.id,
@@ -36,6 +39,11 @@ class Restaurant {
     required this.isOpen,
     required this.acceptsOrders,
     required this.canOrderNow,
+    this.unavailableCode = '',
+    this.unavailableReason = '',
+    this.isTemporarilyClosed = false,
+    this.reopensAt,
+    this.reopensLabel = '',
     this.description = '',
     this.phone,
     this.phonePrefix = '',
@@ -69,6 +77,11 @@ class Restaurant {
       isOpen: json['is_open'] as bool? ?? false,
       acceptsOrders: json['accepts_orders'] as bool? ?? false,
       canOrderNow: json['can_order_now'] as bool? ?? false,
+      unavailableCode: json['unavailable_code'] as String? ?? '',
+      unavailableReason: json['unavailable_reason'] as String? ?? '',
+      isTemporarilyClosed: json['is_temporarily_closed'] as bool? ?? false,
+      reopensAt: DateTime.tryParse(json['reopens_at'] as String? ?? ''),
+      reopensLabel: json['reopens_label'] as String? ?? '',
       // Absent quand la requête ne portait pas de point de référence.
       // Volontairement laissé nul plutôt que ramené à `0` : un zéro inventé
       // ferait croire à une proximité qu'on n'a pas mesurée.
@@ -124,8 +137,44 @@ class Restaurant {
   /// Prend-il des commandes maintenant ? Le drapeau du coup de feu.
   final bool acceptsOrders;
 
-  /// Les trois conditions réunies. C'est ce que teste un bouton « Commander ».
+  /// Le verdict du serveur : l'établissement prend-il une commande maintenant ?
+  /// C'est ce que teste un bouton « Commander ».
   final bool canOrderNow;
+
+  /// Pourquoi [canOrderNow] est faux — une constante de
+  /// `MotifIndisponibilite`, vide sinon.
+  final String unavailableCode;
+
+  /// La phrase à afficher quand [canOrderNow] est faux, vide sinon.
+  final String unavailableReason;
+
+  /// Fermée par une fermeture exceptionnelle datée — un jour férié, des travaux.
+  final bool isTemporarilyClosed;
+
+  /// Premier instant où elle rouvre, quand elle est fermée et que le serveur
+  /// le connaît ; nul sinon, ou d'un serveur antérieur à ce champ.
+  final DateTime? reopensAt;
+
+  /// Cette réouverture en toutes lettres — « demain à 11 h 00 » —, **composée
+  /// par le serveur dans le fuseau du pays** : l'horloge du téléphone n'est
+  /// pas celle de la cuisine. Vide quand il n'y a rien à annoncer.
+  final String reopensLabel;
+
+  /// « Fermé — réouverture demain à 11 h 00 », « Ouvert », « Commandes en pause ».
+  ///
+  /// L'étiquette courte d'une cuisine, pour une carte ou un en-tête. La phrase
+  /// longue reste [unavailableReason].
+  String get statusLabel {
+    if (canOrderNow) return 'Ouvert';
+    final reouverture = reopensLabel.isEmpty ? '' : ' — réouverture $reopensLabel';
+    return switch (unavailableCode) {
+      'kitchen_temporarily_closed' => 'Fermé exceptionnellement$reouverture',
+      'kitchen_closed' => 'Fermé$reouverture',
+      'kitchen_paused' => 'Commandes en pause',
+      'kitchen_suspended' => 'Indisponible',
+      _ => 'Indisponible',
+    };
+  }
 
   /// Distance depuis le point de référence de la requête, en mètres, ou `null`
   /// si la requête n'en portait pas.

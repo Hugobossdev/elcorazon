@@ -28,6 +28,8 @@ class MenuItem {
     required this.ratingAverage,
     required this.ratingCount,
     required this.sortOrder,
+    this.unavailableCode = '',
+    this.unavailableReason = '',
     this.ingredients = const [],
     this.calories,
     this.optionGroups = const [],
@@ -48,6 +50,10 @@ class MenuItem {
       allergens: (json['allergens'] as List<dynamic>? ?? const []).map((e) => e.toString()).toList(),
       dietaryTags: (json['dietary_tags'] as List<dynamic>? ?? const []).map((e) => e.toString()).toList(),
       isAvailable: json['is_available'] as bool,
+      // Absents d'un cache écrit avant que le serveur ne les rende : vides,
+      // `isAvailable` seul continue alors de dire l'essentiel.
+      unavailableCode: json['unavailable_code'] as String? ?? '',
+      unavailableReason: json['unavailable_reason'] as String? ?? '',
       isPopular: json['is_popular'] as bool,
       vipExclusive: json['vip_exclusive'] as bool,
       ratingAverage: double.parse(json['rating_average'].toString()),
@@ -82,6 +88,8 @@ class MenuItem {
         'allergens': allergens,
         'dietary_tags': dietaryTags,
         'is_available': isAvailable,
+        'unavailable_code': unavailableCode,
+        'unavailable_reason': unavailableReason,
         'is_popular': isPopular,
         'vip_exclusive': vipExclusive,
         'rating_average': ratingAverage,
@@ -104,7 +112,23 @@ class MenuItem {
   final int preparationMinutes;
   final List<String> allergens;
   final List<String> dietaryTags;
+
+  /// **Peut-on commander cet article ?** — le verdict du serveur, pas
+  /// l'interrupteur de la cuisine.
+  ///
+  /// Faux quand l'article est retiré, désactivé, rangé dans une catégorie
+  /// éteinte, épuisé, ou quand la cuisine n'a plus de quoi le préparer. La
+  /// disponibilité de la cuisine elle-même (fermée, suspendue) n'y entre pas :
+  /// elle est sur l'établissement, `Restaurant.canOrderNow`.
   final bool isAvailable;
+
+  /// Pourquoi [isAvailable] est faux — une constante de
+  /// `MotifIndisponibilite`, vide sinon. À comparer, jamais à afficher.
+  final String unavailableCode;
+
+  /// La phrase à afficher quand [isAvailable] est faux, vide sinon.
+  final String unavailableReason;
+
   final bool isPopular;
   final bool vipExclusive;
   final double ratingAverage;

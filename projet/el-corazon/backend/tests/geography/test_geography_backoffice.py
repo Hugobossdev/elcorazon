@@ -322,10 +322,19 @@ class TestHoraires:
             location=restaurant.location,
             phone="+22890000011",
         )
-        OpeningHours.objects.create(
+        plage_d_ailleurs = OpeningHours.objects.create(
             restaurant=ailleurs, weekday=0, opens_at="11:00", closes_at="23:00"
         )
 
-        response = gerant.get(reverse("v1:restaurants:managed-opening-hours-list"))
+        response = gerant.get(
+            reverse("v1:restaurants:managed-opening-hours-list"), {"page_size": 100}
+        )
 
-        assert response.data["count"] == 0
+        # Exactement les plages de son établissement — la fixture commune en
+        # porte quatorze, l'ouverture permanente —, et jamais celle d'ailleurs.
+        # Comparer à l'ensemble attendu plutôt qu'à un compte de zéro : le zéro
+        # ne tenait qu'à l'absence d'horaires propres, et n'aurait pas vu une
+        # fuite le jour où la fixture en a eu.
+        vues = {ligne["id"] for ligne in response.data["results"]}
+        assert str(plage_d_ailleurs.pk) not in vues
+        assert vues == {str(pk) for pk in restaurant.opening_hours.values_list("pk", flat=True)}

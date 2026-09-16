@@ -285,4 +285,3 @@ class TestOriginesAutorisees:
             "render.yaml ne déclare pas CORS_ALLOW_LOCAL_DEV_ORIGINS : le repli "
             "de `prod.py` s'applique, et il autorise localhost."
         )
-

@@ -111,6 +111,43 @@ les composants d'adresse sont extraits **une fois** — l'implémentation Flutte
 cherchait le nom de la ville *dans le texte* de l'adresse, et trouvait « Lomé »
 dans « Rue de Lomé, Cotonou ».
 
+### Le réseau de cuisines de bout en bout (septembre 2026, lot 4)
+
+La hiérarchie n'a toujours pas bougé — `Country → City → DeliveryZone →
+Restaurant` est la hiérarchie pays → ville → lieu → cuisine que demande le
+produit, sous d'autres noms. Ce qui manquait tenait à ses bords : la commande,
+la flotte, et quelques incohérences que le schéma laissait passer.
+
+- **La commande fige sa géographie** (`Order.country`, `city`, `delivery_zone`,
+  `delivery_zone_name`). Pays et ville se déduisaient de la cuisine : la
+  rattacher ailleurs faisait migrer toute son histoire, et les rapports par
+  ville réécrivaient le passé. La zone — celle de l'adresse, qui tarife la
+  course — n'était retenue nulle part. Reprise des commandes existantes par la
+  même règle que `resolve_zone`, zones retirées comprises.
+- **Une zone municipale ne tarife que sa ville.** `resolve_zone` prend la ville
+  de la cuisine désignée : sans elle, un panier ouvert à Lomé se faisait livrer
+  une adresse de la ville voisine au barème de celle-ci, alors que le choix
+  automatique la refusait.
+- **Une cuisine ne se pose pas sur la zone propre d'une autre**, ni ne se publie
+  sur un marché fermé (`configuration_gaps`).
+- **Fermetures exceptionnelles datées** (`KitchenClosure`), jugées avant les
+  horaires (`kitchen_temporarily_closed`), et **réouverture annoncée** —
+  instant et phrase composés dans le fuseau du pays par le juge
+  (`next_opening`, seul lecteur autorisé de l'ouverture).
+- **Périmètre de zone des livreurs** (`CourierProfile.service_zones`, vide =
+  toutes les zones de la cuisine), relu par la liste des disponibles et par
+  `AssignmentService.offer`.
+- **Affectation automatique** (`apps.delivery.dispatch`, réglable par cuisine) :
+  commande prête → livreur compatible ; refus, expiration
+  (`DELIVERY_OFFER_TTL_SECONDS`, horloge `expire-stale-offers`) et mise en
+  ligne relancent. Aucune garde contournée : elle passe par `offer`.
+- **Rapport réseau** par pays, ville, zone ou cuisine, et **audit** de
+  cohérence en lecture seule (`manage.py audit_reseau`).
+
+Le livreur reste rattaché à **une** cuisine. L'élargir à plusieurs toucherait le
+cloisonnement du personnel, les gains et la file temps réel ; la zone suffit
+aux cas rencontrés, et une zone municipale couvre déjà toute une ville.
+
 ### Ce qui est reporté, sans obstacle futur
 
 | Reporté | Débloqué par |

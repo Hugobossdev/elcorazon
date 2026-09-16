@@ -208,8 +208,17 @@ class ApiClient {
 
     final response = error.response;
     final data = response?.data;
+    final statut = response?.statusCode;
     if (response != null && data is Map<String, dynamic>) {
-      return ApiException.fromProblemDetail(response.statusCode ?? 0, data);
+      return ApiException.fromProblemDetail(statut ?? 0, data);
+    }
+
+    // Une réponse **est arrivée**, mais son corps ne se lit pas : page HTML
+    // d'erreur Django, proxy, corps vide. Ce n'est pas une panne réseau, et le
+    // dire en était une conséquence directe — un 500 de l'annuaire a été
+    // affiché « aucun restaurant en service » (voir `ApiException.unreadable`).
+    if (statut != null && statut > 0) {
+      return ApiException.unreadable(statut);
     }
 
     return ApiException.network(error.message ?? 'Impossible de joindre le serveur.');

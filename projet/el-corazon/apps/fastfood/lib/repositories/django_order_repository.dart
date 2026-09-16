@@ -2,7 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/repositories/order_repository.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Commandes contre le backend Django (Phase 6). Le paiement réel (PayDunya
 /// via le backend) est une tranche à venir — créer une commande ici ne
@@ -72,7 +72,7 @@ class DjangoOrderRepository implements OrderRepository {
     // locaux. Le carnet garantit désormais l'invariant à la source : toute
     // `eccore.Address` vient de `/profiles/addresses/`.
     final remote = await _orders.create(
-      restaurantSlug: await RestaurantContextService().exigerSlug(),
+      restaurantSlug: await KitchenContextService().exigerSlug(),
       addressId: address.id!,
       paymentMethod: _toRemotePaymentMethod(paymentMethod),
       instructions: instructions ?? '',

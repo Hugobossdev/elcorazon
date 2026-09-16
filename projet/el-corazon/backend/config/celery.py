@@ -66,4 +66,12 @@ app.conf.beat_schedule = {
         "task": "apps.loyalty.tasks.renew_subscriptions",
         "schedule": 3600.0,
     },
+    "expire-stale-offers": {
+        # Chaque minute : une proposition sans réponse bloque un repas prêt. Le
+        # tour clôt ce qui a dépassé `DELIVERY_OFFER_TTL_SECONDS`, propose au
+        # livreur suivant, et rattrape les commandes prêtes restées sans course
+        # faute de livreur en ligne au moment où elles l'étaient devenues.
+        "task": "apps.delivery.tasks.expire_stale_offers",
+        "schedule": 60.0,
+    },
 }

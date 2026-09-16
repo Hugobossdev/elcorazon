@@ -2,6 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:admin/presentation/inventaire.dart';
 import 'package:admin/screens/admin/reseau/champs_reseau.dart';
 import 'package:admin/screens/admin/reseau/selecteur_de_lieu.dart';
 import 'package:admin/screens/admin/reseau/zone_creation_dialog.dart';
@@ -60,8 +61,10 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
   final _telephone = TextEditingController();
   final _email = TextEditingController();
   final _preparation = TextEditingController(text: '20');
+  final _plafond = TextEditingController();
 
   String? _zoneId;
+  bool _affectationAutomatique = true;
   bool _slugTouche = false;
   bool _envoiEnCours = false;
 
@@ -82,7 +85,10 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
       _telephone.text = existant.phone ?? '';
       _email.text = existant.email ?? '';
       _preparation.text = existant.defaultPreparationMinutes.toString();
+      final plafond = existant.stockAdjustmentCeiling;
+      _plafond.text = plafond == null ? '' : '${plafond.toMajorUnits()}'.replaceFirst(RegExp(r'\.0$'), '');
       _zoneId = existant.zoneId;
+      _affectationAutomatique = existant.autoDispatchCouriers;
     }
 
     _nom.addListener(() {
@@ -104,6 +110,7 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
       _telephone,
       _email,
       _preparation,
+      _plafond,
     ]) {
       champ.dispose();
     }
@@ -210,6 +217,10 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
             phone: _telephone.text.trim(),
             email: _email.text.trim(),
             defaultPreparationMinutes: int.parse(_preparation.text.trim()),
+            autoDispatchCouriers: _affectationAutomatique,
+            stockAdjustmentCeiling:
+                prixDuLot(_plafond.text, devise: widget.existant!.currency),
+            clearStockAdjustmentCeiling: _plafond.text.trim().isEmpty,
           );
 
     if (!mounted) return;
@@ -356,6 +367,49 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
                     ),
                   ],
                 ),
+                if (!_creation) ...[
+                  const SizedBox(height: 20),
+                  _Titre('Livraison', scheme),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _affectationAutomatique,
+                    onChanged: (valeur) => setState(() => _affectationAutomatique = valeur),
+                    title: const Text('Affecter les livreurs automatiquement'),
+                    subtitle: Text(
+                      _affectationAutomatique
+                          ? 'Dès qu’une commande est prête, la course est proposée au livreur '
+                              'compatible le plus proche — même zone, en ligne, sans course en cours.'
+                          : 'Les courses s’affectent à la main depuis la supervision.',
+                    ),
+                  ),
+                ],
+                // Le plafond ne se fixe qu'une fois l'établissement ouvert : sa
+                // devise vient de la zone, et un montant saisi avant de la
+                // connaître se lirait dans la mauvaise unité.
+                if (!_creation) ...[
+                  const SizedBox(height: 20),
+                  _Titre('Inventaire', scheme),
+                  CustomTextField(
+                    label: 'Plafond des pertes sans validation (${widget.existant!.currency})',
+                    hint: 'Vide : toute perte attend une validation',
+                    controller: _plafond,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    validator: (v) {
+                      try {
+                        prixDuLot(v ?? '', devise: widget.existant!.currency);
+                        return null;
+                      } on FormatException {
+                        return 'Montant attendu, sans décimale superflue';
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Au-delà de ce montant, une perte ou une correction de stock attend '
+                    'la validation d’une autre personne. Laissé vide, tout se valide.',
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  ),
+                ],
                 if (_creation) ...[
                   const SizedBox(height: 20),
                   Container(

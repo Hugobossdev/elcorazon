@@ -66,6 +66,28 @@ class CourierPerformanceRowSerializer(serializers.Serializer[Any]):
     earnings_minor = serializers.IntegerField(read_only=True)
 
 
+class NetworkQuerySerializer(serializers.Serializer[Any]):
+    """`?level=` et `?zone=` du rapport réseau — la fenêtre vient de `ReportQuerySerializer`."""
+
+    level = serializers.ChoiceField(
+        choices=["country", "city", "zone", "kitchen"], required=False, default="kitchen"
+    )
+    zone = serializers.UUIDField(required=False, allow_null=True, default=None)
+
+
+class NetworkRowSerializer(serializers.Serializer[Any]):
+    key = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    city = serializers.CharField(read_only=True)
+    country = serializers.CharField(read_only=True)
+    currency = serializers.CharField(read_only=True)
+    orders_count = serializers.IntegerField(read_only=True)
+    in_progress_count = serializers.IntegerField(read_only=True)
+    delivered_count = serializers.IntegerField(read_only=True)
+    cancelled_count = serializers.IntegerField(read_only=True)
+    revenue_minor = serializers.IntegerField(read_only=True)
+
+
 class StatusRowSerializer(serializers.Serializer[Any]):
     status = serializers.CharField(read_only=True)
     orders_count = serializers.IntegerField(read_only=True)

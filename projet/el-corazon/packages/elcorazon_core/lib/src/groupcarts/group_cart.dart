@@ -63,6 +63,7 @@ class GroupCartLine {
     required this.total,
     required this.isOrderable,
     required this.unavailableReason,
+    this.unavailableCode = '',
     this.image,
   });
 
@@ -83,6 +84,7 @@ class GroupCartLine {
       total: Money.fromJson(json['total'] as Map<String, dynamic>),
       isOrderable: json['is_orderable'] as bool? ?? true,
       unavailableReason: json['unavailable_reason'] as String? ?? '',
+      unavailableCode: json['unavailable_code'] as String? ?? '',
     );
   }
 
@@ -99,6 +101,9 @@ class GroupCartLine {
   final Money total;
   final bool isOrderable;
   final String unavailableReason;
+
+  /// Motif stable — `MotifIndisponibilite`.
+  final String unavailableCode;
 }
 
 /// Ce que doit un participant — calculé par le serveur, jamais réparti ici.
@@ -144,6 +149,8 @@ class GroupCart {
     required this.subtotal,
     required this.isOrderable,
     required this.updatedAt,
+    this.unavailableCode = '',
+    this.unavailableReason = '',
     this.closesAt,
     this.orderId,
   });
@@ -173,6 +180,8 @@ class GroupCart {
       currency: json['currency'] as String? ?? 'XOF',
       subtotal: Money.fromJson(json['subtotal'] as Map<String, dynamic>),
       isOrderable: json['is_orderable'] as bool? ?? false,
+      unavailableCode: json['unavailable_code'] as String? ?? '',
+      unavailableReason: json['unavailable_reason'] as String? ?? '',
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );
   }
@@ -204,8 +213,15 @@ class GroupCart {
   final String currency;
   final Money subtotal;
 
-  /// Vrai quand toutes les lignes sont commandables — l'hôte peut confirmer.
+  /// Vrai quand la cuisine prend la commande et que toutes les lignes sont
+  /// commandables — l'hôte peut confirmer.
   final bool isOrderable;
+
+  /// Pourquoi **la cuisine** ne prend pas la commande — vides sinon. Un
+  /// déjeuner d'équipe se compose en une heure : l'hôte doit apprendre que la
+  /// cuisine a fermé avant de recueillir l'adresse et le paiement.
+  final String unavailableCode;
+  final String unavailableReason;
   final DateTime updatedAt;
 
   bool isHost(String userId) => hostId == userId;

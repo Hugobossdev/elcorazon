@@ -3,7 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/theme.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Les moyens de joindre l'établissement, pour un visiteur non connecté.
 ///
@@ -38,7 +38,7 @@ class GuestContactScreen extends StatelessWidget {
   /// encore répondu au premier affichage, et une constante figerait la valeur
   /// vide.
   String get _businessAddress {
-    final contexte = RestaurantContextService();
+    final contexte = KitchenContextService();
     final morceaux = [contexte.name, contexte.cityName]
         .whereType<String>()
         .where((morceau) => morceau.isNotEmpty);

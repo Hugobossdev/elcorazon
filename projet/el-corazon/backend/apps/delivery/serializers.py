@@ -13,9 +13,10 @@ from typing import Any
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from apps.accounts.models import User, phone_validator
+from apps.accounts.models import User, UserType, phone_validator
 from apps.delivery.models import (
     Assignment,
     CourierProfile,
@@ -23,7 +24,9 @@ from apps.delivery.models import (
     CourierShift,
     VehicleType,
 )
-from apps.delivery.states import DELIVERY_MACHINE, VERIFICATION_MACHINE
+from apps.delivery.states import DELIVERY_MACHINE, ENGAGED_STATUSES, VERIFICATION_MACHINE
+from apps.geography.models import DeliveryZone
+from apps.orders.models import PaymentMethod
 from apps.restaurants.models import Restaurant
 from common.serializers import LocationField, MoneyField
 
@@ -96,6 +99,9 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
     last_location = LocationField(read_only=True)
     total_earnings = MoneyField(read_only=True)
     can_accept_orders = serializers.BooleanField(read_only=True)
+    # Les zones où il roule. Vide : toutes celles de sa cuisine — voir
+    # `CourierProfile.service_zones`.
+    service_zones = serializers.SerializerMethodField()
 
     class Meta:
         model = CourierProfile
@@ -105,6 +111,7 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
             "email",
             "phone",
             "restaurant",
+            "service_zones",
             "verification_status",
             "verification_notes",
             "verified_at",
@@ -134,6 +141,24 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
             "updated_at",
         ]
         read_only_fields = fields
+
+    @extend_schema_field(
+        serializers.ListField(child=serializers.DictField(), help_text="`id` et `name`.")
+    )
+    def get_service_zones(self, obj: CourierProfile) -> list[dict[str, str]]:
+        return [{"id": str(zone.pk), "name": zone.name} for zone in obj.service_zones.all()]
+
+
+class CourierZonesSerializer(serializers.Serializer[Any]):
+    """Corps de `POST /delivery/couriers/{id}/zones/` — la liste **entière**.
+
+    Remplace, n'ajoute pas : l'écran coche des zones et envoie ce qu'il voit.
+    Une liste vide lève la restriction.
+    """
+
+    zones = serializers.PrimaryKeyRelatedField[DeliveryZone](
+        queryset=DeliveryZone.objects.select_related("city"), many=True, allow_empty=True
+    )
 
 
 class CourierProvisioningSerializer(serializers.Serializer[Any]):
@@ -276,7 +301,26 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
     delivery_landmark = serializers.CharField(source="order.delivery_landmark", read_only=True)
     delivery_location = serializers.JSONField(source="order.delivery_location", read_only=True)
     recipient_name = serializers.CharField(source="order.recipient_name", read_only=True)
-    recipient_phone = serializers.CharField(source="order.recipient_phone", read_only=True)
+    recipient_phone = serializers.SerializerMethodField()
+    # Ce que le livreur doit savoir pour livrer, et qui manquait : la consigne
+    # laissée par le client (« sonnez deux fois, portail bleu »), la zone et la
+    # ville où il roule, et **ce qu'il doit encaisser**. Une commande payée en
+    # espèces partait sans montant : le livreur l'apprenait du client, sur le
+    # pas de la porte.
+    delivery_instructions = serializers.CharField(
+        source="order.delivery_instructions", read_only=True
+    )
+    delivery_zone_name = serializers.CharField(source="order.delivery_zone_name", read_only=True)
+    city_name = serializers.CharField(
+        source="order.city.name", read_only=True, allow_null=True, default=None
+    )
+    payment_method = serializers.CharField(source="order.payment_method", read_only=True)
+    order_total = MoneyField(source="order.total", read_only=True)
+    estimated_delivery_at = serializers.DateTimeField(
+        source="order.estimated_delivery_at", read_only=True, allow_null=True
+    )
+    amount_to_collect = serializers.SerializerMethodField()
+    items = serializers.SerializerMethodField()
     courier = CourierPublicSerializer(read_only=True)
     courier_fee = MoneyField(read_only=True)
     allowed_transitions = serializers.SerializerMethodField()
@@ -294,6 +338,14 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
             "delivery_location",
             "recipient_name",
             "recipient_phone",
+            "delivery_instructions",
+            "delivery_zone_name",
+            "city_name",
+            "payment_method",
+            "order_total",
+            "estimated_delivery_at",
+            "amount_to_collect",
+            "items",
             "courier",
             "status",
             "allowed_transitions",
@@ -310,6 +362,50 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
 
     def get_allowed_transitions(self, obj: Assignment) -> list[str]:
         return sorted(DELIVERY_MACHINE.targets_from(obj.status))
+
+    def get_recipient_phone(self, obj: Assignment) -> str:
+        """Le numéro du destinataire — pour le livreur, **tant qu'il porte la course**.
+
+        Proposée, la course peut être refusée : le livreur qui décline n'a pas à
+        repartir avec le numéro d'un client qu'il ne livrera pas. Terminée, elle
+        ne demande plus d'appeler personne. Le numéro lui est rendu vide dans
+        ces deux cas — l'adresse et le quartier, eux, restent lisibles, parce
+        qu'ils servent à décider d'accepter.
+
+        Le personnel, qui supervise la même course depuis le back-office
+        (`ManagedAssignmentViewSet`), le lit toujours : c'est lui qui rappelle
+        le client quand une livraison coince.
+        """
+        requete = self.context.get("request")
+        lecteur = getattr(requete, "user", None)
+        if getattr(lecteur, "user_type", None) == UserType.STAFF:
+            return obj.order.recipient_phone
+        return obj.order.recipient_phone if obj.status in ENGAGED_STATUSES else ""
+
+    @extend_schema_field(MoneyField(allow_null=True))
+    def get_amount_to_collect(self, obj: Assignment) -> dict[str, Any] | None:
+        """Ce que le livreur encaisse à la porte — le total en espèces, sinon rien."""
+        if obj.order.payment_method != PaymentMethod.CASH:
+            return None
+        return MoneyField().to_representation(obj.order.total)
+
+    @extend_schema_field(
+        serializers.ListField(
+            child=serializers.DictField(), help_text="Nom, image, quantité, options."
+        )
+    )
+    def get_items(self, obj: Assignment) -> list[dict[str, Any]]:
+        """Ce qu'il y a dans le sac, pour le vérifier au retrait — **sans les prix**."""
+        return [
+            {
+                "name": ligne.item_name,
+                "item_image": ligne.item_image,
+                "quantity": ligne.quantity,
+                "options": [option.get("option", "") for option in ligne.options],
+                "notes": ligne.notes,
+            }
+            for ligne in obj.order.lines.all()
+        ]
 
 
 class OfferSerializer(serializers.Serializer[Any]):

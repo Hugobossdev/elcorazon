@@ -36,21 +36,34 @@ posée à travers une position.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
 from django.contrib.gis.db.models.functions import Distance
 from django.contrib.gis.geos import Point
-from django.db.models import Q
+from django.db.models import Q, QuerySet
+from django.utils import timezone
 
 from apps.geography.models import DeliveryZone
 from apps.geography.resolution import covering_zones, resolve_zone
 from apps.geography.services import DeliveryQuote, quote_delivery
-from apps.restaurants.models import Restaurant
+from apps.restaurants.availability import kitchen_unavailability
+from apps.restaurants.models import Restaurant, kitchen_state_prefetches
+from common.availability import AddressNotServed, UnavailabilityCode
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
 
 __all__ = ["DeliveryAvailability", "check_delivery", "overlapping_zones"]
+
+logger = logging.getLogger(__name__)
+
+#: Cuisines examinées au plus pour un point, de la plus proche à la plus loin.
+#:
+#: Une ville en compte quelques-unes ; la borne ne sert qu'à ce qu'une erreur de
+#: saisie — une zone municipale dessinée sur tout un pays — ne fasse pas juger
+#: des centaines d'établissements à chaque déplacement du repère sur la carte.
+_CANDIDATS_MAX = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +101,15 @@ class DeliveryAvailability:
     #: disparu de la réponse 409 du devis.
     refusal: BusinessRuleViolation | None = None
 
+    #: Le motif **stable** du refus, nul quand la livraison est possible.
+    #:
+    #: `no_kitchen_available` et `address_not_served` n'appellent pas le même
+    #: geste — attendre qu'El Corazón ouvre dans le quartier, ou choisir une
+    #: autre adresse —, et `reason` seule obligeait le client à comparer des
+    #: phrases. Pour un refus de panier (minimum, devise), c'est le code du
+    #: refus lui-même.
+    unavailable_code: str | None = None
+
     @property
     def estimated_minutes(self) -> int | None:
         """Délai annoncé : préparation en cuisine **plus** course.
@@ -112,13 +134,22 @@ def check_delivery(
 ) -> DeliveryAvailability:
     """Livrabilité d'un point : établissement, zone, distance, frais, délai.
 
-    Sans `restaurant`, la fonction **choisit** le plus proche parmi ceux qui
-    desservent le point. C'est ce que demande l'application cliente : obliger
-    quelqu'un à désigner une cuisine que la géographie détermine est une étape
-    sans décision.
+    Sans `restaurant`, la fonction **choisit** : la plus proche des cuisines
+    qui desservent le point **et peuvent prendre une commande maintenant**, à
+    défaut la plus proche de celles qui le desservent. C'est ce que demande
+    l'application cliente : obliger quelqu'un à désigner une cuisine que la
+    géographie détermine est une étape sans décision.
 
-    Avec `restaurant`, elle vérifie *celui-là* — le cas du panier déjà ouvert,
-    où changer d'établissement changerait le catalogue et les prix.
+    Avec `restaurant`, elle vérifie *celle-là* — le cas du panier déjà ouvert,
+    où changer de cuisine changerait le catalogue et les prix.
+
+    ## Ce que `is_available` dit, et ce qu'il ne dit pas
+
+    **La livrabilité** : une cuisine dessert ce point, dans son rayon, et le
+    panier en respecte le barème. Pas l'état de la cuisine : il voyage avec
+    elle, `restaurant.can_order_now` et son motif. « On vous livre, mais la
+    cuisine ouvre à 11 h » et « on ne vous livre pas » ne sont pas la même
+    réponse, et les fondre obligerait l'écran à deviner laquelle il reçoit.
 
     Les refus sont ordonnés du plus général au plus précis, pour que le message
     rendu soit le plus actionnable : d'abord « personne ne dessert ici »,
@@ -127,7 +158,7 @@ def check_delivery(
     à trois cents kilomètres.
     """
     if restaurant is None:
-        restaurant = _plus_proche_desservant(point)
+        restaurant = _cuisine_pour_le_point(point)
         if restaurant is None:
             return DeliveryAvailability(
                 is_available=False,
@@ -135,21 +166,27 @@ def check_delivery(
                 zone=None,
                 distance_m=None,
                 quote=None,
-                reason="Aucun établissement ne dessert cette adresse pour le moment.",
+                reason="Aucune cuisine El Corazón ne dessert cette adresse pour le moment.",
+                unavailable_code=str(UnavailabilityCode.NO_KITCHEN_AVAILABLE),
             )
 
-    zone = resolve_zone(point, restaurant_id=restaurant.pk)
+    # La ville de la cuisine borne les zones municipales. Sans elle, une cuisine
+    # désignée — le panier déjà ouvert — se voyait tarifer par la zone de la
+    # ville voisine qui couvre le point, et « desservir » une adresse que le
+    # choix automatique (`_desservantes`) lui refuse. Deux réponses pour une
+    # seule adresse : la règle doit être la même dans les deux sens.
+    zone = resolve_zone(point, restaurant_id=restaurant.pk, city_id=restaurant.zone.city_id)
     if zone is None:
+        hors_zone = AddressNotServed("Cette adresse n'est couverte par aucune zone de livraison.")
         return DeliveryAvailability(
             is_available=False,
             restaurant=restaurant,
             zone=None,
             distance_m=None,
             quote=None,
-            reason="Cette adresse n'est couverte par aucune zone de livraison.",
-            refusal=BusinessRuleViolation(
-                "Cette adresse n'est couverte par aucune zone de livraison."
-            ),
+            reason=hors_zone.detail,
+            refusal=hors_zone,
+            unavailable_code=str(UnavailabilityCode.ADDRESS_NOT_SERVED),
         )
 
     distance_m = _distance_metres(restaurant, point)
@@ -159,22 +196,21 @@ def check_delivery(
     # parcourue est ce qui coûte. Le dire ici évite qu'un écran annonce
     # « desservi » et que la commande échoue trois écrans plus loin.
     if distance_m is not None and Decimal(str(distance_m)) / 1000 > zone.max_distance_km:
+        trop_loin = AddressNotServed(
+            f"Adresse à {distance_m / 1000:.1f} km, au-delà des "
+            f"{zone.max_distance_km} km desservis depuis cette cuisine.",
+            distance_km=f"{distance_m / 1000:.2f}",
+            max_distance_km=str(zone.max_distance_km),
+        )
         return DeliveryAvailability(
             is_available=False,
             restaurant=restaurant,
             zone=zone,
             distance_m=distance_m,
             quote=None,
-            reason=(
-                f"Adresse à {distance_m / 1000:.1f} km, au-delà des "
-                f"{zone.max_distance_km} km desservis depuis cet établissement."
-            ),
-            refusal=BusinessRuleViolation(
-                f"Adresse à {distance_m / 1000:.1f} km, au-delà des "
-                f"{zone.max_distance_km} km desservis depuis cet établissement.",
-                distance_km=f"{distance_m / 1000:.2f}",
-                max_distance_km=str(zone.max_distance_km),
-            ),
+            reason=trop_loin.detail,
+            refusal=trop_loin,
+            unavailable_code=str(UnavailabilityCode.ADDRESS_NOT_SERVED),
         )
 
     quote = None
@@ -194,6 +230,7 @@ def check_delivery(
                 quote=None,
                 reason=str(refus),
                 refusal=refus,
+                unavailable_code=refus.code,
             )
 
     return DeliveryAvailability(
@@ -229,8 +266,69 @@ def overlapping_zones(zone: DeliveryZone) -> list[DeliveryZone]:
     )
 
 
-def _plus_proche_desservant(point: Point) -> Restaurant | None:
-    """Établissement en service le plus proche dont une zone couvre ce point.
+def _cuisine_pour_le_point(point: Point) -> Restaurant | None:
+    """La cuisine qui livrera ce point — la plus proche **qui peut commander**.
+
+    ## Le défaut que ce choix ferme
+
+    La fonction rendait la plus proche des cuisines desservant le point, sans
+    regarder si elle prenait des commandes. Dans une ville à deux cuisines, un
+    client plus proche de celle qui est fermée se voyait attribuer celle-là —
+    et donc une carte qu'il ne pouvait pas commander —, pendant que la seconde,
+    ouverte et desservant la même adresse, restait invisible.
+
+    La plus proche commandable est donc retenue. S'il n'y en a aucune, la plus
+    proche tout court : « la cuisine de votre quartier ouvre à 11 h » est une
+    réponse, là où « aucune cuisine » serait faux.
+
+    L'état de chaque candidate est lu par le juge de la cuisine — jamais
+    recomposé ici (voir `tests/availability/test_juge.py`, qui interdit tout
+    second lecteur de `accepts_orders`).
+    """
+    candidates = list(
+        _desservantes(point)
+        .select_related("zone__city__country")
+        .prefetch_related(*kitchen_state_prefetches())
+        .annotate(vers=Distance("location", point))
+        .order_by("vers")[:_CANDIDATS_MAX]
+    )
+
+    if not candidates:
+        logger.info("kitchen.resolution.none", extra={"candidates": 0})
+        return None
+
+    moment = timezone.now()
+    rejetees: list[dict[str, str]] = []
+    for cuisine in candidates:
+        verdict = kitchen_unavailability(cuisine, moment)
+        if verdict is None:
+            logger.info(
+                "kitchen.resolution.selected",
+                extra={
+                    "kitchen": cuisine.slug,
+                    "city": cuisine.zone.city.slug,
+                    "candidates": [c.slug for c in candidates],
+                    "rejected": rejetees,
+                },
+            )
+            return cuisine
+        rejetees.append({"kitchen": cuisine.slug, "code": str(verdict.code)})
+
+    plus_proche = candidates[0]
+    logger.info(
+        "kitchen.resolution.none_orderable",
+        extra={
+            "kitchen": plus_proche.slug,
+            "city": plus_proche.zone.city.slug,
+            "candidates": [c.slug for c in candidates],
+            "rejected": rejetees,
+        },
+    )
+    return plus_proche
+
+
+def _desservantes(point: Point) -> QuerySet[Restaurant]:
+    """Établissements en service dont une zone couvre ce point.
 
     La **couverture est vérifiée avant la proximité**, et l'ordre compte : le
     restaurant le plus proche à vol d'oiseau n'est pas nécessairement celui qui
@@ -264,9 +362,7 @@ def _plus_proche_desservant(point: Point) -> Restaurant | None:
         .values_list("restaurant_id", flat=True)
     )
 
-    candidats = servants.filter(Q(zone__city_id__in=villes) | Q(pk__in=proprietaires))
-
-    return candidats.annotate(vers=Distance("location", point)).order_by("vers").first()
+    return servants.filter(Q(zone__city_id__in=villes) | Q(pk__in=proprietaires))
 
 
 def _distance_metres(restaurant: Restaurant, point: Point) -> float | None:

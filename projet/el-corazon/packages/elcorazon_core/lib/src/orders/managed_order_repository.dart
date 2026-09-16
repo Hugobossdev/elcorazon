@@ -19,11 +19,18 @@ class ManagedOrderRepository {
 
   /// Commandes de supervision, les plus récentes d'abord.
   ///
+  /// [countryIsoCode], [citySlug] et [deliveryZoneId] filtrent sur la
+  /// géographie **figée** de la commande — le marché, la ville et la zone où
+  /// elle a été prise, et non ceux où la cuisine est rattachée aujourd'hui.
+  ///
   /// [placedFrom]/[placedTo] bornent le service en cours : sans elles, un
   /// écran de supervision charge l'historique entier pour n'en afficher que la
   /// fin.
   Future<List<Order>> list({
     String? status,
+    String? countryIsoCode,
+    String? citySlug,
+    String? deliveryZoneId,
     String? restaurantSlug,
     String? customerId,
     DateTime? placedFrom,
@@ -33,6 +40,7 @@ class ManagedOrderRepository {
     String? path = '/orders/manage/';
     Map<String, dynamic>? queryParameters = {
       if (status != null) 'status': status,
+      ..._geographie(countryIsoCode, citySlug, deliveryZoneId),
       if (restaurantSlug != null) 'restaurant__slug': restaurantSlug,
       if (customerId != null) 'customer': customerId,
       if (placedFrom != null) 'placed_at__gte': placedFrom.toUtc().toIso8601String(),
@@ -62,6 +70,9 @@ class ManagedOrderRepository {
   /// davantage rend simplement 100.
   Future<Page<Order>> listPage({
     String? status,
+    String? countryIsoCode,
+    String? citySlug,
+    String? deliveryZoneId,
     String? restaurantSlug,
     String? customerId,
     DateTime? placedFrom,
@@ -74,6 +85,7 @@ class ManagedOrderRepository {
       queryParameters: {
         'page_size': pageSize,
         if (status != null) 'status': status,
+        ..._geographie(countryIsoCode, citySlug, deliveryZoneId),
         if (restaurantSlug != null) 'restaurant__slug': restaurantSlug,
         if (customerId != null) 'customer': customerId,
         if (placedFrom != null) 'placed_at__gte': placedFrom.toUtc().toIso8601String(),
@@ -118,6 +130,9 @@ class ManagedOrderRepository {
   /// Tous les statuts sont présents dans la réponse, à zéro le cas échéant :
   /// l'appelant n'a pas à distinguer « aucune commande » d'une clé absente.
   Future<Map<String, int>> countsByStatus({
+    String? countryIsoCode,
+    String? citySlug,
+    String? deliveryZoneId,
     String? restaurantSlug,
     String? search,
     DateTime? placedFrom,
@@ -126,6 +141,7 @@ class ManagedOrderRepository {
     final response = await apiClient.get(
       '/orders/manage/counts/',
       queryParameters: {
+        ..._geographie(countryIsoCode, citySlug, deliveryZoneId),
         if (restaurantSlug != null) 'restaurant__slug': restaurantSlug,
         if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
         if (placedFrom != null) 'placed_at__gte': placedFrom.toUtc().toIso8601String(),
@@ -172,4 +188,18 @@ class ManagedOrderRepository {
     );
     return Order.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Pays → ville → zone, sous les noms de filtres du serveur.
+  ///
+  /// Une valeur vide est omise comme une valeur nulle : un menu déroulant
+  /// « Tous » rend souvent `''`, et l'envoyer ferait filtrer sur rien.
+  static Map<String, dynamic> _geographie(
+    String? countryIsoCode,
+    String? citySlug,
+    String? deliveryZoneId,
+  ) => {
+    if (countryIsoCode != null && countryIsoCode.isNotEmpty) 'country__iso_code': countryIsoCode,
+    if (citySlug != null && citySlug.isNotEmpty) 'city__slug': citySlug,
+    if (deliveryZoneId != null && deliveryZoneId.isNotEmpty) 'delivery_zone': deliveryZoneId,
+  };
 }

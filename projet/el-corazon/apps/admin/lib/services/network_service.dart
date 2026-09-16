@@ -384,10 +384,14 @@ class NetworkService extends ChangeNotifier {
     String? phone,
     String? email,
     bool? acceptsOrders,
+    bool? autoDispatchCouriers,
     int? defaultPreparationMinutes,
+    eccore.Money? stockAdjustmentCeiling,
+    bool clearStockAdjustmentCeiling = false,
   }) {
     return _ecrire(
       () => _depotEtablissements.update(
+        autoDispatchCouriers: autoDispatchCouriers,
         slug: slug,
         name: name,
         description: description,
@@ -398,6 +402,8 @@ class NetworkService extends ChangeNotifier {
         email: email,
         acceptsOrders: acceptsOrders,
         defaultPreparationMinutes: defaultPreparationMinutes,
+        stockAdjustmentCeiling: stockAdjustmentCeiling,
+        clearStockAdjustmentCeiling: clearStockAdjustmentCeiling,
       ),
       apres: _remplacer,
     );

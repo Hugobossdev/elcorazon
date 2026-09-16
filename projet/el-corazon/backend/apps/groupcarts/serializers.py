@@ -58,6 +58,7 @@ class GroupCartLineSerializer(serializers.Serializer[Any]):
     unit_price = MoneyField(read_only=True)
     total = MoneyField(read_only=True)
     is_orderable = serializers.BooleanField(read_only=True)
+    unavailable_code = serializers.CharField(read_only=True)
     unavailable_reason = serializers.CharField(read_only=True)
 
 
@@ -94,6 +95,12 @@ class GroupCartSerializer(serializers.Serializer[Any]):
     currency = serializers.CharField(read_only=True)
     subtotal = MoneyField(read_only=True)
     is_orderable = serializers.BooleanField(read_only=True)
+    # Pourquoi la **cuisine** ne prend pas la commande — vides sinon. Comme sur
+    # le panier personnel : les motifs d'articles sont sur leurs lignes. Un
+    # déjeuner d'équipe se compose en une heure, et l'hôte doit apprendre que
+    # la cuisine a fermé avant d'avoir recueilli l'adresse et le paiement.
+    unavailable_code = serializers.CharField(read_only=True)
+    unavailable_reason = serializers.CharField(read_only=True)
     updated_at = serializers.DateTimeField(source="group_cart.updated_at", read_only=True)
 
 

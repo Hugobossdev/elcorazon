@@ -64,6 +64,9 @@ class FiltresCommandes {
     this.fenetre = FenetreCommandes.trenteJours,
     this.tri = TriCommandes.dateDecroissante,
     this.restaurantSlug,
+    this.paysIso,
+    this.villeSlug,
+    this.zoneId,
     this.taillePage = 20,
   });
 
@@ -84,6 +87,16 @@ class FiltresCommandes {
   /// le serveur cloisonne de toute façon.
   final String? restaurantSlug;
 
+  /// Pays → ville → zone, sur la géographie **figée** de la commande : là où
+  /// elle a été prise, pas là où la cuisine est rattachée aujourd'hui.
+  ///
+  /// Hiérarchiques : changer de pays efface la ville et la zone, changer de
+  /// ville efface la zone (voir [copyWith]). Garder une zone d'Abidjan sous
+  /// « Togo » produirait une liste vide sans raison visible.
+  final String? paysIso;
+  final String? villeSlug;
+  final String? zoneId;
+
   /// Plafonné à 100 par le serveur (`max_page_size`).
   final int taillePage;
 
@@ -96,7 +109,10 @@ class FiltresCommandes {
       statut != null ||
       recherche.trim().isNotEmpty ||
       fenetre != FenetreCommandes.trenteJours ||
-      restaurantSlug != null;
+      restaurantSlug != null ||
+      paysIso != null ||
+      villeSlug != null ||
+      zoneId != null;
 
   /// Combien de filtres sont posés — affiché sur la pastille du bouton.
   int get nombreActifs => [
@@ -104,6 +120,9 @@ class FiltresCommandes {
         recherche.trim().isNotEmpty,
         fenetre != FenetreCommandes.trenteJours,
         restaurantSlug != null,
+        paysIso != null,
+        villeSlug != null,
+        zoneId != null,
       ].where((pose) => pose).length;
 
   FiltresCommandes copyWith({
@@ -114,14 +133,34 @@ class FiltresCommandes {
     TriCommandes? tri,
     String? restaurantSlug,
     bool effacerRestaurant = false,
+    String? paysIso,
+    bool effacerPays = false,
+    String? villeSlug,
+    bool effacerVille = false,
+    String? zoneId,
+    bool effacerZone = false,
     int? taillePage,
   }) {
+    // La hiérarchie : un étage qui change emporte ceux d'en dessous.
+    final nouveauPays = effacerPays ? null : (paysIso ?? this.paysIso);
+    final paysChange = nouveauPays != this.paysIso;
+    final nouvelleVille = (effacerVille || (paysChange && villeSlug == null))
+        ? null
+        : (villeSlug ?? this.villeSlug);
+    final villeChange = nouvelleVille != this.villeSlug;
+    final nouvelleZone = (effacerZone || (villeChange && zoneId == null))
+        ? null
+        : (zoneId ?? this.zoneId);
+
     return FiltresCommandes(
       statut: effacerStatut ? null : (statut ?? this.statut),
       recherche: recherche ?? this.recherche,
       fenetre: fenetre ?? this.fenetre,
       tri: tri ?? this.tri,
       restaurantSlug: effacerRestaurant ? null : (restaurantSlug ?? this.restaurantSlug),
+      paysIso: nouveauPays,
+      villeSlug: nouvelleVille,
+      zoneId: nouvelleZone,
       taillePage: taillePage ?? this.taillePage,
     );
   }
@@ -135,6 +174,9 @@ class FiltresCommandes {
       recherche.trim() == autre.recherche.trim() &&
       fenetre == autre.fenetre &&
       restaurantSlug == autre.restaurantSlug &&
+      paysIso == autre.paysIso &&
+      villeSlug == autre.villeSlug &&
+      zoneId == autre.zoneId &&
       taillePage == autre.taillePage;
 
   @override
@@ -143,5 +185,15 @@ class FiltresCommandes {
 
   @override
   int get hashCode =>
-      Object.hash(statut, recherche.trim(), fenetre, tri, restaurantSlug, taillePage);
+      Object.hash(
+        statut,
+        recherche.trim(),
+        fenetre,
+        tri,
+        restaurantSlug,
+        paysIso,
+        villeSlug,
+        zoneId,
+        taillePage,
+      );
 }

@@ -25,6 +25,12 @@ extension ArticleAffiche on eccore.MenuItem {
   bool get estVegan => dietaryTags.contains('vegan');
 
   /// L'article est-il commandable en l'état ?
+  ///
+  /// C'est `is_available` tel que le serveur le rend sur la carte publique :
+  /// le **verdict** de son juge de disponibilité — retiré, désactivé, épuisé,
+  /// ou sans la matière pour le préparer —, et non l'interrupteur de la
+  /// cuisine. L'application ne recompose rien : un plat en rupture de pain en
+  /// sort grisé, avec son motif (`unavailableReason`).
   bool get estCommandable => isAvailable;
 }
 

@@ -82,6 +82,13 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
     filterset_fields: ClassVar[dict[str, list[str]]] = {
         "status": ["exact"],
         "restaurant__slug": ["exact"],
+        # Pays → ville → zone → cuisine, sur la géographie **figée** de la
+        # commande : une cuisine rattachée ailleurs depuis ne déplace pas son
+        # historique d'un filtre à l'autre. Les quatre se cumulent, et le
+        # cloisonnement du compte (`_perimetre`) s'applique avant eux.
+        "country__iso_code": ["exact"],
+        "city__slug": ["exact"],
+        "delivery_zone": ["exact"],
         "customer": ["exact"],
         "placed_at": ["gte", "lte"],
     }
@@ -119,7 +126,9 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
         différaient.
         """
         user = authenticated_user(self.request)
-        queryset = Order.objects.select_related("restaurant", "customer").order_by("-placed_at")
+        queryset = Order.objects.select_related(
+            "restaurant", "customer", "country", "city"
+        ).order_by("-placed_at")
 
         if is_unscoped(user):
             return queryset

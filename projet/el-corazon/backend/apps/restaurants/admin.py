@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from apps.restaurants.models import OpeningHours, Restaurant, StaffMembership
+from apps.restaurants.models import KitchenClosure, OpeningHours, Restaurant, StaffMembership
 
 __all__ = ["RestaurantAdmin", "StaffMembershipAdmin"]
 
@@ -30,6 +30,15 @@ class OpeningHoursInline(admin.TabularInline):
     ordering = ("weekday", "opens_at")
 
 
+class KitchenClosureInline(admin.TabularInline):
+    """Fermetures exceptionnelles — datées, et levées d'elles-mêmes à leur fin."""
+
+    model = KitchenClosure
+    extra = 0
+    fields = ("starts_at", "ends_at", "reason")
+    ordering = ("-starts_at",)
+
+
 class StaffMembershipInline(admin.TabularInline):
     model = StaffMembership
     extra = 0
@@ -44,7 +53,7 @@ class RestaurantAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug", "address")
     prepopulated_fields = {"slug": ("name",)}
     list_select_related = ("zone__city__country",)
-    inlines = (OpeningHoursInline, StaffMembershipInline)
+    inlines = (OpeningHoursInline, KitchenClosureInline, StaffMembershipInline)
     # `is_active` est dérivé de `status` (voir `Restaurant.save`) : le laisser
     # modifiable offrirait deux leviers de publication, dont l'un serait
     # silencieusement annulé par le prochain enregistrement.

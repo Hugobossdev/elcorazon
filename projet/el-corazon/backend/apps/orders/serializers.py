@@ -15,11 +15,13 @@ from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from apps.geography.models import Country, DeliveryZone
 from apps.orders.models import Order, OrderLine, OrderStatusEvent, PaymentMethod
 from apps.orders.states import ORDER_MACHINE
 from apps.profiles.models import Address
 from apps.promotions.serializers import PromotionSerializer
 from apps.restaurants.models import Restaurant
+from apps.restaurants.states import KNOWN_TO_CUSTOMERS
 from common.serializers import LocationField, MoneyField
 
 __all__ = [
@@ -81,6 +83,20 @@ class OrderSerializer(serializers.ModelSerializer[Order]):
     # (`AssignmentSerializer.pickup_location`) ; le client, lui, ne voit jamais
     # sa course. C'est donc à la commande de le porter.
     restaurant_location = LocationField(source="restaurant.location", read_only=True)
+    # La géographie **figée** de la commande (`Order.country`, `city`,
+    # `delivery_zone`) — et non celle où la cuisine est rattachée aujourd'hui.
+    # Vides pour une commande antérieure que la reprise n'a pas su situer.
+    country = serializers.SlugRelatedField[Country](
+        slug_field="iso_code", read_only=True, allow_null=True
+    )
+    city = serializers.CharField(source="city.name", read_only=True, allow_null=True, default=None)
+    city_slug = serializers.CharField(
+        source="city.slug", read_only=True, allow_null=True, default=None
+    )
+    delivery_zone = serializers.PrimaryKeyRelatedField[DeliveryZone](
+        read_only=True, allow_null=True
+    )
+    delivery_zone_name = serializers.CharField(read_only=True)
     subtotal = MoneyField(read_only=True)
     delivery_fee = MoneyField(read_only=True)
     discount = MoneyField(read_only=True)
@@ -97,6 +113,11 @@ class OrderSerializer(serializers.ModelSerializer[Order]):
             "restaurant",
             "restaurant_name",
             "restaurant_location",
+            "country",
+            "city",
+            "city_slug",
+            "delivery_zone",
+            "delivery_zone_name",
             "status",
             "allowed_transitions",
             "lines_count",
@@ -189,8 +210,11 @@ class OrderCreateSerializer(serializers.Serializer[Any]):
     évalue, jamais un montant que le client annonce.
     """
 
+    # Une cuisine suspendue reste désignable : c'est le juge qui la refuse, avec
+    # son motif (`kitchen_suspended`), et non la validation du champ — voir
+    # `KNOWN_TO_CUSTOMERS`.
     restaurant = serializers.SlugRelatedField[Restaurant](
-        slug_field="slug", queryset=Restaurant.objects.filter(is_active=True)
+        slug_field="slug", queryset=Restaurant.objects.filter(status__in=KNOWN_TO_CUSTOMERS)
     )
     address = serializers.PrimaryKeyRelatedField[Address](queryset=Address.objects.none())
     payment_method = serializers.ChoiceField(choices=PaymentMethod.choices)
@@ -255,6 +279,10 @@ class OrderQuoteSerializer(serializers.Serializer[Any]):
     total = MoneyField(read_only=True)
     promotion = PromotionSerializer(read_only=True, allow_null=True)
     is_orderable = serializers.BooleanField(read_only=True)
+    # Pourquoi `is_orderable` est faux — vides sinon. Le code est stable
+    # (`common.availability.UnavailabilityCode`) ; la phrase est affichable.
+    unavailable_code = serializers.CharField(read_only=True)
+    unavailable_reason = serializers.CharField(read_only=True)
 
 
 class StatusTransitionSerializer(serializers.Serializer[Any]):

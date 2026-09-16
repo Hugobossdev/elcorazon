@@ -35,6 +35,17 @@ class CourierSummary {
   final int ratingCount;
 }
 
+/// Une zone de livraison nommée — l'identifiant pour écrire, le nom pour lire.
+class ZoneRef {
+  const ZoneRef({required this.id, required this.name});
+
+  factory ZoneRef.fromJson(Map<String, dynamic> json) =>
+      ZoneRef(id: json['id'].toString(), name: json['name'] as String? ?? '');
+
+  final String id;
+  final String name;
+}
+
 /// Dossier livreur complet — miroir de `CourierProfileSerializer`.
 ///
 /// Tous les champs sont en lecture seule côté serveur, y compris
@@ -63,6 +74,7 @@ class CourierProfile {
     this.lastLocationAt,
     this.totalEarnings,
     this.phone = '',
+    this.serviceZones = const [],
   });
 
   factory CourierProfile.fromJson(Map<String, dynamic> json) {
@@ -98,6 +110,9 @@ class CourierProfile {
       ratingAverage: double.parse('${json['rating_average']}'),
       ratingCount: json['rating_count'] as int,
       totalEarnings: earnings == null ? null : Money.fromJson(earnings),
+      serviceZones: (json['service_zones'] as List<dynamic>? ?? const [])
+          .map((zone) => ZoneRef.fromJson(zone as Map<String, dynamic>))
+          .toList(growable: false),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );
@@ -117,6 +132,10 @@ class CourierProfile {
 
   /// Établissement de rattachement, par son slug.
   final String restaurantSlug;
+
+  /// Zones où il roule. **Vide : toutes celles que dessert sa cuisine** — le
+  /// cas courant. Renseignée, la liste restreint les courses qu'il reçoit.
+  final List<ZoneRef> serviceZones;
 
   /// `pending` | `approved` | `rejected` | `suspended` (`VerificationStatus`).
   final String verificationStatus;

@@ -158,7 +158,9 @@ backend/
     ├── geography/             # ★ pays, villes, zones de livraison  (nouveau)
     ├── restaurants/           # ★ établissements, horaires, rattachement aux zones
     ├── catalog/               # ★ catégories, articles, personnalisation, avis
-    ├── inventory/             #   stock matières et disponibilité article
+    ├── inventory/             #   ingrédients, stock matières, journal des mouvements
+    ├── production/            #   recettes, engagement de la matière d'une commande
+    ├── availability/          # ★ le juge unique de « peut-on commander ? » (sans modèle)
     ├── carts/                 # ★ panier serveur
     ├── orders/                # ★ commandes, lignes, machine à états
     ├── groupcarts/            # ★ panier collaboratif  (nouveau)
@@ -241,6 +243,8 @@ sequenceDiagram
     A->>A: authentification + autorisation
     A->>S: create_order(user, dto)
     S->>DB: BEGIN
+    S->>S: juger la cuisine — publiée, ouverte, prenant les commandes
+    Note over S: AvailabilityService — refus 409 kitchen_not_orderable
     S->>DB: relire prix catalogue (SELECT ... FOR UPDATE)
     Note over S,DB: C1 — le prix client n'est jamais lu
     S->>S: recalculer sous-total, frais (zone), remise
@@ -322,8 +326,15 @@ graph LR
     geography --> restaurants
     geography --> delivery
     restaurants --> catalog
+    restaurants --> inventory
+    catalog --> production
+    inventory --> production
+    restaurants --> availability
+    catalog --> availability
+    production --> availability
+    availability --> carts
+    availability --> orders
     catalog --> carts
-    catalog --> inventory
     carts --> orders
     carts --> groupcarts
     promotions --> orders
@@ -347,6 +358,15 @@ il se **confirme en commande**, donc il dépend de `orders`, et jamais l'inverse
 d'en écrire une seconde : deux paniers dont les prix seraient calculés à deux endroits finiraient par
 ne plus dire la même chose, et c'est précisément ainsi que les frais de livraison de l'implémentation
 précédente avaient divergé.
+
+`availability` est l'autre cas qui mérite un mot. « Peut-on commander ? » compose trois niveaux qui
+vivent chacun où sont leurs données : la cuisine (`restaurants.availability` — publiée, ouverte,
+prenant les commandes), l'article (`catalog.availability` — au menu, actif, en stock, options
+servies) et la matière (`production` — de quoi le préparer). Le juge ne pouvait vivre dans aucun des
+trois : ni `catalog` ni `restaurants` ne voient la matière, puisque `production` dépend d'eux. Il est
+donc au-dessus, sans modèle, et il ne réécrit aucune règle. La carte publique l'interroge **sans
+l'importer** : il s'inscrit auprès de `catalog` au `ready()` de son application, par le même
+mécanisme de registre que les contrôles de complétude d'un établissement.
 
 Ce graphe est **vérifié en CI** (`tests/architecture/test_dependency_graph.py`) : une app ajoutée sans
 déclaration de ses dépendances fait échouer la construction, et une arête hors graphe aussi.

@@ -253,9 +253,7 @@ def on_assignment_offered(
     )
 
 
-@receiver(
-    assignment_cancelled, sender=Assignment, dispatch_uid="notifications.delivery_cancelled"
-)
+@receiver(assignment_cancelled, sender=Assignment, dispatch_uid="notifications.delivery_cancelled")
 def on_assignment_cancelled(
     sender: type[Assignment], *, assignment: Assignment, reason: str = "", **kwargs: Any
 ) -> None:

@@ -1,4 +1,4 @@
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Constantes de l'application cliente.
 ///
@@ -13,7 +13,7 @@ import 'package:elcora_fast/services/restaurant_context_service.dart';
 /// l'application sur deux magasins.
 ///
 /// Elles ont été retirées, pas remplacées par d'autres valeurs : ce que le
-/// serveur sait, le client le demande (`RestaurantContextService`). Ce qui
+/// serveur sait, le client le demande (`KitchenContextService`). Ce qui
 /// reste ici ne décrit aucun établissement en particulier.
 class AppConstants {
   /// Slug de l'article « gâteau sur mesure » au catalogue.
@@ -29,7 +29,7 @@ class AppConstants {
   /// paramètre `components=country:xx` de Google Places.
   ///
   /// **Repli seulement.** Le pays réel vient de l'établissement courant
-  /// (`RestaurantContextService.countryCode`), qui le tient du serveur. Cette
+  /// (`KitchenContextService.countryCode`), qui le tient du serveur. Cette
   /// valeur ne sert plus qu'au premier affichage d'un champ téléphonique, avant
   /// que l'annuaire ait répondu : un sélecteur d'indicatif doit bien s'ouvrir
   /// sur quelque chose, et le marché historique est le moins mauvais des
@@ -57,7 +57,7 @@ class AppConstants {
   /// corrige d'un geste, alors qu'un slug de restaurant deviné envoie une
   /// commande au mauvais endroit sans que personne ne le voie.
   static String get phoneCountryCode =>
-      (RestaurantContextService().countryCode ?? countryCode).toUpperCase();
+      (KitchenContextService().countryCode ?? countryCode).toUpperCase();
 
   /// Exemple montré en filigrane d'un champ téléphone. Suit le pays ci-dessus.
   static const String phoneHint = '+228 90 00 00 00';
@@ -90,7 +90,7 @@ class AppConstants {
   /// Symbole de repli pour un montant dont on ne connaît pas encore la devise.
   ///
   /// La devise réelle est portée par chaque montant (`Money`, ADR-007) et par
-  /// l'établissement courant (`RestaurantContextService.currency`) : elle est
+  /// l'établissement courant (`KitchenContextService.currency`) : elle est
   /// héritée du pays et diffère d'un marché à l'autre. Cette constante n'est
   /// qu'un libellé de secours, jamais une unité de calcul.
   static const String currency = 'FCFA';

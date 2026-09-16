@@ -78,6 +78,28 @@ class TestSondeDeDisponibilite:
         assert "motdepasse" not in reponse.content.decode()
         assert "interne" not in reponse.content.decode()
 
+    def test_le_schema_a_jour_est_rapporte(self) -> None:
+        corps = Client().get(reverse("ready")).json()
+
+        assert corps["dependencies"]["migrations"] == "ok"
+
+    def test_des_migrations_en_attente_repondent_503(self) -> None:
+        """Le code en avance sur le schéma : aucune route métier ne répond.
+
+        Panne du 2026-09-13 — un champ ajouté pendant que le conteneur tournait,
+        `migrate` n'étant lancé qu'au démarrage. Chaque requête sur un
+        établissement rendait 500, pendant que cette sonde disait « ready » ; le
+        client, lui, affichait « aucun restaurant en service ».
+        """
+        with mock.patch("config.urls._migrations_en_attente", return_value=3):
+            reponse = Client().get(reverse("ready"))
+
+        assert reponse.status_code == 503
+        corps = reponse.json()
+        assert corps["status"] == "not-ready"
+        assert corps["dependencies"]["migrations"] == "en attente"
+        assert corps["dependencies"]["database"] == "ok"
+
     def test_la_sonde_de_vivacite_reste_insensible_a_la_base(self) -> None:
         """`/health/` ne doit surtout pas suivre `/ready/`.
 

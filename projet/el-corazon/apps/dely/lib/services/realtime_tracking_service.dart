@@ -78,6 +78,10 @@ class RealtimeTrackingService extends ChangeNotifier
   StreamSubscription<eccore.RealtimeEvent>? _feedSubscription;
   final _courseOffersController = StreamController<eccore.AssignmentOffer>.broadcast();
 
+  /// Identifiants des propositions **retirées** faute de réponse dans le délai
+  /// (`delivery.offer_expired`) : la course est passée à un autre livreur.
+  final _expiredOffersController = StreamController<String>.broadcast();
+
   /// Reprise de la file après coupure.
   ///
   /// `RealtimeChannel` ne tente **qu'une seule** reconnexion, puis ferme le
@@ -183,6 +187,9 @@ class RealtimeTrackingService extends ChangeNotifier
 
   /// Les courses qu'on me propose, à mesure qu'elles arrivent.
   Stream<eccore.AssignmentOffer> get courseOffers => _courseOffersController.stream;
+
+  /// Les propositions retirées, par identifiant de course.
+  Stream<String> get expiredOffers => _expiredOffersController.stream;
 
   Stream<Course> get orderUpdates => _orderUpdatesController.stream;
   Stream<Map<String, dynamic>> get deliveryLocationUpdates =>
@@ -345,6 +352,14 @@ class RealtimeTrackingService extends ChangeNotifier
         // imposerait encore une minute d'attente à la suivante.
         _feedReconnectAttempts = 0;
 
+        // Sans réponse dans le délai, le serveur propose la course au livreur
+        // suivant et le dit ici : la proposition doit quitter l'écran, sans
+        // quoi le livreur appuierait sur « Accepter » pour un refus.
+        if (event.type == 'delivery.offer_expired') {
+          final id = event.payload['assignment'];
+          if (id != null) _expiredOffersController.add(id.toString());
+          return;
+        }
         if (event.type != 'delivery.offered') return;
         _courseOffersController.add(eccore.AssignmentOffer.fromPayload(event.payload));
       },
@@ -686,6 +701,7 @@ class RealtimeTrackingService extends ChangeNotifier
   void dispose() {
     disconnect();
     _courseOffersController.close();
+    _expiredOffersController.close();
     _orderUpdatesController.close();
     _deliveryLocationUpdatesController.close();
     super.dispose();

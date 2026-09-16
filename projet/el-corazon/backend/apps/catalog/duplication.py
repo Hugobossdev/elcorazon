@@ -105,7 +105,10 @@ def _copier_les_articles(
             # de créer un article orphelin qu'aucun écran n'afficherait.
             continue
 
-        correspondance[str(article.pk)] = MenuItem.objects.create(
+        # `type: ignore[misc]` — convention du dépôt pour un champ posé par
+        # `contribute_to_class` : django-stubs ne voit pas `price`, qui est une
+        # `property` sur la classe construite. Même motif que `OrderService.place`.
+        correspondance[str(article.pk)] = MenuItem.objects.create(  # type: ignore[misc]
             restaurant=cible,
             category=categorie,
             name=article.name,
@@ -149,7 +152,7 @@ def _copier_les_options(articles: dict[str, MenuItem]) -> None:
     OptionGroup.objects.bulk_create(groupes_crees.values())
 
     options = [
-        Option(
+        Option(  # type: ignore[misc]
             group=groupes_crees[str(option.group_id)],
             name=option.name,
             price_delta=option.price_delta,
@@ -171,7 +174,7 @@ def _copier_les_modeles_d_options(source: Restaurant, cible: Restaurant) -> None
     """
     OptionTemplate.objects.bulk_create(
         [
-            OptionTemplate(
+            OptionTemplate(  # type: ignore[misc]
                 restaurant=cible,
                 name=modele.name,
                 group_name=modele.group_name,

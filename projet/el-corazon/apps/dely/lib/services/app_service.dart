@@ -83,6 +83,7 @@ class AppService extends ChangeNotifier {
   DjangoDeliveryRepository? _deliveryRepository;
   eccore.CourierProfile? _courierProfile;
   StreamSubscription<eccore.AssignmentOffer>? _courseOffersSubscription;
+  StreamSubscription<String>? _expiredOffersSubscription;
 
   /// Construit à la demande : l'`ApiClient` vit dans le conteneur Riverpod créé
   /// par `main()`, et le lire au constructeur d'`AppService` le figerait avant
@@ -112,6 +113,7 @@ class AppService extends ChangeNotifier {
   void dispose() {
     _sessionSubscription.close();
     unawaited(_courseOffersSubscription?.cancel());
+    unawaited(_expiredOffersSubscription?.cancel());
     unawaited(_tokenRefreshSubscription.cancel());
     unawaited(_notificationOpenedSubscription.cancel());
     super.dispose();
@@ -197,6 +199,14 @@ class AppService extends ChangeNotifier {
     // transitions permises), que le message d'alerte ne porte pas.
     _courseOffersSubscription = tracking.courseOffers.listen((offer) {
       eccore.Journal.trace('📨 Course proposée : ${offer.reference} (${offer.restaurant})');
+      unawaited(loadAvailableOrders(forceRefresh: true));
+    });
+
+    // Une proposition restée sans réponse a été confiée à quelqu'un d'autre :
+    // la liste se recharge, et la proposition en disparaît.
+    unawaited(_expiredOffersSubscription?.cancel());
+    _expiredOffersSubscription = tracking.expiredOffers.listen((assignmentId) {
+      eccore.Journal.trace('⌛ Proposition retirée : $assignmentId');
       unawaited(loadAvailableOrders(forceRefresh: true));
     });
   }

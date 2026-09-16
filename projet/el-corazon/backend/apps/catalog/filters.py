@@ -53,6 +53,15 @@ class MenuItemFilter(filters.FilterSet):
         fields: ClassVar[dict[str, list[str]]] = {
             "restaurant__slug": ["exact"],
             "category__slug": ["exact"],
+            # Filtre sur l'**interrupteur** de la cuisine, pas sur le verdict que
+            # rend le champ `is_available` de la réponse (voir
+            # `MenuItemSerializer`). Un plat en rupture de matière passe donc ce
+            # filtre et sort grisé, avec son motif — il n'est pas masqué.
+            #
+            # Le verdict ne se filtre pas en base : il passe par la recette et le
+            # stock de chaque cuisine, et un filtre calculé après la pagination
+            # rendrait des pages de tailles arbitraires. Même arbitrage que
+            # l'absence de filtre `open_now` sur les établissements.
             "is_available": ["exact"],
             "is_popular": ["exact"],
             "vip_exclusive": ["exact"],

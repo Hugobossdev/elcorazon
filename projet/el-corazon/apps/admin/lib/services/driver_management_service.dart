@@ -198,6 +198,27 @@ class DriverManagementService extends ChangeNotifier {
     }
   }
 
+  /// Affecte le livreur à des zones de sa cuisine — permission `couriers.write`.
+  ///
+  /// La liste est **entière** : une liste vide lève la restriction, et le
+  /// livreur roule dans toutes les zones de sa cuisine. Une zone que la cuisine
+  /// ne dessert pas est refusée par le serveur, qui dit laquelle.
+  Future<bool> setServiceZones(String driverId, List<String> zoneIds) async {
+    try {
+      final maj = await _couriers.setServiceZones(courierId: driverId, zoneIds: zoneIds);
+      final index = _drivers.indexWhere((driver) => driver.id == driverId);
+      if (index != -1) _drivers[index] = maj;
+      _error = null;
+      notifyListeners();
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      eccore.Journal.trace('DriverManagementService: zones refusées — ${e.code}');
+      notifyListeners();
+      return false;
+    }
+  }
+
   /// Suspend un livreur — permission `couriers.suspend`, motif obligatoire.
   ///
   /// Distinct de l'instruction du dossier : suspendre retire du service

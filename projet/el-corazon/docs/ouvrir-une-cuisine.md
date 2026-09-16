@@ -217,19 +217,102 @@ tient compte, plutôt que d'obliger à saisir deux plages sur deux jours.
 
 Le système en déduit seul si la cuisine est ouverte, dans le fuseau de son pays.
 
+> **Les horaires sont appliqués, pas seulement affichés.** Hors plage
+> d'ouverture, la cuisine **refuse** les commandes — l'application affiche
+> « Fermé — réouverture demain à 11 h 00 » et le serveur rend le même motif si
+> une commande est tentée. Une cuisine sans aucune plage est fermée à toute
+> heure, et n'annonce aucune réouverture.
+
+#### Fermetures exceptionnelles
+
+**Horaires → Fermetures exceptionnelles → Fermer**
+
+Un jour férié, des travaux, une coupure : on ferme **de telle date à telle
+date**, avec un motif facultatif que le client lit — « Fermé exceptionnellement
+(jour férié) — réouverture vendredi à 11 h 00 ». La cuisine **rouvre d'elle-même**
+à la fin, dans ses horaires habituels. Ne pas retirer une plage d'horaires pour
+fermer un jour : on fermerait tous les mêmes jours de la semaine.
+
+Les heures se saisissent à l'heure du poste. Un poste réglé sur un autre fuseau
+que la cuisine voit ses heures décalées d'autant.
+
 ### 5b — Catalogue
 
 Catégories, articles, options, suppléments. **Isolé par établissement** : le
 slug d'un article est unique par restaurant, et modifier la carte de Lomé ne
 touche pas celle d'Abidjan.
 
+Désactiver une **catégorie** rend ses articles incommandables partout, y compris
+dans les paniers déjà composés : ils y restent visibles, marqués « momentanément
+indisponible ».
+
 ### 5c — Livreurs
 
 Un livreur est rattaché à un établissement à son inscription. La fiche donne
 accès à la gestion de la flotte du périmètre courant.
 
+**Zones de livraison d'un livreur** (**Livreurs → Modifier**). Rien de coché :
+il roule dans toutes les zones de sa cuisine — le cas courant. Coché : il ne
+reçoit que les courses de ces zones ; un livreur affecté à Cocody ne reçoit pas
+une course pour Yopougon, même partie de la même cuisine. Seules les zones que
+sa cuisine dessert se proposent, et le serveur refuse les autres.
+
+**Affectation automatique** (**Réseau → Établissements → Modifier → Livraison**,
+activée par défaut). Dès qu'une commande est **prête**, la course est proposée au
+livreur compatible le plus proche de la cuisine : même cuisine, zone permise,
+dossier validé, en ligne, sans course en cours — d'abord ceux qui n'ont pas
+déjà refusé cette commande, puis ceux qui n'ont aucune autre proposition en
+attente. Un refus, une proposition restée **90 secondes** sans réponse
+(`DELIVERY_OFFER_TTL_SECONDS`), ou un livreur qui se met en ligne relancent la
+recherche. L'affectation manuelle depuis la supervision reste possible dans les
+deux cas. **Prérequis de production : le worker et l'horloge Celery**
+(`elcorazon-worker`, `elcorazon-beat`) — sans l'horloge, une proposition sans
+réponse n'expire jamais.
+
 > Un dossier livreur **approuvé** est exigé pour la mise en service : sans lui,
 > l'établissement prendrait des commandes que personne ne peut livrer.
+
+### 5d — Matière : stock et recettes *(facultatif à l'ouverture)*
+
+**Inventaire → Stock · Validations · Recettes · Ingrédients**
+
+Rien de ce qui suit n'est exigé pour la mise en service : un plat sans recette
+ne consomme rien, et un ingrédient sans ligne de stock n'est jamais décompté.
+La cuisine peut ouvrir, et suivre sa matière plat par plat ensuite. Mais tant
+que ce n'est pas fait, **son coût matière est inconnu** et une rupture de pain
+ne retire aucun burger de la carte.
+
+1. **Ingrédients** — le référentiel est commun à toutes les cuisines, et il se
+   tient **au siège** : un compte rattaché à une cuisine le lit, sans l'écrire.
+   Chaque ingrédient se mesure en masse, en volume ou en unités, et cette
+   dimension ne change plus.
+2. **Stock → Suivre un ingrédient**, puis **Réception** à chaque livraison. On
+   saisit la quantité et le **prix du lot** tel qu'il figure sur la facture ; le
+   coût au kilogramme en est déduit. Une réception envoyée deux fois — réseau
+   coupé, bouton pressé deux fois — n'est comptée qu'une fois.
+3. **Recettes** — la couverture en tête dit combien de plats ont une recette.
+   Chaque plat se compose par portion, et chaque option aussi : un supplément
+   fromage ajoute du fromage, « sans oignon » en retire (quantité négative).
+4. **Seuil d'alerte** sur les lignes qui le méritent : **Stock → Au seuil
+   d'alerte** liste ce qui doit être commandé.
+
+Dès qu'un ingrédient suivi manque, les plats qui l'emploient sortent **grisés**
+de l'application cliente, et une commande ne peut plus les emporter.
+
+#### Pertes, comptages, et la seconde validation
+
+**Perte** et **Comptage** écrivent au journal une sortie ou un écart. Au-delà
+d'un **plafond de valeur**, la déclaration attend la validation d'**une autre
+personne**, dans **Validations** ; celle qui a déclaré ne peut ni valider ni
+refuser, et le serveur le refuse jusque dans la base.
+
+Le plafond se fixe sur la fiche de l'établissement (**Réseau → Modifier**),
+dans sa devise, par un compte muni de `restaurants.write` — le siège, pas le
+gérant dont il encadre les écritures. **Laissé vide, toute perte attend une
+validation** : c'est le défaut sûr, qu'on desserre en le fixant.
+
+Une perte dont le coût est inconnu — aucune livraison facturée encore — attend
+elle aussi : on ne peut pas prouver qu'une valeur inconnue est sous le plafond.
 
 ---
 
@@ -250,7 +333,8 @@ reçoit des commandes.
 
 - **Suspendre** le retire de l'application cliente. À réserver aux arrêts durables.
 - **« Accepte les commandes »** est le drapeau du coup de feu : l'établissement
-  reste visible, affiché comme débordé. C'est ce qu'on bascule pour une heure,
+  reste visible, affiché comme débordé, et le serveur refuse toute commande
+  tant qu'il est coupé — y compris depuis un panier déjà ouvert. C'est ce qu'on bascule pour une heure,
   pas la suspension — celle-ci le ferait disparaître au lieu de le montrer
   occupé.
 
@@ -264,7 +348,7 @@ Chaque changement d'état **prévient le personnel** du périmètre concerné.
 |---|---|
 | **El Corazón Fast** (client) | L'établissement entre dans l'annuaire. À partir de deux cuisines, une bascule apparaît dans l'en-tête : ville d'abord, cuisine ensuite, avec un tri « Autour de moi » facultatif. Le catalogue, les prix et le panier suivent le choix. |
 | **El Corazón Dely** (livreur) | Les candidatures peuvent viser le nouvel établissement, et l'indicatif téléphonique proposé suit son pays. Les courses partent de sa position réelle. |
-| **El Corazón Admin** | La fiche entre dans la liste, avec ses compteurs — commandes, livreurs, produits — et les filtres pays / ville / statut. Les statistiques du périmètre s'y ajoutent. |
+| **El Corazón Admin** | La fiche entre dans la liste, avec ses compteurs — commandes, livreurs, produits — et les filtres pays / ville / statut. La supervision filtre ses commandes par pays → ville → zone → cuisine, et l'onglet **Réseau → Activité** chiffre commandes et chiffre d'affaires par pays, ville, zone ou cuisine. |
 
 ---
 
@@ -302,6 +386,10 @@ Deux garde-fous que le serveur applique :
 | Mettre en service | ✅ | ✅ *dans son périmètre* | ❌ |
 | Suspendre, repasser en configuration | ✅ | ✅ | ✅ |
 | Horaires, carte, flotte, commandes | ✅ | ✅ | ✅ |
+| Ingrédients du référentiel | ✅ | ❌ | ❌ |
+| Stock, recettes, réceptions, pertes | ✅ | ✅ *selon ses permissions* | ✅ *selon ses permissions* |
+| Valider la perte d'un autre | ✅ | ✅ *avec `inventory.approve`* | ✅ *avec `inventory.approve`* |
+| Fixer le plafond de validation | ✅ | ✅ *avec `restaurants.write`* | ❌ |
 | Statistiques | enseigne | son périmètre | son établissement |
 
 ---
@@ -316,6 +404,11 @@ Un compte du siège peut affiner avec trois filtres qui **se cumulent** :
 `?country=`, `?city=`, `?restaurant=`. Ils restreignent, jamais ils
 n'élargissent : un filtre hors périmètre rend un rapport vide, jamais les
 chiffres d'un établissement qu'on n'administre pas.
+
+`GET /analytics/reports/network/?level=country|city|zone|kitchen` range les
+commandes selon leur **géographie figée** : chaque commande garde le pays, la
+ville et la zone où elle a été prise. Une cuisine rattachée ailleurs plus tard
+ne fait pas migrer son historique d'une ville à l'autre.
 
 ---
 
@@ -384,6 +477,16 @@ Le parcours complet, dans l'ordre :
 
 Tant que l'étape 8 n'a pas été faite **avec une vraie commande**, l'ouverture
 n'est pas vérifiée : un écran vert ne prouve que l'écran.
+
+Les incohérences que le schéma laisse passer — cuisine sur la zone propre d'une
+autre, cuisine en service sur un marché fermé ou sans horaires, livreur affecté
+hors de la desserte de sa cuisine, commandes sans géographie figée — se
+listent sans rien modifier :
+
+```bash
+python manage.py audit_reseau            # rapport
+python manage.py audit_reseau --strict   # code de sortie 1 s'il reste une anomalie
+```
 
 Les propriétés structurelles — catalogues cloisonnés, devises héritées, tri par
 proximité, périmètre des rapports — se vérifient d'une commande :

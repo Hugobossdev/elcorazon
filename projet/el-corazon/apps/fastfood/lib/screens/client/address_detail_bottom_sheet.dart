@@ -15,7 +15,7 @@ import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/location_service.dart';
 import 'package:elcora_fast/services/places_service.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Feuille de saisie d'une adresse — création si [address] est nul, édition
 /// sinon.
@@ -84,7 +84,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       // créée par défaut décrivait un autre pays que celui où l'on livre.
       // Elle vient maintenant du restaurant courant, et suit donc le second
       // établissement le jour où il ouvre.
-      _cityController.text = RestaurantContextService().cityName ?? '';
+      _cityController.text = KitchenContextService().cityName ?? '';
     }
   }
 
@@ -313,7 +313,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
                   child: CustomTextField(
                     controller: _cityController,
                     label: 'Ville',
-                    hint: RestaurantContextService().cityName ?? 'Ville',
+                    hint: KitchenContextService().cityName ?? 'Ville',
                     validator: (value) =>
                         value?.isEmpty == true ? 'Ville requise' : null,
                   ),
@@ -721,7 +721,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
       return;
     }
 
-    final configuree = RestaurantContextService().cityName;
+    final configuree = KitchenContextService().cityName;
     if (configuree != null &&
         configuree.isNotEmpty &&
         formatted.toLowerCase().contains(configuree.toLowerCase())) {
@@ -789,7 +789,7 @@ class _AddressDetailBottomSheetState extends State<AddressDetailBottomSheet>
     // restaurant passe devant. Nulle, l'autocomplétion fonctionne sans
     // préférence géographique — ce qui vaut mieux qu'un biais vers une ville
     // où l'on ne livre pas.
-    final contexte = RestaurantContextService();
+    final contexte = KitchenContextService();
     final latitude = contexte.latitude;
     final longitude = contexte.longitude;
     final biais = (latitude == null || longitude == null)

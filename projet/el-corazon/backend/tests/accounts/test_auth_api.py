@@ -494,9 +494,7 @@ class TestMiseAJourDeSonProfil:
         )
         client.force_authenticate(customer)
 
-        reponse = client.patch(
-            reverse("v1:accounts:me"), {"phone": "+22890333333"}, format="json"
-        )
+        reponse = client.patch(reverse("v1:accounts:me"), {"phone": "+22890333333"}, format="json")
 
         assert reponse.status_code == status.HTTP_400_BAD_REQUEST
 

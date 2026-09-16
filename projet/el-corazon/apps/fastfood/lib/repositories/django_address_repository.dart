@@ -2,7 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/presentation/adresse.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Ce qu'un client saisit pour créer ou corriger une adresse.
 ///
@@ -120,9 +120,13 @@ class DjangoAddressRepository implements AddressBookRepository {
   static final Map<String, String> _identifiantsDeVille = {};
 
   Future<String> _cityId() async {
-    final slug = RestaurantContextService().citySlug;
+    final contexte = KitchenContextService();
+    // Résout la cuisine si ce n'est pas fait, et lève `CuisineIndisponible` avec
+    // la vraie cause : l'annuaire injoignable ne se dit pas « aucune cuisine ».
+    await contexte.exigerSlug();
+    final slug = contexte.citySlug;
     if (slug == null || slug.isEmpty) {
-      throw const AucunEtablissement();
+      throw CuisineIndisponible(contexte.situation, detail: contexte.error);
     }
 
     final connu = _identifiantsDeVille[slug];

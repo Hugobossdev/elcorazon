@@ -76,7 +76,12 @@ def covering_zones(point: Point) -> QuerySet[DeliveryZone]:
     ).select_related("city__country")
 
 
-def resolve_zone(point: Point, *, restaurant_id: uuid.UUID | None = None) -> DeliveryZone | None:
+def resolve_zone(
+    point: Point,
+    *,
+    restaurant_id: uuid.UUID | None = None,
+    city_id: uuid.UUID | None = None,
+) -> DeliveryZone | None:
     """La zone qui s'applique à ce point — l'unique règle du produit.
 
     L'ordre de départage, du plus fort au plus faible :
@@ -89,6 +94,11 @@ def resolve_zone(point: Point, *, restaurant_id: uuid.UUID | None = None) -> Del
     Sans `restaurant_id`, seules les zones municipales concourent : une zone
     propre à une cuisine ne doit pas tarifer une question posée sans elle.
 
+    `city_id` restreint les zones **municipales** à cette ville. C'est la ville
+    de la cuisine qu'on interroge : une zone municipale décrit où livrent les
+    cuisines *de sa ville*, et celle de la ville voisine ne tarife pas une
+    course partie d'ici — voir `apps.restaurants.delivery.check_delivery`.
+
     Rend `None` quand aucune zone ne couvre le point. **Ce n'est pas une
     erreur** : « je viens d'emménager hors zone » est une réponse légitime à une
     question légitime, et la traiter en exception obligerait chaque appelant à
@@ -96,13 +106,17 @@ def resolve_zone(point: Point, *, restaurant_id: uuid.UUID | None = None) -> Del
     """
     zones = covering_zones(point)
 
+    municipales = Q(restaurant__isnull=True)
+    if city_id is not None:
+        municipales &= Q(city_id=city_id)
+
     if restaurant_id is None:
-        zones = zones.filter(restaurant__isnull=True)
+        zones = zones.filter(municipales)
     else:
         # Les zones d'un *autre* établissement sont écartées : elles ne
         # concernent pas cette course, et les laisser concourir ferait payer au
         # client le barème d'une cuisine où il ne commande pas.
-        zones = zones.filter(Q(restaurant__isnull=True) | Q(restaurant_id=restaurant_id))
+        zones = zones.filter(municipales | Q(restaurant_id=restaurant_id))
 
     return (
         zones.annotate(surface=Area("boundary"))

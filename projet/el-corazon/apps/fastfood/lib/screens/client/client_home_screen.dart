@@ -10,7 +10,7 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/services/favorites_service.dart';
 import 'package:elcora_fast/services/notification_database_service.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
@@ -336,7 +336,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
 /// qui bloquera le règlement, autant la proposer maintenant.
 /// Bascule d'établissement — **seulement quand il y a un choix à faire**.
 ///
-/// `RestaurantContextService` exposait `hasChoice` et `select()` depuis
+/// `KitchenContextService` exposait `hasChoice` et `select()` depuis
 /// l'origine ; aucun écran ne les appelait. Le client se voyait attribuer le
 /// premier établissement rendu par le serveur sans jamais savoir qu'il y en
 /// avait d'autres. C'est le geste qui manquait au multi-cuisine côté client.
@@ -344,27 +344,25 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
 /// Absent sous deux établissements : une bascule à une seule option est un
 /// bouton qui ne fait rien, et l'accueil en a déjà assez.
 ///
-/// Le retour de la feuille recharge le catalogue quand l'établissement a
-/// changé. Sans cela, les plats du précédent resteraient affichés sous le
+/// Le changement de cuisine recharge le catalogue par `AppService`, qui s'y
+/// abonne. Sans cela, les plats de la précédente resteraient affichés sous le
 /// nouveau nom — pire qu'une liste vide, parce que rien ne le signalerait.
 class _ChoixDeCuisine extends StatelessWidget {
   const _ChoixDeCuisine();
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<RestaurantContextService>(
+    return Consumer<KitchenContextService>(
       builder: (context, contexte, _) {
         if (!contexte.hasChoice) return const SizedBox.shrink();
 
         return IconButton(
           tooltip: 'Changer de cuisine',
           icon: const Icon(Icons.storefront_outlined),
-          onPressed: () async {
-            final change = await SelecteurEtablissementSheet.ouvrir(context);
-            if (change && context.mounted) {
-              await context.read<AppService>().rechargerLeCatalogue();
-            }
-          },
+          // Le catalogue se recharge seul au changement de cuisine : `AppService`
+          // s'y abonne, parce que la cuisine change aussi sans ce bouton — par
+          // l'adresse de livraison, ou quand celle qu'on parcourait est suspendue.
+          onPressed: () => SelecteurEtablissementSheet.ouvrir(context),
         );
       },
     );

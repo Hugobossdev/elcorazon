@@ -3,7 +3,7 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -198,7 +198,7 @@ class _GuestWelcomeScreenState extends State<GuestWelcomeScreen>
 /// sur une formulation générale tant que l'annuaire n'a pas répondu — plutôt
 /// que d'annoncer une ville où l'on ne livre pas.
 String _sousTitreDAccueil() {
-  final ville = RestaurantContextService().cityName;
+  final ville = KitchenContextService().cityName;
   return (ville == null || ville.isEmpty)
       ? 'Le cœur de la cuisine grillée au feu de bois.'
       : 'Le cœur de la cuisine de $ville.';

@@ -22,6 +22,9 @@ router.register(
     "manage/hours", backoffice.ManagedOpeningHoursViewSet, basename="managed-opening-hours"
 )
 router.register(
+    "manage/closures", backoffice.ManagedKitchenClosureViewSet, basename="managed-closure"
+)
+router.register(
     "manage/zones", backoffice.ManagedRestaurantZoneViewSet, basename="managed-restaurant-zone"
 )
 router.register("manage", backoffice.ManagedRestaurantViewSet, basename="managed-restaurant")

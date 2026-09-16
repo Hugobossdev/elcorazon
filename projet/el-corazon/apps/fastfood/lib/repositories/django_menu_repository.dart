@@ -2,7 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/repositories/menu_repository.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Le catalogue, contre le backend Django.
 ///
@@ -10,20 +10,23 @@ import 'package:elcora_fast/services/restaurant_context_service.dart';
 /// que les écrans lisent. Ce qui reste est le peu que l'application ajoute —
 /// l'établissement dont il s'agit, et la périodicité du rafraîchissement.
 ///
-/// L'établissement vient de [RestaurantContextService] et non d'une constante :
-/// le catalogue est **par restaurant** côté serveur, si bien qu'un slug écrit
-/// en dur rendrait la carte de Lomé sous le nom de n'importe quel autre
-/// établissement.
+/// La cuisine vient de [KitchenContextService] et non d'une constante : le
+/// catalogue est **par cuisine** côté serveur, si bien qu'un slug écrit en dur
+/// rendrait la carte de Lomé sous le nom de n'importe quelle autre cuisine.
+///
+/// Quand aucune cuisine ne peut être désignée, `exigerSlug` lève
+/// `CuisineIndisponible` avec sa cause — panne, réponse vide, adresse hors
+/// zone —, et c'est elle que l'écran de la carte affiche.
 class DjangoMenuRepository implements MenuRepository {
   DjangoMenuRepository({
     eccore.CatalogRepository? catalogRepository,
-    RestaurantContextService? restaurantContext,
+    KitchenContextService? kitchenContext,
   }) : _catalog =
            catalogRepository ?? eccore.CatalogRepository(apiClient: apiClient),
-       _contexte = restaurantContext ?? RestaurantContextService();
+       _contexte = kitchenContext ?? KitchenContextService();
 
   final eccore.CatalogRepository _catalog;
-  final RestaurantContextService _contexte;
+  final KitchenContextService _contexte;
 
   @override
   Future<List<eccore.MenuItem>> getMenuItems({String? categoryId}) async {

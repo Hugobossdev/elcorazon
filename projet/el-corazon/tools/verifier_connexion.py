@@ -230,6 +230,33 @@ def verifier(app: str, url: str, origine: str | None) -> bool:
     else:
         print(f"    témoin   {'health/':26} {resultat[0]} — le serveur répond")
 
+    # La sonde de disponibilité dit **laquelle** des dépendances manque — dont
+    # le schéma. Panne du 2026-09-13 : un champ ajouté à `Restaurant` pendant
+    # que le conteneur tournait, `migrate` ne s'exécutant qu'à son démarrage.
+    # Toutes les routes publiques rendaient 500, le témoin `auth/login/` rendait
+    # 405 (le cache allait bien), et l'ancienne conclusion de ce script
+    # accusait… le cache.
+    resultat = interroger(f"{origine_serveur}/ready/", origine)
+    if isinstance(resultat, str):
+        print(f"    ÉCHEC    {'ready/':26} {resultat}")
+    else:
+        code, _, corps = resultat
+        try:
+            dependances = json.loads(corps).get("dependencies", {})
+        except (json.JSONDecodeError, UnicodeDecodeError, AttributeError):
+            dependances = {}
+        detail = ", ".join(f"{nom} {etat}" for nom, etat in dependances.items())
+        print(f"    témoin   {'ready/':26} {code} — {detail or 'réponse illisible'}")
+        if dependances.get("migrations") == "en attente":
+            print(
+                "             -> **migrations en attente** : le code est en avance sur le "
+                "schéma, chaque\n"
+                "               requête qui touche une table modifiée rend 500. Depuis "
+                "`backend/` :\n"
+                "               docker compose exec api python manage.py migrate"
+            )
+            ok = False
+
     return ok
 
 
@@ -261,8 +288,10 @@ def main(argv: list[str]) -> int:
     if not tout_va_bien:
         print(
             "\nÉCHEC : une application au moins ne peut pas joindre son backend.\n"
-            "Un 500 sur les routes publiques pendant qu'une route protégée rend 401 "
-            "désigne le cache, pas la base."
+            "Lire les témoins avant de conclure : `ready/` nomme la dépendance en "
+            "défaut (base, cache,\nmigrations) ; un 503 sur `auth/login/` désigne le "
+            "cache ; `injoignable` désigne l'adresse\nou un serveur éteint — le seul "
+            "cas que l'application doit appeler « erreur réseau »."
         )
         return 1
 

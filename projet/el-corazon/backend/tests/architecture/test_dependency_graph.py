@@ -43,13 +43,55 @@ ALLOWED: dict[str, set[str]] = {
     "restaurants": {"accounts", "geography"},
     "profiles": {"accounts", "geography"},
     "catalog": {"accounts", "restaurants"},
-    "carts": {"accounts", "catalog", "restaurants"},
+    # L'inventaire ne connaît ni le catalogue ni les commandes, et c'est le
+    # point de sa conception : un ingrédient ne sait pas dans quels plats il
+    # entre. C'est la recette — `production`, second temps — qui fera le pont,
+    # et elle dépendra des deux. L'inverse aurait fait dépendre la chambre
+    # froide de la carte.
+    "inventory": {"accounts", "restaurants"},
+    # Et voici le pont annoncé. `production` est le seul module autorisé à
+    # connaître à la fois ce qui se vend et ce qui se consomme ; c'est ce qui
+    # permet aux deux autres de s'ignorer.
+    #
+    # Elle ne dépend **pas** d'`orders` : la nomenclature répond à « que faut-il
+    # pour ce plat ? », question qu'on doit pouvoir poser sans commande — pour
+    # un devis, pour la disponibilité, pour un inventaire prévisionnel. C'est
+    # `orders` qui traduira ses lignes en `ProducedLine`, jamais l'inverse.
+    "production": {"accounts", "catalog", "inventory", "restaurants"},
+    # Le juge de « peut-on commander ? ». Il compose trois niveaux qui vivent
+    # chacun où sont leurs données — la cuisine (`restaurants`), l'article
+    # (`catalog`), la matière (`production`) — et n'en réécrit aucun.
+    #
+    # Il ne pouvait vivre dans aucun des trois : `catalog` et `restaurants` ne
+    # voient pas la matière, et la poser dans `production` y aurait mêlé les
+    # horaires d'ouverture à la nomenclature. Il ne dépend pas d'`inventory`
+    # directement : c'est `production` qui sait lire un manque, comme elle sait
+    # l'engager.
+    #
+    # La carte publique l'interroge sans l'importer — il s'inscrit auprès de
+    # `catalog` au `ready()`, comme les contrôles de complétude le font auprès
+    # de `restaurants`.
+    # `geography` : `can_accept_order` compose la desserte de l'adresse avec le
+    # reste, et rend le devis de la course (`DeliveryQuote`) qu'elle a établi —
+    # la commande l'écrit sans le recalculer.
+    "availability": {"accounts", "catalog", "geography", "production", "restaurants"},
+    # `availability` : le panier ne décide plus seul qu'une ligne est
+    # commandable, il le demande au juge.
+    "carts": {"accounts", "availability", "catalog", "restaurants"},
     "promotions": {"accounts", "restaurants"},
     "orders": {
         "accounts",
+        # La cuisine est rejugée au moment d'écrire la commande — le verdict
+        # qu'emporte la sélection date de sa lecture.
+        "availability",
         "carts",
         "catalog",
         "geography",
+        # `production` et non `inventory` : c'est `MaterialService` qui sait
+        # traduire une commande en mouvements de stock, et cela laisse `orders`
+        # ignorer jusqu'au nom de `StockItem`. Une arête au lieu de deux, et le
+        # jour où la matière se réservera autrement, un seul module changera.
+        "production",
         "profiles",
         "promotions",
         "restaurants",

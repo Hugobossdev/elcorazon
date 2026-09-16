@@ -13,6 +13,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.core.cache import cache
 from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from django.http import HttpRequest, JsonResponse
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
@@ -38,6 +39,18 @@ def healthcheck(_request: HttpRequest) -> JsonResponse:
     return JsonResponse({"status": "ok", "version": settings.SPECTACULAR_SETTINGS["VERSION"]})
 
 
+def _migrations_en_attente() -> int:
+    """Nombre de migrations connues du code et absentes de la base.
+
+    Lit le graphe des fichiers de migration et la table `django_migrations` :
+    aucune écriture, aucun verrou. Le coût — charger le graphe — convient à une
+    sonde de diagnostic, pas à `/health/`, que l'hébergeur interroge en boucle.
+    """
+    executeur = MigrationExecutor(connection)
+    cibles = executeur.loader.graph.leaf_nodes()
+    return len(executeur.migration_plan(cibles))
+
+
 def readiness(_request: HttpRequest) -> JsonResponse:
     """Sonde de **disponibilité** — l'application peut-elle réellement servir ?
 
@@ -61,9 +74,11 @@ def readiness(_request: HttpRequest) -> JsonResponse:
 
     ## Ce qu'elle vérifie, et ce qu'elle en dit
 
-    PostgreSQL par un `SELECT 1`, et le cache par un aller-retour. Chaque
-    dépendance est rapportée séparément : « prêt » ou « pas prêt » ne dit pas
-    laquelle a lâché, et c'est la première chose qu'on cherche.
+    PostgreSQL par un `SELECT 1`, le cache par un aller-retour, et le schéma
+    par les migrations en attente. Chaque dépendance est rapportée séparément :
+    « prêt » ou « pas prêt » ne dit pas laquelle a lâché, et c'est la première
+    chose qu'on cherche. Un schéma en retard fait échouer la sonde comme une
+    base absente : dans les deux cas, aucune route métier ne peut répondre.
 
     Le cache est signalé mais **ne fait pas échouer** la sonde. Redis en offre
     gratuite est volatil et plafonné ; l'application dégrade proprement sans lui
@@ -95,7 +110,27 @@ def readiness(_request: HttpRequest) -> JsonResponse:
         logger.warning("readiness.cache", extra={"detail": str(erreur)})
         dependances["cache"] = "indisponible"
 
-    pret = dependances["database"] == "ok"
+    # Le schéma, ensuite — et seulement si la base répond.
+    #
+    # Panne vécue le 2026-09-13 : un champ ajouté à `Restaurant` pendant que le
+    # conteneur de développement tournait. uvicorn `--reload` a rechargé le
+    # modèle, mais `migrate` ne s'exécute qu'au **démarrage** du conteneur
+    # (`docker-compose.yml`). Chaque requête touchant un établissement —
+    # annuaire, carte, panier — rendait alors 500 `ProgrammingError`, pendant
+    # que cette sonde répondait « ready ». L'application cliente, elle, lisait
+    # « aucun restaurant en service ».
+    en_attente = 0
+    if dependances["database"] == "ok":
+        try:
+            en_attente = _migrations_en_attente()
+            dependances["migrations"] = "ok" if en_attente == 0 else "en attente"
+        except Exception as erreur:
+            logger.warning("readiness.migrations", extra={"detail": str(erreur)})
+            dependances["migrations"] = "illisible"
+
+    pret = dependances["database"] == "ok" and en_attente == 0
+    if en_attente:
+        logger.error("readiness.migrations_pending", extra={"pending": en_attente})
     return JsonResponse(
         {
             "status": "ready" if pret else "not-ready",
@@ -140,6 +175,8 @@ api_v1 = [
     path("geography/", include("apps.geography.urls")),
     path("restaurants/", include("apps.restaurants.urls")),
     path("catalog/", include("apps.catalog.urls")),
+    path("inventory/", include("apps.inventory.urls")),
+    path("production/", include("apps.production.urls")),
     path("profiles/", include("apps.profiles.urls")),
     path("carts/", include("apps.carts.urls")),
     path("group-carts/", include("apps.groupcarts.urls")),

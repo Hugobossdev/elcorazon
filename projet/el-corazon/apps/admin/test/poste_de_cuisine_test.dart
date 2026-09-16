@@ -1,3 +1,9 @@
+// Chaque test de ce fichier range une commande dans une colonne du poste, et
+// nomme donc son statut — `preparing` compris, même quand c'est la valeur par
+// défaut de `commandeDeTest`. Le taire ferait lire « une commande » là où le test
+// regarde « une commande en préparation ». Le décor étant partagé avec d'autres
+// suites qui s'appuient sur ce défaut, c'est ici que la règle se lève, et non là.
+// ignore_for_file: avoid_redundant_argument_values
 import 'package:admin/presentation/poste_de_cuisine.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:flutter_test/flutter_test.dart';

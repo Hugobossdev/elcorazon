@@ -1,3 +1,4 @@
+import 'package:elcorazon_core/src/catalog/indisponibilite.dart';
 import 'package:elcorazon_core/src/geography/delivery_zone.dart';
 import 'package:elcorazon_core/src/models/money.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
@@ -32,6 +33,7 @@ class DeliveryAvailability {
   const DeliveryAvailability({
     required this.isAvailable,
     this.reason,
+    this.unavailableCode,
     this.restaurant,
     this.zone,
     this.distanceMeters,
@@ -50,6 +52,7 @@ class DeliveryAvailability {
     return DeliveryAvailability(
       isAvailable: json['is_available'] as bool? ?? false,
       reason: json['reason'] as String?,
+      unavailableCode: json['unavailable_code'] as String?,
       restaurant: restaurant == null ? null : Restaurant.fromJson(restaurant),
       zone: zone == null ? null : DeliveryZone.fromJson(zone),
       distanceMeters: (json['distance_m'] as num?)?.toDouble(),
@@ -64,6 +67,21 @@ class DeliveryAvailability {
 
   /// Ce qui empêche la livraison, en clair. Nul quand elle est possible.
   final String? reason;
+
+  /// Le motif **stable** du refus — `MotifIndisponibilite.aucuneCuisine`,
+  /// `MotifIndisponibilite.adresseNonDesservie`, ou le code d'un refus de
+  /// panier. Nul quand la livraison est possible, et nul aussi d'un serveur
+  /// antérieur à ce champ : l'écran retombe alors sur [reason].
+  ///
+  /// L'état de la cuisine n'est **pas** ici : il voyage avec elle,
+  /// `restaurant.canOrderNow`. Être livrable et pouvoir commander maintenant
+  /// sont deux réponses.
+  final String? unavailableCode;
+
+  /// Personne ne dessert ce point — une réponse du serveur, pas une panne.
+  bool get aucuneCuisine =>
+      unavailableCode == MotifIndisponibilite.aucuneCuisine ||
+      (!isAvailable && restaurant == null);
 
   /// L'établissement qui dessert — celui qu'on a demandé, ou le plus proche que
   /// le serveur a choisi. Nul quand aucun ne dessert le point.

@@ -75,6 +75,36 @@ class ReportingRepository {
     );
   }
 
+  /// Commandes et chiffre d'affaires par pays, ville, zone ou cuisine.
+  ///
+  /// [level] vaut `country`, `city`, `zone` ou `kitchen`. Les regroupements
+  /// portent sur la géographie **figée** des commandes. Les filtres se
+  /// composent avec le périmètre du compte : ils restreignent, jamais ils
+  /// n'élargissent.
+  Future<List<NetworkRow>> network({
+    required DateTime start,
+    required DateTime end,
+    String level = 'kitchen',
+    String? countryIsoCode,
+    String? citySlug,
+    String? restaurantSlug,
+    String? deliveryZoneId,
+  }) {
+    return _rows(
+      '/analytics/reports/network/',
+      NetworkRow.fromJson,
+      start,
+      end,
+      extra: {
+        'level': level,
+        if (countryIsoCode != null) 'country': countryIsoCode,
+        if (citySlug != null) 'city': citySlug,
+        if (restaurantSlug != null) 'restaurant': restaurantSlug,
+        if (deliveryZoneId != null) 'zone': deliveryZoneId,
+      },
+    );
+  }
+
   /// Chiffres de tête du tableau de bord, en un appel.
   Future<AnalyticsOverview> overview({
     required DateTime start,

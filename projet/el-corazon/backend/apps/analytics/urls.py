@@ -20,6 +20,7 @@ urlpatterns = [
     path("reports/orders/", views.OrderStatusReportView.as_view(), name="report-orders"),
     path("reports/categories/", views.CategoryReportView.as_view(), name="report-categories"),
     path("reports/overview/", views.OverviewView.as_view(), name="report-overview"),
+    path("reports/network/", views.NetworkReportView.as_view(), name="report-network"),
     path(
         "reports/customers/<uuid:pk>/",
         views.CustomerStatsView.as_view(),

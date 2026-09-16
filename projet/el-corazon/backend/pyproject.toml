@@ -70,8 +70,25 @@ dev = [
     "pytest-asyncio==1.*",
     "factory-boy==3.*",
     "freezegun==1.*",
-    "ruff==0.14.*",
-    "mypy==1.*",
+    # Les deux portes de qualité sont épinglées **à la version exacte**, et ce
+    # n'est pas de la prudence excessive.
+    #
+    # Un formateur change de sortie entre deux versions correctives : ruff 0.14.14
+    # replie sur une ligne un appel que 0.14.x plus ancien gardait éclaté. Sous
+    # `ruff==0.14.*`, deux constructions du même commit peuvent donc rendre l'une
+    # verte et l'autre rouge, sans qu'une ligne de code ait bougé — et c'est
+    # `ruff format --check` qui échoue, c'est-à-dire la porte, pas un avertissement.
+    #
+    # Le même raisonnement vaut pour mypy, dont chaque version affine l'inférence :
+    # `mypy==1.*` accepte n'importe quelle 1.x, y compris celle qui, sortie demain,
+    # refusera du code inchangé.
+    #
+    # C'est la variante silencieuse de l'incident que raconte l'en-tête de
+    # `.github/workflows/backend-ci.yml` : ce qui est testé et ce qui est déployé
+    # doivent être la même chose, et cela vaut aussi pour ce qui *teste*. Relever
+    # ces versions devient un commit, visible et réversible.
+    "ruff==0.14.14",
+    "mypy==1.19.1",
     "django-stubs[compatible-mypy]==5.*",
     "djangorestframework-stubs==3.*",
     # Fournit les DLL GDAL et GEOS aux postes Windows, qui n'ont pas de

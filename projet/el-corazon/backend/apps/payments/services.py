@@ -476,9 +476,7 @@ class RefundService:
         # n'en porte pas de champ propre ; il rejoint le motif, qui est le seul
         # texte libre de la ligne.
         if provider_reference:
-            refund.reason = (
-                f"{refund.reason} — virement {provider_reference}".strip()
-            )
+            refund.reason = f"{refund.reason} — virement {provider_reference}".strip()
             refund.save(update_fields=["reason", "updated_at"])
 
         return refund

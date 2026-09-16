@@ -27,6 +27,9 @@ def client() -> APIClient:
 
 @pytest.fixture
 def ouvert_le_mardi(restaurant: Restaurant) -> Restaurant:
+    # La fixture commune est ouverte en permanence ; ces tests portent sur une
+    # plage précise, et partent donc d'un horaire vide.
+    restaurant.opening_hours.all().delete()
     OpeningHours.objects.create(
         restaurant=restaurant,
         weekday=Weekday.TUESDAY,

@@ -1,8 +1,9 @@
-"""Points d'entrée des commandes — côté client et côté livreur.
+"""Points d'entrée des commandes — côté client.
 
-Ce que voit celui qui a commandé, et ce que voit celui qui livre. Le personnel
-a ses propres routes, dans `backoffice.py` : elles nomment leurs permissions,
-là où celles-ci ne reposent que sur l'appartenance.
+Le personnel a ses propres routes, dans `backoffice.py` : elles nomment leurs
+permissions, là où celles-ci ne reposent que sur l'appartenance. Le livreur
+consulte une course par `/delivery/assignments/`, qui porte le sous-ensemble
+de données nécessaire à la remise ; il ne lit jamais la commande cliente.
 
 L'appartenance est un filtre de requête et non une permission d'objet : une
 commande d'autrui est introuvable, pas interdite. Un 403 confirmerait au
@@ -71,22 +72,29 @@ class OrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
 
     def get_queryset(self) -> QuerySet[Order]:
         user = authenticated_user(self.request)
+        if user.user_type == UserType.COURIER:
+            # La course est la frontière d'accès du livreur. Lui rendre la
+            # commande ici contournerait le masquage du numéro de téléphone,
+            # exposerait les données client à une proposition simplement reçue
+            # et ajouterait une relecture N+1 dans l'application livreur.
+            #
+            # AssignmentSerializer fournit les articles, le total, l'adresse,
+            # les consignes et le numéro au bon moment du cycle. Une commande
+            # est donc introuvable depuis cette route, même après acceptation.
+            return Order.objects.none()
+
         # Mêmes compteurs que la supervision : `OrderSerializer` est partagé, et
         # sans l'annotation il retomberait sur une requête par commande pour
         # les compter — l'inverse de ce que ces champs cherchent à éviter.
-        queryset = avec_compteurs(Order.objects.select_related("restaurant").order_by("-placed_at"))
+        queryset = avec_compteurs(
+            Order.objects.select_related("restaurant", "country", "city").order_by("-placed_at")
+        )
 
-        if user.user_type == UserType.COURIER:
-            # Le livreur voit les commandes qu'on lui a confiées, et rien
-            # d'autre : ni l'historique du client, ni les courses de ses
-            # collègues.
-            queryset = queryset.filter(assignments__courier__user=user).distinct()
-        else:
-            # Tout le reste — y compris un compte du personnel qui passerait
-            # par ici — ne voit que ce qu'il a commandé lui-même. La
-            # supervision a ses propres routes, sous `manage/`, où elle doit
-            # présenter `orders.read`.
-            queryset = queryset.filter(customer=user)
+        # Tout le reste — y compris un compte du personnel qui passerait par
+        # ici — ne voit que ce qu'il a commandé lui-même. La supervision a ses
+        # propres routes, sous `manage/`, où elle doit présenter
+        # `orders.read`.
+        queryset = queryset.filter(customer=user)
 
         if self.action == "retrieve":
             queryset = queryset.prefetch_related("lines__menu_item", "status_events")

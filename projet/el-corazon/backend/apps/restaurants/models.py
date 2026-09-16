@@ -9,11 +9,13 @@ l'ouverture d'un second établissement indolore.
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from django.contrib.gis.db import models as gis
 from django.db import models
+from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.geography.models import City, Country, DeliveryZone
@@ -21,17 +23,21 @@ from apps.restaurants.readiness import gaps_from_registry
 from apps.restaurants.signals import restaurant_status_changed
 from apps.restaurants.states import RESTAURANT_MACHINE, RestaurantStatus
 from common.exceptions import BusinessRuleViolation
+from common.fields import MoneyField
 from common.models import TimeStampedModel, UUIDModel
 from common.storage import banners
 
 __all__ = [
     "AreaMembership",
     "IncompleteConfiguration",
+    "KitchenClosure",
     "OpeningHours",
     "Restaurant",
     "RestaurantStatus",
     "StaffMembership",
     "Weekday",
+    "kitchen_state_prefetches",
+    "zone_anchoring_problem",
 ]
 
 
@@ -61,6 +67,27 @@ class IncompleteConfiguration(BusinessRuleViolation):
             "Cet établissement ne peut pas être mis en service : " + " ".join(manques),
             missing=manques,
         )
+
+
+def zone_anchoring_problem(zone: DeliveryZone, restaurant_id: uuid.UUID | None) -> str | None:
+    """Pourquoi cette zone ne peut pas porter cet établissement — `None` si elle le peut.
+
+    Une cuisine se pose sur une zone **municipale** de sa ville, ou sur l'une de
+    ses propres zones. La zone propre d'une autre cuisine porte le barème de
+    celle-ci : s'y poser ferait facturer la course au tarif du voisin, et
+    `resolve_zone`, qui écarte les zones des autres établissements, ne la
+    retiendrait jamais pour cette cuisine — une zone de rattachement qui ne
+    s'applique à rien.
+
+    `restaurant_id` est nul à la création : aucune zone ne peut encore lui être
+    propre.
+    """
+    if zone.restaurant_id is not None and zone.restaurant_id != restaurant_id:
+        return (
+            f"La zone « {zone.name} » est propre à un autre établissement : une cuisine "
+            "se rattache à une zone municipale de sa ville, ou à l'une des siennes."
+        )
+    return None
 
 
 class Restaurant(UUIDModel, TimeStampedModel):
@@ -107,6 +134,33 @@ class Restaurant(UUIDModel, TimeStampedModel):
     accepts_orders = models.BooleanField(default=True)
 
     default_preparation_minutes = models.PositiveSmallIntegerField(default=20)
+
+    # Proposer soi-même la course au livreur compatible le plus proche quand une
+    # commande est prête (`apps.delivery.dispatch`). Désactivé, la cuisine
+    # affecte à la main depuis le back-office, comme avant ce champ — ce qui
+    # reste possible dans les deux cas.
+    auto_dispatch_couriers = models.BooleanField(
+        default=True,
+        help_text="Proposer automatiquement la course à un livreur compatible dès que "
+        "la commande est prête.",
+    )
+
+    # Plafond de valeur au-delà duquel une perte ou une correction de stock
+    # exige une **seconde validation**, par une autre personne que celle qui la
+    # déclare (voir `apps.inventory.services`).
+    #
+    # Par établissement, parce qu'un plafond est un montant, et qu'un montant a
+    # la devise du pays : un plafond d'enseigne en francs CFA serait faux pour
+    # une cuisine d'Accra.
+    #
+    # **Nul veut dire : tout se valide**, et non « rien ne se valide ». Une perte
+    # est un actif qui sort du bilan sans transaction ; tant que personne n'a
+    # décidé à partir de quel montant elle peut passer seule, elle ne passe pas
+    # seule. Le défaut sûr est le contrôle, qu'on desserre en fixant le plafond.
+    #
+    # Modifiable par `restaurants.write` seulement — le siège, pas le gérant de
+    # la cuisine dont il encadre les écritures.
+    stock_adjustment_ceiling = MoneyField(null=True)
 
     # Vue « des deux côtés » du rattachement, à travers `StaffMembership` — donc
     # sans table supplémentaire ni migration de schéma. Elle n'existe que pour
@@ -179,12 +233,29 @@ class Restaurant(UUIDModel, TimeStampedModel):
 
         # Le point de retrait hors de la zone qu'il dessert est la faute de
         # saisie que rien d'autre n'attraperait : la commande partirait, et le
-        # calcul de distance mesurerait depuis une autre ville. C'est aussi la
-        # seule forme d'incohérence géographique que le schéma ne rend pas
-        # impossible — `City` porte une clé vers `Country`, si bien qu'une
-        # ville d'un autre pays ne peut pas être choisie.
+        # calcul de distance mesurerait depuis une autre ville. `City` porte une
+        # clé vers `Country`, si bien qu'une ville d'un autre pays ne peut pas
+        # être choisie ; les deux incohérences que le schéma laisse passer sont
+        # celle-ci et la suivante.
         if not self.zone.boundary.covers(self.location):
             manques.append("La position de l'établissement tombe hors de sa zone de livraison.")
+
+        # La zone propre d'une autre cuisine. La saisie la refuse
+        # (`ManagedRestaurantSerializer.validate_zone`) ; le rappeler ici couvre
+        # ce que la saisie ne voit pas — `django-admin`, un `shell`, une zone
+        # rattachée *après coup* à un autre établissement.
+        if (probleme := zone_anchoring_problem(self.zone, self.pk)) is not None:
+            manques.append(probleme)
+
+        # Un marché fermé à un étage quelconque rend la cuisine invisible : la
+        # publier la montrerait « En service » au back-office et introuvable
+        # dans l'application, sans que rien ne dise pourquoi.
+        if not self.zone.is_active:
+            manques.append(f"La zone de livraison « {self.zone.name} » est désactivée.")
+        if not self.zone.city.is_active:
+            manques.append(f"La ville « {self.zone.city.name} » est désactivée.")
+        if not self.zone.city.country.is_active:
+            manques.append(f"Le marché « {self.zone.city.country.name} » est fermé.")
         if not self.opening_hours.exists():
             manques.append("Aucune plage d'ouverture n'est définie.")
         if not self.staff_memberships.exists():
@@ -263,6 +334,100 @@ class Restaurant(UUIDModel, TimeStampedModel):
                 return True
 
         return False
+
+    # ------------------------------------------------ fermetures exceptionnelles
+
+    def closures_after(self, moment: dt.datetime) -> list[KitchenClosure]:
+        """Fermetures exceptionnelles qui ne sont pas terminées à cet instant.
+
+        Lit le préchargement quand la vue l'a posé (`kitchen_state_prefetches`),
+        sinon interroge la base en ne rapatriant que l'avenir : l'historique des
+        fermetures grandit d'année en année et n'intéresse aucun verdict.
+        """
+        cache = getattr(self, "_prefetched_objects_cache", {})
+        if "closures" in cache:
+            return [fermeture for fermeture in self.closures.all() if fermeture.ends_at > moment]
+        return list(self.closures.filter(ends_at__gt=moment).order_by("starts_at"))
+
+    def closure_at(self, moment: dt.datetime) -> KitchenClosure | None:
+        """La fermeture exceptionnelle en cours à cet instant, s'il y en a une."""
+        for fermeture in self.closures_after(moment):
+            if fermeture.starts_at <= moment < fermeture.ends_at:
+                return fermeture
+        return None
+
+
+def kitchen_state_prefetches(at: dt.datetime | None = None) -> tuple[Any, ...]:
+    """Ce qu'il faut précharger pour juger l'état de plusieurs cuisines sans N+1.
+
+    Les horaires et les fermetures **à venir** : deux requêtes pour toute une
+    liste, là où `kitchen_state` en coûterait deux par cuisine. À employer
+    partout où l'on précharge des horaires pour un verdict.
+    """
+    depuis = at if at is not None else timezone.now()
+    return (
+        "opening_hours",
+        models.Prefetch(
+            "closures",
+            queryset=KitchenClosure.objects.filter(ends_at__gt=depuis).order_by("starts_at"),
+        ),
+    )
+
+
+class KitchenClosure(UUIDModel, TimeStampedModel):
+    """Fermeture exceptionnelle — un jour férié, des travaux, une coupure de gaz.
+
+    ## Pourquoi pas une plage d'horaires en moins
+
+    Les horaires disent la semaine type ; ils se répètent. Supprimer la plage
+    du mardi pour fermer **ce** mardi fermerait aussi tous les suivants, et il
+    faudrait se souvenir de la remettre. Une fermeture a un début et une fin
+    datés, et **se lève d'elle-même** : la cuisine rouvre à l'heure dite sans
+    qu'on y pense — ce qu'aucun interrupteur ne fait.
+
+    ## Pourquoi pas `accepts_orders`
+
+    La pause dit « on ne prend rien pour quelques minutes » et n'a pas de fin
+    connue. Une fermeture en a une, que le client doit lire : « fermé
+    exceptionnellement, réouverture demain à 11 h ». Les confondre ferait
+    annoncer « réessayez dans quelques minutes » pour une fermeture de deux
+    jours.
+
+    Les instants sont absolus (UTC en base) : ils se saisissent et s'affichent
+    dans le fuseau du pays, comme les horaires se comparent dans ce fuseau.
+    """
+
+    restaurant = models.ForeignKey(Restaurant, on_delete=models.CASCADE, related_name="closures")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    reason = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Montré au client : « fermeture exceptionnelle (jour férié) ».",
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        verbose_name = "fermeture exceptionnelle"
+        verbose_name_plural = "fermetures exceptionnelles"
+        ordering = ["starts_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(ends_at__gt=models.F("starts_at")),
+                name="kitchen_closure_ends_after_start",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["restaurant", "ends_at"], name="closure_restaurant_end_idx")
+        ]
+
+    def __str__(self) -> str:
+        return (
+            f"{self.restaurant.name} — fermée du {self.starts_at:%d/%m %H:%M} "
+            f"au {self.ends_at:%d/%m %H:%M}"
+        )
 
 
 class StaffMembership(UUIDModel, TimeStampedModel):

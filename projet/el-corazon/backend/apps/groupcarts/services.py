@@ -289,10 +289,12 @@ class GroupCartService:
         return (
             GroupCart.objects.select_related("restaurant__zone__city__country", "host")
             .prefetch_related(
+                # Lus par le juge de disponibilité — voir `CartService.load`.
+                "restaurant__opening_hours",
                 Prefetch(
                     "lines",
                     queryset=GroupCartLine.objects.select_related(
-                        "menu_item", "member"
+                        "menu_item__category", "member"
                     ).prefetch_related(
                         Prefetch(
                             "options",
@@ -307,8 +309,12 @@ class GroupCartService:
 
     @staticmethod
     def price(group_cart: GroupCart) -> PricedSelection:
-        """Valorise le panier entier — même code que le panier personnel."""
-        return price_selection(group_cart.lines.all(), group_cart.restaurant.currency)
+        """Valorise le panier entier — même code, et même juge, que le panier personnel."""
+        return price_selection(
+            group_cart.lines.all(),
+            group_cart.restaurant.currency,
+            restaurant=group_cart.restaurant,
+        )
 
     @staticmethod
     def price_per_member(group_cart: GroupCart) -> dict[str, Money]:
@@ -532,7 +538,7 @@ class GroupCartService:
         """
         if menu_item.restaurant_id != group_cart.restaurant_id:
             raise BusinessRuleViolation(
-                "Cet article appartient à un autre restaurant.",
+                "Cet article appartient à une autre cuisine.",
                 restaurant_id=str(group_cart.restaurant_id),
             )
         if menu_item.is_deleted or not menu_item.is_available:

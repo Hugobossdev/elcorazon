@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:elcora_fast/presentation/catalogue.dart';
+import 'package:elcora_fast/presentation/changement_de_cuisine.dart';
 import 'package:elcora_fast/presentation/reprise_de_commande.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
@@ -12,7 +13,7 @@ import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/tarification.dart';
 import 'package:elcora_fast/services/offline_sync_service.dart';
 import 'package:elcora_fast/services/delivery_fee_service.dart';
-import 'package:elcora_fast/services/restaurant_context_service.dart';
+import 'package:elcora_fast/services/kitchen_context_service.dart';
 // import 'package:elcora_fast/services/wallet_service.dart'; // Portefeuille désactivé temporairement
 
 /// Service de gestion du panier (local + synchronisation Supabase)
@@ -100,6 +101,21 @@ class CartService extends ChangeNotifier {
   /// prix changé). `null` tant qu'aucun devis n'a été demandé.
   bool? get isOrderable => _quote?.isOrderable;
 
+  /// Pourquoi le serveur refuse de commander ce panier — la cuisine fermée,
+  /// suspendue, ou un article qui ne peut plus l'être. `null` quand rien ne
+  /// bloque **ou** qu'aucun devis n'existe encore : on n'annonce pas un refus
+  /// qu'on n'a pas reçu.
+  ///
+  /// La phrase est celle du juge de disponibilité du serveur ; l'application
+  /// ne la compose pas.
+  String? get motifBloquant {
+    final devis = _quote;
+    if (devis == null || devis.isOrderable) return null;
+    return devis.unavailableReason.isNotEmpty
+        ? devis.unavailableReason
+        : 'Cette commande ne peut pas être passée pour le moment.';
+  }
+
   String? get promoCode => _promoCode;
   bool get isInitialized => _isInitialized;
   String? get userId => _userId;
@@ -134,14 +150,14 @@ class CartService extends ChangeNotifier {
   /// Lecture synchrone, pour les clés de stockage : les rendre asynchrones
   /// obligerait à attendre le réseau avant de relire un panier local, qui n'en
   /// a pas besoin.
-  String? get _slugLocal => RestaurantContextService().slug;
+  String? get _slugLocal => KitchenContextService().slug;
 
   /// Établissement à écrire côté serveur, en résolvant l'annuaire au besoin.
   ///
   /// Distinct de [_slugLocal] : une écriture distante ne doit jamais partir
   /// sur un établissement deviné, alors qu'une lecture locale peut se contenter
   /// de ce qu'on sait.
-  Future<String> _slug() => RestaurantContextService().exigerSlug();
+  Future<String> _slug() => KitchenContextService().exigerSlug();
 
   /// Initialise le service (chargement local)
   Future<void> initialize() async {
@@ -152,7 +168,7 @@ class CartService extends ChangeNotifier {
       // Avant la première lecture : un panier relu sous l'ancienne clé puis
       // relu de nouveau après le changement afficherait brièvement les lignes
       // du restaurant précédent.
-      _finDAbonnement ??= RestaurantContextService()
+      _finDAbonnement ??= KitchenContextService()
           .ecouterLeChangement(_surChangementDEtablissement);
       await _loadCartFromStorage();
       _isInitialized = true;
@@ -234,6 +250,27 @@ class CartService extends ChangeNotifier {
   Future<void> _surChangementDEtablissement(String ancien, String nouveau) async {
     eccore.Journal.trace('CartService : établissement $ancien → $nouveau');
 
+    // Le client l'apprend : son panier ne suit pas la cuisine, et le voir se
+    // vider sans un mot se lit comme une perte. Pas d'avis quand il vient de
+    // confirmer lui-même le changement — il sait déjà.
+    final articles = itemCount;
+    if (articles > 0 && !_changementConfirme) {
+      final contexte = KitchenContextService();
+      messagerDeLApplication.currentState?.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Text(
+            ChangementDeCuisine.avis(
+              ancienne: contexte.cuisineParSlug(ancien)?.name ?? 'votre cuisine précédente',
+              nouvelle: contexte.cuisineParSlug(nouveau)?.name ?? 'une autre cuisine',
+              articles: articles,
+            ),
+          ),
+        ),
+      );
+    }
+    _changementConfirme = false;
+
     _items.clear();
     _quote = null;
     _promoDiscount = 0.0;
@@ -243,6 +280,12 @@ class CartService extends ChangeNotifier {
     await _loadCartFromStorage();
     notifyListeners();
   }
+
+  /// Posé par l'écran qui vient de faire **confirmer** un changement de cuisine,
+  /// pour que l'avis ne répète pas ce que le client vient d'accepter.
+  bool _changementConfirme = false;
+
+  void changementDeCuisineConfirme() => _changementConfirme = true;
 
   @override
   void dispose() {

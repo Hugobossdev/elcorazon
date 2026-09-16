@@ -8,11 +8,13 @@ client et facturait ce qu'on lui disait de facturer.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from rest_framework import serializers
 
 from apps.accounts.models import User
+from apps.catalog.availability import menu_unavailabilities
 from apps.catalog.models import (
     Category,
     MenuItem,
@@ -22,6 +24,7 @@ from apps.catalog.models import (
     Review,
 )
 from apps.restaurants.models import Restaurant
+from common.availability import Unavailability
 from common.serializers import MoneyField
 
 __all__ = [
@@ -68,6 +71,24 @@ class OptionGroupSerializer(serializers.ModelSerializer[OptionGroup]):
         read_only_fields = fields
 
 
+class _JugedMenuListSerializer(serializers.ListSerializer[MenuItem]):
+    """Interroge le juge **une fois pour la page**, pas une fois par article.
+
+    Le verdict d'un article passe par sa recette et par le stock de sa cuisine.
+    Posé article par article, une page de vingt plats coûterait quarante
+    requêtes ; posé sur la page, deux.
+    """
+
+    def to_representation(self, data: Any) -> list[Any]:
+        items = list(data.all() if hasattr(data, "all") else data)
+        juges: set[uuid.UUID] = self.context.setdefault("menu_judged", set())
+        verdicts: dict[uuid.UUID, Unavailability] = self.context.setdefault("menu_verdicts", {})
+        a_juger = [item for item in items if item.pk not in juges]
+        verdicts.update(menu_unavailabilities(a_juger))
+        juges.update(item.pk for item in a_juger)
+        return super().to_representation(items)
+
+
 class MenuItemSerializer(serializers.ModelSerializer[MenuItem]):
     """Forme de liste — ce qu'affiche une carte de menu.
 
@@ -75,15 +96,42 @@ class MenuItemSerializer(serializers.ModelSerializer[MenuItem]):
     porterait alors des centaines de lignes que l'écran de liste n'affiche pas,
     et le premier chargement du menu s'en trouverait ralenti sur un réseau
     mobile — le seul que ces clients utilisent.
+
+    ## `is_available` est un verdict, pas la colonne
+
+    Sur cette forme publique, `is_available` répond à « puis-je commander cet
+    article ? » : retiré, désactivé, catégorie éteinte, épuisé, **ou sans la
+    matière pour le préparer**. C'est la réponse du juge de disponibilité
+    (`apps.availability`), et `unavailable_code` / `unavailable_reason` disent
+    pourquoi.
+
+    Le nom est conservé plutôt que remplacé par un `is_orderable` neuf, et
+    c'est délibéré : les applications clientes déjà installées lisent ce champ
+    pour griser un plat. Elles cessent donc de proposer un burger dont le pain
+    manque **sans attendre leur mise à jour** — trois applications déployées ne
+    se mettent pas à jour le même jour.
+
+    La colonne brute — l'interrupteur que la cuisine manipule — reste lisible et
+    inscriptible par le back-office, sur `ManagedMenuItemSerializer`. Les deux
+    ne se confondent pas : la cuisine bascule un interrupteur, le client lit un
+    verdict.
+
+    La disponibilité de la **cuisine** — fermée, suspendue — n'y entre pas :
+    elle est sur l'établissement (`can_order_now`), où elle se dit une fois pour
+    toute la carte au lieu d'être répétée sur chaque plat.
     """
 
     price = MoneyField(read_only=True)
     restaurant = serializers.SlugRelatedField[Restaurant](slug_field="slug", read_only=True)
     category = serializers.SlugRelatedField[Category](slug_field="slug", read_only=True)
     category_name = serializers.CharField(source="category.name", read_only=True)
+    is_available = serializers.SerializerMethodField()
+    unavailable_code = serializers.SerializerMethodField()
+    unavailable_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = MenuItem
+        list_serializer_class = _JugedMenuListSerializer
         fields = [
             "id",
             "restaurant",
@@ -98,6 +146,8 @@ class MenuItemSerializer(serializers.ModelSerializer[MenuItem]):
             "allergens",
             "dietary_tags",
             "is_available",
+            "unavailable_code",
+            "unavailable_reason",
             "is_popular",
             "vip_exclusive",
             "rating_average",
@@ -107,6 +157,33 @@ class MenuItemSerializer(serializers.ModelSerializer[MenuItem]):
             "updated_at",
         ]
         read_only_fields = fields
+
+    def _verdict(self, obj: MenuItem) -> Unavailability | None:
+        """Le verdict de la page s'il a été calculé, sinon celui de cet article seul.
+
+        « Jugé » et « sans motif » sont tenus séparément, et c'est le point : le
+        dictionnaire des verdicts ne contient que les articles **non**
+        commandables. Y chercher un article jamais jugé rendrait `None` — donc
+        « disponible » — par simple absence, dès qu'un même contexte sert à
+        sérialiser deux articles l'un après l'autre.
+        """
+        juges: set[uuid.UUID] = self.context.setdefault("menu_judged", set())
+        verdicts: dict[uuid.UUID, Unavailability] = self.context.setdefault("menu_verdicts", {})
+        if obj.pk not in juges:
+            verdicts.update(menu_unavailabilities([obj]))
+            juges.add(obj.pk)
+        return verdicts.get(obj.pk)
+
+    def get_is_available(self, obj: MenuItem) -> bool:
+        return self._verdict(obj) is None
+
+    def get_unavailable_code(self, obj: MenuItem) -> str:
+        verdict = self._verdict(obj)
+        return str(verdict.code) if verdict is not None else ""
+
+    def get_unavailable_reason(self, obj: MenuItem) -> str:
+        verdict = self._verdict(obj)
+        return verdict.message if verdict is not None else ""
 
 
 class MenuItemDetailSerializer(MenuItemSerializer):

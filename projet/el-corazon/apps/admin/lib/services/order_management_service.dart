@@ -161,6 +161,9 @@ class OrderManagementService extends ChangeNotifier {
         placedFrom: filtres.depuis,
         placedTo: filtres.jusqua,
         restaurantSlug: filtres.restaurantSlug,
+        countryIsoCode: filtres.paysIso,
+        citySlug: filtres.villeSlug,
+        deliveryZoneId: filtres.zoneId,
         pageSize: filtres.taillePage,
       ),
     );
@@ -188,6 +191,9 @@ class OrderManagementService extends ChangeNotifier {
     try {
       _comptesParStatut = await _orders.countsByStatus(
         restaurantSlug: _filtres.restaurantSlug,
+        countryIsoCode: _filtres.paysIso,
+        citySlug: _filtres.villeSlug,
+        deliveryZoneId: _filtres.zoneId,
         search: _filtres.recherche,
         placedFrom: _filtres.depuis,
         placedTo: _filtres.jusqua,

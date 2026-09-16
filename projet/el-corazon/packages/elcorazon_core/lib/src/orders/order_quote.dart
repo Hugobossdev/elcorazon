@@ -20,6 +20,8 @@ class OrderQuote {
     required this.discount,
     required this.total,
     required this.isOrderable,
+    this.unavailableCode = '',
+    this.unavailableReason = '',
     this.promotionCode = '',
     this.promotionDescription = '',
   });
@@ -32,6 +34,8 @@ class OrderQuote {
       discount: Money.fromJson(json['discount'] as Map<String, dynamic>),
       total: Money.fromJson(json['total'] as Map<String, dynamic>),
       isOrderable: json['is_orderable'] as bool? ?? false,
+      unavailableCode: json['unavailable_code'] as String? ?? '',
+      unavailableReason: json['unavailable_reason'] as String? ?? '',
       promotionCode: promotion?['code'] as String? ?? '',
       promotionDescription: promotion?['description'] as String? ?? '',
     );
@@ -46,9 +50,17 @@ class OrderQuote {
   final Money discount;
   final Money total;
 
-  /// Faux quand le panier contient un article devenu indisponible ou dont le
-  /// prix a changé. L'écran de commande le dit avant le bouton, pas après.
+  /// Faux quand la cuisine ne prend pas la commande — fermée, suspendue — ou
+  /// que le panier contient un article qui ne peut plus l'être. L'écran de
+  /// commande le dit avant le bouton, pas après.
   final bool isOrderable;
+
+  /// Le premier motif bloquant, la cuisine avant les articles — une constante
+  /// de `MotifIndisponibilite`, vide quand [isOrderable] est vrai.
+  final String unavailableCode;
+
+  /// La phrase qui l'accompagne, à afficher telle quelle.
+  final String unavailableReason;
 
   /// Code effectivement retenu — vide quand aucun n'a été fourni **ou** quand
   /// celui fourni a été refusé. Le distinguer d'une remise nulle importe : un

@@ -48,6 +48,7 @@ class CartLine {
     required this.total,
     required this.isOrderable,
     required this.unavailableReason,
+    this.unavailableCode = '',
   });
 
   factory CartLine.fromJson(Map<String, dynamic> json) {
@@ -65,6 +66,7 @@ class CartLine {
       total: Money.fromJson(json['total'] as Map<String, dynamic>),
       isOrderable: json['is_orderable'] as bool,
       unavailableReason: json['unavailable_reason'] as String? ?? '',
+      unavailableCode: json['unavailable_code'] as String? ?? '',
     );
   }
 
@@ -82,6 +84,11 @@ class CartLine {
   final Money total;
   final bool isOrderable;
   final String unavailableReason;
+
+  /// Motif stable de [isOrderable] faux — `MotifIndisponibilite`. Une rupture
+  /// d'ingrédient porte un nombre de portions dans la phrase ; le code, lui,
+  /// permet de proposer le bon geste (réduire la quantité, retirer la ligne).
+  final String unavailableCode;
 }
 
 /// Panier serveur d'un restaurant — miroir de `CartSerializer`. Ne stocke
@@ -97,6 +104,8 @@ class Cart {
     required this.subtotal,
     required this.isOrderable,
     required this.updatedAt,
+    this.unavailableCode = '',
+    this.unavailableReason = '',
   });
 
   factory Cart.fromJson(Map<String, dynamic> json) {
@@ -110,6 +119,8 @@ class Cart {
           .toList(),
       subtotal: Money.fromJson(json['subtotal'] as Map<String, dynamic>),
       isOrderable: json['is_orderable'] as bool,
+      unavailableCode: json['unavailable_code'] as String? ?? '',
+      unavailableReason: json['unavailable_reason'] as String? ?? '',
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );
   }
@@ -120,6 +131,14 @@ class Cart {
   final String currency;
   final List<CartLine> lines;
   final Money subtotal;
+  /// Vrai quand la cuisine prend la commande **et** que toute ligne est
+  /// commandable.
   final bool isOrderable;
+
+  /// Pourquoi **la cuisine** ne prend pas la commande — fermée, suspendue.
+  /// Vides quand elle la prend ; les motifs d'articles sont sur les lignes.
+  final String unavailableCode;
+  final String unavailableReason;
+
   final DateTime updatedAt;
 }

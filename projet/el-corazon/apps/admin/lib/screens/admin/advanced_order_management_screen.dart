@@ -20,7 +20,9 @@ import 'package:admin/presentation/dialogues/changement_statut.dart';
 import 'package:admin/presentation/barre_pagination.dart';
 import 'package:admin/presentation/dialogues/contact_commande.dart';
 import 'package:admin/presentation/dialogues/details_commande.dart';
+import 'package:admin/presentation/filtres_geographiques.dart';
 import 'package:admin/presentation/filtres_supervision.dart';
+import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/presentation/export_commandes.dart';
 import 'package:admin/presentation/onglets/statistiques_commandes.dart';
 import 'package:admin/presentation/tri_commandes.dart';
@@ -1104,6 +1106,15 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                       },
                     ),
                     const SizedBox(height: 16),
+                    // Pays → ville → zone → cuisine : la géographie figée de
+                    // la commande, proposée depuis ce que le compte voit. Chaque
+                    // étage ne propose que ce que l'étage du dessus contient.
+                    FiltresGeographiques(
+                      filtres: _filtres,
+                      etablissements: perimetre.restaurants,
+                      zones: context.read<DeliveryZoneService>(),
+                      onChange: poser,
+                    ),
                     // Le filtre par établissement remplace l'ancien « filtre
                     // par zone », dont les mots-clés étaient des quartiers de
                     // Dakar pour un restaurant de Lomé. Celui-ci part au
@@ -1119,7 +1130,11 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                           const DropdownMenuItem<String?>(
                             child: Text('Tout mon périmètre'),
                           ),
-                          for (final etablissement in perimetre.restaurants)
+                          for (final etablissement in perimetre.restaurants.where(
+                            (r) =>
+                                (_filtres.paysIso == null || r.countryIsoCode == _filtres.paysIso) &&
+                                (_filtres.villeSlug == null || r.citySlug == _filtres.villeSlug),
+                          ))
                             DropdownMenuItem(
                               value: etablissement.slug,
                               child: Text(etablissement.name),

@@ -532,4 +532,8 @@ class TestDevisAvantCommande:
             "total",
             "promotion",
             "is_orderable",
+            # Pourquoi `is_orderable` est faux — ajoutés par le juge de
+            # disponibilité, pour que le bouton grisé dise pourquoi.
+            "unavailable_code",
+            "unavailable_reason",
         }
