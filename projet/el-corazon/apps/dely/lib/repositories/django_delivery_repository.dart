@@ -109,9 +109,15 @@ class Course {
       assignment.status == eccore.DeliveryStatus.onTheWay ||
       assignment.status == eccore.DeliveryStatus.delivered;
 
-  MoyenPaiement get moyenPaiement => MoyenPaiement.depuisServeur(
-    assignment.paymentMethod.isNotEmpty ? assignment.paymentMethod : commande?.paymentMethod,
-  );
+  /// Le moyen de règlement, tel que la course le porte.
+  ///
+  /// Le repli sur la commande relue a disparu avec elle : un moyen vide — une
+  /// course servie par un serveur antérieur — retombe sur les espèces, comme
+  /// le fait déjà [MoyenPaiement.depuisServeur] pour toute valeur inconnue.
+  /// Arriver sans monnaie devant une commande à régler coûte plus cher que
+  /// l'inverse.
+  MoyenPaiement get moyenPaiement =>
+      MoyenPaiement.depuisServeur(assignment.paymentMethod);
 
   /// Ce qu'il faut encaisser à la porte — nul quand la commande est déjà payée.
   ///

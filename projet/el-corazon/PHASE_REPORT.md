@@ -1,8 +1,52 @@
 # Rapport de phase — lot 4 (réseau de cuisines de bout en bout), lot 3 (cuisine résolue, erreurs distinctes), lot 2-bo (back-office de la matière), lot 1 (disponibilité), lot 2 (production, 2a et 2b)
 
+> ## ⚠️ Bilan provisoire — 16 septembre 2026
+>
+> **Ce document n'atteste plus rien.** Les tableaux « Validation » de chaque lot
+> décrivent des exécutions faites au moment de leur rédaction, sur un arbre de
+> travail qui a continué de bouger ensuite. Au moins une de leurs affirmations
+> était **fausse** au moment du gel : le lot 4 annonce « `flutter analyze` ×4 :
+> No issues found » alors que `dely` portait trois erreurs de compilation dans
+> `lib/` — la refonte de `Course`, qui retire le champ `commande`, était
+> inachevée. Une application qui ne compile pas ne peut pas avoir été testée.
+>
+> Tant que les mesures n'auront pas été refaites et consignées ici, **aucune
+> ligne verte de ce rapport ne doit être citée comme preuve**.
+>
+> Ce qui a changé depuis :
+>
+> - l'arbre de travail est **figé** dans le commit `ca0e47a`, sur la branche
+>   `fix/audit-2026-09-15` — 185 entrées, dont 51 fichiers neufs ; ce commit ne
+>   prétend pas que l'état est vert, il le rend reproductible ;
+> - un audit des trois applications (16 septembre) a relevé 20 constats qui ne
+>   figurent pas ici, dont quatre touchant la chaîne commande → cuisine →
+>   livraison. Ils seront consignés dans `AUDIT_2026-09-15.md` ;
+> - la compilation de `dely` a été rétablie (phase 0 du plan de correction).
+>
+> ### Mesures refaites — phase 0
+>
+> | Porte | Résultat au gel (`ca0e47a`) | Après correction de `dely` |
+> | --- | --- | --- |
+> | `flutter analyze` socle / client / admin | No issues found | No issues found |
+> | `flutter analyze` dely | **13 problèmes, dont 3 erreurs en `lib/`** | No issues found |
+> | `tools/code_mort.py` | aucun fichier injoignable | aucun fichier injoignable |
+> | `tools/contrat_routes.py` | 177 HTTP + 6 WebSocket, toutes servies | inchangé |
+> | `flutter test` ×4 | non exécuté avant le gel | _mesure en cours_ |
+> | `pytest` | non exécuté avant le gel | _mesure en cours_ |
+> | `ruff check`, `ruff format --check`, `mypy --strict` | non exécutés avant le gel | _mesure en cours_ |
+>
+> Les sections ci-dessous sont conservées **telles qu'elles ont été écrites**,
+> pour ce qu'elles documentent des intentions et des changements de chaque lot.
+> Leur partie « Validation » est à lire comme un historique, pas comme un état.
+
+---
+
 > Branche `redesign-client-ui`, au-dessus de `50d0cea`. **Rien n'est commité** :
 > ce rapport décrit un arbre de travail, et la décision de commiter appartient à
 > l'exploitant du dépôt. Les lots sont décrits du plus récent au plus ancien.
+>
+> _(Cette note date de la rédaction initiale : le travail est depuis figé dans
+> `ca0e47a` — voir le bilan provisoire ci-dessus.)_
 
 ---
 

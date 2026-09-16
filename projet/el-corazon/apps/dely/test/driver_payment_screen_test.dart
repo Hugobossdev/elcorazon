@@ -22,7 +22,17 @@ void main() {
   eccore.Money montant(int mineur) =>
       eccore.Money(amountMinor: mineur, currency: 'XOF');
 
-  eccore.Assignment affectation() {
+  /// La course telle que le serveur la rend depuis le lot 4 : elle porte le
+  /// moyen de paiement, le total et le montant à encaisser, que l'écran lisait
+  /// auparavant sur une commande relue.
+  ///
+  /// [ancienServeur] retire ces trois champs, pour vérifier que l'écran reste
+  /// affichable devant un serveur qui ne les envoie pas encore.
+  eccore.Assignment affectation({
+    String moyen = 'cash',
+    int total = 4500,
+    bool ancienServeur = false,
+  }) {
     return eccore.Assignment.fromJson({
       'id': 'course-1',
       'order': 'a1b2c3d4-0000-0000-0000-000000000001',
@@ -47,43 +57,18 @@ void main() {
       'offered_at': '2026-08-02T12:00:00Z',
       'created_at': '2026-08-02T11:59:00Z',
       'updated_at': '2026-08-02T12:00:00Z',
+      if (!ancienServeur) ...{
+        'payment_method': moyen,
+        'order_total': {'amount': '$total', 'currency': 'XOF'},
+        // Rendu par le serveur en espèces seulement.
+        'amount_to_collect':
+            moyen == 'cash' ? {'amount': '$total', 'currency': 'XOF'} : null,
+      },
     });
   }
 
-  eccore.Order commandeServeur({
-    String moyen = 'cash',
-    int total = 4500,
-  }) {
-    return eccore.Order.fromJson({
-      'id': 'a1b2c3d4-0000-0000-0000-000000000001',
-      'reference': 'CMD-0001',
-      'restaurant': 'el-corazon-lome',
-      'restaurant_name': 'El Corazón Lomé',
-      'status': 'out_for_delivery',
-      'allowed_transitions': const <String>[],
-      'subtotal': {'amount': '${total - 500}', 'currency': 'XOF'},
-      'delivery_fee': {'amount': '500', 'currency': 'XOF'},
-      'discount': {'amount': '0', 'currency': 'XOF'},
-      'total': {'amount': '$total', 'currency': 'XOF'},
-      'payment_method': moyen,
-      'delivery_address_line': 'Rue du Commerce, Lomé',
-      'delivery_landmark': '',
-      'delivery_location': {'lat': 6.14, 'lon': 1.23},
-      'recipient_name': 'Awa',
-      'recipient_phone': '+22890000000',
-      'placed_at': '2026-08-02T11:58:00Z',
-      'lines': const <dynamic>[],
-      'created_at': '2026-08-02T11:58:00Z',
-      'updated_at': '2026-08-02T12:00:00Z',
-    });
-  }
-
-  Course course({String moyen = 'cash', int total = 4500}) {
-    return Course(
-      assignment: affectation(),
-      commande: commandeServeur(moyen: moyen, total: total),
-    );
-  }
+  Course course({String moyen = 'cash', int total = 4500}) =>
+      Course(assignment: affectation(moyen: moyen, total: total));
 
   Future<void> afficher(WidgetTester tester, Course c) async {
     await tester.pumpWidget(
@@ -188,10 +173,10 @@ void main() {
       expect(find.text('#A1B2C3D4'), findsNothing);
     });
 
-    testWidgets('une course sans détail reste affichable', (tester) async {
-      // L'historique n'est pas relu commande par commande : l'écran doit
-      // supporter une course dont le détail manque, plutôt que de casser.
-      await afficher(tester, Course(assignment: affectation()));
+    testWidgets('une course sans montant reste affichable', (tester) async {
+      // Servie par un serveur antérieur au lot 4, la course n'a ni total ni
+      // montant à encaisser : l'écran doit rester lisible plutôt que casser.
+      await afficher(tester, Course(assignment: affectation(ancienServeur: true)));
 
       expect(find.text('Rue du Commerce, Lomé'), findsOneWidget);
       expect(find.text('CMD-0001'), findsOneWidget);

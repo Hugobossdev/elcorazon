@@ -12,14 +12,18 @@ const _entetesJson = {
   Headers.contentTypeHeader: [Headers.jsonContentType],
 };
 
-/// Sert `/delivery/assignments/` filtré par statut, et `/orders/{id}/`.
+/// Sert `/delivery/assignments/` filtré par statut.
 ///
 /// Le vrai serveur pagine ; une seule page suffit ici, `next` valant `null`.
+///
+/// `/orders/{id}/` répond **500** à dessein : depuis le lot 4, la course porte
+/// tout ce que le livreur doit voir, et le contrat ne lui donne de toute façon
+/// pas accès à la commande d'un client. Une relecture qui reviendrait par
+/// mégarde doit faire échouer le test qui l'a provoquée, pas passer inaperçue.
 class _FauxServeur implements HttpClientAdapter {
-  _FauxServeur({required this.coursesParStatut, this.commande});
+  _FauxServeur({required this.coursesParStatut});
 
   final Map<String, List<Map<String, dynamic>>> coursesParStatut;
-  final Map<String, dynamic>? commande;
 
   /// Chemins demandés, dans l'ordre — sert à vérifier ce que l'app relit.
   final List<String> chemins = [];
@@ -46,11 +50,11 @@ class _FauxServeur implements HttpClientAdapter {
     }
 
     if (options.path.startsWith('/orders/')) {
-      if (commande == null) {
-        return ResponseBody.fromString('{"detail":"Introuvable"}', 404,
-            headers: _entetesJson,);
-      }
-      return _json(commande!);
+      return ResponseBody.fromString(
+        '{"detail":"Une course ne relit pas la commande de son client."}',
+        500,
+        headers: _entetesJson,
+      );
     }
 
     return ResponseBody.fromString('{}', 200, headers: _entetesJson);
@@ -62,10 +66,18 @@ class _FauxServeur implements HttpClientAdapter {
 
 Map<String, dynamic> _montant(int mineur) => {'amount': '$mineur', 'currency': 'XOF'};
 
+/// Une course telle que `AssignmentSerializer` la rend depuis le lot 4.
+///
+/// [ancienServeur] retire les champs que ce lot a ajoutés — consignes, zone,
+/// moyen de paiement, total, montant à encaisser, articles. Une application à
+/// jour doit rester utilisable devant un serveur qui ne les envoie pas encore.
 Map<String, dynamic> _course({
   String statut = eccore.DeliveryStatus.accepted,
   String repere = '',
   String adresse = 'Rue du Commerce',
+  String moyenPaiement = 'cash',
+  String consignes = '',
+  bool ancienServeur = false,
 }) {
   return {
     'id': 'course-1',
@@ -91,47 +103,26 @@ Map<String, dynamic> _course({
     'offered_at': '2026-08-07T10:00:00Z',
     'created_at': '2026-08-07T09:59:00Z',
     'updated_at': '2026-08-07T10:00:00Z',
-  };
-}
-
-Map<String, dynamic> _commande({
-  String moyenPaiement = 'cash',
-  String consignes = '',
-}) {
-  return {
-    'id': 'commande-1',
-    'reference': 'CMD-0001',
-    'restaurant': 'el-corazon-lome',
-    'restaurant_name': 'El Corazón Lomé',
-    'status': 'preparing',
-    'allowed_transitions': const <String>[],
-    'subtotal': _montant(9000),
-    'delivery_fee': _montant(1000),
-    'discount': _montant(500),
-    'total': _montant(9500),
-    'payment_method': moyenPaiement,
-    'delivery_address_line': 'Rue du Commerce',
-    'delivery_landmark': '',
-    'delivery_location': {'lat': 6.14, 'lon': 1.23},
-    'recipient_name': 'Awa',
-    'recipient_phone': '+22890000000',
-    'placed_at': '2026-08-07T09:58:00Z',
-    'estimated_delivery_at': '2026-08-07T10:45:00Z',
-    'delivery_instructions': consignes,
-    'lines': [
-      {
-        'id': 'ligne-1',
-        'menu_item': 'article-1',
-        'item_name': 'Poulet braisé',
-        'item_image': 'https://exemple.test/poulet.jpg',
-        'unit_price': _montant(4500),
-        'quantity': 2,
-        'line_total': _montant(9000),
-        'notes': 'Bien épicé',
-      },
-    ],
-    'created_at': '2026-08-07T09:58:00Z',
-    'updated_at': '2026-08-07T10:00:00Z',
+    if (!ancienServeur) ...{
+      'delivery_instructions': consignes,
+      'delivery_zone_name': 'Bè',
+      'city_name': 'Lomé',
+      'payment_method': moyenPaiement,
+      'order_total': _montant(9500),
+      'estimated_delivery_at': '2026-08-07T10:45:00Z',
+      // Le serveur ne le rend qu'en espèces : c'est lui, et non le moyen de
+      // paiement lu par l'application, qui dit ce qu'il y a à encaisser.
+      'amount_to_collect': moyenPaiement == 'cash' ? _montant(9500) : null,
+      'items': [
+        {
+          'name': 'Poulet braisé',
+          'item_image': 'https://exemple.test/poulet.jpg',
+          'quantity': 2,
+          'options': const ['Fort'],
+          'notes': 'Bien épicé',
+        },
+      ],
+    },
   };
 }
 
@@ -175,12 +166,13 @@ void main() {
     Future<Course> premiere({
       String statut = eccore.DeliveryStatus.accepted,
       String repere = '',
-      Map<String, dynamic>? commande,
+      String consignes = '',
     }) async {
       final courses = await depot(
         _FauxServeur(
-          coursesParStatut: {statut: [_course(statut: statut, repere: repere)]},
-          commande: commande ?? _commande(),
+          coursesParStatut: {
+            statut: [_course(statut: statut, repere: repere, consignes: consignes)],
+          },
         ),
       ).loadCourses();
       return courses.single;
@@ -194,24 +186,47 @@ void main() {
       expect(course.orderId, 'commande-1');
     });
 
-    test('les montants passent en unité majeure', () async {
+    test('le total et le montant à encaisser viennent de la course', () async {
+      // Depuis le lot 4, la course les porte elle-même : le sous-total, les
+      // frais et la remise ne lui sont plus rendus, et l'application ne les
+      // affiche plus. Un livreur n'a pas à connaître la composition d'une
+      // facture ; il a besoin de ce qu'il encaisse à la porte.
       final course = await premiere();
-      expect(course.sousTotal!.amountMinor, 9000);
-      expect(course.fraisLivraison!.amountMinor, 1000);
-      expect(course.remise!.amountMinor, 500);
       expect(course.total!.amountMinor, 9500);
+      expect(course.aEncaisser!.amountMinor, 9500);
     });
 
-    test('les articles sont repris ligne à ligne', () async {
+    test('une commande déjà réglée n’a rien à encaisser', () async {
+      final course = await depot(
+        _FauxServeur(
+          coursesParStatut: {
+            eccore.DeliveryStatus.accepted: [
+              _course(moyenPaiement: 'mobile_money'),
+            ],
+          },
+        ),
+      ).loadCourses();
+
+      expect(course.single.aEncaisser, isNull);
+      expect(course.single.total!.amountMinor, 9500);
+    });
+
+    test('les articles sont repris sans leurs prix', () async {
+      // `AssignmentSerializer.get_items` les exclut délibérément : le livreur
+      // vérifie un sac, il ne facture pas. Ce qu'il lui faut est le nom, la
+      // quantité, les options retenues et la remarque du client.
       final course = await premiere();
       final article = course.articles.single;
 
-      expect(article.menuItemId, 'article-1');
       expect(article.itemName, 'Poulet braisé');
       expect(article.quantity, 2);
-      expect(article.unitPrice.amountMinor, 4500);
-      expect(article.lineTotal.amountMinor, 9000);
+      expect(article.options, ['Fort']);
       expect(article.notes, 'Bien épicé');
+      expect(article.label, '2 × Poulet braisé (Fort)');
+    });
+
+    test('la zone et la ville de livraison sont lisibles', () async {
+      expect((await premiere()).zoneLivraison, 'Bè, Lomé');
     });
 
     test('le client n’est jamais exposé au livreur', () async {
@@ -237,8 +252,7 @@ void main() {
     test('des consignes vides ne deviennent pas une note vide', () async {
       expect((await premiere()).consignes, isNull);
       expect(
-        (await premiere(commande: _commande(consignes: 'Sonner deux fois')))
-            .consignes,
+        (await premiere(consignes: 'Sonner deux fois')).consignes,
         'Sonner deux fois',
       );
     });
@@ -249,7 +263,6 @@ void main() {
       final courses = await depot(
         _FauxServeur(
           coursesParStatut: {etape: [_course(statut: etape)]},
-          commande: _commande(),
         ),
       ).loadCourses();
       return courses.single.etape;
@@ -273,7 +286,6 @@ void main() {
               _course(statut: eccore.DeliveryStatus.offered),
             ],
           },
-          commande: _commande(),
         ),
       ).loadCourses();
       expect(proposee.single.estProposee, isTrue);
@@ -284,7 +296,6 @@ void main() {
           coursesParStatut: {
             eccore.DeliveryStatus.accepted: [_course()],
           },
-          commande: _commande(),
         ),
       ).loadCourses();
       expect(mienne.single.estMienne, isTrue);
@@ -297,9 +308,8 @@ void main() {
       final courses = await depot(
         _FauxServeur(
           coursesParStatut: {
-            eccore.DeliveryStatus.accepted: [_course()],
+            eccore.DeliveryStatus.accepted: [_course(moyenPaiement: recu)],
           },
-          commande: _commande(moyenPaiement: recu),
         ),
       ).loadCourses();
       return courses.single.moyenPaiement;
@@ -328,7 +338,6 @@ void main() {
             _course(statut: eccore.DeliveryStatus.delivered),
           ],
         },
-        commande: _commande(),
       );
       await depot(faux).loadCourses();
 
@@ -339,7 +348,9 @@ void main() {
       );
     });
 
-    test('elle reste affichable sans son détail', () async {
+    test('elle reste complète sans aucune relecture', () async {
+      // La course livrée porte encore tout ce que l'historique affiche : la
+      // relecture de la commande n'est plus ce qui remplissait l'écran.
       final courses = await depot(
         _FauxServeur(
           coursesParStatut: {
@@ -353,21 +364,22 @@ void main() {
       final livree = courses.single;
       expect(livree.etape, EtapeCourse.livree);
       expect(livree.adresseLivraison, 'Rue du Commerce');
-      expect(livree.articles, isEmpty);
-      expect(livree.total, isNull);
+      expect(livree.articles, hasLength(1));
+      expect(livree.total!.amountMinor, 9500);
       // La rémunération, elle, est sur l'affectation — c'est d'elle que vivent
       // les gains, et non d'un pourcentage d'un total qu'on n'a pas relu.
       expect(livree.remuneration!.amountMinor, 1000);
     });
   });
 
-  group('Une commande illisible n’efface pas la course', () {
-    test('la course subsiste, montants à zéro', () async {
-      // Mieux vaut une course incomplète qu'une course disparue de l'écran.
+  group('Un serveur antérieur n’efface pas la course', () {
+    test('la course subsiste, montants absents plutôt qu’inventés', () async {
+      // Mieux vaut une course incomplète qu'une course disparue de l'écran —
+      // et un montant absent plutôt qu'un zéro qu'on prendrait pour un fait.
       final courses = await depot(
         _FauxServeur(
           coursesParStatut: {
-            eccore.DeliveryStatus.accepted: [_course()],
+            eccore.DeliveryStatus.accepted: [_course(ancienServeur: true)],
           },
         ),
       ).loadCourses();
@@ -378,6 +390,12 @@ void main() {
       expect(course.adresseLivraison, 'Rue du Commerce');
       expect(course.articles, isEmpty);
       expect(course.total, isNull);
+      expect(course.aEncaisser, isNull);
+      expect(course.consignes, isNull);
+      expect(course.zoneLivraison, isEmpty);
+      // Faute de moyen de paiement, on se prépare à encaisser : l'erreur la
+      // moins coûteuse des deux.
+      expect(course.moyenPaiement, MoyenPaiement.especes);
     });
   });
 
@@ -388,7 +406,6 @@ void main() {
           coursesParStatut: {
             eccore.DeliveryStatus.accepted: [_course()],
           },
-          commande: _commande(),
         ),
       ).loadCourses();
 

@@ -450,7 +450,7 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
                     ClipRRect(
                       borderRadius: BorderRadius.circular(6),
                       child: Image.network(
-                        item.itemImage ?? '',
+                        item.itemImage,
                         width: 24,
                         height: 24,
                         fit: BoxFit.cover,
@@ -918,7 +918,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Image.network(
-                        item.itemImage ?? '',
+                        item.itemImage,
                         width: 40,
                         height: 40,
                         fit: BoxFit.cover,
@@ -940,18 +940,33 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
                             item.itemName,
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          Text(
-                            'Quantité: ${item.quantity}',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 12,
+                          // Les options retenues et la remarque du client, et
+                          // non un prix de ligne : la course ne porte aucun
+                          // prix par article (`AssignmentSerializer.get_items`
+                          // les exclut délibérément). Ce qui compte au retrait
+                          // est « sans oignons », pas « 4 500 CFA ».
+                          if (item.options.isNotEmpty)
+                            Text(
+                              item.options.join(', '),
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
+                          if (item.notes.isNotEmpty)
+                            Text(
+                              item.notes,
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
                         ],
                       ),
                     ),
                     Text(
-                      item.lineTotal.format(),
+                      '× ${item.quantity}',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ],
