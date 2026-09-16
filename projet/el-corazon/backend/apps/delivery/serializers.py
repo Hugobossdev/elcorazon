@@ -331,7 +331,13 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
     amount_to_collect = serializers.SerializerMethodField()
     items = serializers.SerializerMethodField()
     courier = CourierPublicSerializer(read_only=True)
-    courier_fee = MoneyField(read_only=True)
+    # **Nulle tant que la course est seulement proposée** : la rémunération est
+    # figée à l'acceptation. Le schéma la déclarait non nulle, alors que le
+    # serveur rend bien `null` sur une offre — un client généré depuis ce
+    # contrat aurait planté à la première proposition reçue. Relevé par le test
+    # de contrat, pas à l'exécution : l'application Dart, elle, la lisait déjà
+    # comme facultative.
+    courier_fee = MoneyField(read_only=True, allow_null=True)
     allowed_transitions = serializers.SerializerMethodField()
 
     class Meta:

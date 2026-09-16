@@ -25,16 +25,17 @@
 >
 > ### Mesures refaites — phases 0 et 1
 >
-> | Porte | Au gel (`ca0e47a`) | Après phase 0 (`05e72a2`) | Après phase 1 |
+> | Porte | Au gel (`ca0e47a`) | Après phase 0 (`05e72a2`) | Après phase 5 |
 > | --- | --- | --- | --- |
 > | `flutter analyze` socle / client / admin | No issues found | No issues found | No issues found |
 > | `flutter analyze` dely | **13 problèmes, dont 3 erreurs en `lib/`** | No issues found | No issues found |
-> | `flutter test` socle | non exécuté | 509 | **520** |
-> | `flutter test` client | non exécuté | 443 | 443 |
-> | `flutter test` admin | non exécuté | 238 | **251** |
-> | `flutter test` livreur | non exécuté | 168 | **171** |
-> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 075 passés, 0 échec** |
-> | `ruff check` · `ruff format --check` · `mypy --strict` | non exécutés | verts | verts (443 fichiers, 296 sources) |
+> | `flutter test` socle | non exécuté | 509 | **526** |
+> | `flutter test` client | non exécuté | 443 | **451** |
+> | `flutter test` admin | non exécuté | 238 | **253** |
+> | `flutter test` livreur | non exécuté | 168 | **174** |
+> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 081 passés, 0 échec** |
+> | `ruff check` · `ruff format --check` · `mypy --strict` | non exécutés | verts | verts (444 fichiers, 296 sources) |
+> | `spectacular --fail-on-warn` | non exécuté | non exécuté | vert |
 > | `tools/code_mort.py` | aucun fichier injoignable | idem | idem |
 > | `tools/contrat_routes.py` | 177 HTTP + 6 WS, toutes servies | idem | 178 HTTP + 6 WS, toutes servies |
 >
@@ -44,13 +45,69 @@
 > * `delivery/test_affectation_automatique.py::…le_montant_a_encaisser…` —
 >   **préexistant** : le contrat d'une course a gagné `item_image`, le test ne
 >   l'avait pas suivi. Corrigé en phase 1 ;
-> * `tracking/test_websocket.py::…sans_since_rien_n_est_rejoue` — **passe
->   isolément**, et repasse en suite complète depuis. Instable, à surveiller ;
->   il n'a pas de rapport avec ce lot.
+> * `tracking/test_websocket.py::TestRattrapage` — **instable**. Deux cas
+>   différents de cette classe ont échoué lors de deux exécutions complètes, et
+>   **passent tous les deux isolément**. Le rattrapage de messages manqués
+>   dépend d'un ordonnancement asynchrone sous charge ; ce n'est pas une
+>   régression de ce chantier, mais c'est un test sur lequel on ne peut pas
+>   s'appuyer en l'état.
 >
 > Les sections ci-dessous sont conservées **telles qu'elles ont été écrites**,
 > pour ce qu'elles documentent des intentions et des changements de chaque lot.
 > Leur partie « Validation » est à lire comme un historique, pas comme un état.
+
+---
+
+# Chantier de correction — audit du 16 septembre 2026
+
+Branche `fix/audit-2026-09-15`. Chaque phase est un commit, et chaque commit
+porte ses mesures.
+
+| Phase | Commit | Objet |
+| --- | --- | --- |
+| 0 | `ca0e47a`, `05e72a2` | geler l'arbre, rétablir la compilation de `dely` |
+| 1 | `07ade33` | la chaîne commande → cuisine → livraison |
+| 2 | `e81aec9` | client : session, annulation, suivi |
+| 3 | `2d17eae` | livreur : encaissement, course refusée, hors ligne |
+| 4 | `7686859` | back-office : refus affichés, affectation unique, fuseau, code mort |
+| 5 | — | contrats, scénarios, trace (`AUDIT_2026-09-15.md`) |
+
+## Phase 1 — ce qui a changé de règle
+
+**Une course n'avance plus sans sa commande.** Le geste « j'ai récupéré » est
+refusé tant que la cuisine n'a pas déclaré le repas prêt, et une étape dont la
+projection échoue annule la transaction entière — course comprise. Auparavant,
+la projection retombait en silence : la course allait jusqu'à « livrée », le
+livreur était crédité, et la commande restait « en préparation » pour le client.
+
+**`OFFERABLE_FROM` se réduit à `ready`.** Une course ne se propose plus pendant
+la préparation. C'est un **changement de règle d'exploitation**, assumé : on ne
+pré-affecte plus un livreur pendant la cuisson. L'affectation automatique
+fonctionnait déjà ainsi (`dispatch_on_ready`) ; seul le back-office pouvait
+proposer plus tôt. Une constante à rouvrir si l'exploitation le demande — la
+garde sur le retrait, elle, reste la règle de fond.
+
+**Le livreur est publié sur le suivi, pas sur la commande.** `orders` n'a pas le
+droit de connaître `delivery` (ADR-002, vérifié par `tests/architecture`) : le
+contrat de la commande ne pouvait pas porter le livreur, et c'est pourquoi
+« Message », « Appeler » et la notation étaient morts côté client. Identité dès
+l'acceptation, téléphone tant que la course est engagée, plus rien après.
+
+**Le poste de cuisine a son propre contrat.** `GET /orders/manage/kitchen/` rend
+la file du service d'**une** cuisine, lignes comprises, sans montants ni
+coordonnées du client. L'établissement est obligatoire et filtré côté serveur.
+
+## Ce qui reste ouvert
+
+* les écrans « carte temps réel », « historique livreur » et « statistiques
+  livreur » déclarent désormais leur dépendance et distinguent la panne du vide,
+  mais n'ont **pas** de test widget : leur montage réclame Google Maps. Le
+  contrat qu'ils partagent, lui, est testé (`fenetres_de_supervision_test.dart`) ;
+* le comportement de session de `AppService` (client et livreur) est vérifié
+  dans le socle (`verification_flow_test.dart`) et par lecture dans les apps :
+  ces services sont des singletons qui construisent le push, la géolocalisation
+  et le temps réel à la construction, ce qu'un test unitaire ne monte pas sans
+  un échafaudage disproportionné.
 
 ---
 

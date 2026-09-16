@@ -143,6 +143,75 @@ class TestChampsRequis:
         assert_conforme(response.data, component(schema, "RestaurantDetail"), schema)
 
 
+class TestContratsDeLaChaineLivraison:
+    """Les trois formes ajoutées pour rendre la livraison cohérente.
+
+    Elles sont neuves, donc jamais éprouvées contre le schéma : c'est
+    exactement le moment où un champ déclaré obligatoire sort absent.
+    """
+
+    def test_la_file_de_cuisine_est_complete(
+        self, restaurant: Restaurant, customer: User, schema: dict[str, Any]
+    ) -> None:
+        """Ce que le poste de cuisine lit — plats compris."""
+        from apps.accounts.models import Role, UserType
+        from apps.orders.states import OrderStatus
+        from apps.restaurants.models import StaffMembership
+        from tests.fixtures import build_order
+
+        build_order(restaurant, customer, reference="EC700001", status=OrderStatus.PREPARING)
+        cuisinier = User.objects.create_user(
+            "contrat.cuisine@elcorazon.test",
+            "motdepasse",
+            full_name="Cuisine",
+            user_type=UserType.STAFF,
+        )
+        cuisinier.roles.add(
+            Role.objects.create(name="Cuisine contrat", permissions=["orders.read"])
+        )
+        StaffMembership.objects.create(user=cuisinier, restaurant=restaurant)
+        client = APIClient()
+        client.force_authenticate(cuisinier)
+
+        reponse = client.get(
+            reverse("v1:orders:managed-order-kitchen") + f"?restaurant={restaurant.slug}"
+        )
+
+        assert reponse.status_code == 200, reponse.data
+        for carte in reponse.data["results"]:
+            assert_conforme(carte, component(schema, "KitchenOrder"), schema)
+
+    def test_la_course_du_livreur_est_complete(
+        self, restaurant: Restaurant, customer: User, courier: Any, schema: dict[str, Any]
+    ) -> None:
+        """La course porte ce que le livreur doit voir — y compris l'étape de
+        la commande, sans laquelle son application proposait de récupérer un
+        repas encore en cuisine."""
+        from apps.delivery.services import AssignmentService
+        from apps.orders.states import OrderStatus
+        from tests.fixtures import build_order
+
+        commande = build_order(restaurant, customer, reference="EC700002", status=OrderStatus.READY)
+        course = AssignmentService.offer(order=commande, courier=courier)
+        client = APIClient()
+        client.force_authenticate(courier.user)
+
+        reponse = client.get(reverse("v1:delivery:assignment-detail", args=[course.pk]))
+
+        assert reponse.status_code == 200, reponse.data
+        assert_conforme(reponse.data, component(schema, "Assignment"), schema)
+        assert reponse.data["order_status"] == OrderStatus.READY
+
+    def test_le_suivi_client_est_complet(
+        self, as_customer: APIClient, order: Order, schema: dict[str, Any]
+    ) -> None:
+        """Sans livreur affecté : le suivi doit rester conforme, pas vide."""
+        reponse = as_customer.get(reverse("v1:tracking:order", args=[order.pk]))
+
+        assert reponse.status_code == 200
+        assert_conforme(reponse.data, component(schema, "Tracking"), schema)
+
+
 class TestFormeDesMontants:
     """ADR-007 — `{"amount": "1250", "currency": "XOF"}`, la valeur en chaîne."""
 

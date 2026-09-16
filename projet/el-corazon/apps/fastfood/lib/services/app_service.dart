@@ -260,6 +260,7 @@ class AppService extends ChangeNotifier {
   void _oublierLeCompte() {
     _orders = [];
     _erreurHistorique = null;
+    _historiqueLu = false;
     KitchenContextService().reset();
   }
 
@@ -403,11 +404,16 @@ class AppService extends ChangeNotifier {
     }
   }
 
-  /// Appelée après que `sessionProvider` a fini de restaurer la session
-  /// (Phase 6) — `_currentUser` est donc déjà à jour via le pont ci-dessus.
+  /// Charge l'historique **si le pont de session ne l'a pas déjà fait**.
+  ///
+  /// Depuis que l'ouverture de session déclenche la lecture (`_onSessionChanged`),
+  /// un démarrage avec session restaurée les lançait toutes les deux : deux
+  /// parcours complets de `/orders/` à l'ouverture de l'application. La
+  /// condition n'est donc plus « y a-t-il quelqu'un » mais « a-t-on déjà lu » —
+  /// l'historique vaut `null` tant qu'aucune lecture n'a abouti ni échoué.
   Future<void> _loadUserSession() async {
     try {
-      if (_currentUser != null) {
+      if (_currentUser != null && !_historiqueLu) {
         await _loadUserOrders();
       }
     } catch (e) {
@@ -418,6 +424,9 @@ class AppService extends ChangeNotifier {
       );
     }
   }
+
+  /// Une lecture de l'historique a-t-elle abouti — ou échoué — pour ce compte ?
+  bool _historiqueLu = false;
 
   // Authentication methods — Django (Phase 6), plus Supabase. Signatures
   // inchangées : les écrans qui appellent login/register n'ont pas eu
@@ -815,6 +824,7 @@ class AppService extends ChangeNotifier {
     try {
       _orders = await DjangoOrderRepository().getUserOrders(_currentUser!.id);
       _erreurHistorique = null;
+      _historiqueLu = true;
     } catch (e) {
       eccore.Journal.trace('Error loading user orders: $e');
       _orders = [];
@@ -822,6 +832,10 @@ class AppService extends ChangeNotifier {
       // Sans lui, l'écran ne peut que montrer un historique vide — c'est-à-dire
       // affirmer quelque chose de faux sur le compte du client.
       _erreurHistorique = messageErreur(e);
+      // Lu, quoique sans succès : le démarrage n'a pas à relancer une seconde
+      // lecture derrière celle du pont de session. C'est « Réessayer » qui la
+      // relance, à la demande.
+      _historiqueLu = true;
     }
     // Hors du `try` : la branche d'échec ne prévenait personne, si bien qu'un
     // écran déjà construit gardait indéfiniment l'état d'avant la panne.
