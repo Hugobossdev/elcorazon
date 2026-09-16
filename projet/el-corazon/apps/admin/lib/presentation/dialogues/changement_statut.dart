@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/ui/ui.dart';
@@ -37,24 +38,30 @@ Future<void> confirmerChangementStatut({
 
   if (confirme != true) return;
 
-  final applique = await orderService.updateOrderStatus(order.id, nouveauStatut);
-
-  // Sur le Web, certains rebuilds se perdent si l'écran n'écoute pas la bonne
-  // instance : le rechargement garantit que la commande change d'onglet.
-  if (applique) {
+  // Le refus du serveur porte la phrase à afficher : « cette commande est déjà
+  // partie », « permission refusée », « session expirée » n'appellent pas le
+  // même geste, et « Erreur lors du changement de statut » n'en indiquait
+  // aucun.
+  String? motifDuRefus;
+  try {
+    await orderService.updateOrderStatus(order.id, nouveauStatut);
+    // Sur le Web, certains rebuilds se perdent si l'écran n'écoute pas la bonne
+    // instance : le rechargement garantit que la commande change d'onglet.
     await orderService.refresh();
+  } catch (erreur) {
+    motifDuRefus = messageErreur(erreur);
   }
 
   if (context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          applique
-              ? 'Statut changé: ${nouveauStatut.libelle}'
-              : 'Erreur lors du changement de statut',
+          motifDuRefus ?? 'Statut changé: ${nouveauStatut.libelle}',
         ),
-        backgroundColor: fondDuBandeau,
-        duration: const Duration(seconds: 2),
+        backgroundColor: motifDuRefus == null
+            ? fondDuBandeau
+            : Theme.of(context).colorScheme.error,
+        duration: Duration(seconds: motifDuRefus == null ? 2 : 5),
       ),
     );
   }

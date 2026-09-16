@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/ui/ui.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -39,23 +40,29 @@ Future<bool> annulerCommande({
 
   if (motif == null) return false;
 
-  final annulee = await orderService.cancelOrder(order.id, motif);
+  // Le motif du refus vient du serveur : « permission « orders.cancel », ou
+  // commande trop avancée » était une **devinette** de l'écran, là où le
+  // serveur avait écrit laquelle des deux.
+  String? motifDuRefus;
+  try {
+    await orderService.cancelOrder(order.id, motif);
+  } catch (erreur) {
+    motifDuRefus = messageErreur(erreur);
+  }
 
-  if (!context.mounted) return annulee;
+  if (!context.mounted) return motifDuRefus == null;
 
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
       content: Text(
-        annulee
-            ? 'Commande ${order.reference} annulée.'
-            : "L'annulation a été refusée — permission « orders.cancel », ou "
-                'commande trop avancée.',
+        motifDuRefus ?? 'Commande ${order.reference} annulée.',
       ),
-      backgroundColor: annulee ? scheme.inverseSurface : danger,
+      backgroundColor: motifDuRefus == null ? scheme.inverseSurface : danger,
+      duration: Duration(seconds: motifDuRefus == null ? 3 : 5),
     ),
   );
 
-  return annulee;
+  return motifDuRefus == null;
 }
 
 class _AnnulationCommande extends StatefulWidget {

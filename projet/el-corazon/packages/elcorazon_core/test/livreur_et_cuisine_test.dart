@@ -130,6 +130,54 @@ void main() {
     });
   });
 
+  group('Une fermeture se saisit en heure de la cuisine', () {
+    test('l’instant part sans décalage — c’est le serveur qui le situe', () {
+      // Le back-office envoyait un instant absolu fabriqué depuis l'horloge du
+      // **poste** : fermer Douala (UTC+1) « le 25 à minuit » depuis Lomé
+      // (UTC+0) fermait à une heure du matin, heure de Douala. Les horaires
+      // d'ouverture, eux, se saisissent depuis toujours en heure de la cuisine.
+      final envoye = heureMurale(DateTime(2026, 12, 25, 0, 30));
+
+      expect(envoye, '2026-12-25T00:30:00');
+      // Ni « Z », ni « +00:00 » : un décalage ferait lire l'instant comme
+      // absolu, et le serveur refuse cette forme sur ce champ.
+      expect(envoye, isNot(contains('Z')));
+      expect(envoye, isNot(contains('+')));
+    });
+
+    test('la fermeture lue porte l’heure de la cuisine et son fuseau', () {
+      final fermeture = KitchenClosure.fromJson({
+        'id': 'f1',
+        'restaurant': 'r1',
+        'restaurant_name': 'El Corazón Douala',
+        'starts_at': '2026-12-24T23:00:00Z',
+        'ends_at': '2026-12-26T10:00:00Z',
+        'starts_at_local': '2026-12-25T00:00:00+01:00',
+        'ends_at_local': '2026-12-26T11:00:00+01:00',
+        'timezone_name': 'Africa/Douala',
+        'reason': 'Noël',
+        'is_current': false,
+      });
+
+      expect(fermeture.debutLocal, '2026-12-25T00:00:00+01:00');
+      expect(fermeture.fuseau, 'Africa/Douala');
+      // L'instant absolu reste disponible — c'est lui qui sert à comparer.
+      expect(fermeture.startsAt.toUtc().hour, 23);
+    });
+
+    test('un serveur antérieur laisse l’heure locale vide', () {
+      final fermeture = KitchenClosure.fromJson({
+        'id': 'f2',
+        'restaurant': 'r1',
+        'starts_at': '2026-12-24T23:00:00Z',
+        'ends_at': '2026-12-26T10:00:00Z',
+      });
+
+      expect(fermeture.debutLocal, isEmpty);
+      expect(fermeture.fuseau, isEmpty);
+    });
+  });
+
   group('La file de production', () {
     test('une commande porte ses plats, leurs options et les remarques', () {
       final commande = KitchenOrder.fromJson({

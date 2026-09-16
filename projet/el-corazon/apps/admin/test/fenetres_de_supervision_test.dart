@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:dio/dio.dart';
@@ -189,6 +190,32 @@ void main() {
 
       expect(sut.allOrders, hasLength(1));
       expect(sut.erreurFenetre, isNotNull);
+    });
+  });
+
+  group('Un refus du serveur remonte jusqu’à l’écran', () {
+    test('un changement de statut refusé lève, avec le motif', () async {
+      // Il rendait `false`, en ne gardant que le code dans le journal : un 403
+      // sans `orders.update_status`, un 409 « cette commande est déjà partie »
+      // et une coupure réseau donnaient la même phrase — « Erreur lors du
+      // changement de statut » — qui n'indique aucun geste à faire.
+      final sut = service(enPanne: true);
+
+      await expectLater(
+        sut.updateOrderStatus('commande-1', StatutCommande.prete),
+        throwsA(isA<eccore.ApiException>()),
+      );
+    });
+
+    test('une annulation refusée lève aussi', () async {
+      // L'écran devinait le motif : « permission « orders.cancel », ou commande
+      // trop avancée » — là où le serveur avait écrit laquelle des deux.
+      final sut = service(enPanne: true);
+
+      await expectLater(
+        sut.cancelOrder('commande-1', 'motif'),
+        throwsA(isA<eccore.ApiException>()),
+      );
     });
   });
 

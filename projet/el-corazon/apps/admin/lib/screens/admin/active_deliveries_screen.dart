@@ -6,7 +6,7 @@ import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/presentation/commande.dart';
-import 'package:admin/presentation/messages_erreur.dart';
+import 'package:admin/presentation/dialogues/assignation_livreur.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -466,92 +466,30 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
     return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 
+  /// Ouvre **le** dialogue d'affectation — celui de la supervision.
+  ///
+  /// ## Pourquoi cet écran n'a plus le sien
+  ///
+  /// Il en portait un second, écrit à part : une liste de livreurs, un appel,
+  /// un bandeau. Les deux ont divergé sur tout ce qui compte — l'un marquait la
+  /// commande « récupérée » après l'affectation, l'autre non ; l'un écartait
+  /// les livreurs déjà en course, l'autre les proposait ; l'un lisait le refus
+  /// du serveur, l'autre annonçait « Livreur assigné » quoi qu'il arrive. Les
+  /// deux ont été corrigés séparément, ce qui est exactement le coût d'un
+  /// doublon.
+  ///
+  /// Une seule affectation, un seul dialogue : la règle ne peut plus être juste
+  /// d'un côté et fausse de l'autre.
   Future<void> _showAssignDriverDialog(
     BuildContext context,
     eccore.Order order,
-  ) async {
-    final driverService = context.read<DriverManagementService>();
-    final orderService = context.read<OrderManagementService>();
-    // Écartés : ceux qui portent déjà une course (L6). Les données sont dans
-    // `AssignmentService`, que cet écran charge déjà pour afficher les porteurs.
-    final availableDrivers = driverService.getAvailableDrivers(
-      engages: context.read<AssignmentService>().livreursEngages,
-    );
-
-    if (availableDrivers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Aucun livreur disponible actuellement')),
-      );
-      return;
-    }
-
-    await showDialog(
+  ) {
+    return afficherAssignationLivreur(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Assigner un livreur'),
-        content: SizedBox(
-          width: 400,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: availableDrivers.length,
-            itemBuilder: (context, index) {
-              final driver = availableDrivers[index];
-              return ListTile(
-                leading: CircleAvatar(
-                  child: Text(driver.fullName[0]),
-                ),
-                title: Text(driver.fullName),
-                subtitle: Row(
-                  children: [
-                    Text('${driver.deliveriesCompleted} livraisons • '),
-                    const Icon(Icons.star_rounded, size: 14),
-                    Text(' ${driver.ratingAverage}'),
-                  ],
-                ),
-                onTap: () async {
-                  Navigator.pop(context);
-                  // Le retour d'`assignDriver` était **jeté**, et le bandeau de
-                  // succès s'affichait sans condition : un 403 sans droit, un
-                  // 409 « commande déjà confiée », un livreur inéligible ou une
-                  // panne réseau donnaient tous « Livreur X assigné ». Le
-                  // superviseur croyait la course partie, et personne n'allait
-                  // chercher le repas.
-                  try {
-                    await orderService.assignDriver(order.id, driver.id);
-                  } catch (erreur) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(messageErreur(erreur)),
-                          backgroundColor: Theme.of(context).colorScheme.error,
-                          duration: const Duration(seconds: 5),
-                        ),
-                      );
-                    }
-                    return;
-                  }
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        // « Proposée » et non « assignée » : le livreur accepte
-                        // ou refuse, et l'écran ne doit pas annoncer un accord
-                        // qu'il n'a pas encore.
-                        content: Text('Course proposée à ${driver.fullName}'),
-                      ),
-                    );
-                  }
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-        ],
-      ),
+      order: order,
+      orderService: context.read<OrderManagementService>(),
+      driverService: context.read<DriverManagementService>(),
+      assignmentService: context.read<AssignmentService>(),
     );
   }
 

@@ -414,22 +414,28 @@ class OrderManagementService extends ChangeNotifier {
   ///
   /// L'annulation ne passe pas par ici : voir [cancelOrder], qui exige une
   /// permission distincte et un motif.
-  Future<bool> updateOrderStatus(String orderId, StatutCommande newStatus) async {
+  /// ## Pourquoi elle lève désormais
+  ///
+  /// Elle rendait `false` sur toute `ApiException`, en n'en gardant que le code
+  /// dans le journal. Le motif du serveur — écrit pour être lu — était perdu à
+  /// cette ligne, et l'écran ne pouvait qu'afficher « Erreur lors du changement
+  /// de statut » : un 403 sans `orders.update_status`, un 409 « cette commande
+  /// est déjà partie », une coupure réseau et une session expirée devenaient la
+  /// même phrase, qui n'indique aucun geste à faire.
+  ///
+  /// C'est le même geste que pour l'affectation d'un livreur, corrigée pour la
+  /// même raison : une méthode qui lève ne se laisse pas ignorer par
+  /// distraction.
+  Future<void> updateOrderStatus(String orderId, StatutCommande newStatus) async {
     if (newStatus == StatutCommande.annulee) {
       return cancelOrder(orderId, 'Annulée depuis la supervision');
     }
 
-    try {
-      final updated = await _orders.updateStatus(
-        orderId: orderId,
-        status: newStatus.versServeur,
-      );
-      _replaceLocally(updated);
-      return true;
-    } on eccore.ApiException catch (e) {
-      eccore.Journal.trace('OrderManagementService: transition refusée — ${e.code}');
-      return false;
-    }
+    final updated = await _orders.updateStatus(
+      orderId: orderId,
+      status: newStatus.versServeur,
+    );
+    _replaceLocally(updated);
   }
 
   void _replaceLocally(eccore.Order order) {
@@ -443,48 +449,40 @@ class OrderManagementService extends ChangeNotifier {
   }
 
   /// Confirmer une commande
-  Future<bool> confirmOrder(String orderId) async {
-    return await updateOrderStatus(orderId, StatutCommande.confirmee);
-  }
+  Future<void> confirmOrder(String orderId) =>
+      updateOrderStatus(orderId, StatutCommande.confirmee);
 
   /// Commencer la préparation d'une commande
-  Future<bool> startPreparingOrder(String orderId) async {
-    return await updateOrderStatus(orderId, StatutCommande.enPreparation);
-  }
+  Future<void> startPreparingOrder(String orderId) =>
+      updateOrderStatus(orderId, StatutCommande.enPreparation);
 
   /// Marquer une commande comme prête
-  Future<bool> markOrderReady(String orderId) async {
-    return await updateOrderStatus(orderId, StatutCommande.prete);
-  }
+  Future<void> markOrderReady(String orderId) =>
+      updateOrderStatus(orderId, StatutCommande.prete);
 
-  /// Marquer une commande comme récupérée
-  Future<bool> markOrderPickedUp(String orderId) async {
-    return await updateOrderStatus(orderId, StatutCommande.recuperee);
-  }
+  /// Marquer une commande comme récupérée — geste du **livreur**, pas du
+  /// back-office : conservé pour les courses hors application.
+  Future<void> markOrderPickedUp(String orderId) =>
+      updateOrderStatus(orderId, StatutCommande.recuperee);
 
   /// Marquer une commande comme en route
-  Future<bool> markOrderOnTheWay(String orderId) async {
-    return await updateOrderStatus(orderId, StatutCommande.enRoute);
-  }
+  Future<void> markOrderOnTheWay(String orderId) =>
+      updateOrderStatus(orderId, StatutCommande.enRoute);
 
   /// Marquer une commande comme livrée
-  Future<bool> markOrderDelivered(String orderId) async {
-    return await updateOrderStatus(orderId, StatutCommande.livree);
-  }
+  Future<void> markOrderDelivered(String orderId) =>
+      updateOrderStatus(orderId, StatutCommande.livree);
 
   /// Annuler une commande
-  Future<bool> cancelOrderStatus(String orderId) async {
-    return await updateOrderStatus(orderId, StatutCommande.annulee);
-  }
+  Future<void> cancelOrderStatus(String orderId) =>
+      updateOrderStatus(orderId, StatutCommande.annulee);
 
   /// Accepter une commande
-  Future<bool> acceptOrder(String orderId) async {
-    return await updateOrderStatus(orderId, StatutCommande.confirmee);
-  }
+  Future<void> acceptOrder(String orderId) =>
+      updateOrderStatus(orderId, StatutCommande.confirmee);
 
-  /// Refuser une commande
   /// Refuse une commande : c'est une annulation, avec son motif.
-  Future<bool> rejectOrder(String orderId, {String? reason}) async {
+  Future<void> rejectOrder(String orderId, {String? reason}) {
     final motif = reason?.trim();
     return cancelOrder(
       orderId,
@@ -502,15 +500,13 @@ class OrderManagementService extends ChangeNotifier {
   ///
   /// Le motif n'est pas décoratif : l'opérateur annule la commande d'un tiers,
   /// qui sera remboursé et rappellera pour savoir pourquoi.
-  Future<bool> cancelOrder(String orderId, String reason) async {
-    try {
-      final updated = await _orders.cancel(orderId: orderId, reason: reason);
-      _replaceLocally(updated);
-      return true;
-    } on eccore.ApiException catch (e) {
-      eccore.Journal.trace('OrderManagementService: annulation refusée — ${e.code}');
-      return false;
-    }
+  /// Le refus remonte tel quel — voir [updateOrderStatus] : « l'annulation a
+  /// été refusée — permission « orders.cancel », ou commande trop avancée »
+  /// était une **devinette** de l'écran, là où le serveur avait écrit laquelle
+  /// des deux.
+  Future<void> cancelOrder(String orderId, String reason) async {
+    final updated = await _orders.cancel(orderId: orderId, reason: reason);
+    _replaceLocally(updated);
   }
 
   /// Propose la course d'une commande à un livreur — permission
@@ -546,13 +542,27 @@ class OrderManagementService extends ChangeNotifier {
     await refresh();
   }
 
-  /// Filtrer les commandes par date
-  List<eccore.Order> filterByDateRange(DateTime startDate, DateTime endDate) {
-    return _allOrders.where((order) {
-      return order.passeeLe.isAfter(startDate.subtract(const Duration(days: 1))) &&
-          order.passeeLe.isBefore(endDate.add(const Duration(days: 1)));
-    }).toList();
-  }
+  // ---------------------------------------------------------- code retiré
+  //
+  // Onze méthodes d'agrégation ont été retirées d'ici : résumé du jour,
+  // tendances sur sept jours, heures de pointe, plats les plus commandés,
+  // commandes du jour / de la semaine / du mois, commandes en retard,
+  // programmées, à surveiller, et le filtre par période qui les servait.
+  //
+  // **Aucune n'avait d'appelant**, et trois étaient fausses :
+  //
+  //   * `getDailySummary` s'appuyait sur un filtre qui élargissait la période
+  //     d'un jour de chaque côté — le « résumé du jour » couvrait trois jours,
+  //     et `getOrderTrends` empilait sept de ces triples ;
+  //   * `getThisWeekOrders` bornait la semaine à l'heure courante, excluant le
+  //     lundi matin et incluant le dimanche soir suivant ;
+  //   * `getMostOrderedItems` lisait `lines`, que la forme de liste ne porte
+  //     pas : le classement des plats était vide sur toutes les commandes.
+  //
+  // Ces chiffres existent côté serveur, agrégés en SQL et cloisonnés par
+  // périmètre (`/analytics/reports/`). Les recalculer ici à partir d'une
+  // fenêtre partielle donnerait un second chiffre, différent, pour la même
+  // question.
 
   /// Obtenir les commandes en attente
   List<eccore.Order> getPendingOrders() {
@@ -676,43 +686,6 @@ class OrderManagementService extends ChangeNotifier {
     }
   }
 
-  /// Obtenir les commandes d'aujourd'hui
-  List<eccore.Order> getTodayOrders() {
-    final today = DateTime.now();
-    return _allOrders
-        .where(
-          (order) =>
-              order.passeeLe.year == today.year &&
-              order.passeeLe.month == today.month &&
-              order.passeeLe.day == today.day,
-        )
-        .toList();
-  }
-
-  /// Obtenir les commandes de cette semaine
-  List<eccore.Order> getThisWeekOrders() {
-    final now = DateTime.now();
-    final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-    final endOfWeek = startOfWeek.add(const Duration(days: 6));
-
-    return _allOrders
-        .where(
-          (order) =>
-              order.passeeLe.isAfter(startOfWeek) && order.passeeLe.isBefore(endOfWeek),
-        )
-        .toList();
-  }
-
-  /// Obtenir les commandes de ce mois
-  List<eccore.Order> getThisMonthOrders() {
-    final now = DateTime.now();
-    return _allOrders
-        .where(
-          (order) => order.passeeLe.year == now.year && order.passeeLe.month == now.month,
-        )
-        .toList();
-  }
-
   // `searchOrders` a été retiré : il rendait une liste filtrée que son seul
   // appelant jetait (`service.searchOrders(value);`), si bien que la barre de
   // recherche de la supervision ne filtrait rien. La recherche est désormais
@@ -780,173 +753,6 @@ class OrderManagementService extends ChangeNotifier {
       if (_fenetreDemandee || _fenetreChargee) _loadAllOrders(),
       if (_page != null) reloadPage(),
     ]);
-  }
-
-  /// Obtenir les commandes nécessitant une attention
-  List<eccore.Order> getOrdersNeedingAttention() {
-    final now = DateTime.now();
-    return _allOrders.where((order) {
-      // Commandes en attente depuis plus de 30 minutes
-      if (order.statut == StatutCommande.enAttente) {
-        final timeDiff = now.difference(order.passeeLe);
-        if (timeDiff.inMinutes > 30) return true;
-      }
-
-      // Une annulation ne réclame l'attention que si de l'argent est déjà
-      // passé : les espèces n'ont jamais quitté le client.
-      if (order.statut == StatutCommande.annulee && order.moyenPaiement.estPrepaye) {
-        return true;
-      }
-
-      return false;
-    }).toList();
-  }
-
-  /// Obtenir les commandes programmées
-  List<eccore.Order> getScheduledOrders() {
-    final now = DateTime.now();
-    return _allOrders.where((order) {
-      return order.estimatedDeliveryAt != null && order.estimatedDeliveryAt!.isAfter(now);
-    }).toList();
-  }
-
-  /// Obtenir les commandes en retard
-  List<eccore.Order> getDelayedOrders() {
-    final now = DateTime.now();
-    return _allOrders.where((order) {
-      if (order.estimatedDeliveryAt == null) return false;
-      if (order.statut == StatutCommande.livree) return false;
-      if (order.statut == StatutCommande.annulee) return false;
-
-      return now.isAfter(order.estimatedDeliveryAt!);
-    }).toList();
-  }
-
-  // `archiveOldOrders` a été retirée. Elle comptait les commandes anciennes,
-  // écrivait le total dans le journal, expliquait en commentaire que « dans un
-  // vrai système on pourrait déplacer ces commandes » — puis rendait `true`.
-  // Un appelant en concluait que l'archivage avait eu lieu.
-
-  /// Obtenir le résumé journalier
-  Map<String, dynamic> getDailySummary(DateTime date) {
-    final dayStart = DateTime(date.year, date.month, date.day);
-    final dayEnd = dayStart.add(const Duration(days: 1));
-
-    final dayOrders = filterByDateRange(dayStart, dayEnd);
-
-    final deliveredOrders = dayOrders.where((o) => o.statut == StatutCommande.livree);
-    final revenue = deliveredOrders.fold(0.0, (sum, order) => sum + order.totalAffiche);
-    final avgOrderValue =
-        deliveredOrders.isNotEmpty ? revenue / deliveredOrders.length : 0.0;
-
-    final statusBreakdown = <String, int>{};
-    for (final order in dayOrders) {
-      final statusName = order.statut.libelle;
-      statusBreakdown[statusName] = (statusBreakdown[statusName] ?? 0) + 1;
-    }
-
-    return {
-      'date': date.toIso8601String(),
-      'total_orders': dayOrders.length,
-      'completed_orders': deliveredOrders.length,
-      'revenue': revenue,
-      'average_order_value': avgOrderValue,
-      'status_breakdown': statusBreakdown,
-    };
-  }
-
-  /// Obtenir les tendances de commandes
-  Map<String, dynamic> getOrderTrends({int days = 7}) {
-    final List<Map<String, dynamic>> trends = [];
-    final now = DateTime.now();
-
-    for (int i = days - 1; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
-      final summary = getDailySummary(date);
-      trends.add(summary);
-    }
-
-    // Calculer les tendances
-    final firstDay = trends.first;
-    final lastDay = trends.last;
-
-    // `trends` porte des `Map<String, dynamic>` : on type les quatre valeurs
-    // lues plutôt que de calculer sur du `dynamic`, où une clé absente
-    // n'échouerait qu'à l'exécution.
-    final commandesDebut = firstDay['total_orders']! as num;
-    final commandesFin = lastDay['total_orders']! as num;
-    final revenuDebut = firstDay['revenue']! as num;
-    final revenuFin = lastDay['revenue']! as num;
-
-    final orderGrowth = commandesFin - commandesDebut;
-    final revenueGrowth = revenuFin - revenuDebut;
-
-    final orderGrowthPercent =
-        commandesDebut > 0 ? (orderGrowth / commandesDebut) * 100 : 0.0;
-
-    final revenueGrowthPercent =
-        revenuDebut > 0 ? (revenueGrowth / revenuDebut) * 100 : 0.0;
-
-    return {
-      'trends': trends,
-      'order_growth': orderGrowth,
-      'revenue_growth': revenueGrowth,
-      'order_growth_percent': orderGrowthPercent,
-      'revenue_growth_percent': revenueGrowthPercent,
-      'period_days': days,
-    };
-  }
-
-  /// Obtenir les heures de pointe
-  Map<String, dynamic> getPeakHours() {
-    final hourCounts = <int, int>{};
-
-    for (final order in _allOrders) {
-      final hour = order.passeeLe.hour;
-      hourCounts[hour] = (hourCounts[hour] ?? 0) + 1;
-    }
-
-    int peakHour = 0;
-    int maxOrders = 0;
-
-    hourCounts.forEach((hour, count) {
-      if (count > maxOrders) {
-        maxOrders = count;
-        peakHour = hour;
-      }
-    });
-
-    return {
-      'peak_hour': peakHour,
-      'peak_orders': maxOrders,
-      'hour_distribution': hourCounts,
-    };
-  }
-
-  /// Obtenir les produits les plus commandés
-  Map<String, dynamic> getMostOrderedItems({int limit = 10}) {
-    final itemCounts = <String, int>{};
-
-    for (final order in _allOrders) {
-      for (final item in order.lines) {
-        itemCounts[item.itemName] = (itemCounts[item.itemName] ?? 0) + item.quantity;
-      }
-    }
-
-    final sortedItems = itemCounts.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-
-    return {
-      'top_items': sortedItems
-          .take(limit)
-          .map(
-            (e) => {
-              'name': e.key,
-              'quantity': e.value,
-            },
-          )
-          .toList(),
-    };
   }
 
   /// Statistiques de livraison, mesurées sur ce qui a **réellement** eu lieu.

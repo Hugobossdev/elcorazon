@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:admin/presentation/anciennete_commande.dart';
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/poste_de_cuisine.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/dashboard_realtime_service.dart';
@@ -127,19 +128,24 @@ class _KitchenScreenState extends State<KitchenScreen> {
     final service = context.read<OrderManagementService>();
     final messager = ScaffoldMessenger.of(context);
 
-    final ok = await service.updateOrderStatus(commande.commande.id, cible);
-    if (!mounted) return;
-
-    if (!ok) {
-      // Le serveur a refusé. C'est lui qui tient la machine à états, et un
-      // écran qui masquerait le refus ferait croire à un plat parti.
+    final couleurErreur = Theme.of(context).colorScheme.error;
+    try {
+      await service.updateOrderStatus(commande.commande.id, cible);
+    } catch (erreur) {
+      if (!mounted) return;
+      // **Le motif du serveur**, et non « n'a pas pu passer en Prête » : un 403
+      // sans `orders.update_status`, un 409 « cette commande est déjà partie »
+      // et une coupure réseau n'appellent pas le même geste, et l'écran les
+      // rendait sous une seule phrase qui n'en indiquait aucun.
       messager.showSnackBar(
         SnackBar(
-          content: Text('Refusé : ${commande.reference} n\'a pas pu passer en ${cible.libelle}.'),
-          backgroundColor: Theme.of(context).colorScheme.error,
+          content: Text('${commande.reference} : ${messageErreur(erreur)}'),
+          backgroundColor: couleurErreur,
+          duration: const Duration(seconds: 5),
         ),
       );
     }
+    if (!mounted) return;
     await _relire();
   }
 

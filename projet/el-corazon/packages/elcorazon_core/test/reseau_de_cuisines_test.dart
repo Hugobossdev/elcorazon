@@ -324,13 +324,18 @@ void main() {
 
       final fermeture = await depot.create(
         restaurantId: 'r1',
-        startsAt: DateTime.utc(2026, 12, 25),
-        endsAt: DateTime.utc(2026, 12, 26),
+        debut: DateTime(2026, 12, 25),
+        fin: DateTime(2026, 12, 26),
         reason: '  Noël ',
       );
 
       final corps = serveur.requetes.single.data as Map<String, dynamic>;
-      expect(corps['starts_at'], '2026-12-25T00:00:00.000Z');
+      // **Heure murale**, sans fuseau : c'est le serveur qui la situe dans
+      // celui de la cuisine. Envoyer un instant absolu — ce que faisait le
+      // back-office depuis l'horloge du poste — fermait Douala à une heure du
+      // matin quand le siège de Lomé saisissait minuit.
+      expect(corps['starts_at_local'], '2026-12-25T00:00:00');
+      expect(corps.containsKey('starts_at'), isFalse);
       expect(corps['reason'], 'Noël');
       expect(fermeture.reason, 'Noël');
       expect(fermeture.isPastAt(DateTime.utc(2026, 12, 27)), isTrue);

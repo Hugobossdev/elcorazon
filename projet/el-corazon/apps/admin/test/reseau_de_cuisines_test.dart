@@ -65,8 +65,8 @@ class _DepotFermetures implements eccore.ManagedKitchenClosureRepository {
   @override
   Future<eccore.KitchenClosure> create({
     required String restaurantId,
-    required DateTime startsAt,
-    required DateTime endsAt,
+    required DateTime debut,
+    required DateTime fin,
     String reason = '',
   }) async => throw UnimplementedError();
 

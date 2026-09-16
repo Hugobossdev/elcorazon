@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
@@ -606,15 +607,36 @@ class RestaurantDuplicationSerializer(serializers.Serializer[Any]):
 class ManagedKitchenClosureSerializer(serializers.ModelSerializer[KitchenClosure]):
     """Fermeture exceptionnelle d'une cuisine — `/restaurants/manage/closures/`.
 
-    Les instants s'envoient en ISO 8601 **avec leur décalage** : le back-office
-    les saisit dans le fuseau du pays, et un instant sans fuseau serait lu dans
-    celui du serveur — une heure d'écart à Lagos, deux à Kinshasa en été
-    européen.
+    ## Le fuseau est celui de la cuisine, et c'est le serveur qui le tient
+
+    Les horaires d'ouverture se saisissent en heure de la cuisine — `11:00`
+    veut dire onze heures **là-bas**, et le serveur les compare dans le fuseau
+    du pays. Les fermetures, elles, voyageaient en instants absolus que le
+    back-office fabriquait à partir de l'horloge du **poste** : un siège à Lomé
+    (UTC+0) qui fermait Douala (UTC+1) le 25 décembre à minuit fermait en
+    réalité à une heure du matin, heure de Douala. Deux conventions pour deux
+    champs voisins du même écran.
+
+    D'où [starts_at_local] et [ends_at_local] : une heure **murale**, sans
+    décalage — « 2026-12-25T00:00 » — que le serveur situe dans le fuseau de la
+    cuisine concernée, parce qu'il est le seul à le connaître de façon sûre.
+    Elles sont rendues en lecture sous la même forme, pour que l'écran affiche
+    ce que l'exploitant a saisi sans jamais convertir.
+
+    `starts_at`/`ends_at` restent acceptés **avec leur décalage**, pour un
+    appelant qui sait ce qu'il fait ; les deux formes ne se mélangent pas.
     """
 
     restaurant = serializers.PrimaryKeyRelatedField[Restaurant](queryset=Restaurant.objects.all())
     restaurant_name = serializers.CharField(source="restaurant.name", read_only=True)
     is_current = serializers.SerializerMethodField()
+    # Rendus par méthode, acceptés par `to_internal_value` : ce ne sont pas des
+    # champs du modèle, et les déclarer en écriture les ferait entrer dans la
+    # validation de `DateTimeField`, qui lit un instant **absolu** — exactement
+    # ce qu'on cherche à ne plus demander à l'appelant.
+    starts_at_local = serializers.SerializerMethodField()
+    ends_at_local = serializers.SerializerMethodField()
+    timezone_name = serializers.CharField(source="restaurant.timezone", read_only=True)
 
     class Meta:
         model = KitchenClosure
@@ -624,15 +646,102 @@ class ManagedKitchenClosureSerializer(serializers.ModelSerializer[KitchenClosure
             "restaurant_name",
             "starts_at",
             "ends_at",
+            "starts_at_local",
+            "ends_at_local",
+            "timezone_name",
             "reason",
             "is_current",
             "created_at",
         ]
-        read_only_fields = ["id", "restaurant_name", "is_current", "created_at"]
+        read_only_fields = [
+            "id",
+            "restaurant_name",
+            "is_current",
+            "created_at",
+            "timezone_name",
+            "starts_at_local",
+            "ends_at_local",
+        ]
+        extra_kwargs = {
+            # Facultatifs : l'appelant fournit **soit** la paire absolue, soit
+            # la paire locale. `validate` refuse l'absence des deux.
+            "starts_at": {"required": False},
+            "ends_at": {"required": False},
+        }
 
     def get_is_current(self, obj: KitchenClosure) -> bool:
         maintenant: dt.datetime = self.context.setdefault("now", timezone.now())
         return obj.starts_at <= maintenant < obj.ends_at
+
+    @extend_schema_field(serializers.CharField)
+    def get_starts_at_local(self, obj: KitchenClosure) -> str:
+        """Le début, **en heure de la cuisine**.
+
+        Sans lui, chaque écran refait la conversion — et le back-office la
+        faisait avec l'horloge du poste, ce qui décale l'affichage d'une
+        fermeture dès qu'on supervise un pays voisin.
+        """
+        return obj.starts_at.astimezone(ZoneInfo(obj.restaurant.timezone)).isoformat()
+
+    @extend_schema_field(serializers.CharField)
+    def get_ends_at_local(self, obj: KitchenClosure) -> str:
+        return obj.ends_at.astimezone(ZoneInfo(obj.restaurant.timezone)).isoformat()
+
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        """Situe une heure murale dans le fuseau de la cuisine visée.
+
+        La conversion a lieu **avant** la validation du modèle : tout ce qui
+        suit — la contrainte d'ordre, le refus d'une fermeture déjà finie —
+        travaille sur des instants absolus, comme auparavant.
+        """
+        brut = dict(data) if isinstance(data, dict) else data
+        locaux: dict[str, Any] = {
+            champ: brut.pop(f"{champ}_local", None)
+            for champ in ("starts_at", "ends_at")
+            if isinstance(brut, dict)
+        }
+        valeurs: dict[str, Any] = super().to_internal_value(brut)
+
+        if not any(locaux.values()):
+            return valeurs
+
+        restaurant = valeurs.get("restaurant") or getattr(self.instance, "restaurant", None)
+        if restaurant is None:
+            raise serializers.ValidationError(
+                {"restaurant": "Indiquez la cuisine : c'est son fuseau qui situe ces heures."}
+            )
+
+        fuseau = ZoneInfo(restaurant.timezone)
+        for champ, brute in locaux.items():
+            if brute is None:
+                continue
+            if champ in valeurs:
+                raise serializers.ValidationError(
+                    {
+                        f"{champ}_local": (
+                            f"Choisissez une seule forme : `{champ}` (avec décalage) "
+                            f"ou `{champ}_local` (heure de la cuisine)."
+                        )
+                    }
+                )
+            try:
+                murale = dt.datetime.fromisoformat(str(brute))
+            except ValueError as invalide:
+                raise serializers.ValidationError(
+                    {f"{champ}_local": "Heure illisible — format attendu : 2026-12-25T00:00."}
+                ) from invalide
+            if murale.tzinfo is not None:
+                raise serializers.ValidationError(
+                    {
+                        f"{champ}_local": (
+                            "Cette heure est celle de la cuisine : elle s'envoie sans "
+                            "décalage. Utilisez `" + champ + "` pour un instant absolu."
+                        )
+                    }
+                )
+            valeurs[champ] = murale.replace(tzinfo=fuseau)
+
+        return valeurs
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         """Une fermeture a une fin postérieure à son début, et une fin à venir.
@@ -645,6 +754,16 @@ class ManagedKitchenClosureSerializer(serializers.ModelSerializer[KitchenClosure
         instance = self.instance if isinstance(self.instance, KitchenClosure) else None
         debut = attrs.get("starts_at", getattr(instance, "starts_at", None))
         fin = attrs.get("ends_at", getattr(instance, "ends_at", None))
+        # Les deux paires sont facultatives séparément — il en faut une.
+        if debut is None or fin is None:
+            raise serializers.ValidationError(
+                {
+                    "starts_at": (
+                        "Indiquez le début et la fin — en heure de la cuisine "
+                        "(`starts_at_local`) ou en instant absolu (`starts_at`)."
+                    )
+                }
+            )
         if debut is not None and fin is not None and fin <= debut:
             raise serializers.ValidationError(
                 {"ends_at": "La réouverture doit suivre le début de la fermeture."}

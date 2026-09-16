@@ -16,9 +16,15 @@ import 'package:admin/services/admin_auth_service.dart';
 /// client lit entre-temps « Fermé exceptionnellement — réouverture vendredi à
 /// 11 h 00 ».
 ///
-/// Les dates se saisissent à l'heure du poste et partent en UTC ; le serveur
-/// compare dans le fuseau du pays. Un poste réglé sur un autre fuseau que la
-/// cuisine voit donc ses heures décalées d'autant — le rappel est à l'écran.
+/// Les dates se saisissent **à l'heure de la cuisine**, comme les horaires
+/// d'ouverture : « 25/12 à 00:00 » veut dire minuit là-bas. Elles partent sans
+/// décalage et le serveur les situe dans le fuseau du pays, qu'il est seul à
+/// connaître de façon sûre — l'application n'embarque pas la base de fuseaux.
+///
+/// Auparavant, elles étaient converties depuis l'horloge du **poste** : un
+/// siège à Lomé (UTC+0) qui fermait Douala (UTC+1) le 25 décembre à minuit
+/// fermait en réalité à une heure du matin, heure de Douala. Deux conventions
+/// pour deux champs voisins du même écran.
 class FermeturesExceptionnelles extends StatefulWidget {
   const FermeturesExceptionnelles({
     required this.restaurantId,
@@ -88,8 +94,8 @@ class _FermeturesExceptionnellesState extends State<FermeturesExceptionnelles> {
     try {
       await _depot.create(
         restaurantId: widget.restaurantId,
-        startsAt: saisie.debut,
-        endsAt: saisie.fin,
+        debut: saisie.debut,
+        fin: saisie.fin,
         reason: saisie.motif,
       );
       if (!mounted) return;
@@ -195,7 +201,7 @@ class _FermeturesExceptionnellesState extends State<FermeturesExceptionnelles> {
                     fermeture.isCurrent ? Icons.lock_clock : Icons.event_outlined,
                     color: fermeture.isCurrent ? scheme.error : scheme.onSurfaceVariant,
                   ),
-                  title: Text(libellePeriode(fermeture.startsAt, fermeture.endsAt)),
+                  title: Text(libellePeriodeDe(fermeture)),
                   subtitle: Text(
                     [
                       if (fermeture.isCurrent) 'En cours',
@@ -215,16 +221,30 @@ class _FermeturesExceptionnellesState extends State<FermeturesExceptionnelles> {
   }
 }
 
-/// « 25/12 à 00:00 », à l'heure du poste.
+/// « 25/12 à 00:00 » — tel qu'affiché, sans conversion de fuseau.
 String libelleInstant(DateTime instant) {
   String deux(int n) => n.toString().padLeft(2, '0');
-  final l = instant.toLocal();
-  return '${deux(l.day)}/${deux(l.month)} à ${deux(l.hour)}:${deux(l.minute)}';
+  return '${deux(instant.day)}/${deux(instant.month)} '
+      'à ${deux(instant.hour)}:${deux(instant.minute)}';
 }
 
-/// « du 25/12 à 00:00 au 26/12 à 11:00 », à l'heure du poste.
-String libellePeriode(DateTime debut, DateTime fin) =>
-    'du ${libelleInstant(debut)} au ${libelleInstant(fin)}';
+/// « du 25/12 à 00:00 au 26/12 à 11:00 », **en heure de la cuisine**.
+///
+/// Les deux instants viennent du serveur sous leur forme locale
+/// (`starts_at_local`) : il les compose dans le fuseau du pays, que
+/// l'application ne sait pas résoudre. Repli sur l'instant absolu — donc
+/// l'heure du poste — quand le serveur ne les rend pas encore ; c'est ce que
+/// faisait l'écran pour **toutes** les fermetures, et ce qui décalait
+/// l'affichage d'un pays voisin.
+String libellePeriodeDe(eccore.KitchenClosure fermeture) {
+  final debut = DateTime.tryParse(fermeture.debutLocal);
+  final fin = DateTime.tryParse(fermeture.finLocal);
+  if (debut == null || fin == null) {
+    return 'du ${libelleInstant(fermeture.startsAt.toLocal())} '
+        'au ${libelleInstant(fermeture.endsAt.toLocal())}';
+  }
+  return 'du ${libelleInstant(debut)} au ${libelleInstant(fin)}';
+}
 
 class _Saisie {
   const _Saisie({required this.debut, required this.fin, required this.motif});

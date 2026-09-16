@@ -557,6 +557,85 @@ class TestFermeturesAuBackOffice:
         assert fiche.data["is_temporarily_closed"] is True
         assert fiche.data["closure_reason"] == "jour férié"
 
+    def test_l_heure_saisie_est_celle_de_la_cuisine(self, restaurant: Restaurant) -> None:
+        """Le fuseau est celui de l'établissement, pas celui du poste.
+
+        Le back-office envoyait un instant absolu fabriqué à partir de
+        l'horloge du **poste** : un siège à Lomé (UTC+0) qui fermait une
+        cuisine de Douala (UTC+1) le 25 décembre à minuit fermait en réalité à
+        une heure du matin, heure de Douala. Les horaires d'ouverture, eux,
+        se saisissent depuis toujours en heure de la cuisine — deux conventions
+        pour deux champs voisins du même écran.
+        """
+        Country.objects.filter(pk=restaurant.zone.city.country.pk).update(timezone="Africa/Douala")
+        gerant = connecte(
+            membre(
+                "gerant.fuseau@elcorazon.test",
+                restaurant,
+                "restaurants.read",
+                "restaurants.write",
+            )
+        )
+
+        reponse = gerant.post(
+            self.url(),
+            {
+                "restaurant": str(restaurant.pk),
+                "starts_at_local": "2030-12-25T00:00:00",
+                "ends_at_local": "2030-12-26T11:00:00",
+                "reason": "Noël",
+            },
+            format="json",
+        )
+
+        assert reponse.status_code == status.HTTP_201_CREATED, reponse.data
+        fermeture = KitchenClosure.objects.get()
+        # Minuit à Douala, c'est 23 h la veille en UTC.
+        assert fermeture.starts_at == dt.datetime(2030, 12, 24, 23, tzinfo=dt.UTC)
+        # Et la réponse rend l'heure telle que l'exploitant l'a saisie.
+        assert reponse.data["starts_at_local"].startswith("2030-12-25T00:00:00")
+        assert reponse.data["timezone_name"] == "Africa/Douala"
+
+    def test_une_heure_locale_avec_decalage_est_refusee(self, restaurant: Restaurant) -> None:
+        """Les deux formes ne se mélangent pas : l'une est murale, l'autre absolue."""
+        gerant = connecte(
+            membre(
+                "gerant.melange@elcorazon.test",
+                restaurant,
+                "restaurants.read",
+                "restaurants.write",
+            )
+        )
+
+        reponse = gerant.post(
+            self.url(),
+            {
+                "restaurant": str(restaurant.pk),
+                "starts_at_local": "2030-12-25T00:00:00+02:00",
+                "ends_at_local": "2030-12-26T11:00:00",
+            },
+            format="json",
+        )
+
+        assert reponse.status_code == status.HTTP_400_BAD_REQUEST
+        assert not KitchenClosure.objects.exists()
+
+    def test_sans_debut_ni_fin_rien_ne_se_ferme(self, restaurant: Restaurant) -> None:
+        gerant = connecte(
+            membre(
+                "gerant.vide@elcorazon.test",
+                restaurant,
+                "restaurants.read",
+                "restaurants.write",
+            )
+        )
+
+        reponse = gerant.post(
+            self.url(), {"restaurant": str(restaurant.pk), "reason": "?"}, format="json"
+        )
+
+        assert reponse.status_code == status.HTTP_400_BAD_REQUEST
+
     def test_une_fermeture_hors_perimetre_est_refusee(
         self, restaurant: Restaurant, zone: DeliveryZone
     ) -> None:
