@@ -30,10 +30,20 @@ class AddressSelectorScreen extends StatefulWidget {
   final eccore.Address? currentAddress;
   final Function(eccore.Address) onAddressSelected;
 
+  /// Le choix est-il **retenu** par le carnet dès la sélection ?
+  ///
+  /// Vrai partout sauf à la caisse. Retenir l'adresse déclenche la résolution
+  /// de cuisine qui la dessert, et donc, le cas échéant, un changement de
+  /// cuisine — qui vide le panier affiché. Au moment de payer, ce geste doit
+  /// être **confirmé avant** d'être appliqué, pas constaté après : c'est
+  /// l'appelant qui retient alors le choix, une fois le client d'accord.
+  final bool retenirLeChoix;
+
   const AddressSelectorScreen({
     required this.onAddressSelected,
     super.key,
     this.currentAddress,
+    this.retenirLeChoix = true,
   });
 
   @override
@@ -219,10 +229,12 @@ class _AddressSelectorScreenState extends State<AddressSelectorScreen> {
     // Le choix est aussi retenu par le service, et non seulement remonté à
     // l'écran appelant : sans cela, l'adresse choisie ici était oubliée dès
     // qu'on quittait la commande en cours.
-    try {
-      await context.read<AddressService>().selectAddress(address.id!);
-    } catch (e) {
-      Journal.trace('Sélection non mémorisée : $e');
+    if (widget.retenirLeChoix) {
+      try {
+        await context.read<AddressService>().selectAddress(address.id!);
+      } catch (e) {
+        Journal.trace('Sélection non mémorisée : $e');
+      }
     }
     if (mounted) widget.onAddressSelected(address);
   }

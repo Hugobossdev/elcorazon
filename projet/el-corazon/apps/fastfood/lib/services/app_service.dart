@@ -212,9 +212,37 @@ class AppService extends ChangeNotifier {
     // être rappelé au lancement.
     if (djangoUser != null && !etaitConnecte) {
       unawaited(_activerLePushPourLeCompte(djangoUser.id));
+      // L'historique suit la session, comme le panier et le carnet.
+      //
+      // Il n'était lu qu'au **démarrage** (`_ouvrir`), et seulement si une
+      // session existait déjà. Quelqu'un qui ouvrait l'application en visiteur
+      // puis se connectait lisait donc « Aucune commande passée » sur un compte
+      // qui en avait, jusqu'à ce qu'il pense à tirer la liste vers le bas.
+      unawaited(_loadUserOrders());
+    } else if (djangoUser == null && etaitConnecte) {
+      _oublierLeCompte();
     }
 
     notifyListeners();
+  }
+
+  /// Efface ce qui appartenait au compte qui vient de partir.
+  ///
+  /// ## Pourquoi ce n'est pas seulement du rangement
+  ///
+  /// `_orders` survivait à la déconnexion. Sur un téléphone partagé — le cas
+  /// courant ici — le compte suivant voyait donc l'historique du précédent
+  /// jusqu'au premier rechargement : le récapitulatif du profil en comptait les
+  /// commandes, et les recommandations s'en nourrissaient.
+  ///
+  /// La cuisine courante part avec : son choix est mémorisé par compte dans la
+  /// tête du client, pas dans celle de l'application. La documentation de
+  /// `KitchenContextService.reset()` annonçait « à la déconnexion » — personne
+  /// ne l'appelait.
+  void _oublierLeCompte() {
+    _orders = [];
+    _erreurHistorique = null;
+    KitchenContextService().reset();
   }
 
   /// Demande la permission puis enregistre l'appareil, dans cet ordre.
@@ -593,8 +621,8 @@ class AppService extends ChangeNotifier {
 
       // Déclencher les notifications et gamification (inchangé, simulé
       // côté client — domaines pas encore migrés).
-      await _notificationService.showOrderConfirmationNotification(
-        remoteOrder.id,
+      await _notificationService.showOrderReceivedNotification(
+        remoteOrder.reference.isNotEmpty ? remoteOrder.reference : remoteOrder.id,
         cartItems.isNotEmpty
             ? cartItems.map((item) => (item as CartItem).name).join(', ')
             : 'Commande',
@@ -782,8 +810,48 @@ class AppService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// La référence lisible d'une commande connue — « EC000123 ».
+  ///
+  /// Les écrans affichaient l'identifiant technique, un UUID de trente-six
+  /// caractères, dans les bandeaux et les notifications. C'est la référence que
+  /// le serveur fabrique pour être lue, redite au téléphone et retrouvée dans
+  /// le back-office. Repli sur l'identifiant tant que la commande n'est pas
+  /// connue localement — mieux vaut un identifiant qu'un vide.
+  String referenceDe(String orderId) {
+    for (final commande in _orders) {
+      if (commande.id == orderId) {
+        return commande.reference.isNotEmpty ? commande.reference : commande.id;
+      }
+    }
+    return orderId;
+  }
+
   /// Relit l'historique — pour le bouton « Réessayer » de l'écran des commandes.
   Future<void> rechargerHistorique() => _loadUserOrders();
+
+  /// Annule une commande, et **laisse remonter le refus**.
+  ///
+  /// `POST /orders/{id}/cancel/` existe depuis l'origine et aucun écran ne
+  /// l'appelait : le centre d'aide promettait une annulation que l'application
+  /// ne savait pas faire.
+  ///
+  /// Le refus du serveur — commande trop avancée — porte la phrase à afficher.
+  /// La rattraper ici pour rendre un booléen la perdrait, et l'écran devrait
+  /// alors deviner entre « trop tard », « pas votre commande » et « réseau
+  /// coupé ». La commande rendue remplace celle qu'on tenait : son statut,
+  /// son horodatage d'annulation et son motif viennent du serveur.
+  Future<Order> annulerLaCommande(String orderId, {String reason = ''}) async {
+    final annulee = await DjangoOrderRepository().cancelOrder(orderId, reason: reason);
+
+    final index = _orders.indexWhere((commande) => commande.id == orderId);
+    if (index != -1) {
+      _orders[index] = annulee;
+    } else {
+      _orders.insert(0, annulee);
+    }
+    notifyListeners();
+    return annulee;
+  }
 
   // Admin methods
   List<Order> get allOrders => _orders;

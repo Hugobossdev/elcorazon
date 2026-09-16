@@ -1,5 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/models/order.dart';
+import 'package:elcora_fast/presentation/annulation_commande.dart';
+import 'package:elcora_fast/presentation/messages_erreur.dart';
+import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/presentation/suivi_commande.dart';
 import 'package:elcora_fast/repositories/django_order_repository.dart';
@@ -52,6 +57,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
   late Order _commande;
   bool _relecture = false;
   bool _relectureEchouee = false;
+  bool _annulationEnCours = false;
 
   @override
   void initState() {
@@ -584,6 +590,20 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             arguments: {'order': _commande},
           ),
         ),
+      // L'annulation : promise par le centre d'aide, servie par le serveur
+      // depuis l'origine, et appelée par aucun écran jusqu'ici. Elle
+      // n'apparaît que sur les états où le serveur l'accepte — le bouton n'est
+      // pas la règle, il en est le reflet.
+      if (peutEtreAnnuleeParLeClient(_commande.status)) ...[
+        const SizedBox(height: DesignConstants.spacingS),
+        ActionButton(
+          label: 'Annuler la commande',
+          emphasis: ActionEmphasis.outlined,
+          icon: Icons.cancel_outlined,
+          isLoading: _annulationEnCours,
+          onPressed: _annulationEnCours ? null : _annuler,
+        ),
+      ],
       const SizedBox(height: DesignConstants.spacingS),
       ActionButton(
         label: 'Besoin d’aide ?',
@@ -592,6 +612,45 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         onPressed: () => Navigator.of(context).pushNamed(AppRouter.support),
       ),
     ];
+  }
+
+  /// Annule la commande, après confirmation.
+  ///
+  /// Le refus du serveur est affiché **tel quel** : « Cette commande ne peut
+  /// plus être annulée depuis l'application ; contactez El Corazón » dit au
+  /// client quoi faire ensuite, là où « Erreur » ne dit rien. La commande est
+  /// relue dans les deux cas — sur un refus, c'est qu'elle a avancé, et l'écran
+  /// doit montrer où elle en est.
+  Future<void> _annuler() async {
+    final motif = await confirmerLAnnulation(context, reference: _commande.reference);
+    if (motif == null || !mounted) return;
+
+    setState(() => _annulationEnCours = true);
+    final messager = ScaffoldMessenger.of(context);
+    final couleurErreur = Theme.of(context).colorScheme.error;
+
+    try {
+      final annulee = await AppService().annulerLaCommande(_commande.id, reason: motif);
+      if (!mounted) return;
+      setState(() {
+        _commande = annulee;
+        _annulationEnCours = false;
+      });
+      messager.showSnackBar(
+        SnackBar(content: Text('Commande ${annulee.reference} annulée.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _annulationEnCours = false);
+      messager.showSnackBar(
+        SnackBar(
+          content: Text(messageErreur(e)),
+          backgroundColor: couleurErreur,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      unawaited(_relire());
+    }
   }
 
   String _heure(DateTime date) {

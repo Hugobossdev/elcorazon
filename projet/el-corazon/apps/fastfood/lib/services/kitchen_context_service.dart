@@ -466,6 +466,33 @@ class KitchenContextService extends ChangeNotifier {
     throw CuisineIndisponible(situation, detail: _detailEchec);
   }
 
+  /// Quelle cuisine desservirait ce point — **sans rien changer**.
+  ///
+  /// Une question, pas un geste : ni le choix courant, ni la desserte
+  /// mémorisée, ni le panier n'en sont affectés. C'est ce qui permet à la
+  /// caisse de demander « votre panier ne suivra pas, on y va ? » **avant**
+  /// d'appliquer un changement d'adresse, au lieu de l'annoncer après coup.
+  ///
+  /// Rend `null` quand aucune cuisine ne dessert le point, quand la
+  /// vérification échoue, ou quand la cuisine désignée n'est pas dans
+  /// l'annuaire — dans les trois cas, il n'y a rien à confirmer.
+  Future<String?> cuisineQuiDesservirait({
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      final reponse = await _verifierLaLivraison(
+        latitude: latitude,
+        longitude: longitude,
+      );
+      final designee = reponse.restaurant?.slug;
+      return designee != null && _trouver(designee) != null ? designee : null;
+    } on Exception catch (e) {
+      eccore.Journal.trace('KitchenContext : desserte non vérifiée — $e');
+      return null;
+    }
+  }
+
   /// Choisit la cuisine courante — un choix **explicite**, mémorisé.
   ///
   /// Un slug absent de l'annuaire est ignoré : le sélecteur n'est pas une porte
@@ -651,7 +678,11 @@ class KitchenContextService extends ChangeNotifier {
   }
 
   /// Oublie tout — à la déconnexion, et dans les tests.
-  @visibleForTesting
+  ///
+  /// Appelé par `AppService` quand la session se ferme (`_oublierLeCompte`).
+  /// L'annotation `@visibleForTesting` qui se trouvait ici disait le contraire
+  /// de la première ligne de cette documentation : la méthode décrivait un
+  /// geste de production que personne ne faisait.
   void reset() {
     _cuisines = const [];
     _slugChoisi = null;

@@ -86,8 +86,23 @@ class NotificationService extends ChangeNotifier {
     }
   }
 
-  Future<void> showOrderConfirmationNotification(
-    String orderId,
+  /// « Commande reçue » — et non « confirmée ».
+  ///
+  /// ## Ce que le mot promettait
+  ///
+  /// Cette notification partait à la **création**, sur une commande qui naît
+  /// `pending` : elle annonçait « ✅ Commande confirmée » avant que la cuisine
+  /// ou le paiement n'aient rien confirmé. Le client pouvait donc lire
+  /// « confirmée » sur une commande que le restaurant refusera dans la minute.
+  ///
+  /// La confirmation réelle a son propre message, poussé par le serveur au
+  /// passage à `confirmed` (`apps/notifications`) : c'est lui qui fait foi.
+  /// Celle-ci accuse réception, ce qui est déjà utile — l'envoi a abouti.
+  ///
+  /// [reference] est la référence métier (« EC000123 »), jamais un UUID : c'est
+  /// ce que le client relira au support.
+  Future<void> showOrderReceivedNotification(
+    String reference,
     String items,
   ) async {
     const AndroidNotificationDetails androidNotificationDetails =
@@ -105,8 +120,8 @@ class NotificationService extends ChangeNotifier {
 
     await _flutterLocalNotificationsPlugin.show(
       DateTime.now().millisecondsSinceEpoch.remainder(100000),
-      '✅ Commande confirmée',
-      'Commande #$orderId: $items',
+      '🧾 Commande reçue',
+      'Commande $reference : $items',
       notificationDetails,
     );
   }

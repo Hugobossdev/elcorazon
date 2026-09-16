@@ -194,6 +194,15 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
 
   @override
   void dispose() {
+    // Le canal se referme avec l'écran.
+    //
+    // Il restait ouvert : `RealtimeTrackingService` est un singleton, et
+    // personne n'appelait `untrackOrder` en sortant. Le serveur continuait donc
+    // de pousser les positions d'une course que plus aucun écran ne regardait,
+    // jusqu'à ce qu'une autre commande prenne la place — ou indéfiniment.
+    if (_suiviTempsReelOuvert) {
+      unawaited(_trackingService?.untrackOrder(widget.orderId) ?? Future<void>.value());
+    }
     _orderUpdatesSubscription?.cancel();
     _courseUpdatesSubscription?.cancel();
     _deliveryLocationSubscription?.cancel();
@@ -250,6 +259,14 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
 
       setState(() {
         _isLoading = false;
+        // Une relecture qui aboutit efface l'erreur précédente.
+        //
+        // Elle ne l'effaçait **jamais** : `_errorMessage` n'était écrit qu'ici,
+        // dans le `catch`, et jamais remis à nul. Une seule coupure parmi les
+        // relectures — toutes les dix secondes — figeait donc l'écran sur sa
+        // page d'erreur pour le reste de la livraison, et « Réessayer »
+        // n'y changeait rien, même quand la relecture réussissait.
+        _errorMessage = null;
       });
     } catch (e) {
       eccore.Journal.trace('❌ Error loading order details: $e');
@@ -638,14 +655,30 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
     );
   }
 
+  /// Les heures des étapes, telles que **le serveur** les a enregistrées.
+  ///
+  /// ## Ce qui était faux
+  ///
+  /// L'étape courante recevait `DateTime.now()` — et le recevait de nouveau à
+  /// chaque relecture, c'est-à-dire toutes les dix secondes. La chronologie
+  /// affichait donc l'heure du dernier rafraîchissement, pas celle du
+  /// changement de statut : une commande confirmée à 12 h 03 se lisait
+  /// « 12 h 47 » à 12 h 47.
+  ///
+  /// `status_events` porte chaque transition avec son horodatage, et
+  /// l'adaptateur les rend depuis le lot 3. On les lit, au lieu de les
+  /// inventer. Ne reste `DateTime.now()` que pour une étape franchie **sous
+  /// nos yeux** et dont le serveur n'a pas encore renvoyé l'événement.
   void _initializeStatusTimestamps() {
-    if (_order == null) return;
+    final commande = _order;
+    if (commande == null) return;
 
-    // Ajouter le statut actuel avec l'horodatage actuel
-    _statusTimestamps[_order!.status] = DateTime.now();
-
-    // Ajouter les timestamps depuis les données de la commande
-    _statusTimestamps[OrderStatus.pending] = _order!.createdAt;
+    for (final etape in commande.statusUpdates) {
+      _statusTimestamps[etape.status] = etape.timestamp;
+    }
+    // La création de la commande est son premier jalon, et elle n'a pas
+    // d'événement de transition — rien ne précède `pending`.
+    _statusTimestamps[OrderStatus.pending] ??= commande.createdAt;
   }
 
   /// Met à jour le polyline de l'historique des positions
@@ -773,7 +806,11 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
 
             // Enregistrer le timestamp du changement de statut
             if (updatedOrder.status != previousStatus) {
-              _statusTimestamps[updatedOrder.status] = DateTime.now();
+              // La commande relue porte ses événements : c'est d'eux que
+              // l'heure vient. `DateTime.now()` ne sert qu'à l'étape que le
+              // serveur n'a pas encore horodatée.
+              _initializeStatusTimestamps();
+              _statusTimestamps[updatedOrder.status] ??= DateTime.now();
             }
 
             // Le livreur, lui, vient du suivi : la commande ne le porte pas.
@@ -974,23 +1011,36 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
     }
   }
 
+  /// L'heure d'arrivée estimée, depuis **le point de livraison déjà connu**.
+  ///
+  /// ## Ce que cette méthode faisait
+  ///
+  /// Elle géocodait la ligne d'adresse — un appel Google — **à chaque relevé de
+  /// position et toutes les trente secondes**, soit de l'ordre de deux cents
+  /// par livraison, pour retrouver un point que la commande porte depuis sa
+  /// création (`delivery_location`, figé au moment de commander) et que la
+  /// carte affiche déjà juste au-dessus.
+  ///
+  /// C'est exactement le défaut corrigé pour les repères de la carte
+  /// (`_placerLesPointsFixes`) et pour l'itinéraire — il restait ici. Outre le
+  /// quota, le géocodage d'un repère (« en face de la pharmacie du Grand
+  /// Marché ») rend un point à quelques rues de là : l'estimation portait sur
+  /// une destination qui n'était pas la bonne.
+  ///
+  /// `_deliveryLatLng` est ce point, déjà résolu — avec le géocodage en repli
+  /// pour les commandes sans coordonnées, une seule fois, à l'ouverture.
   Future<void> _calculateEstimatedDeliveryTime() async {
+    final destination = _deliveryLatLng;
     if (_order == null ||
         _deliveryLocation == null ||
         _geocodingService == null ||
+        destination == null ||
         _order!.status != OrderStatus.onTheWay) {
       return;
     }
 
     try {
-      // Géocoder l'adresse de livraison
-      final deliveryCoords =
-          await _geocodingService!.geocodeAddress(_order!.deliveryAddress);
-
-      if (deliveryCoords == null) {
-        eccore.Journal.trace('⚠️ Could not geocode delivery address');
-        return;
-      }
+      final deliveryCoords = destination;
 
       // Coordonnées du livreur
       final driverCoords = _deliveryLocation!.point;

@@ -8,8 +8,10 @@ import 'package:elcora_fast/services/delivery_fee_service.dart';
 import 'package:elcora_fast/services/kitchen_context_service.dart';
 import 'package:elcora_fast/screens/client/selecteur_etablissement_sheet.dart';
 import 'package:elcora_fast/models/order.dart';
+import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/adresse.dart';
+import 'package:elcora_fast/presentation/changement_de_cuisine.dart';
 import 'package:elcora_fast/presentation/cle_de_tentative.dart';
 import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
@@ -192,11 +194,29 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   // avait pas — un rattrapage qui n'existait que parce que le carnet laissait
   // créer des adresses sans point, et qui n'a plus d'objet.
 
+  /// Choisit l'adresse de livraison — et demande d'abord si le panier peut
+  /// changer de cuisine.
+  ///
+  /// ## Ce qui se passait
+  ///
+  /// Choisir une adresse la retenait aussitôt dans le carnet ; la géographie
+  /// désignait alors la cuisine qui la dessert, et si ce n'était pas la
+  /// courante, `CartService` **vidait le panier affiché** et chargeait celui de
+  /// l'autre cuisine. Le client, à l'étape du paiement, voyait ses articles
+  /// disparaître et lisait « Votre panier est vide » — avec, pour toute
+  /// explication, un bandeau passager.
+  ///
+  /// Rien n'était perdu — chaque cuisine garde son panier — mais personne ne
+  /// l'avait demandé. Le sélecteur de cuisine, lui, demandait confirmation
+  /// depuis le début : la même conséquence méritait la même question.
   Future<void> _selectAddress() async {
+    final cartService = context.read<CartService>();
     final selected = await Navigator.of(context).push<eccore.Address>(
       MaterialPageRoute(
         builder: (context) => AddressSelectorScreen(
           currentAddress: _selectedAddress,
+          // Le choix n'est retenu qu'après accord — voir ci-dessous.
+          retenirLeChoix: false,
           onAddressSelected: (eccore.Address address) {
             Navigator.of(context).pop(address);
           },
@@ -204,14 +224,55 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ),
     );
 
-    if (selected != null && mounted) {
-      setState(() {
-        _selectedAddress = selected;
-        _addressController.text = selected.uneLigne;
-      });
-      setState(() => _adresseReclamee = false);
-      await _calculateDeliveryFeeForAddress(selected);
+    if (selected == null || !mounted) return;
+    if (!await _changementDeCuisineAccepte(selected, cartService)) return;
+    if (!mounted) return;
+
+    // Retenu maintenant, et par nous : c'est ce qui déclenche la bascule de
+    // cuisine, une fois le client d'accord.
+    try {
+      await _addressService.selectAddress(selected.id!);
+    } catch (e) {
+      eccore.Journal.trace('Sélection non mémorisée : $e');
     }
+
+    if (!mounted) return;
+    setState(() {
+      _selectedAddress = selected;
+      _addressController.text = selected.uneLigne;
+      _adresseReclamee = false;
+    });
+    await _calculateDeliveryFeeForAddress(selected);
+  }
+
+  /// `true` s'il n'y a rien à demander, ou si le client accepte de changer.
+  Future<bool> _changementDeCuisineAccepte(
+    eccore.Address adresse,
+    CartService cartService,
+  ) async {
+    final articles = cartService.itemCount;
+    final contexte = KitchenContextService();
+    final actuelle = contexte.slug;
+    if (articles == 0 || actuelle == null) return true;
+
+    final desservante = await contexte.cuisineQuiDesservirait(
+      latitude: adresse.latitude,
+      longitude: adresse.longitude,
+    );
+    // Aucune cuisine désignée, ou la même : rien ne change pour le panier. Le
+    // refus éventuel de la zone est dit par le devis, juste après.
+    if (desservante == null || desservante == actuelle || !mounted) return true;
+
+    final accepte = await ChangementDeCuisine.confirmer(
+      context,
+      ancienne: contexte.cuisineParSlug(actuelle)?.name ?? 'votre cuisine',
+      nouvelle: contexte.cuisineParSlug(desservante)?.name ?? 'une autre cuisine',
+      articles: articles,
+    );
+    // Le panier se videra à la bascule : on le dit une fois, ici, plutôt que
+    // deux — l'avis de `CartService` n'a plus lieu d'être.
+    if (accepte) cartService.changementDeCuisineConfirme();
+    return accepte;
   }
 
   // NOTE: V2 adresses: plus de saisie libre dans le checkout.
@@ -844,6 +905,22 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         // arrière et recommande — se verrait rendre la première.
         _cleDeTentative.commandeCreee();
         cartService.clear();
+
+        // Le succès s'annonce **ici**, avant de quitter la caisse.
+        //
+        // Il s'annonçait après le retour du suivi : le client lisait « Commande
+        // passée avec succès » plusieurs minutes après coup, en retombant sur
+        // une caisse vide. Et le libellé portait l'identifiant technique — un
+        // UUID de trente-six caractères — là où le serveur fabrique une
+        // référence faite pour être lue et redite au téléphone.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Commande ${appService.referenceDe(finalOrderId)} envoyée.'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+
         // Le paiement se règle par webhook signé, jamais par le retour de
         // cet écran (`apps/payments/services.py`) — la commande existe déjà
         // quelle que soit l'issue.
@@ -852,22 +929,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         );
       }
 
-      if (finalOrderId.isNotEmpty && mounted) {
-        // Naviguer vers l'écran de suivi de commande
-        if (mounted && context.mounted) {
-          await context.navigateToDeliveryTracking(finalOrderId);
-        }
-
-        // Afficher un message de succès
-        if (mounted && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Commande #$finalOrderId passée avec succès'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
+      if (finalOrderId.isNotEmpty && mounted && context.mounted) {
+        // **Remplace** la caisse par le suivi, au lieu de l'empiler.
+        //
+        // Empilée, la caisse restait derrière : revenir du suivi ramenait sur
+        // un écran de paiement dont le panier venait d'être vidé, qui
+        // annonçait « Votre panier est vide » à quelqu'un qui venait de
+        // commander. Le parcours de caisse est terminé — il se ferme.
+        await Navigator.of(context).pushReplacementNamed(
+          AppRouter.deliveryTracking,
+          arguments: {'orderId': finalOrderId},
+        );
       }
     } catch (e) {
       if (mounted && context.mounted) {

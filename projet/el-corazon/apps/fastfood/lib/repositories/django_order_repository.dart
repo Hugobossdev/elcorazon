@@ -108,6 +108,25 @@ class DjangoOrderRepository implements OrderRepository {
         .asyncMap((_) => getUserOrders(userId));
   }
 
+  /// Annule une commande — `POST /orders/{id}/cancel/`.
+  ///
+  /// ## Pourquoi cette méthode manquait
+  ///
+  /// Le serveur l'expose depuis l'origine, réservée au client
+  /// (`IsCustomer`), et le centre d'aide de l'application l'annonce : « Tant
+  /// que la cuisine ne l'a pas prise en charge. » **Aucun écran ne l'appelait.**
+  /// Un client qui se trompait d'adresse n'avait d'autre recours que le
+  /// téléphone.
+  ///
+  /// Le refus n'est pas rattrapé ici : passé la confirmation, le serveur
+  /// répond 409 avec la phrase à afficher — « Cette commande ne peut plus être
+  /// annulée depuis l'application ; contactez El Corazón. » C'est elle que
+  /// l'écran doit montrer, pas un message inventé côté client.
+  Future<Order> cancelOrder(String orderId, {String reason = ''}) async {
+    final remote = await _orders.cancel(orderId, reason: reason);
+    return _toLocal(remote, userId: '');
+  }
+
   @override
   Future<Order> createOrder(Order order) {
     throw UnsupportedError(
