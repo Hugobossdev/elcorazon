@@ -23,17 +23,30 @@
 >   livraison. Ils seront consignés dans `AUDIT_2026-09-15.md` ;
 > - la compilation de `dely` a été rétablie (phase 0 du plan de correction).
 >
-> ### Mesures refaites — phase 0
+> ### Mesures refaites — phases 0 et 1
 >
-> | Porte | Résultat au gel (`ca0e47a`) | Après correction de `dely` |
-> | --- | --- | --- |
-> | `flutter analyze` socle / client / admin | No issues found | No issues found |
-> | `flutter analyze` dely | **13 problèmes, dont 3 erreurs en `lib/`** | No issues found |
-> | `tools/code_mort.py` | aucun fichier injoignable | aucun fichier injoignable |
-> | `tools/contrat_routes.py` | 177 HTTP + 6 WebSocket, toutes servies | inchangé |
-> | `flutter test` ×4 | non exécuté avant le gel | _mesure en cours_ |
-> | `pytest` | non exécuté avant le gel | _mesure en cours_ |
-> | `ruff check`, `ruff format --check`, `mypy --strict` | non exécutés avant le gel | _mesure en cours_ |
+> | Porte | Au gel (`ca0e47a`) | Après phase 0 (`05e72a2`) | Après phase 1 |
+> | --- | --- | --- | --- |
+> | `flutter analyze` socle / client / admin | No issues found | No issues found | No issues found |
+> | `flutter analyze` dely | **13 problèmes, dont 3 erreurs en `lib/`** | No issues found | No issues found |
+> | `flutter test` socle | non exécuté | 509 | **520** |
+> | `flutter test` client | non exécuté | 443 | 443 |
+> | `flutter test` admin | non exécuté | 238 | **251** |
+> | `flutter test` livreur | non exécuté | 168 | **171** |
+> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 075 passés, 0 échec** |
+> | `ruff check` · `ruff format --check` · `mypy --strict` | non exécutés | verts | verts (443 fichiers, 296 sources) |
+> | `tools/code_mort.py` | aucun fichier injoignable | idem | idem |
+> | `tools/contrat_routes.py` | 177 HTTP + 6 WS, toutes servies | idem | 178 HTTP + 6 WS, toutes servies |
+>
+> **Les deux échecs pytest de la phase 0 ont été isolés** sur l'arbre gelé, sans
+> les modifications du lot, pour les distinguer d'une régression :
+>
+> * `delivery/test_affectation_automatique.py::…le_montant_a_encaisser…` —
+>   **préexistant** : le contrat d'une course a gagné `item_image`, le test ne
+>   l'avait pas suivi. Corrigé en phase 1 ;
+> * `tracking/test_websocket.py::…sans_since_rien_n_est_rejoue` — **passe
+>   isolément**, et repasse en suite complète depuis. Instable, à surveiller ;
+>   il n'a pas de rapport avec ce lot.
 >
 > Les sections ci-dessous sont conservées **telles qu'elles ont été écrites**,
 > pour ce qu'elles documentent des intentions et des changements de chaque lot.

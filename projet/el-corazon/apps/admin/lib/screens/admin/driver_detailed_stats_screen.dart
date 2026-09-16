@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -5,7 +7,8 @@ import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/statut_commande.dart'; // Import StatutCommande
 import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
-import 'package:admin/services/order_management_service.dart'; // Import Service
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/widgets/loading_widget.dart' as etats; // Import Service
 import 'package:admin/widgets/custom_bar_chart.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
@@ -35,6 +38,11 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
     super.initState();
     if (widget.driver != null) {
       _loadData();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Même dépendance que l'historique : les courbes sont tirées des
+        // commandes de la fenêtre agrégée.
+        if (mounted) unawaited(context.read<OrderManagementService>().ensureWindowLoaded());
+      });
     }
   }
 
@@ -78,6 +86,19 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
           : Consumer<OrderManagementService>(
               // Utiliser Consumer pour accéder aux commandes
               builder: (context, orderService, child) {
+                // Une courbe plate n'est pas la même chose qu'une courbe qu'on
+                // n'a pas pu lire : sans ce cas, une panne se lisait comme une
+                // semaine sans course.
+                if (orderService.erreurFenetre != null &&
+                    orderService.allOrders.isEmpty) {
+                  return etats.ErrorWidget(
+                    message: '${orderService.erreurFenetre!} '
+                        'Les statistiques de ce livreur n’ont pas pu être lues.',
+                    icon: Icons.cloud_off_rounded,
+                    onRetry: () => unawaited(orderService.rechargerLaFenetre()),
+                  );
+                }
+
                 // Calculer les données réelles pour le graphique
                 final driverOrders = orderService.allOrders
                     .where((o) => _commandesPortees.contains(o.id))

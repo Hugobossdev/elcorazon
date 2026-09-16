@@ -13,6 +13,7 @@ import 'package:elcora_dely/presentation/messages_erreur.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/screens/delivery/driver_profile_screen.dart';
 import 'package:elcora_dely/screens/delivery/settings_screen.dart';
+import 'package:elcora_dely/screens/delivery/widgets/attente_de_la_cuisine.dart';
 import 'package:elcora_dely/screens/delivery/widgets/bandeau_instruction.dart';
 import 'package:elcora_dely/screens/delivery/widgets/panneau_simulation.dart';
 import 'package:elcora_dely/services/app_service.dart';
@@ -273,7 +274,11 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
       // Le suivi GPS, lui, s'arrête tout seul : `AppService` referme la porte
       // dès qu'aucune course n'est active (`suivreLaCourse`). Le faire aussi
       // ici laisserait croire que c'est cet écran qui en décide.
-      if (_course.prochaineEtape == null && mounted) Navigator.pop(context);
+      // Sur l'étape **terminale**, et non sur « plus rien à faire » : depuis
+      // que le retrait attend la cuisine, `prochaineEtape` est aussi nulle
+      // pendant l'attente — fermer l'écran à ce moment-là renverrait le livreur
+      // à sa liste alors qu'il est devant le comptoir.
+      if (mounted && !_course.etape.estEnCours) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         setState(() => _isUpdatingStatus = false);
@@ -801,6 +806,13 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   /// elle le met en avant, elle ne l'appuie pas.
   Widget _buildActionSuivante() {
     final suivante = _course.prochaineEtape;
+
+    // L'attente de la cuisine passe avant l'état « rien à faire » : sans cette
+    // branche, l'écran annoncerait « Course terminée — Acceptée » à un livreur
+    // qui attend simplement que le repas sorte.
+    if (suivante == null && _course.enAttenteDeLaCuisine) {
+      return const AttenteDeLaCuisine();
+    }
 
     if (suivante == null) {
       return Container(

@@ -1,5 +1,6 @@
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/network/page.dart';
+import 'package:elcorazon_core/src/orders/kitchen_order.dart';
 import 'package:elcorazon_core/src/orders/order.dart';
 
 /// Supervision des commandes — `/api/v1/orders/manage/`
@@ -99,6 +100,34 @@ class ManagedOrderRepository {
     return Page<Order>.fromJson(
       response.data as Map<String, dynamic>,
       Order.fromJson,
+    );
+  }
+
+  /// **La file de production d'une cuisine** — `GET /orders/manage/kitchen/`.
+  ///
+  /// [restaurantSlug] est obligatoire, et le serveur l'exige : le poste est
+  /// celui d'un établissement, et l'isolement entre cuisines est une règle
+  /// serveur, pas un filtre d'écran. Le back-office lisait auparavant la
+  /// fenêtre de supervision — un an de commandes, toutes cuisines confondues —
+  /// et un compte non cloisonné voyait donc les commandes d'Abidjan sur
+  /// l'écran « Cuisine — Lomé ».
+  ///
+  /// La fenêtre rendue est celle du **service en cours** : ni l'attente de
+  /// confirmation, ni ce qui est livré ou annulé. Les commandes arrivent de la
+  /// plus ancienne à la plus récente — l'ordre dans lequel on cuisine.
+  ///
+  /// [pageSize] est plafonné à 100 par le serveur.
+  Future<Page<KitchenOrder>> kitchenBoard({
+    required String restaurantSlug,
+    int pageSize = 100,
+  }) async {
+    final response = await apiClient.get(
+      '/orders/manage/kitchen/',
+      queryParameters: {'restaurant': restaurantSlug, 'page_size': pageSize},
+    );
+    return Page<KitchenOrder>.fromJson(
+      response.data as Map<String, dynamic>,
+      KitchenOrder.fromJson,
     );
   }
 

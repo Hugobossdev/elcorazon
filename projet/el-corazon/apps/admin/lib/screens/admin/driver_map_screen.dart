@@ -47,6 +47,11 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     super.initState();
     _zoneService = DeliveryZoneService();
     unawaited(RestaurantScopeService().resolve());
+    // La carte place les commandes actives : elle dépend donc de la fenêtre
+    // agrégée, et doit le déclarer. `refresh()` seul ne la chargeait pas.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(context.read<OrderManagementService>().ensureWindowLoaded());
+    });
     _startAutoRefresh();
   }
 
@@ -127,6 +132,26 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
       ),
       body: Column(
         children: [
+          // Les commandes placées sur la carte viennent de la fenêtre agrégée.
+          // Quand sa lecture échoue, la carte se contente d'afficher les
+          // livreurs — sans un mot, elle laisse croire qu'aucune commande n'est
+          // en cours. Le bandeau le dit, et la carte reste utilisable.
+          Consumer<OrderManagementService>(
+            builder: (context, orderService, child) {
+              final motif = orderService.erreurFenetre;
+              if (motif == null) return const SizedBox.shrink();
+              return MaterialBanner(
+                backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                content: Text('Commandes non rafraîchies : $motif'),
+                actions: [
+                  TextButton(
+                    onPressed: () => unawaited(orderService.rechargerLaFenetre()),
+                    child: const Text('Réessayer'),
+                  ),
+                ],
+              );
+            },
+          ),
           // Barre de filtres et légende
           Container(
             padding: const EdgeInsets.all(12),

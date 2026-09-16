@@ -89,6 +89,7 @@ export 'src/network/api_exception.dart';
 export 'src/network/api_failure.dart';
 export 'src/network/message_erreur.dart';
 export 'src/network/page.dart';
+export 'src/orders/kitchen_order.dart';
 export 'src/orders/managed_order_repository.dart';
 export 'src/orders/order.dart';
 export 'src/orders/order_quote.dart';

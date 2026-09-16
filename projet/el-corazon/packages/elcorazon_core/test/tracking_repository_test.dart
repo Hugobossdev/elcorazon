@@ -179,6 +179,8 @@ void main() {
       final tracking = await repository.forOrder('order-1');
 
       expect(tracking.hasCourier, isTrue);
+      expect(tracking.courier!.fullName, 'Kofi A.');
+      expect(tracking.courier!.vehicleType, 'moto');
       expect(tracking.assignmentStatus, 'on_the_way');
       expect(tracking.lastPosition?.longitude, 1.2255);
       expect(tracking.estimatedDeliveryAt, isNotNull);
@@ -191,7 +193,11 @@ void main() {
 
       expect(tracking.hasCourier, isFalse);
       expect(tracking.lastPosition, isNull);
-      expect(tracking.courier, isEmpty);
+      // `null` et non plus une `Map` vide : c'est ce qui permet à l'écran de
+      // savoir qu'il n'y a personne à joindre ni à noter. Une map vide restait
+      // acceptée par le modèle — un serveur antérieur la rend encore — et vaut
+      // la même chose.
+      expect(tracking.courier, isNull);
     });
   });
 }

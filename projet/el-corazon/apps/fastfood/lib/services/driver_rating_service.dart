@@ -54,13 +54,12 @@ class DriverRatingService {
   Future<({double average, int count})?> courierRatingForOrder(String orderId) async {
     try {
       final tracking = await eccore.TrackingRepository(apiClient: _client).forOrder(orderId);
-      if (!tracking.hasCourier) return null;
+      final livreur = tracking.courier;
+      if (livreur == null) return null;
 
-      final average = tracking.courier['rating_average'];
-      final count = tracking.courier['rating_count'];
       return (
-        average: double.tryParse('$average') ?? 0.0,
-        count: count is int ? count : int.tryParse('$count') ?? 0,
+        average: double.tryParse(livreur.ratingAverage) ?? 0.0,
+        count: livreur.ratingCount,
       );
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('DriverRatingService: suivi indisponible — ${e.code}');

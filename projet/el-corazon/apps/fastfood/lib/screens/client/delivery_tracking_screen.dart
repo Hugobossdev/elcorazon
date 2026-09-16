@@ -19,7 +19,6 @@ import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/repositories/django_order_repository.dart';
 import 'package:elcora_fast/services/geocoding_service.dart';
 import 'package:elcora_fast/services/directions_service.dart';
-import 'package:elcora_fast/services/driver_rating_service.dart';
 import 'package:elcora_fast/config/app_constants.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/models/position_livreur.dart';
@@ -54,9 +53,21 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
   String? _errorMessage;
   PositionLivreur? _deliveryLocation;
   String? _estimatedDeliveryTime;
-  Map<String, dynamic>? _driverProfile;
-  double? _driverRating; // Note moyenne du livreur
-  int _driverRatingCount = 0; // Nombre d'évaluations du livreur
+  /// Le livreur, tel que `/tracking/orders/{id}/` le rend — `null` tant que
+  /// personne n'a accepté la course.
+  ///
+  /// ## Ce qu'il remplace
+  ///
+  /// L'écran lisait `Order.deliveryPersonId` pour savoir s'il y avait un
+  /// livreur à joindre. Ce champ **n'a jamais été renseigné** : le contrat de
+  /// la commande ne porte aucun livreur, et il ne peut pas en porter — `orders`
+  /// n'a pas le droit de connaître `delivery` (ADR-002). Conséquence : les
+  /// boutons « Message » et « Appeler » étaient grisés en permanence, et la
+  /// notation du livreur ne s'affichait jamais, y compris sur une commande
+  /// livrée par quelqu'un que le client avait vu à sa porte.
+  ///
+  /// C'est le **suivi** qui porte le livreur, et c'est lui qu'on lit.
+  eccore.TrackingCourier? _livreur;
 
   GoogleMapController? _mapController;
   Set<Marker> _markers = {};
@@ -265,17 +276,10 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
       final tracking = await _tracking.forOrder(widget.orderId);
       if (!mounted) return;
 
-      if (tracking.hasCourier && tracking.courier.isNotEmpty) {
-        setState(() {
-          _driverProfile = {
-            'auth_user_id': tracking.courier['id'],
-            'name': tracking.courier['full_name'] ?? 'Livreur',
-            'profile_image': tracking.courier['avatar'],
-            'vehicle_type': tracking.courier['vehicle_type'],
-          };
-        });
-        await _loadDriverRating();
-      }
+      // Réaffecté à chaque lecture, y compris à `null` : une course refusée
+      // puis reproposée change de livreur, et garder l'ancien afficherait le
+      // nom de quelqu'un qui ne vient plus.
+      setState(() => _livreur = tracking.courier);
 
       final position = tracking.lastPosition;
       if (position != null && mounted) {
@@ -301,21 +305,16 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
     }
   }
 
-  /// Note du livreur affecté à cette commande — lue dans le suivi
-  /// (`tracking/orders/{id}/`), qui la porte déjà : le client voit la note de
-  /// celui qui lui livre, et n'interroge pas la fiche d'un livreur au hasard.
-  Future<void> _loadDriverRating() async {
-    try {
-      final note = await DriverRatingService().courierRatingForOrder(widget.orderId);
-      if (note != null && mounted) {
-        setState(() {
-          _driverRating = note.average;
-          _driverRatingCount = note.count;
-        });
-      }
-    } catch (e) {
-      eccore.Journal.trace('⚠️ Error loading driver rating: $e');
-    }
+  /// La note du livreur n'a plus de lecture à elle : le suivi la porte
+  /// (`rating_average`, `rating_count`) et `_livreur` la garde. Un second appel
+  /// pour deux nombres déjà reçus n'apprenait rien et pouvait diverger de ce
+  /// que l'écran affichait juste à côté.
+  double? get _noteDuLivreur {
+    final moyenne = double.tryParse(_livreur?.ratingAverage ?? '');
+    // Un livreur sans course notée rend `0` : c'est « pas encore noté », et
+    // l'afficher comme une note de zéro le condamnerait sur une absence de
+    // données.
+    return moyenne == null || moyenne <= 0 ? null : moyenne;
   }
 
   /// Place les deux points fixes de la carte : d'où part le repas, où il va.
@@ -777,13 +776,13 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
               _statusTimestamps[updatedOrder.status] = DateTime.now();
             }
 
-            // Mettre à jour le profil du livreur si nouvellement assigné
-            if (updatedOrder.deliveryPersonId != null &&
-                (_driverProfile == null ||
-                    _driverProfile!['auth_user_id'] !=
-                        updatedOrder.deliveryPersonId)) {
-              _loadTracking();
-            }
+            // Le livreur, lui, vient du suivi : la commande ne le porte pas.
+            // Une étape franchie peut l'avoir fait apparaître — ou changer —
+            // et c'est le seul moyen de le savoir sans attendre la relecture
+            // périodique. L'abonnement `courseUpdates` couvre le cas nominal ;
+            // celui-ci rattrape une affectation dont seul le statut de la
+            // commande a bougé.
+            if (_livreur == null) unawaited(_loadTracking());
 
             // Si la commande est livrée, arrêter le suivi
             if (updatedOrder.status == OrderStatus.delivered) {
@@ -1040,7 +1039,8 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
   }
 
   void _openChat() {
-    if (_order?.deliveryPersonId == null) {
+    final livreur = _livreur;
+    if (livreur == null) {
       context.showErrorMessage(
         'La conversation s’ouvrira dès qu’un livreur aura pris votre commande.',
       );
@@ -1051,15 +1051,16 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
       MaterialPageRoute(
         builder: (context) => ChatScreen(
           orderId: widget.orderId,
-          driverId: _order?.deliveryPersonId,
-          driverName: _driverProfile?['name'] ?? 'Livreur',
+          driverId: livreur.id,
+          driverName: livreur.nomAffiche,
         ),
       ),
     );
   }
 
   Future<void> _startVoiceCall() async {
-    if (_order?.deliveryPersonId == null) {
+    final livreur = _livreur;
+    if (livreur == null) {
       context.showErrorMessage('Aucun livreur n’est encore affecté.');
       return;
     }
@@ -1079,7 +1080,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
         builder: (context) => CallScreen(
           orderId: widget.orderId,
           callerName: currentUser.fullName,
-          receiverName: _driverProfile?['name'] ?? 'Livreur',
+          receiverName: livreur.nomAffiche,
         ),
       ),
     );
@@ -1329,7 +1330,8 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
   // -------------------------------------------------------------- le livreur
 
   Widget _carteDuLivreur(ThemeData theme) {
-    if (_driverProfile == null) {
+    final livreur = _livreur;
+    if (livreur == null) {
       return SectionCard(
         color: theme.colorScheme.surfaceContainerLow,
         child: Row(
@@ -1372,8 +1374,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
       );
     }
 
-    final vehicule = _driverProfile!['vehicle_type']?.toString();
-    final plaque = _driverProfile!['vehicle_plate']?.toString();
+    final vehicule = livreur.vehicleType;
 
     return SectionCard(
       child: Row(
@@ -1383,7 +1384,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
               width: DesignConstants.avatarSizeLarge,
               height: DesignConstants.avatarSizeLarge,
               child: FoodImage(
-                url: _driverProfile!['profile_image']?.toString(),
+                url: livreur.avatar,
                 icon: Icons.person_rounded,
                 iconSize: 32,
               ),
@@ -1395,7 +1396,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _driverProfile!['name']?.toString() ?? 'Votre livreur',
+                  livreur.nomAffiche,
                   style: AppTypography.titleLg(
                     color: theme.colorScheme.onSurface,
                   ),
@@ -1409,25 +1410,24 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
                     // Un livreur sans note est **nouveau**, pas mal noté :
                     // afficher « 0,0 ★ » le condamnerait sur une absence de
                     // données.
-                    if (_driverRating != null)
+                    if (_noteDuLivreur != null)
                       RatingBadge(
-                        rating: _driverRating!,
-                        count:
-                            _driverRatingCount > 0 ? _driverRatingCount : null,
+                        rating: _noteDuLivreur!,
+                        count: livreur.ratingCount > 0 ? livreur.ratingCount : null,
                       )
                     else
                       const StatusChip(
                         label: 'Nouveau',
                         icon: Icons.auto_awesome_rounded,
                       ),
-                    // Véhicule et plaque ne sont montrés que si le suivi les
-                    // porte : la maquette dessine « Yamaha NMAX • ABJ-742 »,
-                    // le serveur ne les renseigne pas toujours.
-                    if (vehicule != null && vehicule.isNotEmpty)
+                    // Le véhicule n'est montré que si le suivi le porte. La
+                    // **plaque** n'y est pas, et c'est délibéré côté serveur :
+                    // la maquette dessine « Yamaha NMAX • ABJ-742 », le
+                    // contrat client ne rend que le type de véhicule — de quoi
+                    // reconnaître qui arrive, pas de quoi ficher un employé.
+                    if (vehicule.isNotEmpty)
                       StatusChip(
-                        label: plaque != null && plaque.isNotEmpty
-                            ? '$vehicule • $plaque'
-                            : vehicule,
+                        label: vehicule,
                         icon: Icons.two_wheeler_rounded,
                         background: theme.colorScheme.surfaceContainerHigh,
                         foreground: theme.colorScheme.onSurfaceVariant,
@@ -1437,6 +1437,18 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
               ],
             ),
           ),
+          // Le numéro du livreur, **tant que la course est engagée** : le
+          // serveur cesse de le rendre à la livraison, et ce bouton disparaît
+          // alors de lui-même. C'est le recours quand l'appel par
+          // l'application ne passe pas — un immeuble sans réseau de données,
+          // un client à la porte.
+          if (livreur.joignable)
+            IconButton(
+              onPressed: () => _makePhoneCall(livreur.telephone),
+              icon: const Icon(Icons.phone_rounded),
+              tooltip: 'Appeler ${livreur.nomAffiche}',
+              color: theme.colorScheme.primary,
+            ),
         ],
       ),
     );
@@ -1445,7 +1457,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
   // --------------------------------------------------------------- actions
 
   Widget _actions(ThemeData theme) {
-    final avecLivreur = _order?.deliveryPersonId != null;
+    final avecLivreur = _livreur != null;
 
     return Row(
       children: [

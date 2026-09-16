@@ -468,9 +468,21 @@ class TestCeQueLeLivreurVoit:
         assert donnees["delivery_instructions"] == "Portail bleu, sonnez deux fois"
         assert donnees["delivery_zone_name"] == "Centre"
         assert donnees["city_name"] == "Lomé"
+        # `item_image` fait partie du contrat : la fiche d'une course montre une
+        # vignette par article, et le livreur vérifie son sac à l'œil.
         assert donnees["items"] == [
-            {"name": "Burger Corazón", "quantity": 2, "options": ["À point"], "notes": ""}
+            {
+                "name": "Burger Corazón",
+                "item_image": "",
+                "quantity": 2,
+                "options": ["À point"],
+                "notes": "",
+            }
         ]
+        # Le statut de la **commande**, que l'étape de la course ne dit pas :
+        # c'est lui qui autorise l'application du livreur à proposer « J'ai
+        # récupéré la commande ».
+        assert donnees["order_status"] == OrderStatus.READY
 
     def test_rien_a_encaisser_quand_c_est_deja_paye(
         self, restaurant: Restaurant, customer: User, courier: CourierProfile

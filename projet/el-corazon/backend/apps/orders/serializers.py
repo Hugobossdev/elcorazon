@@ -26,6 +26,7 @@ from common.serializers import LocationField, MoneyField
 
 __all__ = [
     "CancelSerializer",
+    "KitchenOrderSerializer",
     "OrderCreateSerializer",
     "OrderDetailSerializer",
     "OrderPreviewSerializer",
@@ -54,6 +55,72 @@ class OrderLineSerializer(serializers.ModelSerializer[OrderLine]):
             "notes",
         ]
         read_only_fields = fields
+
+
+class KitchenLineSerializer(serializers.ModelSerializer[OrderLine]):
+    """Une ligne telle qu'on la prépare — **sans les prix**.
+
+    Ce qu'il faut pour cuisiner tient dans quatre champs : quoi, combien,
+    comment, et ce que le client a demandé en plus. Le prix unitaire et le
+    total de ligne n'y ont pas leur place : ils appartiennent à la facture, pas
+    au poste, et les rendre gonflerait une charge que le poste relit à chaque
+    événement du service.
+    """
+
+    class Meta:
+        model = OrderLine
+        fields = ["id", "item_name", "quantity", "options", "notes"]
+        read_only_fields = fields
+
+
+class KitchenOrderSerializer(serializers.ModelSerializer[Order]):
+    """Une commande vue du poste de cuisine.
+
+    ## Pourquoi un contrat de plus
+
+    Le poste lisait la **forme de liste** (`OrderSerializer`), qui ne porte pas
+    les lignes : chaque carte affichait « 3 article(s) » et rien d'autre. Un
+    écran de cuisine qui ne dit pas ce qu'il faut cuisiner n'a pas d'usage —
+    c'est le défaut le plus visible de la vague précédente.
+
+    Lui servir la **forme détaillée** aurait été pire : elle porte les montants,
+    les événements de statut, l'adresse et le téléphone du client, que le poste
+    n'a aucune raison de connaître, et elle les porte pour chaque commande du
+    service, relue à chaque événement temps réel.
+
+    D'où cette forme-ci : ce qu'on cuisine, dans quel ordre, et depuis combien
+    de temps ça attend. Rien sur le client, rien sur l'argent.
+    """
+
+    lines = KitchenLineSerializer(many=True, read_only=True)
+    allowed_transitions = serializers.SerializerMethodField()
+    items_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "reference",
+            "status",
+            "allowed_transitions",
+            "placed_at",
+            "estimated_delivery_at",
+            "items_count",
+            "delivery_instructions",
+            "lines",
+        ]
+        read_only_fields = fields
+
+    def get_allowed_transitions(self, obj: Order) -> list[str]:
+        return sorted(ORDER_MACHINE.targets_from(obj.status))
+
+    @extend_schema_field(serializers.IntegerField)
+    def get_items_count(self, obj: Order) -> int:
+        """La somme des quantités — le premier chiffre qui intéresse une cuisine."""
+        annote = getattr(obj, "items_count", None)
+        if annote is not None:
+            return int(annote)
+        return sum(ligne.quantity for ligne in obj.lines.all())
 
 
 class OrderStatusEventSerializer(serializers.ModelSerializer[OrderStatusEvent]):

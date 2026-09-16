@@ -33,7 +33,7 @@ from typing import ClassVar
 
 from django.db.models import Count, QuerySet
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.request import Request
@@ -44,6 +44,7 @@ from rest_framework.viewsets import GenericViewSet
 from apps.orders.models import Order
 from apps.orders.queries import avec_compteurs
 from apps.orders.serializers import (
+    KitchenOrderSerializer,
     OrderDetailSerializer,
     OrderSerializer,
     StaffCancelSerializer,
@@ -55,7 +56,22 @@ from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids
 from common.exceptions import BusinessRuleViolation
 from common.permissions import HasPermission, authenticated_user
 
-__all__ = ["ManagedOrderViewSet"]
+__all__ = ["KITCHEN_STATUSES", "ManagedOrderViewSet"]
+
+#: Les statuts qu'un poste de cuisine a sous les yeux.
+#:
+#: `pending` en est exclu — une commande non confirmée n'est pas à préparer,
+#: le paiement n'est pas acquis — et les deux états terminaux aussi : une
+#: commande livrée ou annulée quitte le poste. Ce qui reste est exactement ce
+#: qui occupe la cuisine ou attend d'être enlevé, c'est-à-dire une fenêtre
+#: bornée par le service en cours et non par une profondeur d'historique.
+KITCHEN_STATUSES = (
+    OrderStatus.CONFIRMED,
+    OrderStatus.PREPARING,
+    OrderStatus.READY,
+    OrderStatus.PICKED_UP,
+    OrderStatus.ON_THE_WAY,
+)
 
 
 class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Order]):
@@ -193,6 +209,66 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
         resultat = dict.fromkeys(OrderStatus.values, 0)
         resultat.update({ligne["status"]: ligne["nombre"] for ligne in comptes})
         return Response(resultat)
+
+    @extend_schema(
+        responses={200: KitchenOrderSerializer(many=True)},
+        parameters=[
+            OpenApiParameter(
+                "restaurant",
+                OpenApiTypes.STR,
+                description="Slug de la cuisine dont on tient le poste. **Obligatoire.**",
+                required=True,
+            )
+        ],
+        tags=["orders"],
+        description=(
+            "La file de production d'**une** cuisine : les commandes engagées, "
+            "avec leurs lignes, leurs options et les remarques du client. "
+            "Paginée, ordonnée de la plus ancienne à la plus récente."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="kitchen", url_name="kitchen")
+    def kitchen(self, request: Request) -> Response:
+        """Ce qu'un poste de cuisine a sous les yeux.
+
+        ## Trois choix, et ce qu'ils corrigent
+
+        **L'établissement est obligatoire, et filtré ici.** Le poste lisait une
+        fenêtre d'un an de commandes *tous établissements confondus* et se
+        contentait de la peindre en quatre colonnes : un compte non cloisonné —
+        le siège — voyait donc les commandes d'Abidjan sur l'écran intitulé
+        « Cuisine — Lomé ». L'interface reste libre de filtrer à son tour ; elle
+        n'est pas ce qui garantit l'isolement.
+
+        **La fenêtre est celle du service, pas de l'histoire.** `pending` n'y
+        est pas — rien n'est lancé tant que la commande n'est pas confirmée —
+        et `delivered`/`cancelled` non plus : une commande remise quitte le
+        poste. Entre les deux, tout ce qui occupe la cuisine ou attend d'être
+        enlevé.
+
+        **L'ordre est chronologique croissant.** Le service se fait dans
+        l'ordre d'arrivée ; c'est la liste de supervision qui montre le plus
+        récent d'abord, parce qu'elle répond à une autre question.
+        """
+        slug = request.query_params.get("restaurant", "").strip()
+        if not slug:
+            raise BusinessRuleViolation(
+                "Le poste de cuisine est celui d'un établissement : indiquez lequel "
+                "avec `?restaurant=<slug>`.",
+            )
+
+        queryset = (
+            avec_compteurs(self._perimetre())
+            .filter(restaurant__slug=slug, status__in=KITCHEN_STATUSES)
+            .prefetch_related("lines")
+            .order_by("placed_at")
+        )
+
+        page = self.paginate_queryset(queryset)
+        serializer = KitchenOrderSerializer(page if page is not None else queryset, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
 
     @extend_schema(
         request=StatusTransitionSerializer,

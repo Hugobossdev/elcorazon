@@ -21,6 +21,7 @@ __all__ = [
     "ChatMessageSerializer",
     "LocationPingSerializer",
     "PingWriteSerializer",
+    "TrackingCourierSerializer",
     "TrackingSerializer",
 ]
 
@@ -119,6 +120,40 @@ class ChatMessageSerializer(serializers.Serializer[Any]):
     text = serializers.CharField(max_length=2000, allow_blank=False, trim_whitespace=True)
 
 
+class TrackingCourierSerializer(serializers.Serializer[Any]):
+    """Le livreur, tel que le client qui attend son repas peut le voir.
+
+    ## Pourquoi ce contrat est déclaré ici plutôt que sur la commande
+
+    L'application cliente grisait « Message » et « Appeler » en permanence, et
+    n'offrait jamais de noter le livreur : elle attendait un identifiant de
+    livreur **sur la commande**, que `OrderSerializer` n'a jamais porté. Il ne
+    peut pas le porter : `orders` n'a pas le droit de connaître `delivery`
+    (ADR-002, vérifié par `tests/architecture`). `tracking`, lui, dépend
+    légitimement des deux — c'est donc ici que le livreur se publie.
+
+    ## Ce qui est rendu, et quand
+
+    * l'identité affichable — prénom, véhicule, note — **à partir de
+      l'acceptation** : un livreur qui n'a pas encore accepté peut refuser, et
+      nommer au client quelqu'un qui ne viendra pas n'apprend rien à personne ;
+    * le **téléphone**, seulement tant que la course est engagée. Une fois la
+      commande livrée, il n'y a plus personne à joindre pour cette course, et
+      un numéro personnel qui reste lisible dans un historique n'est plus un
+      service mais une fuite. C'est la règle symétrique de celle que le serveur
+      applique déjà au numéro du client vis-à-vis du livreur
+      (`AssignmentSerializer.get_recipient_phone`).
+    """
+
+    id = serializers.CharField(read_only=True)
+    full_name = serializers.CharField(read_only=True)
+    avatar = serializers.CharField(read_only=True, allow_null=True)
+    vehicle_type = serializers.CharField(read_only=True)
+    rating_average = serializers.CharField(read_only=True)
+    rating_count = serializers.IntegerField(read_only=True)
+    phone = serializers.CharField(read_only=True, allow_blank=True)
+
+
 class TrackingSerializer(serializers.Serializer[Any]):
     """Suivi rendu au client d'une commande.
 
@@ -130,6 +165,6 @@ class TrackingSerializer(serializers.Serializer[Any]):
 
     order = serializers.UUIDField(read_only=True)
     assignment_status = serializers.CharField(read_only=True)
-    courier = serializers.DictField(read_only=True)
+    courier = TrackingCourierSerializer(read_only=True, allow_null=True)
     last_position = LocationPingSerializer(read_only=True, allow_null=True)
     estimated_delivery_at = serializers.DateTimeField(read_only=True, allow_null=True)

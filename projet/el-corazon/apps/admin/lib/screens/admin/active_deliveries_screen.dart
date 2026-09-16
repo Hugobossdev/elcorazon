@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/order_management_service.dart';
@@ -10,6 +12,7 @@ import 'package:admin/presentation/statut_livreur.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/screens/admin/driver_map_screen.dart';
 import 'package:admin/ui/ui.dart';
+import 'package:admin/widgets/loading_widget.dart' as etats;
 
 class ActiveDeliveriesScreen extends StatefulWidget {
   const ActiveDeliveriesScreen({super.key});
@@ -38,7 +41,12 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
     final assignments = context.read<AssignmentService>();
 
     await Future.wait([
-      orderService.refresh(),
+      // `ensureWindowLoaded` et non `refresh` : cet écran lit la **fenêtre
+      // agrégée**, que `refresh()` ne chargeait pas tant que personne ne
+      // l'avait ouverte ailleurs. L'écran restait donc vide — « Aucune
+      // livraison active » — jusqu'à ce qu'un opérateur soit passé par
+      // l'onglet de supervision qui, lui, la demandait.
+      orderService.ensureWindowLoaded(),
       driverService.refresh(),
       assignments.refresh(),
     ]);
@@ -51,6 +59,18 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
         builder: (context, orderService, driverService, assignments, child) {
           if (orderService.isLoading && orderService.allOrders.isEmpty) {
             return const Center(child: CircularProgressIndicator());
+          }
+
+          // Une panne n'est pas un service calme. Sans cette branche, un
+          // serveur muet et une soirée sans commande s'affichaient tous deux
+          // « Aucune livraison active ».
+          if (orderService.erreurFenetre != null && orderService.allOrders.isEmpty) {
+            return etats.ErrorWidget(
+              message: '${orderService.erreurFenetre!} '
+                  'Les livraisons en cours n’ont pas pu être lues.',
+              icon: Icons.cloud_off_rounded,
+              onRetry: () => unawaited(orderService.rechargerLaFenetre()),
+            );
           }
 
           // Filtrer les commandes actives (prêtes, assignées, en cours)

@@ -133,3 +133,77 @@ Map<String, dynamic> transitionJson(String vers, DateTime quand) => {
       'reason': '',
       'created_at': quand.toIso8601String(),
     };
+
+/// Le JSON d'une commande **de cuisine**, tel que le rend
+/// `/orders/manage/kitchen/`.
+///
+/// Forme distincte de [commandeJson], et c'est tout l'objet du poste : ni
+/// montants, ni coordonnées du client, mais les lignes — que la forme de liste
+/// ne porte pas. C'est ce manque qui faisait afficher « 3 article(s) » à la
+/// place des plats.
+Map<String, dynamic> commandeCuisineJson({
+  String id = 'commande-1',
+  String reference = 'CMD-0001',
+  String statut = 'preparing',
+  String consignes = '',
+  int articles = 2,
+  DateTime? passeeLe,
+  DateTime? livraisonPrevueLe,
+  List<dynamic>? lignes,
+  List<String>? transitionsAutorisees,
+}) {
+  final quand = (passeeLe ?? DateTime(2026, 8, 8, 12)).toIso8601String();
+
+  return {
+    'id': id,
+    'reference': reference,
+    'status': statut,
+    'allowed_transitions': transitionsAutorisees ?? const <String>[],
+    'placed_at': quand,
+    'estimated_delivery_at': livraisonPrevueLe?.toIso8601String(),
+    'items_count': articles,
+    'delivery_instructions': consignes,
+    'lines': lignes ?? const [],
+  };
+}
+
+/// Une ligne telle que le poste la reçoit — sans prix, par construction.
+Map<String, dynamic> ligneCuisineJson({
+  String nom = 'Poulet braisé',
+  int quantite = 2,
+  String note = '',
+  List<String>? options,
+}) => {
+  'id': 'ligne-1',
+  'item_name': nom,
+  'quantity': quantite,
+  'notes': note,
+  'options': options ?? const <String>[],
+};
+
+/// La même commande de cuisine, montée en modèle du socle.
+eccore.KitchenOrder commandeCuisineDeTest({
+  String id = 'commande-1',
+  String reference = 'CMD-0001',
+  String statut = 'preparing',
+  String consignes = '',
+  int articles = 2,
+  DateTime? passeeLe,
+  DateTime? livraisonPrevueLe,
+  List<dynamic>? lignes,
+  List<String>? transitionsAutorisees,
+}) {
+  return eccore.KitchenOrder.fromJson(
+    commandeCuisineJson(
+      id: id,
+      reference: reference,
+      statut: statut,
+      consignes: consignes,
+      articles: articles,
+      passeeLe: passeeLe,
+      livraisonPrevueLe: livraisonPrevueLe,
+      lignes: lignes,
+      transitionsAutorisees: transitionsAutorisees,
+    ),
+  );
+}

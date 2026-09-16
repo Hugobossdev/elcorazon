@@ -87,6 +87,7 @@ class Assignment {
     this.deliveryZoneName = '',
     this.cityName = '',
     this.paymentMethod = '',
+    this.orderStatus = '',
     this.orderTotal,
     this.estimatedDeliveryAt,
     this.amountToCollect,
@@ -129,6 +130,7 @@ class Assignment {
       deliveryZoneName: json['delivery_zone_name'] as String? ?? '',
       cityName: json['city_name'] as String? ?? '',
       paymentMethod: json['payment_method'] as String? ?? '',
+      orderStatus: json['order_status'] as String? ?? '',
       orderTotal: total == null ? null : Money.fromJson(total),
       estimatedDeliveryAt: _parseDate(json['estimated_delivery_at']),
       amountToCollect: aEncaisser == null ? null : Money.fromJson(aEncaisser),
@@ -181,7 +183,34 @@ class Assignment {
 
   /// `cash` | `mobile_money` | … — et, en espèces, **ce qu'il faut encaisser**.
   final String paymentMethod;
+
+  /// L'étape de la **commande** — `OrderStatus` côté serveur.
+  ///
+  /// Distincte de [status], qui est celle de la course, et indispensable pour
+  /// une raison précise : [allowedTransitions] est calculé sur la seule machine
+  /// de la course, si bien que « récupérée » y apparaît dès l'acceptation,
+  /// quelle que soit l'avancée de la cuisine. Le serveur refuse ce geste tant
+  /// que la commande n'est pas prête ; ce champ permet de ne pas le proposer.
+  ///
+  /// Vide d'un serveur antérieur — voir [repasPretARetirer], qui préfère alors
+  /// laisser le geste possible plutôt que de bloquer un livreur sur un champ
+  /// absent.
+  final String orderStatus;
   final Money? orderTotal;
+
+  /// La cuisine a-t-elle déclaré le repas prêt ?
+  ///
+  /// `true` aussi lorsque la commande est déjà plus loin — récupérée, en route,
+  /// livrée : le repas est alors sorti de cuisine depuis longtemps, et un
+  /// livreur qui rejoue son geste après une coupure réseau ne doit pas se voir
+  /// opposer un refus.
+  ///
+  /// `true` également quand le statut est **inconnu** : un serveur antérieur ne
+  /// le rend pas, et masquer le bouton dans ce cas immobiliserait le livreur
+  /// alors que le serveur, lui, accepterait. Le refus métier reste le filet.
+  bool get repasPretARetirer =>
+      orderStatus.isEmpty ||
+      const {'ready', 'picked_up', 'on_the_way', 'delivered'}.contains(orderStatus);
 
   /// Promesse calculée sur la commande au moment de l'affectation.
   final DateTime? estimatedDeliveryAt;

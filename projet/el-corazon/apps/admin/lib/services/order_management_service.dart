@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/filtres_supervision.dart';
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
@@ -26,6 +27,8 @@ class OrderManagementService extends ChangeNotifier {
   List<eccore.Order> _allOrders = [];
   bool _isLoading = false;
   bool _fenetreChargee = false;
+  bool _fenetreDemandee = false;
+  String? _erreurFenetre;
 
   List<eccore.Order> get allOrders => _allOrders;
   bool get isLoading => _isLoading;
@@ -34,6 +37,26 @@ class OrderManagementService extends ChangeNotifier {
   /// affiche des compteurs doit distinguer « zéro commande » de « pas encore
   /// chargé » — les deux donnent zéro, et un seul mérite un indicateur.
   bool get fenetreChargee => _fenetreChargee;
+
+  /// Pourquoi la fenêtre agrégée est vide, quand elle l'est **parce que la
+  /// lecture a échoué**. `null` quand elle a abouti — fût-ce sur zéro commande.
+  ///
+  /// Sans lui, cinq écrans confondaient une panne avec un service calme :
+  /// `_loadAllOrders` rattrapait toute `ApiException` en posant une liste vide,
+  /// et « Aucune livraison active » s'affichait aussi bien sur un serveur muet
+  /// que sur une soirée sans commande.
+  String? get erreurFenetre => _erreurFenetre;
+
+  /// Un écran a-t-il déclaré dépendre de la fenêtre agrégée ?
+  ///
+  /// C'est ce que [ensureWindowLoaded] enregistre, et ce que [refresh] relit.
+  /// Le bouton « Recharger » d'un écran qui n'avait jamais réussi à charger
+  /// ne rechargeait rien : `refresh()` ne relisait la fenêtre que si elle
+  /// l'avait **déjà** été. Le seul écran qui l'ouvrait était un onglet de la
+  /// supervision ; le poste de cuisine, les livraisons actives, la carte et
+  /// les deux écrans de flotte restaient donc vides tant que personne n'était
+  /// passé par cet onglet-là.
+  bool get fenetreDemandee => _fenetreDemandee;
 
   // ------------------------------------------------------------ pagination
 
@@ -118,7 +141,19 @@ class OrderManagementService extends ChangeNotifier {
   /// alertes, carte. Un écran qui affiche une liste n'a pas à l'appeler : il
   /// demande une page.
   Future<void> ensureWindowLoaded() async {
+    _fenetreDemandee = true;
     if (_fenetreChargee || _isLoading) return;
+    await _loadAllOrders();
+  }
+
+  /// Relit la fenêtre agrégée, qu'elle ait déjà abouti ou non.
+  ///
+  /// C'est ce qu'appelle le bouton « Réessayer » d'un écran resté en erreur :
+  /// [ensureWindowLoaded] ne relit rien quand la fenêtre est déjà chargée, ce
+  /// qui est le bon comportement à l'ouverture d'un écran et le mauvais après
+  /// une panne.
+  Future<void> rechargerLaFenetre() async {
+    _fenetreDemandee = true;
     await _loadAllOrders();
   }
 
@@ -131,10 +166,14 @@ class OrderManagementService extends ChangeNotifier {
       );
       _allOrders = remote;
       _fenetreChargee = true;
+      _erreurFenetre = null;
       eccore.Journal.trace('OrderManagementService: ${_allOrders.length} commande(s)');
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('OrderManagementService: chargement impossible — ${e.code}');
-      _allOrders = [];
+      // La liste précédente est **conservée** : sur une coupure passagère, un
+      // écran de supervision qui se vide fait disparaître un service en cours
+      // sous les yeux de l'opérateur. Le motif, lui, remonte à l'écran.
+      _erreurFenetre = messageErreur(e);
     } finally {
       _setLoading(false);
     }
@@ -253,6 +292,72 @@ class OrderManagementService extends ChangeNotifier {
       eccore.Journal.trace('OrderManagementService: page indisponible — ${e.code}');
     } finally {
       _pageEnCours = false;
+      notifyListeners();
+    }
+  }
+
+  // -------------------------------------------------------- poste de cuisine
+
+  /// La file de production de la cuisine ouverte — `GET /orders/manage/kitchen/`.
+  ///
+  /// Un état à part, et non un filtre de [allOrders] : ce que le poste affiche
+  /// n'est ni la même fenêtre, ni la même forme, ni le même public.
+  ///
+  /// ## Ce que cela remplace
+  ///
+  /// Le poste lisait la fenêtre agrégée — **un an de commandes, toutes cuisines
+  /// confondues, sans les lignes**. Trois conséquences : il affichait « 3
+  /// article(s) » au lieu des plats, un compte non cloisonné y voyait les
+  /// commandes d'une autre ville, et chaque événement du service relisait cet
+  /// historique entier page après page.
+  List<eccore.KitchenOrder> _poste = const [];
+  bool _posteEnCours = false;
+  String? _erreurPoste;
+  String? _cuisineDuPoste;
+
+  List<eccore.KitchenOrder> get poste => _poste;
+  bool get posteEnCours => _posteEnCours;
+  String? get erreurPoste => _erreurPoste;
+
+  /// La file a-t-elle été lue au moins une fois pour la cuisine courante ?
+  /// Un poste vide et un poste pas encore chargé ne se peignent pas pareil.
+  bool get posteCharge => _cuisineDuPoste != null && _erreurPoste == null;
+
+  /// Charge — ou recharge — la file de production d'une cuisine.
+  ///
+  /// [slug] est obligatoire, ici comme côté serveur : le poste est celui d'un
+  /// établissement. Changer de cuisine vide la file avant de relire, pour
+  /// qu'aucune commande de l'ancienne ne subsiste à l'écran le temps de la
+  /// requête.
+  Future<void> chargerLePoste(String slug) async {
+    if (_cuisineDuPoste != slug) {
+      _poste = const [];
+      _cuisineDuPoste = slug;
+    }
+    _posteEnCours = true;
+    notifyListeners();
+
+    try {
+      final page = await _orders.kitchenBoard(restaurantSlug: slug);
+      _poste = page.results;
+      _erreurPoste = null;
+      if (page.hasNext) {
+        // Le plafond serveur est de 100 lignes. Une cuisine qui en dépasse
+        // cent simultanées déborde ce que le poste peut montrer : on le dit
+        // plutôt que de couper en silence.
+        eccore.Journal.trace(
+          'Poste de cuisine : ${page.count} commandes, seules les 100 plus '
+          'anciennes sont affichées.',
+        );
+      }
+    } on eccore.ApiException catch (e) {
+      // La file précédente reste à l'écran : en plein service, un poste qui se
+      // vide sur une coupure de trois secondes est pire qu'un poste périmé qui
+      // le dit.
+      _erreurPoste = messageErreur(e);
+      eccore.Journal.trace('Poste de cuisine indisponible — ${e.code}');
+    } finally {
+      _posteEnCours = false;
       notifyListeners();
     }
   }
@@ -667,7 +772,12 @@ class OrderManagementService extends ChangeNotifier {
   Future<void> refresh() async {
     eccore.Journal.trace('🔄 Rafraîchissement manuel des commandes...');
     await Future.wait([
-      if (_fenetreChargee) _loadAllOrders(),
+      // `_fenetreDemandee` et non `_fenetreChargee` : un écran qui **dépend**
+      // de la fenêtre doit la voir se recharger, y compris quand la première
+      // lecture a échoué. Avec la seconde condition, l'écran restait vide et
+      // son bouton « Recharger » ne rechargeait que la page de supervision,
+      // dont il n'affiche rien.
+      if (_fenetreDemandee || _fenetreChargee) _loadAllOrders(),
       if (_page != null) reloadPage(),
     ]);
   }

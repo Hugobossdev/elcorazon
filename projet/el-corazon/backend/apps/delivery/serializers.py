@@ -315,6 +315,15 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
         source="order.city.name", read_only=True, allow_null=True, default=None
     )
     payment_method = serializers.CharField(source="order.payment_method", read_only=True)
+    # L'étape de la **commande**, que l'étape de la course ne dit pas.
+    #
+    # Sans elle, l'application du livreur ne peut pas savoir si la cuisine a
+    # fini : `allowed_transitions` est calculé sur la seule machine de la
+    # course, si bien que « J'ai récupéré la commande » s'affichait dès
+    # l'acceptation. Le serveur refuse désormais ce geste
+    # (`AssignmentService._exiger_une_commande_qui_suit`) ; ce champ permet à
+    # l'écran de ne pas le proposer, plutôt que de le faire échouer.
+    order_status = serializers.CharField(source="order.status", read_only=True)
     order_total = MoneyField(source="order.total", read_only=True)
     estimated_delivery_at = serializers.DateTimeField(
         source="order.estimated_delivery_at", read_only=True, allow_null=True
@@ -342,6 +351,7 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
             "delivery_zone_name",
             "city_name",
             "payment_method",
+            "order_status",
             "order_total",
             "estimated_delivery_at",
             "amount_to_collect",

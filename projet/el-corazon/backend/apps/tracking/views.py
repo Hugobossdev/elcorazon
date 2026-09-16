@@ -21,7 +21,7 @@ from rest_framework.views import APIView
 
 from apps.delivery.models import Assignment
 from apps.delivery.serializers import CourierPublicSerializer
-from apps.delivery.states import DeliveryStatus
+from apps.delivery.states import ENGAGED_STATUSES, DeliveryStatus
 from apps.delivery.views import courier_of
 from apps.orders.models import Order
 from apps.tracking.serializers import (
@@ -74,6 +74,35 @@ class PingView(APIView):
         return Response(LocationPingSerializer(ping).data, status=status.HTTP_201_CREATED)
 
 
+def _courier_visible_par_le_client(assignment: Assignment | None) -> dict[str, object] | None:
+    """Le livreur que le client a le droit de voir, ou `None`.
+
+    Trois états, trois réponses — c'est ce que l'application a besoin de
+    distinguer pour décider si « Message », « Appeler » et la notation ont un
+    destinataire :
+
+    * aucune course, ou une course seulement **proposée** → `None`. Le livreur
+      pressenti peut encore refuser ; le nommer avant qu'il ait accepté
+      annoncerait au client quelqu'un qui ne viendra peut-être pas.
+    * course **engagée** (acceptée, récupérée, en route) → identité **et**
+      téléphone : c'est la fenêtre pendant laquelle les deux ont à se joindre.
+    * course **livrée** → identité sans téléphone : de quoi noter la livraison
+      et reconnaître qui l'a faite, sans laisser un numéro personnel dans un
+      historique consultable indéfiniment.
+
+    Le champ `phone` est rendu **vide plutôt qu'absent** : une clé qui
+    disparaît oblige chaque appelant à distinguer « absente » de « vide », et
+    c'est ainsi qu'on finit par afficher `null` à l'écran.
+    """
+    if assignment is None or assignment.status == DeliveryStatus.OFFERED:
+        return None
+
+    donnees = dict(CourierPublicSerializer(assignment.courier).data)
+    engagee = assignment.status in ENGAGED_STATUSES
+    donnees["phone"] = assignment.courier.user.phone if engagee else ""
+    return donnees
+
+
 class OrderTrackingView(APIView):
     """`GET /tracking/orders/{id}/` — où en est mon repas ?"""
 
@@ -97,7 +126,7 @@ class OrderTrackingView(APIView):
         payload: dict[str, object] = {
             "order": order.pk,
             "assignment_status": assignment.status if assignment else "",
-            "courier": CourierPublicSerializer(assignment.courier).data if assignment else {},
+            "courier": _courier_visible_par_le_client(assignment),
             "last_position": None,
             "estimated_delivery_at": order.estimated_delivery_at,
         }

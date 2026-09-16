@@ -75,6 +75,14 @@ enum ColonneCuisine {
 /// Enveloppe plutôt que copie : les écrans montrent la commande du socle, et
 /// ce que le poste calcule en propre — sa colonne, son retard — est dérivé ici
 /// une fois plutôt que recalculé à chaque `build`.
+///
+/// ## Pourquoi une `KitchenOrder` et non une `Order`
+///
+/// Le poste lisait la forme de **liste** des commandes, qui ne porte pas les
+/// lignes : chaque carte affichait « 3 article(s) » sans dire ce qu'il fallait
+/// préparer. `GET /orders/manage/kitchen/` rend une forme faite pour ce poste —
+/// les plats, leurs options et les remarques du client, sans les montants ni
+/// les coordonnées du client, qui ne le concernent pas.
 @immutable
 class CommandeEnCuisine {
   const CommandeEnCuisine({
@@ -84,7 +92,7 @@ class CommandeEnCuisine {
     required this.attente,
   });
 
-  final eccore.Order commande;
+  final eccore.KitchenOrder commande;
   final ColonneCuisine colonne;
 
   /// La cuisine a dépassé le temps qui lui était imparti.
@@ -94,7 +102,7 @@ class CommandeEnCuisine {
   final Duration attente;
 
   String get reference => commande.reference;
-  List<eccore.OrderLine> get lignes => commande.lines;
+  List<eccore.KitchenLine> get lignes => commande.lines;
 
   /// Les étapes que le serveur autorise depuis l'état courant.
   ///
@@ -142,7 +150,7 @@ Duration delaiDePreparation(int minutesDeclarees) =>
 ///
 /// [maintenant] est injectable pour que le retard se teste sans attendre.
 Map<ColonneCuisine, List<CommandeEnCuisine>> composerLePoste(
-  List<eccore.Order> commandes, {
+  List<eccore.KitchenOrder> commandes, {
   required int minutesDePreparation,
   DateTime? maintenant,
 }) {

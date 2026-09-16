@@ -55,7 +55,7 @@ void main() {
       expect(ColonneCuisine.pour(StatutCommande.annulee), isNull);
 
       final poste = composerLePoste(
-        [commandeDeTest(statut: 'cancelled', passeeLe: midi)],
+        [commandeCuisineDeTest(statut: 'cancelled', passeeLe: midi)],
         minutesDePreparation: 20,
         maintenant: midi,
       );
@@ -71,13 +71,13 @@ void main() {
       // oubliées au fond de la file.
       final poste = composerLePoste(
         [
-          commandeDeTest(id: 'recente', statut: 'preparing', passeeLe: midi),
-          commandeDeTest(
+          commandeCuisineDeTest(id: 'recente', statut: 'preparing', passeeLe: midi),
+          commandeCuisineDeTest(
             id: 'ancienne',
             statut: 'preparing',
             passeeLe: midi.subtract(const Duration(minutes: 30)),
           ),
-          commandeDeTest(
+          commandeCuisineDeTest(
             id: 'moyenne',
             statut: 'preparing',
             passeeLe: midi.subtract(const Duration(minutes: 10)),
@@ -96,8 +96,8 @@ void main() {
     test('le tri s\'applique colonne par colonne', () {
       final poste = composerLePoste(
         [
-          commandeDeTest(id: 'p-recente', statut: 'preparing', passeeLe: midi),
-          commandeDeTest(
+          commandeCuisineDeTest(id: 'p-recente', statut: 'preparing', passeeLe: midi),
+          commandeCuisineDeTest(
             id: 'c-ancienne',
             statut: 'confirmed',
             passeeLe: midi.subtract(const Duration(hours: 2)),
@@ -116,7 +116,7 @@ void main() {
     test('au-delà du délai déclaré, la commande est en retard', () {
       final poste = composerLePoste(
         [
-          commandeDeTest(
+          commandeCuisineDeTest(
             statut: 'preparing',
             passeeLe: midi.subtract(const Duration(minutes: 25)),
           ),
@@ -131,7 +131,7 @@ void main() {
     test('en deçà, elle ne l\'est pas', () {
       final poste = composerLePoste(
         [
-          commandeDeTest(
+          commandeCuisineDeTest(
             statut: 'preparing',
             passeeLe: midi.subtract(const Duration(minutes: 5)),
           ),
@@ -148,7 +148,7 @@ void main() {
       // noierait celles qui attendent encore quelque chose.
       final poste = composerLePoste(
         [
-          commandeDeTest(
+          commandeCuisineDeTest(
             statut: 'picked_up',
             passeeLe: midi.subtract(const Duration(hours: 3)),
           ),
@@ -175,7 +175,7 @@ void main() {
       // trois écrans, trois `switch`, trois trous différents.
       final poste = composerLePoste(
         [
-          commandeDeTest(
+          commandeCuisineDeTest(
             statut: 'confirmed',
             passeeLe: midi,
             transitionsAutorisees: const ['preparing', 'cancelled'],
@@ -196,7 +196,7 @@ void main() {
       // presser un bouton qui ne peut que revenir en erreur.
       final poste = composerLePoste(
         [
-          commandeDeTest(
+          commandeCuisineDeTest(
             statut: 'confirmed',
             passeeLe: midi,
             transitionsAutorisees: const ['cancelled'],
@@ -214,7 +214,7 @@ void main() {
       // bouton qu'on presse à la chaîne, elle finirait pressée par erreur.
       final poste = composerLePoste(
         [
-          commandeDeTest(
+          commandeCuisineDeTest(
             statut: 'preparing',
             passeeLe: midi,
             transitionsAutorisees: const ['cancelled', 'ready'],
@@ -229,7 +229,7 @@ void main() {
 
     test('une commande terminale ne propose rien', () {
       final poste = composerLePoste(
-        [commandeDeTest(statut: 'delivered', passeeLe: midi)],
+        [commandeCuisineDeTest(statut: 'delivered', passeeLe: midi)],
         minutesDePreparation: 20,
         maintenant: midi,
       );
@@ -250,7 +250,7 @@ void main() {
 
     test('une nouvelle commande apparaît dans sa colonne', () {
       final poste = composerLePoste(
-        [commandeDeTest(id: 'neuve', statut: 'confirmed', passeeLe: midi)],
+        [commandeCuisineDeTest(id: 'neuve', statut: 'confirmed', passeeLe: midi)],
         minutesDePreparation: 20,
         maintenant: midi,
       );

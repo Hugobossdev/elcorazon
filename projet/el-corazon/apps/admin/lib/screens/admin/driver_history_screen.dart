@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
+import 'package:admin/widgets/loading_widget.dart' as etats;
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/statut_commande.dart';
@@ -44,7 +47,13 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _chargerLesCourses());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_chargerLesCourses());
+      // L'historique croise les courses du livreur avec les commandes de la
+      // fenêtre agrégée : sans cette demande, il affichait un historique vide
+      // pour un livreur qui avait roulé toute la semaine.
+      if (mounted) unawaited(context.read<OrderManagementService>().ensureWindowLoaded());
+    });
   }
 
   Future<void> _chargerLesCourses() async {
@@ -95,6 +104,18 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
           // la vérité une fois affiché.
           if (!_coursesChargees) {
             return const Center(child: CircularProgressIndicator());
+          }
+
+          // Même règle un cran plus loin : les commandes viennent de la fenêtre
+          // agrégée, et si sa lecture a échoué, un historique vide affirmerait
+          // quelque chose de faux sur le travail de quelqu'un.
+          if (orderService.erreurFenetre != null && orderService.allOrders.isEmpty) {
+            return etats.ErrorWidget(
+              message: '${orderService.erreurFenetre!} '
+                  'L’historique de ce livreur n’a pas pu être lu.',
+              icon: Icons.cloud_off_rounded,
+              onRetry: () => unawaited(orderService.rechargerLaFenetre()),
+            );
           }
 
           final driverOrders = _getDriverOrders(orderService.allOrders);

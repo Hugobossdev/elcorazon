@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcora_fast/models/order.dart';
@@ -8,7 +10,8 @@ import 'package:elcora_fast/services/design_enhancement_service.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore show Journal, TrackingCourier, TrackingRepository;
+import 'package:elcora_fast/main.dart' show apiClient;
 
 class OrderRatingScreen extends StatefulWidget {
   final Order order;
@@ -35,6 +38,21 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
 
   bool _isLoading = false;
 
+  /// Le livreur de cette commande — `null` quand personne ne l'a portée, ou
+  /// tant que le suivi n'a pas répondu.
+  ///
+  /// ## Pourquoi l'écran doit le demander
+  ///
+  /// La section « livreur » était conditionnée à `order.deliveryPersonId`, un
+  /// champ que le contrat de la commande ne porte pas et n'a jamais porté
+  /// (ADR-002 : `orders` ne connaît pas `delivery`). Elle ne s'affichait donc
+  /// **jamais**, et la note du livreur ne partait jamais : le service de
+  /// notation existait, la route serveur aussi, et rien ne les atteignait.
+  ///
+  /// C'est le suivi qui porte le livreur, jusqu'après la livraison — il en
+  /// retire seulement le téléphone, dont on n'a plus besoin ici.
+  eccore.TrackingCourier? _livreur;
+
   /// Les puces de la maquette `rate_your_meal`, traduites.
   static const _appreciationsDuPlat = [
     'Très bon',
@@ -60,6 +78,23 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
       _itemComments[item.menuItemId] = TextEditingController();
       _itemRatings[item.menuItemId] = 0;
       _itemAppreciations[item.menuItemId] = <String>{};
+    }
+    unawaited(_chargerLeLivreur());
+  }
+
+  /// Lit le suivi pour savoir s'il y a quelqu'un à noter.
+  ///
+  /// Un échec laisse la section masquée plutôt que d'afficher une notation qui
+  /// serait refusée : la route exige une course **livrée**, et un formulaire
+  /// qu'on ne peut pas soumettre est pire qu'une section absente.
+  Future<void> _chargerLeLivreur() async {
+    try {
+      final suivi = await eccore.TrackingRepository(
+        apiClient: apiClient,
+      ).forOrder(widget.order.id);
+      if (mounted) setState(() => _livreur = suivi.courier);
+    } catch (e) {
+      eccore.Journal.trace('Notation : livreur inconnu — $e');
     }
   }
 
@@ -93,7 +128,7 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
       int totalActions = 0;
 
       // 1. Submit Driver Rating (if rated)
-      if (_driverRating > 0 && widget.order.deliveryPersonId != null) {
+      if (_driverRating > 0 && _livreur != null) {
         totalActions++;
         final success = await driverRatingService.submitRating(
           orderId: widget.order.id,
@@ -148,7 +183,7 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
         }
       }
     } catch (e) {
-      Journal.trace('Error submitting ratings: $e');
+      eccore.Journal.trace('Error submitting ratings: $e');
       if (mounted) {
         context.showErrorMessage('Envoi impossible pour le moment.');
       }
@@ -201,7 +236,7 @@ class _OrderRatingScreenState extends State<OrderRatingScreen> {
             _carteDArticle(theme, article),
             const SizedBox(height: DesignConstants.spacingM),
           ],
-          if (widget.order.deliveryPersonId != null) ...[
+          if (_livreur != null) ...[
             const SizedBox(height: DesignConstants.spacingS),
             _sectionLivreur(theme),
           ],

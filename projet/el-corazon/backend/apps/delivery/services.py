@@ -67,11 +67,37 @@ __all__ = [
 
 #: Statuts de commande depuis lesquels une course peut être proposée.
 #:
-#: Ni avant `confirmed` — le paiement n'est pas acquis et la cuisine n'a rien
-#: lancé — ni après `ready`, où le repas est déjà parti. Proposer plus tôt
-#: mobiliserait un livreur pour une commande qui peut encore être annulée sans
-#: frais.
-OFFERABLE_FROM = frozenset({OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY})
+#: **Uniquement `ready`** : une course ne se propose que lorsque le repas peut
+#: réellement être retiré. Les deux étapes antérieures — `confirmed`,
+#: `preparing` — y figuraient, et c'est ce qui rendait possible le défaut que
+#: `_exiger_une_commande_qui_suit` ferme : un livreur acceptait pendant la
+#: préparation, puis déclarait « récupérée » un repas encore en cuisine.
+#:
+#: La contrepartie est assumée : on ne pré-affecte plus un livreur pendant la
+#: cuisson. C'est déjà le fonctionnement de l'affectation automatique, qui
+#: déclenche sur `ready` (`DispatchService.dispatch_on_ready`) ; seul le
+#: back-office pouvait proposer plus tôt. Rouvrir la pré-affectation demande de
+#: réintroduire les deux statuts **et** de garder la garde de `transition_to`,
+#: qui reste la règle de fond.
+OFFERABLE_FROM = frozenset({OrderStatus.READY})
+
+#: Ce qu'on dit au livreur quand la commande ne peut pas suivre son geste.
+#:
+#: Une phrase par étape, écrite pour la personne qui la lira sur un téléphone,
+#: au restaurant ou devant une porte — pas un code d'erreur. Le statut de la
+#: commande voyage à côté, dans les membres de l'erreur RFC 9457.
+_REFUS_DE_PROJECTION: dict[str, str] = {
+    DeliveryStatus.PICKED_UP: (
+        "La cuisine n'a pas encore déclaré cette commande prête : elle ne peut pas être récupérée."
+    ),
+    DeliveryStatus.ON_THE_WAY: (
+        "Cette commande n'est pas enregistrée comme récupérée : le départ ne peut pas être déclaré."
+    ),
+    DeliveryStatus.DELIVERED: (
+        "Cette commande n'est pas enregistrée comme partie en livraison : la livraison "
+        "ne peut pas être déclarée."
+    ),
+}
 
 
 def courier_fee_for(order: Order) -> Money:
@@ -469,8 +495,8 @@ class AssignmentService:
 
         if locked.status not in OFFERABLE_FROM:
             raise BusinessRuleViolation(
-                "Une course ne se propose qu'entre la confirmation et la mise à "
-                "disposition du repas.",
+                "Une course ne se propose que lorsque le repas est prêt à être "
+                "retiré : cette commande est encore en cuisine, ou déjà partie.",
                 current_status=locked.status,
             )
         if not courier.can_accept_orders:
@@ -665,6 +691,12 @@ class AssignmentService:
                 order_status=locked.order.status,
             )
 
+        # Une étape qui se projette sur la commande ne s'applique que si la
+        # commande peut réellement la recevoir. **Avant** toute écriture : une
+        # course qui avance sur une commande qui ne suit pas est le défaut que
+        # cette garde ferme (voir `_exiger_une_commande_qui_suit`).
+        AssignmentService._exiger_une_commande_qui_suit(locked, target)
+
         locked.status = target
         touched = ["status"]
         if target == DeliveryStatus.PICKED_UP:
@@ -716,6 +748,47 @@ class AssignmentService:
         return locked
 
     @staticmethod
+    def _exiger_une_commande_qui_suit(assignment: Assignment, target: str) -> None:
+        """Refuse une étape de course que la commande ne peut pas suivre.
+
+        ## Le défaut que cette garde ferme
+
+        `allowed_transitions` est calculé sur la seule machine de la **course**
+        (`AssignmentSerializer.get_allowed_transitions`) : le bouton « J'ai
+        récupéré la commande » s'affichait donc dès l'acceptation, quelle que
+        soit l'avancée de la cuisine. Le serveur l'acceptait, puis `_project`
+        constatait que `ready → picked_up` n'était pas jouable depuis
+        `preparing` et **retournait en silence**.
+
+        La course poursuivait alors sa vie — récupérée, en route, livrée,
+        livreur crédité — pendant que la commande restait « en préparation ».
+        Le client ne voyait jamais sa livraison, ses points de fidélité
+        n'étaient pas crédités (ils le sont à la livraison de la *commande*),
+        et le personnel pouvait encore annuler un repas déjà remis.
+
+        Deux règles ici, et une seule phrase pour les dire au livreur :
+
+        * l'étape est refusée si la commande ne peut pas la recevoir ;
+        * elle est acceptée si la commande y est **déjà** — un rejeu ne doit
+          pas bloquer une course dont la commande a été menée à la main.
+        """
+        projected = ORDER_STATUS_PROJECTION.get(target)
+        if projected is None:
+            # `offered`, `accepted`, `declined`, `cancelled` : rien à projeter.
+            return
+
+        order = assignment.order
+        if order.status == projected or ORDER_MACHINE.can(order.status, projected):
+            return
+
+        raise BusinessRuleViolation(
+            _REFUS_DE_PROJECTION[target],
+            order_status=order.status,
+            assignment_status=assignment.status,
+            expected_order_status=projected,
+        )
+
+    @staticmethod
     def _project(assignment: Assignment, target: str, *, actor: User | None, reason: str) -> None:
         """Répercute l'étape de course sur la commande, si elle en a une.
 
@@ -727,13 +800,18 @@ class AssignmentService:
         projected = ORDER_STATUS_PROJECTION.get(target)
         if projected is None:
             return
-        if not ORDER_MACHINE.can(assignment.order.status, projected):
-            # La commande a été menée ailleurs entre-temps — annulée par le
-            # restaurant, par exemple. La course, elle, a bien avancé : on ne
-            # force pas la commande à suivre, et on ne fait pas échouer le
-            # livreur pour une décision prise sans lui.
+        if assignment.order.status == projected:
+            # La commande y est déjà — le personnel l'y a menée à la main. Il
+            # n'y a rien à projeter, et rien à refuser non plus.
             return
 
+        # Plus de repli silencieux ici : la faisabilité a été vérifiée avant
+        # toute écriture par `_exiger_une_commande_qui_suit`. Si la transition
+        # échouait malgré tout, `InvalidTransition` remonterait et ferait
+        # annuler la transaction entière — course comprise. C'est le
+        # comportement voulu : **une course ne se termine pas sans sa
+        # commande**. L'ancien `return` muet est précisément ce qui laissait
+        # une course livrée sur une commande restée en préparation.
         OrderService.transition_to(
             order=assignment.order, target=projected, actor=actor, reason=reason
         )

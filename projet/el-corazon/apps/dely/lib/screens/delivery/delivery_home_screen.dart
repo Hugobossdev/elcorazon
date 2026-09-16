@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:elcora_dely/screens/delivery/widgets/attente_de_la_cuisine.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/services/performance_service.dart';
@@ -1040,7 +1041,11 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
                           Icon(_getNextActionIcon(order.prochaineEtape), size: 18),
                       label: Text(_getNextActionText(order.prochaineEtape)),
                     ),
-                  ),
+                  )
+                // Pas de bouton mort à la place : le retrait attend la cuisine,
+                // et le livreur doit lire l'attente plutôt que la deviner.
+                else if (order.enAttenteDeLaCuisine)
+                  const Expanded(child: AttenteDeLaCuisine(dense: true)),
               ],
             ),
             const SizedBox(height: 8),

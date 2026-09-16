@@ -277,10 +277,16 @@ class TestLectureDuSuivi:
         assert response.data["last_position"]["point"]["lat"] == pytest.approx(6.1319)
         assert response.data["courier"]["full_name"] == "Kodjo Mensah"
 
-    def test_le_suivi_ne_livre_pas_le_contact_du_livreur(
+    def test_le_suivi_livre_de_quoi_joindre_le_livreur_pendant_la_course(
         self, as_customer: APIClient, course: Assignment, order: Order
     ) -> None:
-        """De quoi le reconnaître à la porte, pas de quoi l'appeler ensuite."""
+        """De quoi le reconnaître à la porte **et** le joindre — pendant la course.
+
+        Le contrat ne portait aucun moyen de contact, et l'application cliente
+        grisait « Message » et « Appeler » en permanence faute de savoir qu'un
+        livreur existait. Le téléphone est donc rendu, mais seulement tant que
+        la course est engagée : voir le test suivant.
+        """
         response = as_customer.get(reverse("v1:tracking:order", args=[order.pk]))
 
         assert set(response.data["courier"]) == {
@@ -290,7 +296,40 @@ class TestLectureDuSuivi:
             "vehicle_type",
             "rating_average",
             "rating_count",
+            "phone",
         }
+        assert response.data["courier"]["phone"] == course.courier.user.phone
+        # Ce qui reste hors du contrat : l'adresse électronique, les pièces
+        # justificatives, la plaque, les compteurs du dossier.
+        assert "email" not in response.data["courier"]
+        assert "id_document" not in response.data["courier"]
+
+    def test_une_course_livree_ne_laisse_plus_le_numero(
+        self, as_customer: APIClient, course: Assignment, order: Order
+    ) -> None:
+        """Passé la livraison, il n'y a plus personne à joindre pour cette course.
+
+        L'identité reste — le client note la livraison, et doit savoir qui l'a
+        faite — mais un numéro personnel qui resterait lisible dans un
+        historique consultable indéfiniment n'est plus un service.
+        """
+        Assignment.objects.filter(pk=course.pk).update(status=DeliveryStatus.DELIVERED)
+
+        response = as_customer.get(reverse("v1:tracking:order", args=[order.pk]))
+
+        assert response.data["courier"]["full_name"] == "Kodjo Mensah"
+        assert response.data["courier"]["phone"] == ""
+
+    def test_une_course_seulement_proposee_ne_nomme_personne(
+        self, as_customer: APIClient, course: Assignment, order: Order
+    ) -> None:
+        """Un livreur qui n'a pas accepté peut refuser : il n'est pas annoncé."""
+        Assignment.objects.filter(pk=course.pk).update(status=DeliveryStatus.OFFERED)
+
+        response = as_customer.get(reverse("v1:tracking:order", args=[order.pk]))
+
+        assert response.data["courier"] is None
+        assert response.data["assignment_status"] == DeliveryStatus.OFFERED
 
     def test_sans_livreur_le_suivi_est_vide_et_non_absent(
         self, as_customer: APIClient, order: Order

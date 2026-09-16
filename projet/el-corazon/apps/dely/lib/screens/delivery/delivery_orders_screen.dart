@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:elcora_dely/screens/communication/call_screen.dart';
+import 'package:elcora_dely/screens/delivery/widgets/attente_de_la_cuisine.dart';
 import 'package:elcora_dely/services/app_service.dart';
 import 'package:elcora_dely/services/error_handler_service.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
@@ -520,7 +521,9 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
                 foregroundColor: Theme.of(context).colorScheme.onPrimary,
               ),
             ),
-          ),
+          )
+        else if (order.enAttenteDeLaCuisine)
+          const Expanded(child: AttenteDeLaCuisine(dense: true)),
       ],
     );
   }

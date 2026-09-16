@@ -42,14 +42,21 @@ pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
 
 @pytest.fixture
 def deux_commandes(restaurant: Restaurant, customer, order: Order) -> tuple[Order, Order]:
-    """Deux commandes confirmées du même établissement, prêtes à être confiées.
+    """Deux commandes **prêtes** du même établissement, à confier à un livreur.
 
     La première est la fixture partagée ; la seconde porte une référence
     distincte, `reference` étant unique.
+
+    Elles sont menées jusqu'à `ready`, et non plus jusqu'à `confirmed` : une
+    course ne se propose que lorsque le repas peut réellement être retiré
+    (`OFFERABLE_FROM`). Ce qui se joue ici — un livreur ne porte qu'une course
+    — est indépendant de cette règle, mais la fixture doit la respecter pour
+    atteindre le geste qu'elle veut éprouver.
     """
     seconde = build_order(restaurant, customer, reference="EC900002")
     for commande in (order, seconde):
-        OrderService.transition_to(order=commande, target=OrderStatus.CONFIRMED, actor=None)
+        for etape in (OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY):
+            OrderService.transition_to(order=commande, target=etape, actor=None)
     return order, seconde
 
 

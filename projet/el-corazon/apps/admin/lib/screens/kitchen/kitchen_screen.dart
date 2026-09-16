@@ -99,15 +99,27 @@ class _KitchenScreenState extends State<KitchenScreen> {
     await _relire();
   }
 
+  /// Relit **la file de cette cuisine**, et elle seule.
+  ///
+  /// ## Ce que cela remplace
+  ///
+  /// `refresh()` rechargeait la fenêtre agrégée de la supervision : un an de
+  /// commandes, toutes cuisines confondues, page après page — à chaque
+  /// événement du service. Un coup de feu à dix commandes déclenchait dix
+  /// téléchargements d'historique, pour n'en afficher qu'une de plus.
+  ///
+  /// L'erreur remonte désormais du service, qui garde la file précédente à
+  /// l'écran : en plein service, un poste qui se vide sur une coupure de trois
+  /// secondes est pire qu'un poste périmé qui le dit.
   Future<void> _relire() async {
     if (!mounted) return;
-    try {
-      await context.read<OrderManagementService>().refresh();
-      if (mounted) setState(() => _erreur = null);
-    } catch (erreur) {
-      if (mounted) setState(() => _erreur = '$erreur');
-    } finally {
-      if (mounted) setState(() => _chargement = false);
+    final service = context.read<OrderManagementService>();
+    await service.chargerLePoste(widget.restaurant.slug);
+    if (mounted) {
+      setState(() {
+        _erreur = service.erreurPoste;
+        _chargement = false;
+      });
     }
   }
 
@@ -152,7 +164,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
     final temsReel = context.watch<DashboardRealtimeService>();
 
     final poste = composerLePoste(
-      service.allOrders,
+      service.poste,
       minutesDePreparation: widget.restaurant.defaultPreparationMinutes,
     );
 
@@ -418,12 +430,11 @@ class _CarteCommande extends StatelessWidget {
             ),
             const SizedBox(height: 8),
 
-            // Les lignes. `lines` est vide sur la forme liste du contrat — le
-            // serveur ne les rend qu'au détail — d'où le repli sur le nombre
-            // d'articles, qui lui voyage partout.
-            if (commandeSocle.lines.isNotEmpty)
-              for (final ligne in commandeSocle.lines) _Ligne(ligne: ligne)
-            else
+            // Les plats, leurs options et les remarques du client. La forme de
+            // cuisine les porte toujours ; le repli sur « 3 article(s) » n'a
+            // plus lieu d'être — c'était tout ce que le poste savait dire.
+            for (final ligne in commandeSocle.lines) _Ligne(ligne: ligne),
+            if (commandeSocle.lines.isEmpty)
               Text(
                 '${commandeSocle.itemsCount} article(s)',
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
@@ -467,7 +478,7 @@ class _CarteCommande extends StatelessWidget {
 class _Ligne extends StatelessWidget {
   const _Ligne({required this.ligne});
 
-  final eccore.OrderLine ligne;
+  final eccore.KitchenLine ligne;
 
   @override
   Widget build(BuildContext context) {
@@ -497,7 +508,7 @@ class _Ligne extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 22),
               child: Text(
-                ligne.options.map((o) => o.optionName).join(' · '),
+                ligne.options.join(' · '),
                 style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
               ),
             ),

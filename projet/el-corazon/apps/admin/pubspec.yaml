@@ -53,6 +53,11 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Les tests montent un faux serveur : `HttpClientAdapter` est le point
+  # d'injection que `ApiClient` expose (`testAdapter`), et il vient de Dio.
+  # Déclaré ici et non en dépendance de production : l'application, elle, ne
+  # connaît que le socle.
+  dio: ^5.7.0
   flutter_launcher_icons: ^0.14.4
   flutter_native_splash: ^2.4.0
 

@@ -77,6 +77,7 @@ Map<String, dynamic> _course({
   String adresse = 'Rue du Commerce',
   String moyenPaiement = 'cash',
   String consignes = '',
+  String statutCommande = 'ready',
   bool ancienServeur = false,
 }) {
   return {
@@ -108,6 +109,7 @@ Map<String, dynamic> _course({
       'delivery_zone_name': 'Bè',
       'city_name': 'Lomé',
       'payment_method': moyenPaiement,
+      'order_status': statutCommande,
       'order_total': _montant(9500),
       'estimated_delivery_at': '2026-08-07T10:45:00Z',
       // Le serveur ne le rend qu'en espèces : c'est lui, et non le moyen de
@@ -396,6 +398,54 @@ void main() {
       // Faute de moyen de paiement, on se prépare à encaisser : l'erreur la
       // moins coûteuse des deux.
       expect(course.moyenPaiement, MoyenPaiement.especes);
+    });
+  });
+
+  group('Le retrait attend la cuisine', () {
+    Future<Course> avecLaCommande(String statutCommande) async {
+      final courses = await depot(
+        _FauxServeur(
+          coursesParStatut: {
+            eccore.DeliveryStatus.accepted: [
+              _course(statutCommande: statutCommande),
+            ],
+          },
+        ),
+      ).loadCourses();
+      return courses.single;
+    }
+
+    test('une commande encore en cuisine ne propose pas « récupérée »', () async {
+      // `allowed_transitions` porte bien `picked_up` — la machine de la
+      // **course** l'autorise — mais la commande, elle, n'est pas prête. Le
+      // serveur refuse ce geste ; l'écran ne doit donc pas l'offrir.
+      final course = await avecLaCommande('preparing');
+
+      expect(course.allowedTransitions, contains('picked_up'));
+      expect(course.prochaineEtape, isNull);
+      expect(course.enAttenteDeLaCuisine, isTrue);
+    });
+
+    test('une commande prête le propose', () async {
+      final course = await avecLaCommande('ready');
+
+      expect(course.prochaineEtape, EtapeCourse.recuperee);
+      expect(course.enAttenteDeLaCuisine, isFalse);
+    });
+
+    test('un serveur qui ne dit rien laisse le geste possible', () async {
+      // Masquer le bouton sur un champ absent immobiliserait le livreur alors
+      // que le serveur, lui, accepterait.
+      final courses = await depot(
+        _FauxServeur(
+          coursesParStatut: {
+            eccore.DeliveryStatus.accepted: [_course(ancienServeur: true)],
+          },
+        ),
+      ).loadCourses();
+
+      expect(courses.single.prochaineEtape, EtapeCourse.recuperee);
+      expect(courses.single.enAttenteDeLaCuisine, isFalse);
     });
   });
 

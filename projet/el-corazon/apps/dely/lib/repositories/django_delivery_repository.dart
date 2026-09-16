@@ -69,10 +69,31 @@ class Course {
       EtapeCourse.enRoute,
       EtapeCourse.livree,
     ]) {
-      if (allowedTransitions.contains(etape.versServeur)) return etape;
+      if (!allowedTransitions.contains(etape.versServeur)) continue;
+      // Le retrait attend la cuisine — voir [enAttenteDeLaCuisine].
+      if (etape == EtapeCourse.recuperee && !assignment.repasPretARetirer) return null;
+      return etape;
     }
     return null;
   }
+
+  /// Le geste suivant existe, mais la cuisine ne l'a pas encore permis.
+  ///
+  /// ## Pourquoi ce n'est pas un bouton grisé de plus
+  ///
+  /// `allowed_transitions` est calculé sur la seule machine de la **course** :
+  /// « récupérée » y figure dès l'acceptation, quelle que soit l'avancée de la
+  /// préparation. L'écran proposait donc au livreur de déclarer qu'il avait
+  /// pris un repas encore en cuisine — et le serveur l'acceptait, laissant la
+  /// commande bloquée en préparation pendant que la course allait jusqu'à
+  /// « livrée ».
+  ///
+  /// Le serveur refuse désormais ce geste. L'application ne doit donc plus le
+  /// proposer, et surtout : elle doit **dire pourquoi**, faute de quoi le
+  /// livreur ne voit qu'un bouton mort au moment où il arrive au comptoir.
+  bool get enAttenteDeLaCuisine =>
+      allowedTransitions.contains(EtapeCourse.recuperee.versServeur) &&
+      !assignment.repasPretARetirer;
 
   /// Le serveur accepte-t-il que je prenne cette course ?
   bool get peutAccepter =>
