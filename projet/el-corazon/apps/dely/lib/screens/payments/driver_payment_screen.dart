@@ -22,14 +22,27 @@ import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 /// Il reste donc au livreur la seule question qui le concerne : **combien
 /// dois-je encaisser en arrivant ?**
 class DriverPaymentScreen extends StatelessWidget {
-  const DriverPaymentScreen({
-    required this.order, required this.amount, super.key,
-  });
+  const DriverPaymentScreen({required this.order, super.key});
 
   final Course order;
-  final eccore.Money? amount;
 
-  bool get _enEspeces => order.moyenPaiement.aEncaisser;
+  /// Ce qu'il y a à encaisser — **tel que le serveur le dit**.
+  ///
+  /// ## Ce que l'écran déduisait
+  ///
+  /// Il lisait le **moyen de paiement** : « espèces » valait « à encaisser »,
+  /// tout le reste valait « déjà réglée ». Une commande en mobile money dont le
+  /// paiement n'a pas abouti — le prestataire refuse, le client abandonne à
+  /// l'écran de règlement — s'affichait donc « Déjà réglée. Vous n'avez rien à
+  /// encaisser », et le livreur repartait sans rien.
+  ///
+  /// `amount_to_collect` est calculé par le serveur, qui connaît l'état réel du
+  /// règlement (`AssignmentSerializer.get_amount_to_collect`). Nul veut dire
+  /// « rien à encaisser » ; un montant veut dire ce montant-là, et il peut
+  /// différer du total.
+  eccore.Money? get _aEncaisser => order.aEncaisser;
+
+  bool get _enEspeces => _aEncaisser != null;
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +76,7 @@ class DriverPaymentScreen extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       _enEspeces
-                          ? amount?.format() ?? '—'
+                          ? _aEncaisser!.format()
                           : order.moyenPaiement.libelle,
                       style: theme.textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.bold,

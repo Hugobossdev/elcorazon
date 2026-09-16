@@ -69,6 +69,12 @@ class _FakeServer implements HttpClientAdapter {
   static const bonCode = '123456';
   String? emailVerifiedAt;
 
+  /// Le serveur ne répond pas — panne de transport, pas refus d'identité.
+  bool enPanne = false;
+
+  /// Le serveur refuse l'identité : jeton révoqué, compte désactivé.
+  bool refuseLIdentite = false;
+
   @override
   void close({bool force = false}) {}
 
@@ -80,6 +86,13 @@ class _FakeServer implements HttpClientAdapter {
   ) async {
     requests.add('${options.method} ${options.path}');
     authorizations.add(options.headers['Authorization'] as String?);
+
+    if (enPanne) {
+      return _json({'detail': 'Service indisponible.'}, 503);
+    }
+    if (refuseLIdentite) {
+      return _json({'detail': 'Jeton invalide.'}, 401);
+    }
     if (options.data is Map) {
       bodies.add(Map<String, dynamic>.from(options.data as Map));
     }
@@ -399,6 +412,67 @@ void main() {
       final user = container.read(sessionProvider).value;
       expect(user, isNotNull);
       expect(user!.emailVerifiedAt, isNull);
+    });
+
+    test('une panne de réseau ne déconnecte pas — elle met hors ligne', () async {
+      // Le défaut : `/auth/me/` injoignable rendait un état d'erreur sans
+      // valeur, donc `null` pour les applications. L'application livreur
+      // affichait l'écran de connexion à quelqu'un dont les jetons étaient
+      // intacts — au moment précis où il n'avait pas de réseau pour les faire
+      // vérifier.
+      await tokenStorage.saveTokens(
+        accessToken: _jwt(expired: false),
+        refreshToken: 'refresh-valide',
+      );
+      final container = conteneur();
+      server.enPanne = true;
+
+      await container.read(sessionProvider.notifier).restoreSession();
+
+      final etat = container.read(sessionProvider);
+      expect(etat.hasError, isTrue);
+      expect(etat.error, isA<SessionHorsLigne>());
+      // Les jetons restent : c'est ce qui rend la reprise possible.
+      expect(await tokenStorage.getRefreshToken(), 'refresh-valide');
+      expect(
+        await container.read(sessionProvider.notifier).aUneSessionMemorisee(),
+        isTrue,
+      );
+    });
+
+    test('la reprise aboutit dès que le serveur répond', () async {
+      await tokenStorage.saveTokens(
+        accessToken: _jwt(expired: false),
+        refreshToken: 'refresh-valide',
+      );
+      final container = conteneur();
+      server.enPanne = true;
+      await container.read(sessionProvider.notifier).restoreSession();
+
+      server.enPanne = false;
+      await container.read(sessionProvider.notifier).restoreSession();
+
+      expect(container.read(sessionProvider).value?.email, 'yao@elcorazon.test');
+      expect(container.read(sessionProvider).hasError, isFalse);
+    });
+
+    test('un refus d’identité, lui, ferme bien la session', () async {
+      // La distinction porte sur la **cause** : un jeton révoqué ferme la
+      // session et efface le stockage ; une panne de transport ne touche à
+      // rien. Confondre les deux, c'est soit déconnecter pour un réseau
+      // absent, soit garder une session que le serveur a révoquée.
+      await tokenStorage.saveTokens(
+        accessToken: _jwt(expired: false),
+        refreshToken: 'refresh-refuse',
+      );
+      final container = conteneur();
+      server.refuseLIdentite = true;
+
+      await container.read(sessionProvider.notifier).restoreSession();
+
+      expect(container.read(sessionProvider).value, isNull);
+      expect(container.read(sessionProvider).error, isNot(isA<SessionHorsLigne>()));
+      expect(await tokenStorage.getRefreshToken(), isNull);
     });
 
     test('reload relit le compte sans toucher aux jetons', () async {

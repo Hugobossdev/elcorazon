@@ -72,7 +72,7 @@ void main() {
 
   Future<void> afficher(WidgetTester tester, Course c) async {
     await tester.pumpWidget(
-      MaterialApp(home: DriverPaymentScreen(order: c, amount: c.total)),
+      MaterialApp(home: DriverPaymentScreen(order: c)),
     );
   }
 
@@ -97,6 +97,10 @@ void main() {
 
   group('Commande déjà réglée', () {
     testWidgets('ne demande aucun encaissement', (tester) async {
+      // « Déjà réglée » se lit sur `amount_to_collect`, que le serveur ne rend
+      // qu'en espèces : c'est lui qui connaît l'état du règlement. L'écran le
+      // déduisait du **moyen de paiement**, si bien qu'un mobile money dont le
+      // paiement n'avait pas abouti s'affichait « rien à encaisser ».
       await afficher(tester, course(moyen: 'mobile_money'));
 
       expect(find.text('Déjà réglée'), findsOneWidget);

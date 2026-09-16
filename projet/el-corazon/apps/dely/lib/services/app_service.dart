@@ -69,6 +69,9 @@ class AppService extends ChangeNotifier {
       _notificationOpenedSubscription;
 
   eccore.User? _currentUser;
+
+  /// La dernière restauration a échoué **faute de réseau**, jetons intacts.
+  bool _sessionHorsLigne = false;
   bool _isInitialized = false;
   List<Course> _courses = [];
 
@@ -95,6 +98,17 @@ class AppService extends ChangeNotifier {
 
   // Getters
   eccore.User? get currentUser => _currentUser;
+
+  /// Vrai quand la session n'a pas pu être **vérifiée**, et seulement alors.
+  ///
+  /// L'écran doit alors proposer de réessayer, pas de se reconnecter : les
+  /// jetons sont là, c'est le serveur qui manque.
+  bool get sessionHorsLigne => _sessionHorsLigne;
+
+  /// Rejoue la restauration de session — le geste du bouton « Réessayer », et
+  /// celui de la reprise automatique quand le réseau revient.
+  Future<void> reprendreLaSession() =>
+      _container.read(eccore.sessionProvider.notifier).restoreSession();
   List<Course> get orders => _courses;
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
@@ -125,6 +139,12 @@ class AppService extends ChangeNotifier {
   void _onSessionChanged(AsyncValue<eccore.User?> next) {
     final wasConnected = _currentUser != null;
     _currentUser = next.value;
+    // « Hors ligne » n'est pas « déconnecté » : la session est mémorisée, elle
+    // n'a simplement pas pu être vérifiée. Sans cette distinction, l'écran de
+    // connexion s'affichait à un livreur qui ouvrait son application dans une
+    // zone sans couverture — au moment précis où il ne pouvait pas faire
+    // vérifier ses identifiants.
+    _sessionHorsLigne = next.hasError && next.error is eccore.SessionHorsLigne;
 
     // La file des courses et l'émission de position suivent la session, pas un
     // écran : un livreur connecté reste joignable et reste suivi même quand il

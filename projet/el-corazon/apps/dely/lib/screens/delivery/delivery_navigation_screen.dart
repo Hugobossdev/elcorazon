@@ -326,29 +326,37 @@ class _DeliveryNavigationScreenState extends State<DeliveryNavigationScreen> {
     );
   }
 
+  /// Ouvre l'encaissement de **la course en cours**.
+  ///
+  /// ## Ce qu'il ouvrait
+  ///
+  /// `assignedDeliveries.first` — la plus récente de mes courses, historique
+  /// compris. Un livreur qui venait de terminer sa tournée y lisait donc
+  /// « À encaisser 9 500 CFA » sur une course livrée une heure plus tôt, et
+  /// pouvait réclamer deux fois le même montant. Entre deux courses, l'écran
+  /// montrait la dernière au lieu de dire qu'il n'y en a pas.
+  ///
+  /// `activeCourse` est la course qu'il porte, et il n'en porte qu'une (L6).
   void _navigateToPayments() {
     final appService = Provider.of<AppService>(context, listen: false);
-    final assignedDeliveries = appService.assignedDeliveries;
+    final course = appService.activeCourse;
 
-    if (assignedDeliveries.isNotEmpty) {
-      final order = assignedDeliveries.first;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => DriverPaymentScreen(
-            order: order,
-            amount: order.total,
-          ),
-        ),
-      );
-    } else {
+    if (course == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Aucune commande disponible pour le paiement'),
+          content: Text('Aucune course en cours : rien à encaisser.'),
           backgroundColor: Colors.orange,
         ),
       );
+      return;
     }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DriverPaymentScreen(order: course),
+      ),
+    );
   }
 
   /// Ouvre la discussion avec le client de la course en cours.

@@ -35,6 +35,35 @@ final expectedUserTypeProvider = Provider<String>((ref) {
   throw UnimplementedError('expectedUserTypeProvider doit être surchargé par app.');
 });
 
+/// La session n'a pas pu être **vérifiée** — elle n'est pas fermée pour autant.
+///
+/// ## Ce que cette distinction évite
+///
+/// Au démarrage, `restoreSession` interroge `/auth/me/`. Quand cet appel échoue
+/// pour une raison de transport — pas de réseau, serveur muet, 5xx — l'état
+/// devenait une erreur sans valeur, et les applications lisaient donc `null` :
+/// l'application livreur affichait l'écran de connexion, l'application cliente
+/// repassait en visiteur. Les jetons étaient pourtant intacts.
+///
+/// Concrètement, un livreur qui ouvrait son application dans un parking ou une
+/// zone sans couverture se voyait demander ses identifiants — au moment
+/// précis où il ne pouvait pas les faire vérifier.
+///
+/// Le commentaire du code le disait déjà — « ne pas déconnecter sur la seule
+/// foi d'un appel qui a échoué » — mais rien ne permettait aux écrans de faire
+/// la différence. C'est ce que porte cette exception : *hors ligne*, et non
+/// *déconnecté*. Les jetons restent en place, et une nouvelle tentative
+/// suffira dès que le réseau reviendra.
+class SessionHorsLigne implements Exception {
+  const SessionHorsLigne(this.cause);
+
+  /// L'échec de transport d'origine — pour le journal, pas pour l'écran.
+  final Object cause;
+
+  @override
+  String toString() => 'SessionHorsLigne($cause)';
+}
+
 /// Source de vérité de la session — remplace, dans chaque app, la lecture
 /// directe de `Supabase.instance.client.auth.currentUser`.
 ///
@@ -78,10 +107,23 @@ class SessionNotifier extends AsyncNotifier<User?> {
       } else {
         // Panne passagère (réseau, 5xx) : ne pas déconnecter sur la seule foi
         // d'un appel qui a échoué pour une raison qui n'a rien à voir avec la
-        // validité de la session.
-        state = AsyncError(error, StackTrace.current);
+        // validité de la session. L'erreur est **nommée** pour que les écrans
+        // puissent proposer de réessayer au lieu de redemander un mot de passe
+        // — voir [SessionHorsLigne].
+        state = AsyncError(SessionHorsLigne(error), StackTrace.current);
       }
     }
+  }
+
+  /// Une session est-elle **mémorisée** sur cet appareil ?
+  ///
+  /// Vrai dès qu'un jeton de rafraîchissement existe, sans le vérifier auprès
+  /// du serveur : c'est exactement la question que pose un écran hors ligne —
+  /// « ai-je quelqu'un à reconnecter quand le réseau reviendra ? ».
+  Future<bool> aUneSessionMemorisee() async {
+    final tokenStorage = ref.read(tokenStorageProvider);
+    return await tokenStorage.getRefreshToken() != null ||
+        await tokenStorage.hasValidAccessToken();
   }
 
   Future<User> login({required String email, required String password}) {

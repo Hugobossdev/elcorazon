@@ -54,6 +54,24 @@ class _OrdersScreenState extends State<OrdersScreen>
     return Consumer<AppService>(
       builder: (context, appService, child) {
         if (!appService.isLoggedIn) {
+          // Hors ligne n'est pas déconnecté : la session est mémorisée, elle
+          // n'a pas pu être vérifiée au démarrage. Envoyer se reconnecter
+          // quelqu'un qui n'a pas de réseau ne mène nulle part.
+          if (appService.sessionHorsLigne) {
+            return Scaffold(
+              backgroundColor: theme.colorScheme.surface,
+              appBar: const GlassAppBar(title: 'Mes commandes', showBack: false),
+              body: etats.EmptyStateWidget(
+                title: 'Pas de connexion',
+                message: 'Votre compte est enregistré sur cet appareil : il n’y '
+                    'a rien à ressaisir. Réessayez dès que le réseau revient.',
+                icon: Icons.wifi_off_rounded,
+                actionText: 'Réessayer',
+                onAction: () => appService.reprendreLaSession(),
+              ),
+            );
+          }
+
           return Scaffold(
             backgroundColor: theme.colorScheme.surface,
             appBar: const GlassAppBar(title: 'Mes commandes', showBack: false),

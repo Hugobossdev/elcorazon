@@ -104,6 +104,19 @@ class AppService extends ChangeNotifier {
   bool get isLoggedIn => _currentUser != null;
   bool get isInitialized => _isInitialized;
 
+  /// La session n'a pas pu être **vérifiée** — elle n'est pas fermée.
+  ///
+  /// L'écran doit alors proposer de réessayer plutôt que de se connecter : les
+  /// identifiants sont mémorisés, c'est le serveur qui manque.
+  bool get sessionHorsLigne => _sessionHorsLigne;
+  bool _sessionHorsLigne = false;
+
+  /// Rejoue la restauration de session — le geste du bouton « Réessayer ».
+  Future<void> reprendreLaSession() async {
+    await _container.read(eccore.sessionProvider.notifier).restoreSession();
+    if (_currentUser != null) await _loadUserOrders();
+  }
+
   /// Pourquoi le catalogue est vide, quand il l'est parce que le chargement a
   /// échoué. `null` quand il a abouti — fût-ce sur une carte réellement vide.
   ///
@@ -195,6 +208,11 @@ class AppService extends ChangeNotifier {
     // sur `next.value` pendant le chargement viderait le carnet d'adresses au
     // démarrage, avant même de savoir qui est connecté.
     if (next.isLoading) return;
+
+    // « Hors ligne » n'est pas « déconnecté » : les jetons sont là, c'est la
+    // vérification qui n'a pas abouti. Sans cette distinction, l'application
+    // repassait en visiteur au démarrage sur un simple manque de réseau.
+    _sessionHorsLigne = next.hasError && next.error is eccore.SessionHorsLigne;
 
     final etaitConnecte = _currentUser != null;
     final djangoUser = next.value;

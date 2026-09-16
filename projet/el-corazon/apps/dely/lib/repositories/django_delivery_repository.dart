@@ -199,8 +199,27 @@ class Course {
   /// La course m'est proposée et je n'y ai pas encore répondu.
   bool get estProposee => assignment.status == eccore.DeliveryStatus.offered;
 
+  /// Je l'ai **refusée** — ou le siège l'a annulée avant que je la prenne.
+  ///
+  /// Distinct d'une course terminée : refuser n'est pas livrer, et n'incrémente
+  /// pas même le compteur d'annulations du livreur. Le serveur la retire de mes
+  /// listes au rechargement suivant ; d'ici là, elle ne doit apparaître nulle
+  /// part.
+  bool get estEcartee =>
+      assignment.status == eccore.DeliveryStatus.declined ||
+      assignment.status == eccore.DeliveryStatus.cancelled;
+
   /// Elle est à moi — acceptée, en cours, ou déjà livrée.
-  bool get estMienne => !estProposee;
+  ///
+  /// ## Ce que « pas proposée » rangeait ici
+  ///
+  /// `estMienne` valait `!estProposee`, c'est-à-dire **aussi** les courses
+  /// refusées et annulées : la course qu'un livreur venait de décliner
+  /// réapparaissait aussitôt dans « Mes courses », onglet « terminées », sous
+  /// le libellé « Annulée » — jusqu'au rechargement suivant, qui la faisait
+  /// disparaître sans explication. Refuser une course donnait donc l'impression
+  /// de l'avoir faite, puis de l'avoir perdue.
+  bool get estMienne => !estProposee && !estEcartee;
 }
 
 /// Courses du livreur contre le backend Django (Phase 6) — remplace les appels

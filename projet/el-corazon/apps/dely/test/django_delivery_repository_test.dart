@@ -401,6 +401,44 @@ void main() {
     });
   });
 
+  group('Une course refusée disparaît', () {
+    // Montée directement, sans passer par le serveur : une course refusée ne
+    // figure dans **aucune** des trois listes qu'il sert (proposées, actives,
+    // livrées récentes). Elle n'existe côté application que parce que le refus
+    // vient de rendre la course à jour — et c'est exactement là qu'elle se
+    // rangeait au mauvais endroit.
+    Course avecLEtape(String etape) =>
+        Course(assignment: eccore.Assignment.fromJson(_course(statut: etape)));
+
+    test('elle n’est ni proposée, ni mienne', () {
+      // `estMienne` valait « pas proposée », donc **aussi** refusée et
+      // annulée : la course qu'un livreur venait de décliner réapparaissait
+      // dans « Mes courses », onglet terminées, sous le libellé « Annulée » —
+      // jusqu'au rechargement suivant, qui la faisait disparaître sans un mot.
+      final refusee = avecLEtape(eccore.DeliveryStatus.declined);
+
+      expect(refusee.estProposee, isFalse);
+      expect(refusee.estMienne, isFalse);
+      expect(refusee.estEcartee, isTrue);
+    });
+
+    test('une course annulée non plus', () {
+      final annulee = avecLEtape(eccore.DeliveryStatus.cancelled);
+
+      expect(annulee.estMienne, isFalse);
+      expect(annulee.estEcartee, isTrue);
+    });
+
+    test('une course livrée, elle, reste la mienne', () {
+      // L'historique doit garder ce qui a été fait : c'est de lui que vivent
+      // les gains et les statistiques.
+      final livree = avecLEtape(eccore.DeliveryStatus.delivered);
+
+      expect(livree.estMienne, isTrue);
+      expect(livree.estEcartee, isFalse);
+    });
+  });
+
   group('Le retrait attend la cuisine', () {
     Future<Course> avecLaCommande(String statutCommande) async {
       final courses = await depot(

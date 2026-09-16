@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:elcora_dely/presentation/etat_compte.dart';
 import 'package:elcora_dely/screens/auth/account_status_screen.dart';
 import 'package:elcora_dely/screens/auth/driver_auth_screen.dart';
+import 'package:elcora_dely/screens/auth/session_hors_ligne_screen.dart';
 import 'package:elcora_dely/screens/auth/verification_screen.dart';
 import 'package:elcora_dely/screens/delivery/delivery_navigation_screen.dart';
 import 'package:elcora_dely/services/app_service.dart';
@@ -44,6 +45,10 @@ class DriverGate extends StatelessWidget {
     final compte = app.currentUser;
 
     if (compte == null) {
+      // Hors ligne n'est pas déconnecté : la session est mémorisée, elle n'a
+      // pas pu être vérifiée. Redemander un mot de passe à quelqu'un qui n'a
+      // pas de réseau ne mène nulle part — c'est l'écran de reprise qu'il faut.
+      if (app.sessionHorsLigne) return const SessionHorsLigneScreen();
       return const DriverAuthScreen();
     }
 
