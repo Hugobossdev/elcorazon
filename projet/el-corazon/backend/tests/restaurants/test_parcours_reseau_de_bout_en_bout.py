@@ -399,6 +399,18 @@ class TestReseauDeBoutEnBout:
             livreur_cocody.post(reverse("v1:delivery:assignment-accept", args=[course.pk]))
         )
         assert acceptee["recipient_phone"] == "+2250700000099"
+        # La commande est prête : le livreur peut la retirer. C'est ce que la
+        # course dit désormais, et ce que l'application lit pour proposer — ou
+        # non — le geste.
+        assert acceptee["order_status"] == OrderStatus.READY
+
+        # Le client, lui, voit **qui** vient : identité et numéro, tant que la
+        # course est engagée. Les deux manquaient au contrat, si bien que
+        # « Message » et « Appeler » restaient grisés toute la livraison.
+        pendant = ok(client.get(reverse("v1:tracking:order", args=[commande["id"]])))
+        assert pendant["courier"]["full_name"] == livreurs["cocody"].user.full_name
+        assert pendant["courier"]["phone"] == livreurs["cocody"].user.phone
+
         for etape in ("picked_up", "on_the_way", "delivered"):
             ok(
                 livreur_cocody.post(
@@ -411,6 +423,12 @@ class TestReseauDeBoutEnBout:
         # =============================================== 25. le client
         suivi = ok(client.get(reverse("v1:orders:order-detail", args=[commande["id"]])))
         assert suivi["status"] == OrderStatus.DELIVERED
+
+        # Livrée : il reste de quoi noter la livraison — le nom — mais plus
+        # personne à joindre pour cette course, donc plus de numéro.
+        apres = ok(client.get(reverse("v1:tracking:order", args=[commande["id"]])))
+        assert apres["courier"]["full_name"] == livreurs["cocody"].user.full_name
+        assert apres["courier"]["phone"] == ""
 
         # ============================================== 26. le siège
         filtres = {

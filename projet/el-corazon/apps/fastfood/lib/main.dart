@@ -58,6 +58,26 @@ late final Future<void> sessionReadyFuture;
 /// — même convention que `sessionReadyFuture` ci-dessus.
 ApiClient get apiClient => _providerContainer.read(apiClientProvider);
 
+/// Pose le conteneur que `main()` construit d'ordinaire — **pour les tests**.
+///
+/// ## Pourquoi cette couture existe
+///
+/// `AppService` tient des règles qui décident de ce que le client voit : quand
+/// son historique est lu, et quand il est **oublié**. Cette seconde règle
+/// protège une donnée personnelle — sur un téléphone partagé, le compte suivant
+/// ne doit pas hériter des commandes du précédent — et elle n'était vérifiable
+/// par aucun test : le service lit son `ApiClient` à travers un global que
+/// `main()` est seul à pouvoir affecter, si bien que le construire hors de
+/// l'application levait une `LateInitializationError`.
+///
+/// Une couture, donc, plutôt qu'un service de plus à injecter partout : elle
+/// n'ajoute aucun chemin en production — `main()` reste le seul à l'appeler
+/// pour de bon — et rend testable la règle qui en avait le plus besoin.
+@visibleForTesting
+void poserLeConteneurPourTests(ProviderContainer conteneur) {
+  _providerContainer = conteneur;
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 

@@ -103,11 +103,12 @@ coordonnées du client. L'établissement est obligatoire et filtré côté serve
   livreur » déclarent désormais leur dépendance et distinguent la panne du vide,
   mais n'ont **pas** de test widget : leur montage réclame Google Maps. Le
   contrat qu'ils partagent, lui, est testé (`fenetres_de_supervision_test.dart`) ;
-* le comportement de session de `AppService` (client et livreur) est vérifié
-  dans le socle (`verification_flow_test.dart`) et par lecture dans les apps :
-  ces services sont des singletons qui construisent le push, la géolocalisation
-  et le temps réel à la construction, ce qu'un test unitaire ne monte pas sans
-  un échafaudage disproportionné.
+* le comportement de session est vérifié dans le socle
+  (`verification_flow_test.dart`) **et**, côté client, de bout en bout
+  (`session_du_compte_test.dart` : connexion, déconnexion, compte suivant sur le
+  même téléphone). Côté livreur, l'état hors ligne n'est vérifié que dans le
+  socle : le portail monte l'écran d'appel et le routeur de notifications, que
+  ce test ne cherche pas à monter.
 
 ---
 
