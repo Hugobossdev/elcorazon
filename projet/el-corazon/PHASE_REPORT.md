@@ -33,7 +33,7 @@
 > | `flutter test` client | non exécuté | 443 | **461** |
 > | `flutter test` admin | non exécuté | 238 | **267** |
 > | `flutter test` livreur | non exécuté | 168 | **183** |
-> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 102 passés, 0 échec** |
+> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 116 passés, 0 échec** |
 > | `ruff check` · `ruff format --check` · `mypy --strict` | non exécutés | verts | verts (444 fichiers, 296 sources) |
 > | `spectacular --fail-on-warn` | non exécuté | non exécuté | vert |
 > | `tools/code_mort.py` | aucun fichier injoignable | idem | idem |
@@ -88,7 +88,8 @@ porte ses mesures.
 | 5 | `d4b4bcf`, `f99b646` | contrats, scénarios, trace (`AUDIT_2026-09-15.md`) |
 | 2 *(reprise)* | `39879e7`, `2a34956` | suivi après coupure, notification, barre de l'app |
 | 3 *(reprise)* | `ba692ba` | le règlement cesse de se déduire du moyen de paiement |
-| 4 *(reprise)* | — | la journée d'un rapport commence chez la cuisine |
+| 4 *(reprise)* | `6c0ec33` | la journée d'un rapport commence chez la cuisine |
+| 5 *(reprise)* | — | contrat de l'encaissement, scénario d'un fuseau distinct |
 
 **Deux phases ont été rouvertes**, et c'est le résultat de la relecture plutôt
 qu'un oubli d'ordonnancement :
@@ -103,9 +104,14 @@ qu'un oubli d'ordonnancement :
 * la phase 4 avait corrigé **une** convention d'heure — les fermetures
   exceptionnelles — et laissé intacte celle des rapports, qui tranchait les
   journées à minuit UTC. Elle avait aussi retiré onze méthodes mortes en
-  laissant les neuf de la couche suivante.
+  laissant les neuf de la couche suivante ;
+* la phase 5 avait éprouvé contre le schéma les trois formes neuves de la
+  chaîne de livraison, et laissé sans test de contrat l'**encaissement** — le
+  cinquième objet, et celui dont un champ nullable porte désormais une
+  information métier.
 
-Voir `AUDIT_2026-09-15.md`, section B bis, pour les deux.
+Voir `AUDIT_2026-09-15.md`, section B ter, qui les réunit : les trois fois, la
+correction s'était arrêtée au premier endroit où le symptôme disparaissait.
 
 ## Phase 1 — ce qui a changé de règle
 

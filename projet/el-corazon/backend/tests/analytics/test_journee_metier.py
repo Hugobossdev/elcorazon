@@ -44,8 +44,8 @@ from apps.analytics.perimetre import (
     resolve_perimetre,
 )
 from apps.analytics.reports import ReportingService
-from apps.geography.models import City, Country, DeliveryZone
 from apps.catalog.models import Category, MenuItem
+from apps.geography.models import City, Country, DeliveryZone
 from apps.orders.models import Order, OrderLine, PaymentMethod
 from apps.orders.states import OrderStatus
 from apps.restaurants.models import Restaurant, RestaurantStatus, StaffMembership
@@ -80,9 +80,7 @@ def douala(cameroun: Country) -> DeliveryZone:
     carre = Polygon(
         ((9.60, 3.95), (9.80, 3.95), (9.80, 4.15), (9.60, 4.15), (9.60, 3.95)), srid=4326
     )
-    ville = City.objects.create(
-        country=cameroun, name="Douala", slug="douala", centroid=DOUALA
-    )
+    ville = City.objects.create(country=cameroun, name="Douala", slug="douala", centroid=DOUALA)
     return DeliveryZone.objects.create(
         city=ville,
         name="Akwa",
@@ -203,9 +201,7 @@ def analyste_douala(cuisine_douala: Restaurant) -> APIClient:
         full_name="Analyste Douala",
         user_type=UserType.STAFF,
     )
-    compte.roles.add(
-        Role.objects.create(name="Analytics Douala", permissions=["analytics.read"])
-    )
+    compte.roles.add(Role.objects.create(name="Analytics Douala", permissions=["analytics.read"]))
     StaffMembership.objects.create(user=compte, restaurant=cuisine_douala)
     client = APIClient()
     client.force_authenticate(compte)
@@ -286,9 +282,7 @@ class TestFuseauDuPerimetre:
         self, restaurant: Restaurant, gerant_douala: User
     ) -> None:
         """Le fuseau n'est pas une porte d'entrée : le cloisonnement passe avant."""
-        perimetre = resolve_perimetre(
-            user=gerant_douala, params={"restaurant": restaurant.slug}
-        )
+        perimetre = resolve_perimetre(user=gerant_douala, params={"restaurant": restaurant.slug})
 
         assert perimetre.is_empty
 
@@ -313,9 +307,7 @@ class TestLesRapportsSuiventLaCuisine:
             plat=plat_douala,
             reference="EC900001",
         )
-        perimetre = resolve_perimetre(
-            user=siege, params={"restaurant": cuisine_douala.slug}
-        )
+        perimetre = resolve_perimetre(user=siege, params={"restaurant": cuisine_douala.slug})
 
         du_jour = ReportingService.revenue_by_day(
             start=dt.date(2026, 9, 17), end=dt.date(2026, 9, 17), perimetre=perimetre
@@ -338,9 +330,7 @@ class TestLesRapportsSuiventLaCuisine:
             plat=plat_douala,
             reference="EC900002",
         )
-        perimetre = resolve_perimetre(
-            user=siege, params={"restaurant": cuisine_douala.slug}
-        )
+        perimetre = resolve_perimetre(user=siege, params={"restaurant": cuisine_douala.slug})
 
         du_jour = ReportingService.revenue_by_day(
             start=dt.date(2026, 9, 17), end=dt.date(2026, 9, 17), perimetre=perimetre
@@ -369,9 +359,7 @@ class TestLesRapportsSuiventLaCuisine:
             plat=plat_douala,
             reference="EC900003",
         )
-        perimetre = resolve_perimetre(
-            user=siege, params={"restaurant": cuisine_douala.slug}
-        )
+        perimetre = resolve_perimetre(user=siege, params={"restaurant": cuisine_douala.slug})
 
         lignes = ReportingService.revenue_by_day(
             start=dt.date(2026, 9, 17), end=dt.date(2026, 9, 17), perimetre=perimetre
@@ -396,9 +384,7 @@ class TestLesRapportsSuiventLaCuisine:
             plat=plat_douala,
             reference="EC900004",
         )
-        perimetre = resolve_perimetre(
-            user=siege, params={"restaurant": cuisine_douala.slug}
-        )
+        perimetre = resolve_perimetre(user=siege, params={"restaurant": cuisine_douala.slug})
 
         du_jour = ReportingService.top_products(
             start=dt.date(2026, 9, 17), end=dt.date(2026, 9, 17), perimetre=perimetre
@@ -422,9 +408,7 @@ class TestLesRapportsSuiventLaCuisine:
             plat=plat_douala,
             reference="EC900005",
         )
-        perimetre = resolve_perimetre(
-            user=siege, params={"restaurant": cuisine_douala.slug}
-        )
+        perimetre = resolve_perimetre(user=siege, params={"restaurant": cuisine_douala.slug})
 
         apercu = ReportingService.overview(
             start=dt.date(2026, 9, 17), end=dt.date(2026, 9, 17), perimetre=perimetre

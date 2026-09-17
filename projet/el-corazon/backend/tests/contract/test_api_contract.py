@@ -212,6 +212,136 @@ class TestContratsDeLaChaineLivraison:
         assert_conforme(reponse.data, component(schema, "Tracking"), schema)
 
 
+class TestContratDeLEncaissement:
+    """Ce que le paiement publie — et ce qu'il reste à réclamer à la porte.
+
+    Le cinquième objet de la chaîne, et le seul qui n'avait aucun test de
+    contrat. Il en avait besoin plus que les autres : `amount_to_collect` est
+    **nullable**, et sa valeur a changé de sens — elle se déduisait du *moyen*
+    de paiement, elle est maintenant la soustraction de ce qui reste dû. Un
+    champ dont la nullité porte une information métier est celui qu'un
+    sérialiseur déclare mal sans que rien ne s'en aperçoive : c'est ainsi que
+    `courier_fee` était déclaré obligatoire tout en sortant nul.
+    """
+
+    def encaisse(self, order: Order, montant: Any, reference: str) -> Any:
+        from apps.payments.models import PaymentProvider, PaymentStatus, Transaction
+        from apps.payments.services import report_settled_total
+
+        transaction = Transaction.objects.create(
+            order=order,
+            provider=PaymentProvider.PAYDUNYA,
+            provider_reference=reference,
+            amount=montant,
+            status=PaymentStatus.COMPLETED,
+        )
+        report_settled_total(order)
+        return transaction
+
+    def test_la_transaction_est_complete(
+        self, as_customer: APIClient, order: Order, schema: dict[str, Any]
+    ) -> None:
+        self.encaisse(order, order.total, "PD-CONTRAT-001")
+
+        reponse = as_customer.get(reverse("v1:payments:transaction-list"))
+
+        assert reponse.status_code == 200, reponse.data
+        assert reponse.data["results"], "la transaction du client doit lui être visible"
+        for ligne in reponse.data["results"]:
+            assert_conforme(ligne, component(schema, "Transaction"), schema)
+
+    def test_une_transaction_en_cours_reste_conforme(
+        self, as_customer: APIClient, order: Order, schema: dict[str, Any]
+    ) -> None:
+        """Le cas qui fait sortir les nuls : rien n'est encore encaissé.
+
+        `completed_at` et `failure_reason` sont vides tant que le prestataire
+        n'a pas répondu — c'est l'état dans lequel **toute** transaction passe,
+        donc celui que le contrat doit supporter en premier.
+        """
+        from apps.payments.models import PaymentProvider, PaymentStatus, Transaction
+
+        Transaction.objects.create(
+            order=order,
+            provider=PaymentProvider.PAYDUNYA,
+            provider_reference="PD-CONTRAT-002",
+            amount=order.total,
+            status=PaymentStatus.PROCESSING,
+        )
+
+        reponse = as_customer.get(reverse("v1:payments:transaction-list"))
+
+        assert reponse.status_code == 200, reponse.data
+        for ligne in reponse.data["results"]:
+            assert_conforme(ligne, component(schema, "Transaction"), schema)
+
+    def test_la_commande_publie_ce_qui_a_ete_encaisse(
+        self, as_customer: APIClient, order: Order, schema: dict[str, Any]
+    ) -> None:
+        """`amount_paid` est nul quand rien n'a été réglé, et doit l'être **déclaré**.
+
+        C'est par lui que la livraison et le back-office savent ce qui reste
+        dû, sans connaître le module de paiement (ADR-002).
+        """
+        avant = as_customer.get(reverse("v1:orders:order-detail", args=[order.pk]))
+        assert avant.status_code == 200, avant.data
+        assert avant.data["amount_paid"] is None
+        assert_conforme(avant.data, component(schema, "OrderDetail"), schema)
+
+        self.encaisse(order, order.total, "PD-CONTRAT-003")
+
+        apres = as_customer.get(reverse("v1:orders:order-detail", args=[order.pk]))
+        assert apres.data["amount_paid"] == {
+            "amount": str(order.total.amount_minor),
+            "currency": order.total.currency,
+        }
+        assert_conforme(apres.data, component(schema, "OrderDetail"), schema)
+
+    @pytest.mark.parametrize(
+        ("part", "attendu_nul"),
+        [
+            (0, False),  # rien de réglé : le total reste à encaisser
+            (50, False),  # à moitié réglé : le reste, et non le total
+            (100, True),  # soldé : plus rien à réclamer
+        ],
+    )
+    def test_le_montant_a_encaisser_reste_conforme_a_chaque_etat_de_reglement(
+        self,
+        restaurant: Restaurant,
+        customer: User,
+        courier: Any,
+        schema: dict[str, Any],
+        part: int,
+        attendu_nul: bool,
+    ) -> None:
+        """Les trois états du règlement, contre le même composant de schéma.
+
+        Le champ est déclaré nullable ; ces trois cas vérifient qu'il l'est
+        **et** que sa valeur suit la soustraction, pas le moyen de paiement.
+        """
+        from apps.delivery.services import AssignmentService
+        from apps.orders.states import OrderStatus
+        from common.money import Money
+        from tests.fixtures import build_order
+
+        commande = build_order(
+            restaurant, customer, reference=f"EC7100{part:02d}", status=OrderStatus.READY
+        )
+        if part:
+            montant = Money(commande.total.amount_minor * part // 100, commande.total.currency)
+            self.encaisse(commande, montant, f"PD-CONTRAT-1{part:03d}")
+
+        course = AssignmentService.offer(order=commande, courier=courier)
+        client = APIClient()
+        client.force_authenticate(courier.user)
+
+        reponse = client.get(reverse("v1:delivery:assignment-detail", args=[course.pk]))
+
+        assert reponse.status_code == 200, reponse.data
+        assert_conforme(reponse.data, component(schema, "Assignment"), schema)
+        assert (reponse.data["amount_to_collect"] is None) is attendu_nul
+
+
 class TestFormeDesMontants:
     """ADR-007 — `{"amount": "1250", "currency": "XOF"}`, la valeur en chaîne."""
 
