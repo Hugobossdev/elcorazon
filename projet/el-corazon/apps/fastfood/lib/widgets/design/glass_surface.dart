@@ -66,10 +66,16 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// qui a fait échouer le premier test de l'écran de suivi.
   static const double _epaisseurDuTrait = 1;
 
+  /// Ce que la barre occupe réellement, trait compris — hors encoche.
+  ///
+  /// C'est ce qu'un écran doit réserver quand il passe son contenu **derrière**
+  /// la barre (`extendBodyBehindAppBar`). Se caler sur [hauteur] seule y laisse
+  /// le même pixel de retard que celui corrigé ici.
+  static const double hauteurTotale = hauteur + _epaisseurDuTrait;
+
   @override
-  Size get preferredSize => Size.fromHeight(
-    hauteur + _epaisseurDuTrait + (bottom?.preferredSize.height ?? 0),
-  );
+  Size get preferredSize =>
+      Size.fromHeight(hauteurTotale + (bottom?.preferredSize.height ?? 0));
 
   @override
   Widget build(BuildContext context) {

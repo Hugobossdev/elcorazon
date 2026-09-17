@@ -133,7 +133,7 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
                 // contenu.
                 SliverToBoxAdapter(
                   child: SizedBox(
-                    height: GlassAppBar.hauteur +
+                    height: GlassAppBar.hauteurTotale +
                         MediaQuery.paddingOf(context).top +
                         DesignConstants.spacingM,
                   ),
