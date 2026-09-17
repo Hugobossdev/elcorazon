@@ -53,9 +53,23 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   static const double hauteur = 64;
 
+  /// Le trait qui sépare la barre du contenu.
+  ///
+  /// Il fait partie de la hauteur demandée, et il ne l'était pas : le
+  /// `Container` qui le porte retranche son épaisseur de la place laissée à son
+  /// enfant, si bien que la rangée de 64 px n'en recevait que 63. Chaque écran
+  /// muni de cette barre débordait donc **d'un pixel**, en permanence.
+  ///
+  /// Invisible à l'œil — un pixel, et le bandeau rayé n'apparaît qu'en debug —
+  /// mais pas sans conséquence : un débordement est une erreur de rendu, et
+  /// **aucun test widget ne peut monter un écran qui en produit un**. C'est ce
+  /// qui a fait échouer le premier test de l'écran de suivi.
+  static const double _epaisseurDuTrait = 1;
+
   @override
-  Size get preferredSize =>
-      Size.fromHeight(hauteur + (bottom?.preferredSize.height ?? 0));
+  Size get preferredSize => Size.fromHeight(
+    hauteur + _epaisseurDuTrait + (bottom?.preferredSize.height ?? 0),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -73,6 +87,9 @@ class GlassAppBar extends StatelessWidget implements PreferredSizeWidget {
           decoration: BoxDecoration(
             color: theme.colorScheme.surface.withValues(alpha: 0.9),
             border: Border(
+              // `BorderSide` trace 1 px par défaut, ce que
+              // [_epaisseurDuTrait] reprend : les deux doivent rester égaux,
+              // sans quoi la barre déborde de nouveau.
               bottom: BorderSide(
                 color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
               ),

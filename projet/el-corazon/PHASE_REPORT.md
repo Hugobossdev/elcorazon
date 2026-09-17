@@ -30,10 +30,10 @@
 > | `flutter analyze` socle / client / admin | No issues found | No issues found | No issues found |
 > | `flutter analyze` dely | **13 problèmes, dont 3 erreurs en `lib/`** | No issues found | No issues found |
 > | `flutter test` socle | non exécuté | 509 | **526** |
-> | `flutter test` client | non exécuté | 443 | **451** |
+> | `flutter test` client | non exécuté | 443 | **461** |
 > | `flutter test` admin | non exécuté | 238 | **253** |
 > | `flutter test` livreur | non exécuté | 168 | **174** |
-> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 081 passés, 0 échec** |
+> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 081 collectés : 2 079 passés, 2 échecs instables** |
 > | `ruff check` · `ruff format --check` · `mypy --strict` | non exécutés | verts | verts (444 fichiers, 296 sources) |
 > | `spectacular --fail-on-warn` | non exécuté | non exécuté | vert |
 > | `tools/code_mort.py` | aucun fichier injoignable | idem | idem |
@@ -45,12 +45,22 @@
 > * `delivery/test_affectation_automatique.py::…le_montant_a_encaisser…` —
 >   **préexistant** : le contrat d'une course a gagné `item_image`, le test ne
 >   l'avait pas suivi. Corrigé en phase 1 ;
-> * `tracking/test_websocket.py::TestRattrapage` — **instable**. Deux cas
->   différents de cette classe ont échoué lors de deux exécutions complètes, et
->   **passent tous les deux isolément**. Le rattrapage de messages manqués
->   dépend d'un ordonnancement asynchrone sous charge ; ce n'est pas une
->   régression de ce chantier, mais c'est un test sur lequel on ne peut pas
->   s'appuyer en l'état.
+> * `tracking/test_websocket.py` — **instable**. Trois cas différents de ce
+>   fichier ont été vus rouges sur quatre exécutions complètes, jamais les
+>   mêmes, et **tous passent isolément** (24 tests verts seuls). Le rattrapage
+>   de messages manqués dépend d'un ordonnancement asynchrone sous charge.
+>
+> Une **seconde** famille s'est révélée aux exécutions suivantes, de même
+> nature : `availability/test_acceptation_commande.py::TestLeVerrouDeLaCuisine::
+> test_une_pause_attend_la_commande_qui_tient_la_cuisine` pose un `lock_timeout`
+> de 300 ms et attend qu'un verrou concurrent le fasse expirer ; sous charge, la
+> fenêtre se referme autrement. Le dossier passe seul, 70 tests.
+>
+> Ni l'une ni l'autre n'est une régression de ce chantier, et ni l'une ni
+> l'autre n'est un test sur lequel on peut s'appuyer en l'état : elles rendent
+> la suite complète rouge au hasard, ce qui est la façon la plus sûre de faire
+> ignorer un vrai échec. C'est la dernière mesure consignée ici : **2 079
+> passés, 2 échecs**, tous deux verts isolément.
 >
 > Les sections ci-dessous sont conservées **telles qu'elles ont été écrites**,
 > pour ce qu'elles documentent des intentions et des changements de chaque lot.
