@@ -159,6 +159,7 @@ class Order {
     this.deliveryInstructions = '',
     this.lines = const [],
     this.statusEvents = const [],
+    this.amountPaid,
     this.restaurantLatitude,
     this.restaurantLongitude,
     this.countryIsoCode = '',
@@ -187,6 +188,10 @@ class Order {
       deliveryFee: Money.fromJson(json['delivery_fee'] as Map<String, dynamic>),
       discount: Money.fromJson(json['discount'] as Map<String, dynamic>),
       total: Money.fromJson(json['total'] as Map<String, dynamic>),
+      amountPaid: switch (json['amount_paid']) {
+        final Map<String, dynamic> montant => Money.fromJson(montant),
+        _ => null,
+      },
       paymentMethod: json['payment_method'] as String,
       deliveryAddressLine: json['delivery_address_line'] as String,
       deliveryLandmark: json['delivery_landmark'] as String? ?? '',
@@ -261,6 +266,26 @@ class Order {
   final Money deliveryFee;
   final Money discount;
   final Money total;
+
+  /// Ce qui a **réellement** été encaissé d'avance sur cette commande.
+  ///
+  /// Nul quand rien ne l'a été — et nul, aussi, devant un serveur antérieur à
+  /// ce champ. Les deux se lisent de la même façon : « aucun encaissement
+  /// connu », c'est-à-dire tout est encore dû.
+  ///
+  /// Ne se déduit **pas** de [paymentMethod], qui annonce une intention et non
+  /// un encaissement. Confondre les deux faisait dire au back-office « rien
+  /// n'a été encaissé, il n'y a rien à rembourser » sur une commande payée, et
+  /// « réglée d'avance » sur une commande dont le paiement avait échoué.
+  final Money? amountPaid;
+
+  /// Rien ne reste dû sur cette commande.
+  ///
+  /// La soustraction, et non le moyen de paiement : c'est la seule forme qui
+  /// reste juste sur un règlement partiel comme sur un paiement en ligne
+  /// avorté.
+  bool get estIntegralementReglee =>
+      (amountPaid?.amountMinor ?? 0) >= total.amountMinor;
 
   /// `mobile_money` | `cash` | `wallet` | `card` (`PaymentMethod` côté serveur).
   final String paymentMethod;

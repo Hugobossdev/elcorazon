@@ -591,9 +591,12 @@ class _DeliveryOrdersScreenState extends State<DeliveryOrdersScreen>
 
   /// Demande confirmation avant de déclarer la livraison faite — l'étape est
   /// irréversible côté serveur, et c'est elle qui crédite la rémunération.
+  ///
+  /// Le montant rappelé est celui du serveur (`amount_to_collect`), et non le
+  /// total filtré par le moyen de paiement — voir la même question sur
+  /// l'écran d'accueil.
   Future<bool> _confirmerLivraison(Course order) async {
-    final montant =
-        order.moyenPaiement.aEncaisser ? order.total?.format() : null;
+    final montant = order.aEncaisser?.format();
 
     final confirme = await showDialog<bool>(
       context: context,

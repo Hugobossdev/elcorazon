@@ -112,6 +112,27 @@ class Order(UUIDModel, TimeStampedModel):
     discount = MoneyField()
     total = MoneyField()
 
+    # Ce que le client a **réellement** réglé d'avance, écrit par `payments` à
+    # chaque encaissement et à chaque remboursement soldé.
+    #
+    # ## Pourquoi cette colonne existe, plutôt qu'une somme calculée
+    #
+    # « Reste-t-il quelque chose à encaisser à la porte ? » est une question de
+    # livraison, et `delivery` n'a pas le droit de connaître `payments` : la
+    # flèche va dans l'autre sens (ADR-002), et l'inverser créerait un cycle
+    # immédiat. Faute de réponse, la course déduisait le règlement du **moyen**
+    # de paiement — « mobile money » valait « déjà payé » —, si bien qu'une
+    # commande dont le paiement avait échoué envoyait le livreur encaisser
+    # zéro franc.
+    #
+    # Le montant est donc reporté ici par le seul module qui le connaît, et lu
+    # par tous les autres. La flèche reste `payments → orders`.
+    #
+    # Nul tant qu'aucun encaissement n'a touché la commande — ce qui est le cas
+    # de toutes celles réglées en espèces, et de celles antérieures à ce champ.
+    # `None` s'y lit « rien de réglé », jamais « on ne sait pas ».
+    amount_paid = MoneyField(null=True)
+
     payment_method = models.CharField(max_length=16, choices=PaymentMethod.choices)
     promo_code = models.CharField(max_length=32, blank=True)
 

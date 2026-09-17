@@ -173,6 +173,11 @@ class TestWebhook:
         assert initiated.status == PaymentStatus.COMPLETED
         assert initiated.completed_at is not None
         assert order.status == OrderStatus.CONFIRMED
+        # Et l'encaissement est **reporté sur la commande**, pour ceux qui n'ont
+        # pas le droit de voir ce module : c'est là que la livraison lit ce
+        # qu'il reste à réclamer à la porte. Sans ce report, elle retomberait
+        # sur le moyen de paiement, qui n'annonce qu'une intention.
+        assert order.amount_paid == initiated.amount
 
     def test_un_montant_moindre_ne_solde_pas_la_transaction(
         self, client: APIClient, order: Order, initiated: Transaction
@@ -206,6 +211,9 @@ class TestWebhook:
         assert initiated.completed_at is None
         # La commande n'a surtout pas bougé : c'est elle que la cuisine lit.
         assert order.status != OrderStatus.CONFIRMED
+        # Rien n'est réputé encaissé non plus — sans quoi le livreur repartirait
+        # sans réclamer les quatre mille francs d'une commande payée cent.
+        assert order.amount_paid is None
 
     def test_la_divergence_de_montant_est_tracee(
         self, client: APIClient, initiated: Transaction
@@ -698,6 +706,11 @@ class TestConstatDuVirement:
         # La trace du virement est ce qu'on cherche quand un client affirme
         # n'avoir rien reçu.
         assert "VIR-42" in remboursement.reason
+        # La transaction sort de l'encaissé, et la commande le dit : sans ce
+        # report, une commande remboursée resterait « déjà réglée » pour la
+        # livraison et pour le back-office.
+        order.refresh_from_db()
+        assert order.amount_paid == Money.zero(order.total.currency)
 
     def test_un_remboursement_partiel_ne_bascule_pas_la_transaction(
         self, as_staff: APIClient, order: Order, encaissee: Transaction

@@ -26,8 +26,8 @@ from apps.delivery.models import (
 )
 from apps.delivery.states import DELIVERY_MACHINE, ENGAGED_STATUSES, VERIFICATION_MACHINE
 from apps.geography.models import DeliveryZone
-from apps.orders.models import PaymentMethod
 from apps.restaurants.models import Restaurant
+from common.money import Money
 from common.serializers import LocationField, MoneyField
 
 __all__ = [
@@ -400,10 +400,31 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
 
     @extend_schema_field(MoneyField(allow_null=True))
     def get_amount_to_collect(self, obj: Assignment) -> dict[str, Any] | None:
-        """Ce que le livreur encaisse à la porte — le total en espèces, sinon rien."""
-        if obj.order.payment_method != PaymentMethod.CASH:
+        """Ce qu'il reste à encaisser à la porte — nul s'il n'y a plus rien.
+
+        ## Ce que cette méthode répondait
+
+        `payment_method != cash → rien à encaisser`. C'est-à-dire : le **moyen**
+        de paiement tenait lieu d'**état** du paiement. Une commande en mobile
+        money dont le règlement n'a pas abouti — prestataire qui refuse, client
+        qui abandonne à l'écran de paiement, puis confirmation à la main depuis
+        le back-office — s'affichait donc « Déjà réglée. Vous n'avez rien à
+        encaisser », et le livreur repartait sans son argent. Symétriquement,
+        une commande réglée pour moitié n'annonçait que le total.
+
+        La question n'est pas « comment le client comptait-il payer ? » mais
+        « combien reste-t-il dû ? ». C'est une soustraction, et `Order.amount_paid`
+        en donne le second terme : `payments` l'y reporte à chaque encaissement
+        et à chaque remboursement soldé (`report_settled_total`), parce que
+        `delivery` n'a pas le droit de lire `payments` (ADR-002).
+
+        Nul veut donc dire « rien à réclamer », quel que soit le moyen annoncé.
+        """
+        regle = obj.order.amount_paid or Money.zero(obj.order.total.currency)
+        reste = obj.order.total - regle
+        if reste.amount_minor <= 0:
             return None
-        return MoneyField().to_representation(obj.order.total)
+        return MoneyField().to_representation(reste)
 
     @extend_schema_field(
         serializers.ListField(

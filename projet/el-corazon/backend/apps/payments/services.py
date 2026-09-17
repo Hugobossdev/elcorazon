@@ -75,6 +75,31 @@ def settled_total(order: Order) -> Money:
     return total
 
 
+def report_settled_total(order: Order) -> Money:
+    """Recopie l'encaissé sur la commande, pour ceux qui ne voient pas `payments`.
+
+    ## Pourquoi un report, et non une lecture
+
+    `delivery` a besoin de savoir ce qui reste à encaisser à la porte, et n'a
+    pas le droit de connaître ce module : la flèche va de `payments` vers
+    `delivery`, et l'inverser créerait un cycle (ADR-002). Faute de réponse, la
+    course déduisait le règlement du **moyen** de paiement — une commande en
+    mobile money dont le paiement avait échoué s'affichait « déjà réglée », et
+    le livreur repartait sans rien.
+
+    Le seul module qui connaît l'état réel du règlement l'écrit donc là où tout
+    le monde peut le lire. C'est une dénormalisation, avec ce qu'elle suppose :
+    **elle doit être rappelée partout où le total encaissé bouge**, c'est-à-dire
+    à l'encaissement d'une transaction et au remboursement intégral de l'une
+    d'elles. Il n'y a pas d'autre chemin — `Transaction.status` ne change qu'en
+    deux endroits, tous deux dans ce fichier.
+    """
+    encaisse = settled_total(order)
+    order.amount_paid = encaisse
+    order.save(update_fields=["amount_paid_minor", "amount_paid_currency", "updated_at"])
+    return encaisse
+
+
 @dataclass(frozen=True, slots=True)
 class WebhookOutcome:
     """Ce qu'a produit une notification, pour le journal et la réponse."""
@@ -330,6 +355,9 @@ class PaymentService:
                 from apps.payments.split import SplitService
 
                 SplitService.on_transaction_settled(txn)
+                # Avant la confirmation : celle-ci émet un signal, et un abonné
+                # qui lirait la commande doit y trouver l'encaissé à jour.
+                report_settled_total(txn.order)
                 PaymentService._confirm_order(txn.order)
 
             # Émis pour toute transaction, y compris celles qui ne règlent pas
@@ -470,6 +498,10 @@ class RefundService:
         if rendu >= txn.amount and PAYMENT_MACHINE.can(txn.status, PaymentStatus.REFUNDED):
             txn.status = PaymentStatus.REFUNDED
             txn.save(update_fields=["status", "updated_at"])
+            # La transaction sort de l'encaissé : sans ce report, une commande
+            # remboursée resterait « déjà réglée » pour la livraison.
+            if txn.order is not None:
+                report_settled_total(txn.order)
 
         # `provider_reference` est la trace du virement chez le prestataire —
         # ce qu'on cherche quand un client affirme n'avoir rien reçu. Le modèle

@@ -303,8 +303,9 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   /// accessible. En fabriquer une côté application donnerait une garantie que
   /// rien ne vérifie.
   Future<bool> _confirmerLivraison() async {
-    final montant =
-        _course.moyenPaiement.aEncaisser ? _course.total?.format() : null;
+    // `amount_to_collect`, et non le total filtré par le moyen de paiement :
+    // c'est le serveur qui sait ce qui reste dû.
+    final montant = _course.aEncaisser?.format();
 
     final confirme = await showDialog<bool>(
       context: context,

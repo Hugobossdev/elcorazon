@@ -434,10 +434,6 @@ void main() {
       expect(etat.error, isA<SessionHorsLigne>());
       // Les jetons restent : c'est ce qui rend la reprise possible.
       expect(await tokenStorage.getRefreshToken(), 'refresh-valide');
-      expect(
-        await container.read(sessionProvider.notifier).aUneSessionMemorisee(),
-        isTrue,
-      );
     });
 
     test('la reprise aboutit dès que le serveur répond', () async {

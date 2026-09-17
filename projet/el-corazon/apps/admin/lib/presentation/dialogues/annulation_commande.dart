@@ -65,6 +65,44 @@ Future<bool> annulerCommande({
   return motifDuRefus == null;
 }
 
+/// Ce que l'annulation implique côté argent, dit à l'opérateur.
+///
+/// ## Ce que ce message affirmait
+///
+/// Il se lisait sur le **moyen** de paiement : « espèces » valait « rien n'a
+/// été encaissé », tout le reste valait « réglée d'avance ». Les deux moitiés
+/// étaient fausses, chacune dans un sens coûteux :
+///
+/// * une commande en ligne dont le règlement a échoué — prestataire qui
+///   refuse, client qui abandonne, puis confirmation à la main — s'annonçait
+///   « réglée d'avance », et l'exploitation partait rembourser un encaissement
+///   qui n'avait jamais eu lieu ;
+/// * une commande payable à la livraison finalement réglée par un autre canal
+///   s'annonçait « rien à rembourser », et le client ne revoyait pas son
+///   argent.
+///
+/// `amount_paid` est écrit par le seul module qui connaît l'état réel du
+/// règlement. Le moyen de paiement reste ce qu'il est : une intention.
+String messageDeRemboursement(eccore.Order order) {
+  final encaisse = order.amountPaid;
+
+  if (encaisse == null || encaisse.amountMinor <= 0) {
+    return 'Rien n’a encore été encaissé sur cette commande '
+        '(${order.moyenPaiement.libelle}) : il n’y a rien à rembourser.';
+  }
+
+  if (order.estIntegralementReglee) {
+    return 'Cette commande a été réglée d’avance (${encaisse.format()}). '
+        'L’annulation ne rembourse pas : le remboursement se fait depuis la '
+        'fiche de la commande, montant par montant.';
+  }
+
+  return 'Cette commande a été réglée en partie : ${encaisse.format()} '
+      'encaissés sur ${order.total.format()}. L’annulation ne rembourse pas — '
+      'le remboursement se fait depuis la fiche de la commande, et il porte '
+      'sur ce qui a été encaissé, pas sur le total.';
+}
+
 class _AnnulationCommande extends StatefulWidget {
   const _AnnulationCommande({required this.order});
 
@@ -149,15 +187,7 @@ class _AnnulationCommandeState extends State<_AnnulationCommande> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            widget.order.moyenPaiement.estPrepaye
-                                ? 'Cette commande a été réglée d’avance '
-                                    '(${widget.order.moyenPaiement.libelle}). '
-                                    'L’annulation ne rembourse pas : le '
-                                    'remboursement se fait depuis la fiche de '
-                                    'la commande, montant par montant.'
-                                : 'Réglée en espèces à la livraison : rien '
-                                    'n’a été encaissé, il n’y a rien à '
-                                    'rembourser.',
+                            messageDeRemboursement(widget.order),
                             style: TextStyle(
                               fontSize: 12,
                               color: scheme.onSurface,

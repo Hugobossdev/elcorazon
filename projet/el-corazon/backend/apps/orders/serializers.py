@@ -168,6 +168,14 @@ class OrderSerializer(serializers.ModelSerializer[Order]):
     delivery_fee = MoneyField(read_only=True)
     discount = MoneyField(read_only=True)
     total = MoneyField(read_only=True)
+    # Ce qui a réellement été encaissé d'avance, reporté par `payments`.
+    #
+    # Nul tant que rien n'a été réglé — ce qui est le cas de toute commande
+    # payable à la livraison. Le **moyen** de paiement ne le dit pas : il
+    # annonce une intention, pas un encaissement, et les confondre faisait dire
+    # au back-office « rien n'a été encaissé, il n'y a rien à rembourser » sur
+    # une commande déjà payée.
+    amount_paid = MoneyField(read_only=True, allow_null=True)
     allowed_transitions = serializers.SerializerMethodField()
     lines_count = serializers.SerializerMethodField()
     items_count = serializers.SerializerMethodField()
@@ -193,6 +201,7 @@ class OrderSerializer(serializers.ModelSerializer[Order]):
             "delivery_fee",
             "discount",
             "total",
+            "amount_paid",
             "payment_method",
             "delivery_address_line",
             "delivery_landmark",

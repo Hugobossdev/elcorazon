@@ -36,9 +36,12 @@ from apps.geography.models import City, DeliveryZone
 from apps.orders.models import Order, OrderLine, PaymentMethod
 from apps.orders.services import OrderService
 from apps.orders.states import OrderStatus
+from apps.payments.models import PaymentProvider, PaymentStatus, Transaction
+from apps.payments.services import report_settled_total
 from apps.restaurants.models import Restaurant, StaffMembership
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
+from common.serializers import MoneyField
 from tests.fixtures import LOME, build_order
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
@@ -484,20 +487,80 @@ class TestCeQueLeLivreurVoit:
         # récupéré la commande ».
         assert donnees["order_status"] == OrderStatus.READY
 
+    def encaisse(self, order: Order, montant: Money, reference: str) -> None:
+        """Enregistre un encaissement, et le reporte comme le fait le webhook."""
+        Transaction.objects.create(
+            order=order,
+            provider=PaymentProvider.PAYDUNYA,
+            provider_reference=reference,
+            amount=montant,
+            status=PaymentStatus.COMPLETED,
+        )
+        report_settled_total(order)
+
+    def a_encaisser(self, course: Assignment, courier: CourierProfile) -> Any:
+        return (
+            connecte(courier.user)
+            .get(reverse("v1:delivery:assignment-detail", args=[course.pk]))
+            .data["amount_to_collect"]
+        )
+
     def test_rien_a_encaisser_quand_c_est_deja_paye(
         self, restaurant: Restaurant, customer: User, courier: CourierProfile
     ) -> None:
         course = self.course(
             restaurant, customer, courier, payment_method=PaymentMethod.MOBILE_MONEY
         )
+        self.encaisse(course.order, course.order.total, "PD-REGLEE-001")
 
-        donnees = (
-            connecte(courier.user)
-            .get(reverse("v1:delivery:assignment-detail", args=[course.pk]))
-            .data
+        assert self.a_encaisser(course, courier) is None
+
+    def test_un_paiement_en_ligne_qui_n_a_pas_abouti_reste_a_encaisser(
+        self, restaurant: Restaurant, customer: User, courier: CourierProfile
+    ) -> None:
+        """Le défaut que la règle précédente produisait, dans son cas exact.
+
+        Le moyen annoncé est « mobile money », et rien n'a été encaissé : le
+        prestataire a refusé, ou le client a quitté l'écran de paiement, et
+        quelqu'un a confirmé la commande à la main depuis le back-office. Le
+        livreur doit réclamer le total à la porte — l'ancienne règle lui
+        affichait « déjà réglée », et il repartait sans son argent.
+        """
+        course = self.course(
+            restaurant, customer, courier, payment_method=PaymentMethod.MOBILE_MONEY
         )
 
-        assert donnees["amount_to_collect"] is None
+        assert self.a_encaisser(course, courier) == MoneyField().to_representation(
+            course.order.total
+        )
+
+    def test_un_paiement_partiel_ne_laisse_a_encaisser_que_le_reste(
+        self, restaurant: Restaurant, customer: User, courier: CourierProfile
+    ) -> None:
+        """Le cas du paiement partagé dont toutes les parts ne sont pas réglées."""
+        course = self.course(
+            restaurant, customer, courier, payment_method=PaymentMethod.MOBILE_MONEY
+        )
+        moitie = Money(course.order.total.amount_minor // 2, course.order.total.currency)
+        self.encaisse(course.order, moitie, "PD-MOITIE-001")
+
+        reste = course.order.total - moitie
+        assert self.a_encaisser(course, courier) == MoneyField().to_representation(reste)
+
+    def test_des_especes_deja_encaissees_ne_sont_pas_reclamees_deux_fois(
+        self, restaurant: Restaurant, customer: User, courier: CourierProfile
+    ) -> None:
+        """Le moyen annoncé ne décide plus, dans un sens comme dans l'autre.
+
+        Une commande en espèces dont le règlement a finalement été enregistré —
+        le client a payé au comptoir, ou par un autre canal — n'a plus rien à
+        réclamer à la porte. L'ancienne règle, qui lisait « espèces donc à
+        encaisser », la facturait une seconde fois.
+        """
+        course = self.course(restaurant, customer, courier, payment_method=PaymentMethod.CASH)
+        self.encaisse(course.order, course.order.total, "PD-COMPTOIR-001")
+
+        assert self.a_encaisser(course, courier) is None
 
     def test_le_numero_du_client_n_arrive_qu_a_l_acceptation(
         self, restaurant: Restaurant, customer: User, courier: CourierProfile

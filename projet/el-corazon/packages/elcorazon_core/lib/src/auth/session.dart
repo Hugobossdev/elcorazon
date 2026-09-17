@@ -115,16 +115,12 @@ class SessionNotifier extends AsyncNotifier<User?> {
     }
   }
 
-  /// Une session est-elle **mémorisée** sur cet appareil ?
-  ///
-  /// Vrai dès qu'un jeton de rafraîchissement existe, sans le vérifier auprès
-  /// du serveur : c'est exactement la question que pose un écran hors ligne —
-  /// « ai-je quelqu'un à reconnecter quand le réseau reviendra ? ».
-  Future<bool> aUneSessionMemorisee() async {
-    final tokenStorage = ref.read(tokenStorageProvider);
-    return await tokenStorage.getRefreshToken() != null ||
-        await tokenStorage.hasValidAccessToken();
-  }
+  // `aUneSessionMemorisee()` a été retiré d'ici. Il répondait « ai-je quelqu'un
+  // à reconnecter quand le réseau reviendra ? », et **aucun écran ne le
+  // demandait** : la question est déjà tranchée par [SessionHorsLigne], qui
+  // n'est levée que lorsque des jetons existent et que c'est le serveur qui
+  // manque. Son seul appelant était le test écrit en même temps que lui, une
+  // ligne après une assertion qui prouvait déjà la même chose.
 
   Future<User> login({required String email, required String password}) {
     return _openSession(

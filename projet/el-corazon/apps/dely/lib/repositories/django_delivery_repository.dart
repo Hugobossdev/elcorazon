@@ -222,6 +222,43 @@ class Course {
   bool get estMienne => !estProposee && !estEcartee;
 }
 
+/// La course que le livreur **porte** parmi celles qu'il connaît.
+///
+/// Une course simplement proposée n'en est pas une, et une course livrée non
+/// plus : c'est la distinction que l'écran d'encaissement avait perdue en
+/// ouvrant « la plus récente de mes courses », historique compris. Un livreur
+/// qui venait de terminer sa tournée y lisait « À encaisser 9 500 CFA » sur une
+/// course livrée une heure plus tôt, et pouvait réclamer deux fois le même
+/// montant ; entre deux courses, l'écran montrait la dernière au lieu de dire
+/// qu'il n'y en a pas.
+///
+/// ## Pourquoi une fonction, et non un getter du service
+///
+/// La règle vivait dans `AppService`, qui tient aussi la session, le GPS et les
+/// notifications poussées : la mettre à l'épreuve demandait de monter les trois.
+/// Elle ne dépend pourtant que d'une liste de courses. Ici, elle s'éprouve avec
+/// la tournée qu'on veut — et c'est le seul endroit qui décide.
+///
+/// ## Quand il y en aurait plusieurs
+///
+/// L'invariant **L6** l'interdit côté serveur : un livreur n'engage qu'une
+/// course à la fois, jusqu'à une contrainte de base
+/// (`one_engaged_assignment_per_courier`). Si plusieurs apparaissaient malgré
+/// tout — reprise de données, serveur d'une version antérieure —, la plus
+/// ancienne l'emporte : c'est celle qui est déjà en route, et changer de
+/// destination en cours de trajet serait le pire des deux comportements.
+Course? courseEnCoursParmi(Iterable<Course> courses) {
+  Course? plusAncienne;
+  for (final course in courses) {
+    if (!course.assignment.isEngaged) continue;
+    if (plusAncienne == null ||
+        course.assignment.offeredAt.isBefore(plusAncienne.assignment.offeredAt)) {
+      plusAncienne = course;
+    }
+  }
+  return plusAncienne;
+}
+
 /// Courses du livreur contre le backend Django (Phase 6) — remplace les appels
 /// Supabase de `DatabaseService` (`getAvailableOrders`, `getAssignedOrders`,
 /// `updateActiveDeliveryStatus`, `updateDeliveryLocation`).

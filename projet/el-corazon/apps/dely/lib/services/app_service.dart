@@ -512,17 +512,10 @@ class AppService extends ChangeNotifier {
   /// serveur d'une version antérieure —, la plus ancienne l'emporte : c'est
   /// celle qui est déjà en route, et changer de destination en cours de trajet
   /// serait le pire des deux comportements.
-  Course? get activeCourse {
-    Course? plusAncienne;
-    for (final course in _coursesByOrderId.values) {
-      if (!course.assignment.isEngaged) continue;
-      if (plusAncienne == null ||
-          course.assignment.offeredAt.isBefore(plusAncienne.assignment.offeredAt)) {
-        plusAncienne = course;
-      }
-    }
-    return plusAncienne;
-  }
+  ///
+  /// La règle elle-même vit dans [courseEnCoursParmi], où elle s'éprouve sans
+  /// monter la session, le GPS et les notifications que ce service tient aussi.
+  Course? get activeCourse => courseEnCoursParmi(_coursesByOrderId.values);
 
   /// Les courses qu'on me propose et auxquelles je n'ai pas encore répondu.
   List<Course> get pendingOffers => _ordersWhereCourse(

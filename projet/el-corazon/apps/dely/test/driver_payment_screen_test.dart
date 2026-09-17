@@ -28,9 +28,14 @@ void main() {
   ///
   /// [ancienServeur] retire ces trois champs, pour vérifier que l'écran reste
   /// affichable devant un serveur qui ne les envoie pas encore.
+  /// [aEncaisser] est ce que le serveur dit qu'il **reste** dû, en unité
+  /// mineure ; `null` veut dire « plus rien à réclamer ». Il ne se déduit plus
+  /// du moyen de paiement — c'était le défaut : « mobile money » valait « déjà
+  /// réglée », y compris quand le règlement avait échoué.
   eccore.Assignment affectation({
     String moyen = 'cash',
     int total = 4500,
+    int? aEncaisser = 4500,
     bool ancienServeur = false,
   }) {
     return eccore.Assignment.fromJson({
@@ -60,15 +65,17 @@ void main() {
       if (!ancienServeur) ...{
         'payment_method': moyen,
         'order_total': {'amount': '$total', 'currency': 'XOF'},
-        // Rendu par le serveur en espèces seulement.
-        'amount_to_collect':
-            moyen == 'cash' ? {'amount': '$total', 'currency': 'XOF'} : null,
+        'amount_to_collect': aEncaisser == null
+            ? null
+            : {'amount': '$aEncaisser', 'currency': 'XOF'},
       },
     });
   }
 
-  Course course({String moyen = 'cash', int total = 4500}) =>
-      Course(assignment: affectation(moyen: moyen, total: total));
+  Course course({String moyen = 'cash', int total = 4500, int? aEncaisser = 4500}) =>
+      Course(
+        assignment: affectation(moyen: moyen, total: total, aEncaisser: aEncaisser),
+      );
 
   Future<void> afficher(WidgetTester tester, Course c) async {
     await tester.pumpWidget(
@@ -97,23 +104,59 @@ void main() {
 
   group('Commande déjà réglée', () {
     testWidgets('ne demande aucun encaissement', (tester) async {
-      // « Déjà réglée » se lit sur `amount_to_collect`, que le serveur ne rend
-      // qu'en espèces : c'est lui qui connaît l'état du règlement. L'écran le
-      // déduisait du **moyen de paiement**, si bien qu'un mobile money dont le
-      // paiement n'avait pas abouti s'affichait « rien à encaisser ».
-      await afficher(tester, course(moyen: 'mobile_money'));
+      // « Déjà réglée » se lit sur `amount_to_collect`, et sur lui seul : c'est
+      // le serveur qui connaît l'état du règlement, et il le rend sous forme de
+      // ce qu'il **reste** dû.
+      await afficher(tester, course(moyen: 'mobile_money', aEncaisser: null));
 
       expect(find.text('Déjà réglée'), findsOneWidget);
       expect(find.text('À encaisser'), findsNothing);
     });
 
     testWidgets('le dit explicitement au livreur', (tester) async {
-      await afficher(tester, course(moyen: 'card'));
+      await afficher(tester, course(moyen: 'card', aEncaisser: null));
 
       expect(
         find.textContaining("Vous n'avez rien à encaisser"),
         findsOneWidget,
       );
+    });
+  });
+
+  group('Le moyen de paiement ne décide de rien', () {
+    testWidgets('un paiement en ligne qui n’a pas abouti reste à encaisser', (
+      tester,
+    ) async {
+      // Le défaut, dans son cas exact : le prestataire refuse, ou le client
+      // quitte l'écran de règlement, et quelqu'un confirme la commande depuis
+      // le back-office. L'écran annonçait « Déjà réglée. Vous n'avez rien à
+      // encaisser », et le livreur repartait sans son argent.
+      await afficher(tester, course(moyen: 'mobile_money'));
+
+      expect(find.text('À encaisser'), findsOneWidget);
+      expect(find.text('Déjà réglée'), findsNothing);
+      expect(find.text('4${nbsp}500 CFA'), findsNWidgets(2));
+    });
+
+    testWidgets('des espèces déjà encaissées ne sont pas réclamées deux fois', (
+      tester,
+    ) async {
+      // La même erreur dans l'autre sens : « espèces donc à encaisser », y
+      // compris quand le règlement avait finalement été enregistré.
+      await afficher(tester, course(aEncaisser: null));
+
+      expect(find.text('Déjà réglée'), findsOneWidget);
+      expect(find.text('À encaisser'), findsNothing);
+    });
+
+    testWidgets('un règlement partiel n’annonce que le reste', (tester) async {
+      // Le montant à réclamer et le total de la commande ne sont plus le même
+      // nombre : c'est précisément ce que l'ancienne règle ne pouvait pas dire.
+      await afficher(tester, course(aEncaisser: 2000));
+
+      expect(find.text('À encaisser'), findsOneWidget);
+      expect(find.text('2${nbsp}000 CFA'), findsOneWidget);
+      expect(find.text('4${nbsp}500 CFA'), findsOneWidget);
     });
   });
 

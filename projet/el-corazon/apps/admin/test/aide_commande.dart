@@ -24,6 +24,12 @@ Map<String, dynamic> commandeJson({
   String moyenPaiement = 'mobile_money',
   String consignes = '',
   int totalCfa = 4500,
+
+  /// Ce que le serveur dit avoir **réellement** encaissé d'avance.
+  ///
+  /// Nul par défaut : rien n'a été réglé. Ce n'est pas la même chose que le
+  /// moyen de paiement, qui n'annonce qu'une intention.
+  int? encaisseCfa,
   DateTime? passeeLe,
   DateTime? livraisonPrevueLe,
   DateTime? livreeLe,
@@ -49,6 +55,7 @@ Map<String, dynamic> commandeJson({
     'delivery_fee': montantJson(0),
     'discount': montantJson(0),
     'total': montantJson(totalCfa),
+    'amount_paid': encaisseCfa == null ? null : montantJson(encaisseCfa),
     'payment_method': moyenPaiement,
     'delivery_address_line': adresse,
     'delivery_landmark': repere,
@@ -77,6 +84,7 @@ eccore.Order commandeDeTest({
   String moyenPaiement = 'mobile_money',
   String consignes = '',
   int totalCfa = 4500,
+  int? encaisseCfa,
   DateTime? passeeLe,
   DateTime? livraisonPrevueLe,
   DateTime? livreeLe,
@@ -95,6 +103,7 @@ eccore.Order commandeDeTest({
       moyenPaiement: moyenPaiement,
       consignes: consignes,
       totalCfa: totalCfa,
+      encaisseCfa: encaisseCfa,
       passeeLe: passeeLe,
       livraisonPrevueLe: livraisonPrevueLe,
       livreeLe: livreeLe,

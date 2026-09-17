@@ -48,9 +48,13 @@ enum MoyenPaiement {
     return mobileMoney;
   }
 
-  /// Le paiement a-t-il été encaissé avant la livraison ?
-  ///
-  /// Les espèces sont remises au livreur ; tout le reste est déjà passé par le
-  /// prestataire au moment où la commande arrive au back-office.
-  bool get estPrepaye => this != especes;
+  // `estPrepaye` a été retiré d'ici. Il valait `this != especes` — « tout ce
+  // qui n'est pas des espèces est déjà passé par le prestataire » —, ce qui
+  // suppose que toute demande de paiement aboutit. Le back-office s'en servait
+  // pour dire à l'opérateur ce qu'une annulation implique, et lui annonçait
+  // donc un remboursement à faire sur une commande dont le règlement avait
+  // échoué.
+  //
+  // L'état du règlement se lit sur `Order.amountPaid`, écrit par le serveur.
+  // Le moyen de paiement reste une intention, et un libellé.
 }

@@ -132,6 +132,14 @@ enum MoyenPaiement {
   /// même chose.
   final IconData icone;
 
-  /// Le livreur doit encaisser à la remise.
-  bool get aEncaisser => this == MoyenPaiement.especes;
+  // `aEncaisser` a été retiré d'ici. Il valait `this == especes`, c'est-à-dire
+  // qu'il déduisait l'**état** d'un paiement de son **moyen** — et trois écrans
+  // s'en servaient pour rappeler au livreur ce qu'il devait réclamer à la
+  // porte. Une commande en ligne dont le règlement avait échoué ne lui
+  // rappelait donc rien, et une commande réglée pour moitié lui annonçait le
+  // total entier.
+  //
+  // Ce qu'il reste dû est une soustraction que seul le serveur peut faire :
+  // elle arrive par `amount_to_collect`, que `Course.aEncaisser` porte. Le
+  // moyen de paiement reste ce qu'il est — un libellé et une icône.
 }

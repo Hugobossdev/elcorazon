@@ -1295,9 +1295,14 @@ class _DeliveryHomeScreenState extends State<DeliveryHomeScreen> {
   /// c'est elle qui crédite la rémunération. Elle rappelle le montant quand
   /// il y a de l'argent à encaisser : partir sans avoir été payé ne se
   /// rattrape pas.
+  ///
+  /// Le montant rappelé est `amount_to_collect`, calculé par le serveur, et
+  /// non le **total** filtré par le moyen de paiement. L'ancienne lecture se
+  /// trompait des deux côtés : elle taisait le montant d'une commande en ligne
+  /// impayée — le livreur partait sans rien réclamer — et annonçait le total
+  /// entier d'une commande réglée pour moitié.
   Future<bool> _confirmerLivraison(BuildContext context, Course order) async {
-    final montant =
-        order.moyenPaiement.aEncaisser ? order.total?.format() : null;
+    final montant = order.aEncaisser?.format();
 
     final confirme = await showDialog<bool>(
       context: context,

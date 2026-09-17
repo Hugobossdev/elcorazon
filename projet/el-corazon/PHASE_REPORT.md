@@ -31,9 +31,9 @@
 > | `flutter analyze` dely | **13 problèmes, dont 3 erreurs en `lib/`** | No issues found | No issues found |
 > | `flutter test` socle | non exécuté | 509 | **526** |
 > | `flutter test` client | non exécuté | 443 | **461** |
-> | `flutter test` admin | non exécuté | 238 | **253** |
-> | `flutter test` livreur | non exécuté | 168 | **174** |
-> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 081 collectés : 2 079 passés, 2 échecs instables** |
+> | `flutter test` admin | non exécuté | 238 | **257** |
+> | `flutter test` livreur | non exécuté | 168 | **183** |
+> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 084 passés, 0 échec** |
 > | `ruff check` · `ruff format --check` · `mypy --strict` | non exécutés | verts | verts (444 fichiers, 296 sources) |
 > | `spectacular --fail-on-warn` | non exécuté | non exécuté | vert |
 > | `tools/code_mort.py` | aucun fichier injoignable | idem | idem |
@@ -59,8 +59,13 @@
 > Ni l'une ni l'autre n'est une régression de ce chantier, et ni l'une ni
 > l'autre n'est un test sur lequel on peut s'appuyer en l'état : elles rendent
 > la suite complète rouge au hasard, ce qui est la façon la plus sûre de faire
-> ignorer un vrai échec. C'est la dernière mesure consignée ici : **2 079
-> passés, 2 échecs**, tous deux verts isolément.
+> ignorer un vrai échec.
+>
+> La dernière exécution complète, elle, est **intégralement verte — 2 084
+> passés**. C'est une bonne nouvelle et non une preuve : ces deux familles
+> dépendent de la charge de la machine, et une exécution verte ne dit rien de
+> la suivante. Ce qui est établi, c'est qu'aucun de leurs échecs n'a jamais
+> survécu à une exécution isolée.
 >
 > Les sections ci-dessous sont conservées **telles qu'elles ont été écrites**,
 > pour ce qu'elles documentent des intentions et des changements de chaque lot.
@@ -80,7 +85,21 @@ porte ses mesures.
 | 2 | `e81aec9` | client : session, annulation, suivi |
 | 3 | `2d17eae` | livreur : encaissement, course refusée, hors ligne |
 | 4 | `7686859` | back-office : refus affichés, affectation unique, fuseau, code mort |
-| 5 | — | contrats, scénarios, trace (`AUDIT_2026-09-15.md`) |
+| 5 | `d4b4bcf`, `f99b646` | contrats, scénarios, trace (`AUDIT_2026-09-15.md`) |
+| 2 *(reprise)* | `39879e7`, `2a34956` | suivi après coupure, notification, barre de l'app |
+| 3 *(reprise)* | — | le règlement cesse de se déduire du moyen de paiement |
+
+**Deux phases ont été rouvertes**, et c'est le résultat de la relecture plutôt
+qu'un oubli d'ordonnancement :
+
+* la phase 2 a été complétée par les deux cas de suivi qui lui manquaient, et le
+  premier test d'écran client a mis au jour un débordement d'un pixel qui
+  rendait toute l'application cliente non testable à l'écran ;
+* la phase 3 **se trompait sur son propre correctif**. Elle annonçait que le
+  montant à encaisser venait désormais du serveur « qui connaît l'état réel du
+  règlement » ; le serveur, lui, le déduisait du moyen de paiement. La
+  déduction fautive avait été déplacée, pas corrigée. Voir
+  `AUDIT_2026-09-15.md`, section B bis.
 
 ## Phase 1 — ce qui a changé de règle
 

@@ -141,9 +141,16 @@ Map<String, dynamic> _course({
 /// (la projection inverse avait produit le constat C4) ; et l'historique n'est
 /// pas relu commande par commande.
 void main() {
-  late _FauxServeur serveur;
+  // Nul tant qu'un test n'a pas sollicité le serveur, et **remis à nul entre
+  // deux** : il était `late` et gardait la valeur du test précédent, si bien
+  // que la garde de `tearDown` — « aucun test ne passe sans avoir rien
+  // demandé » — était satisfaite par la trace du voisin. Les cas qui montent
+  // une course à la main n'y touchent pas, et c'est légitime ; ce qui ne
+  // l'était pas, c'est qu'ils aient l'air de l'avoir fait.
+  _FauxServeur? serveur;
 
   setUp(() {
+    serveur = null;
     TestWidgetsFlutterBinding.ensureInitialized();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(_canalStockage, (call) async {
@@ -328,7 +335,27 @@ void main() {
       // Le livreur doit se préparer à encaisser plutôt que l'inverse : c'est
       // l'erreur la moins coûteuse des deux.
       expect(await moyen('crypto-monnaie'), MoyenPaiement.especes);
-      expect(MoyenPaiement.especes.aEncaisser, isTrue);
+    });
+
+    test('le moyen ne dit rien de ce qu’il reste à encaisser', () async {
+      // La règle que trois écrans appliquaient : « espèces donc à encaisser,
+      // sinon déjà réglée ». Ce qu'il reste dû est une soustraction que seul
+      // le serveur peut faire, et il la rend dans `amount_to_collect`.
+      final serveur = _FauxServeur(
+        coursesParStatut: {
+          eccore.DeliveryStatus.accepted: [
+            {
+              ..._course(moyenPaiement: 'mobile_money'),
+              'amount_to_collect': _montant(9500),
+            },
+          ],
+        },
+      );
+
+      final course = (await depot(serveur).loadCourses()).single;
+
+      expect(course.moyenPaiement, MoyenPaiement.mobileMoney);
+      expect(course.aEncaisser?.amountMinor, 9500);
     });
   });
 
@@ -429,6 +456,13 @@ void main() {
       expect(annulee.estEcartee, isTrue);
     });
 
+    test('elle n’est pas non plus la course qu’on encaisse', () {
+      expect(
+        courseEnCoursParmi([avecLEtape(eccore.DeliveryStatus.declined)]),
+        isNull,
+      );
+    });
+
     test('une course livrée, elle, reste la mienne', () {
       // L'historique doit garder ce qui a été fait : c'est de lui que vivent
       // les gains et les statistiques.
@@ -487,6 +521,101 @@ void main() {
     });
   });
 
+  group('Une tournée, un seul encaissement', () {
+    /// Une course montée à la main, avec sa propre identité et son heure.
+    ///
+    /// L'heure compte : c'est elle qui départage si jamais deux courses
+    /// paraissaient engagées à la fois.
+    Course avec({
+      required String id,
+      required String statut,
+      required String proposeeA,
+    }) {
+      return Course(
+        assignment: eccore.Assignment.fromJson({
+          ..._course(statut: statut),
+          'id': id,
+          'order': 'commande-$id',
+          'offered_at': proposeeA,
+        }),
+      );
+    }
+
+    test('c’est la course en cours, et non la plus récente', () {
+      // Le défaut, dans son cas exact : l'écran ouvrait `assignedDeliveries
+      // .first`, c'est-à-dire la plus récente de mes courses — historique
+      // compris. Le livreur qui venait de finir sa tournée lisait donc le
+      // montant d'une course livrée une heure plus tôt, et pouvait le
+      // réclamer une seconde fois.
+      final tournee = [
+        avec(
+          id: 'livree-ce-matin',
+          statut: eccore.DeliveryStatus.delivered,
+          proposeeA: '2026-09-17T08:00:00Z',
+        ),
+        avec(
+          id: 'en-cours',
+          statut: eccore.DeliveryStatus.onTheWay,
+          proposeeA: '2026-09-17T11:00:00Z',
+        ),
+        avec(
+          id: 'livree-a-midi',
+          statut: eccore.DeliveryStatus.delivered,
+          proposeeA: '2026-09-17T12:00:00Z',
+        ),
+      ];
+
+      expect(courseEnCoursParmi(tournee)?.assignmentId, 'en-cours');
+    });
+
+    test('une course seulement proposée n’est pas celle qu’on encaisse', () {
+      final tournee = [
+        avec(
+          id: 'proposee',
+          statut: eccore.DeliveryStatus.offered,
+          proposeeA: '2026-09-17T11:00:00Z',
+        ),
+      ];
+
+      expect(courseEnCoursParmi(tournee), isNull);
+    });
+
+    test('entre deux tournées, il n’y a rien à encaisser', () {
+      // L'écran montrait la dernière course au lieu de le dire.
+      final tournee = [
+        avec(
+          id: 'livree',
+          statut: eccore.DeliveryStatus.delivered,
+          proposeeA: '2026-09-17T08:00:00Z',
+        ),
+      ];
+
+      expect(courseEnCoursParmi(tournee), isNull);
+      expect(courseEnCoursParmi(const []), isNull);
+    });
+
+    test('si deux paraissaient engagées, la plus ancienne l’emporte', () {
+      // L6 l'interdit côté serveur, jusqu'à une contrainte de base. Si l'état
+      // local en montrait deux malgré tout, c'est celle qui est déjà en route
+      // qui compte : changer de destination en cours de trajet serait le pire
+      // des deux comportements.
+      final tournee = [
+        avec(
+          id: 'la-seconde',
+          statut: eccore.DeliveryStatus.accepted,
+          proposeeA: '2026-09-17T11:30:00Z',
+        ),
+        avec(
+          id: 'la-premiere',
+          statut: eccore.DeliveryStatus.onTheWay,
+          proposeeA: '2026-09-17T11:00:00Z',
+        ),
+      ];
+
+      expect(courseEnCoursParmi(tournee)?.assignmentId, 'la-premiere');
+    });
+  });
+
   group('Ce que le serveur autorise', () {
     test('les transitions viennent de la course, pas d’une machine locale', () async {
       final courses = await depot(
@@ -502,6 +631,10 @@ void main() {
   });
 
   tearDown(() {
-    expect(serveur.chemins, isNotEmpty);
+    // Un test qui a monté un dépôt doit lui avoir fait demander quelque chose :
+    // sans cette garde, un faux serveur muet laisserait passer une lecture qui
+    // n'a jamais eu lieu. Un test qui n'en monte pas n'a rien à prouver ici.
+    final sollicite = serveur;
+    if (sollicite != null) expect(sollicite.chemins, isNotEmpty);
   });
 }

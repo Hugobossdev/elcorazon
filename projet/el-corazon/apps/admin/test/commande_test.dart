@@ -1,4 +1,5 @@
 import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/dialogues/annulation_commande.dart';
 import 'package:admin/presentation/moyen_paiement.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -113,10 +114,56 @@ void main() {
         MoyenPaiement.mobileMoney,
       );
     });
+  });
 
-    test('seules les espèces ne sont pas déjà encaissées', () {
-      expect(MoyenPaiement.especes.estPrepaye, isFalse);
-      expect(MoyenPaiement.carte.estPrepaye, isTrue);
+  group('Ce qui a été encaissé, et ce que l’annulation implique', () {
+    // La règle précédente lisait le **moyen** de paiement : « espèces » valait
+    // « rien n'a été encaissé », tout le reste valait « réglée d'avance ». Les
+    // deux moitiés étaient fausses, et le message servait à décider d'un
+    // remboursement.
+    test('sans encaissement, il n’y a rien à rembourser', () {
+      // Le moyen par défaut de cette fabrique est « mobile money » : c'est
+      // précisément le cas que l'ancienne règle disait « réglé d'avance ».
+      final commande = commandeDeTest();
+
+      expect(commande.amountPaid, isNull);
+      expect(commande.estIntegralementReglee, isFalse);
+      expect(messageDeRemboursement(commande), contains('rien à rembourser'));
+    });
+
+    test('un paiement en ligne avorté n’annonce plus un remboursement', () {
+      // Le cas coûteux : le prestataire refuse, quelqu'un confirme la commande
+      // à la main, et l'exploitation partait rembourser un encaissement qui
+      // n'avait jamais eu lieu.
+      final commande = commandeDeTest(moyenPaiement: 'card');
+
+      expect(messageDeRemboursement(commande), isNot(contains('réglée d’avance')));
+    });
+
+    test('une commande réglée annonce le montant réellement encaissé', () {
+      final commande = commandeDeTest(encaisseCfa: 4500);
+
+      expect(commande.estIntegralementReglee, isTrue);
+      expect(messageDeRemboursement(commande), contains('réglée d’avance'));
+    });
+
+    test('des espèces encaissées comptent comme le reste', () {
+      // L'erreur dans l'autre sens : « espèces donc rien à rembourser », alors
+      // que le règlement avait bien été enregistré.
+      final commande = commandeDeTest(moyenPaiement: 'cash', encaisseCfa: 4500);
+
+      expect(commande.estIntegralementReglee, isTrue);
+      expect(messageDeRemboursement(commande), contains('réglée d’avance'));
+    });
+
+    test('un règlement partiel se dit comme tel', () {
+      final commande = commandeDeTest(encaisseCfa: 2000);
+
+      expect(commande.estIntegralementReglee, isFalse);
+      final message = messageDeRemboursement(commande);
+      expect(message, contains('réglée en partie'));
+      expect(message, contains('2'));
+      expect(message, contains('4'));
     });
   });
 
