@@ -25,7 +25,12 @@ from rest_framework.views import APIView
 
 from apps.accounts.models import User, UserType
 from apps.accounts.serializers import CustomerStatsSerializer
-from apps.analytics.perimetre import Perimetre, PerimetreQuerySerializer, resolve_perimetre
+from apps.analytics.perimetre import (
+    Perimetre,
+    PerimetreQuerySerializer,
+    aujourd_hui_chez,
+    resolve_perimetre,
+)
 from apps.analytics.reports import ReportingService
 from apps.analytics.serializers import (
     CategoryRowSerializer,
@@ -78,10 +83,21 @@ class EventIngestView(APIView):
         return Response(status=status.HTTP_201_CREATED)
 
 
-def _period(request: Request) -> tuple[dt.date, dt.date, int]:
+def _period(request: Request, perimetre: Perimetre) -> tuple[dt.date, dt.date, int]:
+    """La fenêtre demandée, ou la journée en cours **chez l'établissement**.
+
+    Le périmètre est un paramètre et non une seconde lecture de la requête :
+    c'est lui qui porte le fuseau, et sans lui le défaut retomberait sur
+    l'horloge du serveur — UTC — c'est-à-dire sur le même genre d'erreur que
+    celle qu'on corrige, un cran plus loin.
+    """
     query = ReportQuerySerializer(data=request.query_params)
     query.is_valid(raise_exception=True)
-    return query.validated_data["start"], query.validated_data["end"], query.validated_data["limit"]
+    debut = query.validated_data["start"]
+    fin = query.validated_data["end"]
+    if debut is None or fin is None:
+        debut = fin = aujourd_hui_chez(perimetre.timezone_name)
+    return debut, fin, query.validated_data["limit"]
 
 
 def _perimetre(request: Request) -> Perimetre:
@@ -191,8 +207,9 @@ class RevenueReportView(APIView):
         tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
-        start, end, _ = _period(request)
-        rows = ReportingService.revenue_by_day(start=start, end=end, perimetre=_perimetre(request))
+        perimetre = _perimetre(request)
+        start, end, _ = _period(request, perimetre)
+        rows = ReportingService.revenue_by_day(start=start, end=end, perimetre=perimetre)
         return _rendu(request, rows, RevenueRowSerializer, f"chiffre-affaires-{start}-{end}")
 
 
@@ -207,10 +224,9 @@ class TopProductsReportView(APIView):
         tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
-        start, end, limit = _period(request)
-        rows = ReportingService.top_products(
-            start=start, end=end, limit=limit, perimetre=_perimetre(request)
-        )
+        perimetre = _perimetre(request)
+        start, end, limit = _period(request, perimetre)
+        rows = ReportingService.top_products(start=start, end=end, limit=limit, perimetre=perimetre)
         return _rendu(request, rows, TopProductRowSerializer, f"top-produits-{start}-{end}")
 
 
@@ -248,10 +264,9 @@ class CourierPerformanceReportView(APIView):
         tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
-        start, end, _ = _period(request)
-        rows = ReportingService.courier_performance(
-            start=start, end=end, perimetre=_perimetre(request)
-        )
+        perimetre = _perimetre(request)
+        start, end, _ = _period(request, perimetre)
+        rows = ReportingService.courier_performance(start=start, end=end, perimetre=perimetre)
         return _rendu(request, rows, CourierPerformanceRowSerializer, f"livreurs-{start}-{end}")
 
 
@@ -266,10 +281,9 @@ class OrderStatusReportView(APIView):
         tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
-        start, end, _ = _period(request)
-        rows = ReportingService.orders_by_status(
-            start=start, end=end, perimetre=_perimetre(request)
-        )
+        perimetre = _perimetre(request)
+        start, end, _ = _period(request, perimetre)
+        rows = ReportingService.orders_by_status(start=start, end=end, perimetre=perimetre)
         return _rendu(request, rows, StatusRowSerializer, f"commandes-{start}-{end}")
 
 
@@ -284,10 +298,9 @@ class CategoryReportView(APIView):
         tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
-        start, end, _ = _period(request)
-        rows = ReportingService.sales_by_category(
-            start=start, end=end, perimetre=_perimetre(request)
-        )
+        perimetre = _perimetre(request)
+        start, end, _ = _period(request, perimetre)
+        rows = ReportingService.sales_by_category(start=start, end=end, perimetre=perimetre)
         return _rendu(request, rows, CategoryRowSerializer, f"categories-{start}-{end}")
 
 
@@ -321,7 +334,8 @@ class NetworkReportView(APIView):
         tags=["analytics"],
     )
     def get(self, request: Request) -> Response | HttpResponse:
-        start, end, _ = _period(request)
+        perimetre = _perimetre(request)
+        start, end, _ = _period(request, perimetre)
         query = NetworkQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         niveau = query.validated_data["level"]
@@ -329,7 +343,7 @@ class NetworkReportView(APIView):
         rows = ReportingService.network(
             start=start,
             end=end,
-            perimetre=_perimetre(request),
+            perimetre=perimetre,
             level=niveau,
             zone_id=zone,
         )
@@ -347,6 +361,7 @@ class OverviewView(APIView):
 
     @extend_schema(responses={200: OverviewSerializer}, parameters=PERIMETRE, tags=["analytics"])
     def get(self, request: Request) -> Response:
-        start, end, _ = _period(request)
-        rapport = ReportingService.overview(start=start, end=end, perimetre=_perimetre(request))
+        perimetre = _perimetre(request)
+        start, end, _ = _period(request, perimetre)
+        rapport = ReportingService.overview(start=start, end=end, perimetre=perimetre)
         return Response(OverviewSerializer(rapport).data)

@@ -448,47 +448,27 @@ class OrderManagementService extends ChangeNotifier {
     Future.microtask(notifyListeners);
   }
 
-  /// Confirmer une commande
-  Future<void> confirmOrder(String orderId) =>
-      updateOrderStatus(orderId, StatutCommande.confirmee);
-
-  /// Commencer la préparation d'une commande
-  Future<void> startPreparingOrder(String orderId) =>
-      updateOrderStatus(orderId, StatutCommande.enPreparation);
-
-  /// Marquer une commande comme prête
-  Future<void> markOrderReady(String orderId) =>
-      updateOrderStatus(orderId, StatutCommande.prete);
-
-  /// Marquer une commande comme récupérée — geste du **livreur**, pas du
-  /// back-office : conservé pour les courses hors application.
-  Future<void> markOrderPickedUp(String orderId) =>
-      updateOrderStatus(orderId, StatutCommande.recuperee);
-
-  /// Marquer une commande comme en route
-  Future<void> markOrderOnTheWay(String orderId) =>
-      updateOrderStatus(orderId, StatutCommande.enRoute);
-
-  /// Marquer une commande comme livrée
-  Future<void> markOrderDelivered(String orderId) =>
-      updateOrderStatus(orderId, StatutCommande.livree);
-
-  /// Annuler une commande
-  Future<void> cancelOrderStatus(String orderId) =>
-      updateOrderStatus(orderId, StatutCommande.annulee);
-
-  /// Accepter une commande
-  Future<void> acceptOrder(String orderId) =>
-      updateOrderStatus(orderId, StatutCommande.confirmee);
-
-  /// Refuse une commande : c'est une annulation, avec son motif.
-  Future<void> rejectOrder(String orderId, {String? reason}) {
-    final motif = reason?.trim();
-    return cancelOrder(
-      orderId,
-      motif == null || motif.isEmpty ? 'Commande refusée' : motif,
-    );
-  }
+  // Neuf raccourcis d'étape ont été retirés d'ici : `confirmOrder`,
+  // `startPreparingOrder`, `markOrderReady`, `markOrderPickedUp`,
+  // `markOrderOnTheWay`, `markOrderDelivered`, `cancelOrderStatus`,
+  // `acceptOrder` et `rejectOrder`.
+  //
+  // Chacun tenait en une ligne — `updateOrderStatus(orderId, unStatut)` — et
+  // **aucun n'avait d'appelant** : les écrans passent le statut cible
+  // directement, parce que c'est le serveur qui dit quelles étapes sont
+  // permises (`allowed_transitions`) et qu'une méthode par étape suppose de
+  // savoir d'avance laquelle proposer.
+  //
+  // Deux raisons de les retirer plutôt que de les garder « au cas où » :
+  // `acceptOrder` et `confirmOrder` faisaient exactement la même chose sous
+  // deux noms, ce qui laisse le lecteur chercher la différence ; et
+  // `markOrderPickedUp` s'annonçait « conservé pour les courses hors
+  // application », c'est-à-dire pour un usage que rien n'implémente.
+  //
+  // Le lot précédent en avait retiré onze, dont trois fausses. Celles-ci en
+  // sont la seconde couche, et ce ne sont pas des méthodes mortes par
+  // négligence : c'est une façade écrite avant de savoir que les transitions
+  // viendraient du serveur.
 
   // `processRefund` a été retiré : il journalisait « remboursement non
   // branché » et rendait `false`, quel que soit le montant. Un remboursement

@@ -349,4 +349,6 @@ class TestCompositionDuPerimetre:
 
     def test_un_perimetre_global_n_ajoute_aucune_clause(self) -> None:
         """Le rapport d'enseigne ne paie pas un `IN` sur tous les établissements."""
-        assert Perimetre(restaurant_ids=None).filtre("restaurant_id") == {}
+        assert Perimetre(
+            restaurant_ids=None, timezone_name="UTC", timezone_est_certain=False
+        ).filtre("restaurant_id") == {}

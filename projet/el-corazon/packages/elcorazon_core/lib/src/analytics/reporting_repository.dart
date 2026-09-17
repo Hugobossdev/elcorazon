@@ -106,13 +106,25 @@ class ReportingRepository {
   }
 
   /// Chiffres de tête du tableau de bord, en un appel.
-  Future<AnalyticsOverview> overview({
-    required DateTime start,
-    required DateTime end,
-  }) async {
+  ///
+  /// ## Sans fenêtre : la journée de l'établissement
+  ///
+  /// [start] et [end] sont facultatifs, et les omettre n'est pas un
+  /// raccourci : c'est la **seule** façon d'obtenir « aujourd'hui ». La date du
+  /// jour n'est pas une propriété du poste qui consulte — un siège à Paris qui
+  /// ouvre son tableau de bord à minuit et demi est déjà au lendemain, quand la
+  /// cuisine de Lomé n'a pas fini sa soirée. Le serveur, lui, connaît le fuseau
+  /// de l'établissement.
+  ///
+  /// La réponse republie la fenêtre retenue ([AnalyticsOverview.start],
+  /// [AnalyticsOverview.timezoneName]), pour que l'écran dise de quelle journée
+  /// il parle au lieu de l'afficher sans la nommer.
+  ///
+  /// Les deux vont ensemble : n'en donner qu'un est refusé par le serveur.
+  Future<AnalyticsOverview> overview({DateTime? start, DateTime? end}) async {
     final response = await apiClient.get(
       '/analytics/reports/overview/',
-      queryParameters: _fenetre(start, end),
+      queryParameters: start == null || end == null ? null : _fenetre(start, end),
     );
     return AnalyticsOverview.fromJson(response.data as Map<String, dynamic>);
   }

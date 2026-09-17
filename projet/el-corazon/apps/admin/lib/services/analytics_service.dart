@@ -31,6 +31,76 @@ class AnalyticsService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
+  // --------------------------------------------------- la journée en cours
+
+  JourneeDExploitation? _journee;
+  bool _journeeEnCours = false;
+  String? _erreurJournee;
+
+  /// Les chiffres de la journée **de l'établissement**, ou nul avant la
+  /// première lecture.
+  JourneeDExploitation? get journee => _journee;
+  bool get journeeEnCours => _journeeEnCours;
+  String? get erreurJournee => _erreurJournee;
+
+  /// Charge la journée en cours, telle que le serveur la découpe.
+  ///
+  /// ## Ce que le tableau de bord faisait à la place
+  ///
+  /// Il additionnait les commandes **déjà chargées en mémoire** par la fenêtre
+  /// de supervision, en gardant celles dont `passeeLe.day`, `.month` et
+  /// `.year` coïncidaient avec `DateTime.now()`. Trois choses clochaient à la
+  /// fois :
+  ///
+  /// * `passeeLe` est lu d'un horodatage UTC et `DateTime.now()` est local :
+  ///   le test comparait un **jour UTC** à un **jour local**. À Lomé les deux
+  ///   coïncident, ailleurs non ;
+  /// * il filtrait sur la date de **commande** en ne sommant que les livrées,
+  ///   si bien qu'une commande passée la veille et livrée le matin comptait la
+  ///   veille — le « revenu du jour » n'était ni l'un ni l'autre ;
+  /// * il ne portait que sur ce que la pagination avait rendu.
+  ///
+  /// Aucune des trois ne se corrige à l'écran : la journée d'exploitation est
+  /// une question de fuseau, et le fuseau est celui de la cuisine.
+  ///
+  /// Aucune date n'est envoyée — c'est délibéré, et c'est la seule façon
+  /// d'obtenir « aujourd'hui » : le serveur seul sait quel jour il est là où
+  /// l'activité a lieu.
+  Future<void> chargerLaJournee() async {
+    if (_journeeEnCours) return;
+    _journeeEnCours = true;
+    _erreurJournee = null;
+    notifyListeners();
+
+    try {
+      final apercu = await _reports.overview();
+      // La semaine part du lundi de la journée **que le serveur a retenue**,
+      // et non de `DateTime.now().weekday` : ce calcul gardait en outre
+      // l'heure courante, si bien que « cette semaine » commençait lundi à
+      // l'heure qu'il est — les commandes du lundi matin en tombaient.
+      final jour = apercu.start;
+      final lundi = DateTime(jour.year, jour.month, jour.day)
+          .subtract(Duration(days: jour.weekday - 1));
+      final semaine = await _reports.revenue(start: lundi, end: jour);
+
+      _journee = JourneeDExploitation(
+        apercu: apercu,
+        // Une somme de lignes **déjà agrégées par le serveur**, une par jour :
+        // ce n'est pas un recomptage de commandes à l'écran.
+        revenusDeLaSemaineMineur: semaine.fold<int>(
+          0,
+          (somme, ligne) => somme + ligne.revenueMinor,
+        ),
+      );
+    } on eccore.ApiException catch (e) {
+      _erreurJournee = e.detail;
+      eccore.Journal.trace('Analytics : journée indisponible — ${e.code}');
+    } finally {
+      _journeeEnCours = false;
+      notifyListeners();
+    }
+  }
+
   /// Charge en une passe les trois séries du tableau de bord.
   Future<void> loadAnalyticsData({
     required DateTime startDate,
@@ -296,4 +366,42 @@ class AnalyticsService extends ChangeNotifier {
       '${date.year.toString().padLeft(4, '0')}-'
       '${date.month.toString().padLeft(2, '0')}-'
       '${date.day.toString().padLeft(2, '0')}';
+}
+
+/// Les chiffres d'une journée d'exploitation, et de quelle journée il s'agit.
+///
+/// Le second point n'est pas un détail d'affichage : le tableau de bord
+/// annonçait « Revenus du jour » sans jamais dire de quel jour, alors qu'il le
+/// calculait sur l'horloge du poste. Un chiffre daté peut être vérifié ; un
+/// chiffre sans date ne peut qu'être cru.
+class JourneeDExploitation {
+  const JourneeDExploitation({
+    required this.apercu,
+    required this.revenusDeLaSemaineMineur,
+  });
+
+  final eccore.AnalyticsOverview apercu;
+
+  /// Cumul des journées de la semaine en cours, lundi compris.
+  final int revenusDeLaSemaineMineur;
+
+  int get revenusDuJourMineur => apercu.revenueMinor;
+  int get commandesDuJour => apercu.ordersCount;
+  int get livraisonsDuJour => apercu.ordersDelivered;
+  int get panierMoyenMineur => apercu.averageBasketMinor;
+
+  /// La journée couverte, telle que le serveur l'a découpée.
+  DateTime get jour => apercu.start;
+
+  /// Comment nommer cette journée à l'écran.
+  ///
+  /// Le fuseau y figure dès qu'il est **incertain** — un périmètre qui
+  /// traverse plusieurs pays n'a pas de journée commune, et afficher une date
+  /// sans le dire donnerait un chiffre qui ne vaut pour personne.
+  String get libelle {
+    final date = '${jour.day.toString().padLeft(2, '0')}/'
+        '${jour.month.toString().padLeft(2, '0')}';
+    if (apercu.timezoneCertain) return 'Journée du $date';
+    return 'Journée du $date — plusieurs fuseaux, découpage en UTC';
+  }
 }

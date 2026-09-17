@@ -53,6 +53,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     if (!appService.isInitialized) {
       await appService.initializeWithAdminUser();
     }
+    if (!mounted) return;
+    // Les chiffres de la journée sont une **lecture à déclarer**, comme les
+    // fenêtres de supervision du lot 1 : sans cet appel, la carte « Revenus du
+    // jour » resterait indéfiniment sur son tiret, et rien ne dirait pourquoi.
+    await context.read<AnalyticsService>().chargerLaJournee();
   }
 
   @override
@@ -106,6 +111,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
                       allOrders,
                       menuItems,
                       driverService,
+                      analyticsService,
                     ),
                     _buildAnalyticsTab(context, analyticsService),
                   ],
@@ -124,22 +130,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
     List<eccore.Order> orders,
     List<eccore.ManagedMenuItem> menuItems,
     DriverManagementService driverService,
+    AnalyticsService analytics,
   ) {
-    final todayRevenue = _calculateTodayRevenue(orders);
     final totalOrders = orders.length;
     final activeDrivers =
         driverService.drivers.where((d) => d.statut == StatutLivreur.disponible).length;
 
-    // Calculate additional stats
-    final weekStart = DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
-    final weekOrders = orders.where((o) => o.passeeLe.isAfter(weekStart)).toList();
-    final weekRevenue = weekOrders
-        .where((order) => order.statut == StatutCommande.livree)
-        .fold(0.0, (sum, order) => sum + order.totalAffiche);
+    // La journée vient du serveur, qui seul sait quel jour il est là où
+    // l'activité a lieu — voir `AnalyticsService.chargerLaJournee`.
+    final journee = analytics.journee;
 
     return RefreshIndicator(
       onRefresh: () async {
         await context.read<AppService>().initializeWithAdminUser();
+        await analytics.chargerLaJournee();
         setState(() {});
       },
       child: SingleChildScrollView(
@@ -152,11 +156,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             const SizedBox(height: 20),
             _buildKeyMetricsGrid(
               context,
-              todayRevenue,
-              weekRevenue,
+              journee,
+              analytics.erreurJournee,
               totalOrders,
               activeDrivers,
-              _calculateAverageOrderValue(totalOrders, orders),
               orders,
               menuItems,
             ),
@@ -360,11 +363,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   Widget _buildKeyMetricsGrid(
     BuildContext context,
-    double todayRevenue,
-    double weekRevenue,
+    JourneeDExploitation? journee,
+    String? erreurJournee,
     int totalOrders,
     int activeDrivers,
-    double averageOrderValue,
     List<eccore.Order> orders,
     List<eccore.ManagedMenuItem> menuItems,
   ) {
@@ -395,11 +397,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             SizedBox(
               width: width,
               child: EnhancedStatCard(
-                title: 'Revenus du jour',
-                value: formatPrice(todayRevenue),
+                // Trois états distincts, là où il n'y en avait qu'un : un
+                // chiffre absent ne doit pas s'afficher comme un chiffre nul,
+                // et une panne de rapport ne doit pas passer pour un jour creux.
+                title: journee?.libelle ?? 'Revenus du jour',
+                value: journee == null
+                    ? (erreurJournee == null ? '—' : 'Indisponible')
+                    : formatPrice(journee.revenusDuJourMineur.toDouble()),
                 icon: Icons.euro,
-                color: sem.success,
-                subtitle: '${formatPrice(weekRevenue)} cette semaine',
+                color: erreurJournee == null ? sem.success : sem.danger,
+                subtitle: journee == null
+                    ? (erreurJournee ?? 'Chargement…')
+                    : '${formatPrice(journee.revenusDeLaSemaineMineur.toDouble())} '
+                        'cette semaine',
                 onTap: () {
                   Navigator.push(
                     context,
@@ -448,10 +458,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               width: width,
               child: EnhancedStatCard(
                 title: 'Panier Moyen',
-                value: formatPrice(averageOrderValue),
+                // Le panier moyen du serveur, sur la journée : il était calculé
+                // sur les commandes chargées en mémoire, c'est-à-dire sur la
+                // page que la pagination avait rendue.
+                value: journee == null
+                    ? '—'
+                    : formatPrice(journee.panierMoyenMineur.toDouble()),
                 icon: Icons.shopping_basket,
                 color: scheme.tertiary,
-                subtitle: 'Par commande',
+                subtitle: 'Par commande livrée, sur la journée',
                 onTap: () {
                   Navigator.push(
                     context,
@@ -1169,28 +1184,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
 
   // --- Helpers ---
 
-  double _calculateTodayRevenue(List<eccore.Order> orders) {
-    final now = DateTime.now();
-    return orders
-        .where(
-          (o) =>
-              o.passeeLe.day == now.day &&
-              o.passeeLe.month == now.month &&
-              o.passeeLe.year == now.year &&
-              o.statut == StatutCommande.livree,
-        )
-        .fold(0.0, (sum, o) => sum + o.totalAffiche);
-  }
-
-  double _calculateAverageOrderValue(int totalOrders, List<eccore.Order> orders) {
-    if (orders.isEmpty) return 0.0;
-    final deliveredOrders =
-        orders.where((o) => o.statut == StatutCommande.livree).toList();
-    if (deliveredOrders.isEmpty) return 0.0;
-
-    final totalRevenue = deliveredOrders.fold(0.0, (sum, o) => sum + o.totalAffiche);
-    return totalRevenue / deliveredOrders.length;
-  }
+  // `_calculateTodayRevenue` et `_calculateAverageOrderValue` ont été retirés
+  // d'ici. Tous deux additionnaient les commandes **déjà chargées en mémoire**
+  // par la fenêtre de supervision, et le premier comparait en plus un jour
+  // **UTC** (`passeeLe`, lu d'un horodatage ISO) à un jour **local**
+  // (`DateTime.now()`) : à Lomé les deux coïncident, ailleurs non. Il filtrait
+  // par-dessus sur la date de *commande* en ne sommant que les livrées, si
+  // bien qu'une commande passée la veille et livrée le matin comptait la
+  // veille.
+  //
+  // Les deux chiffres viennent maintenant de `/analytics/reports/overview/`,
+  // agrégés en SQL et bornés à la journée de l'établissement — voir
+  // `AnalyticsService.chargerLaJournee`.
 
   Color _getStatusColor(StatutCommande status) {
     // Mapping sémantique basé sur le ColorScheme (compatible light/dark)

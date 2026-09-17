@@ -41,9 +41,11 @@ n'ont alors plus de jointure à faire vers la géographie.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from dataclasses import dataclass
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from rest_framework import serializers
 
@@ -52,7 +54,53 @@ from apps.restaurants.models import Restaurant
 from apps.restaurants.scoping import staff_restaurant_ids
 from common.permissions import is_unscoped
 
-__all__ = ["Perimetre", "PerimetreQuerySerializer", "resolve_perimetre"]
+__all__ = [
+    "Perimetre",
+    "PerimetreQuerySerializer",
+    "aujourd_hui_chez",
+    "fenetre_metier",
+    "resolve_perimetre",
+]
+
+
+def fenetre_metier(
+    *, start: dt.date, end: dt.date, timezone_name: str
+) -> tuple[dt.datetime, dt.datetime]:
+    """Les deux instants qui bornent des journées d'exploitation.
+
+    `start` et `end` sont des dates **murales**, celles du calendrier de la
+    cuisine : « le 25 » veut dire le 25 chez elle. Cette fonction les rend en
+    instants, de minuit local inclus à minuit local exclu le lendemain de
+    `end`.
+
+    ## Pourquoi pas `__date__range`
+
+    C'est ce qu'employaient les six rapports, et `__date` extrait la date dans
+    le fuseau actif du serveur — UTC, figé. La borne tombait donc à minuit UTC,
+    et une cuisine de Douala voyait sa première heure d'activité comptée la
+    veille. La comparaison sur des instants, elle, ne dépend d'aucun réglage
+    global : la conversion est faite ici, une fois, avec le fuseau du
+    périmètre.
+
+    La borne haute est **exclusive** (`__lt`), et non « le dernier instant du
+    jour » : un `__lte` sur 23:59:59 laisse filer la dernière seconde, et sur
+    23:59:59.999999 dépend de la précision de la colonne.
+    """
+    zone = ZoneInfo(timezone_name)
+    debut = dt.datetime.combine(start, dt.time.min, tzinfo=zone)
+    fin = dt.datetime.combine(end + dt.timedelta(days=1), dt.time.min, tzinfo=zone)
+    return debut, fin
+
+
+def aujourd_hui_chez(timezone_name: str) -> dt.date:
+    """La date du jour **là où l'activité a lieu**.
+
+    C'est la valeur par défaut des fenêtres de rapport. Elle était calculée par
+    le poste du back-office (`DateTime.now()` côté Flutter) : un siège qui
+    consulte à minuit et demi voyait le lendemain, et demandait donc les
+    chiffres d'une journée qui n'avait pas commencé chez la cuisine.
+    """
+    return dt.datetime.now(ZoneInfo(timezone_name)).date()
 
 
 class PerimetreQuerySerializer(serializers.Serializer[Any]):
@@ -89,6 +137,29 @@ class Perimetre:
 
     restaurant_ids: frozenset[uuid.UUID] | None
 
+    #: Le fuseau dans lequel se découpent les journées de ce rapport.
+    #:
+    #: ## Pourquoi il appartient au périmètre
+    #:
+    #: Les rapports bornaient leurs fenêtres par `delivered_at__date__range`, et
+    #: `__date` extrait la date dans le fuseau **actif du serveur** — `UTC`,
+    #: figé (`settings.TIME_ZONE`). Une journée de rapport commençait donc à
+    #: minuit UTC, quand la journée d'exploitation d'une cuisine de Douala
+    #: commence à 23 h UTC la veille : tout ce qui se livrait entre minuit et
+    #: une heure du matin sur place était compté la veille.
+    #:
+    #: Personne ne l'avait vu parce que l'établissement d'origine est à Lomé,
+    #: où UTC+0 fait coïncider les deux — le défaut naît avec le deuxième pays.
+    #:
+    #: Le fuseau est celui du périmètre quand il n'y en a qu'un. Pour un
+    #: périmètre qui en traverse plusieurs, « la journée » n'a pas de sens
+    #: unique : on retient UTC, et [timezone_est_certain] le dit à la réponse
+    #: plutôt que de laisser croire à une précision qu'on n'a pas.
+    timezone_name: str
+
+    #: Vrai quand le périmètre tient dans un seul fuseau.
+    timezone_est_certain: bool
+
     @property
     def is_global(self) -> bool:
         return self.restaurant_ids is None
@@ -124,10 +195,44 @@ def resolve_perimetre(*, user: User, params: dict[str, Any]) -> Perimetre:
     autorise = None if is_unscoped(user) else frozenset(staff_restaurant_ids(user))
 
     if demande is None:
-        return Perimetre(restaurant_ids=autorise)
-    if autorise is None:
-        return Perimetre(restaurant_ids=demande)
-    return Perimetre(restaurant_ids=demande & autorise)
+        retenus = autorise
+    elif autorise is None:
+        retenus = demande
+    else:
+        retenus = demande & autorise
+
+    fuseau, certain = _fuseau_du_perimetre(retenus)
+    return Perimetre(restaurant_ids=retenus, timezone_name=fuseau, timezone_est_certain=certain)
+
+
+def _fuseau_du_perimetre(restaurant_ids: frozenset[uuid.UUID] | None) -> tuple[str, bool]:
+    """Le fuseau commun aux établissements retenus, s'il y en a un.
+
+    Une requête, sur des identifiants déjà résolus — la même que celle qui
+    servait à les trouver, prolongée d'une colonne. Un périmètre global ou
+    à cheval sur plusieurs pays n'a pas de fuseau propre : on rend UTC en le
+    disant, ce que la réponse republie.
+
+    Un périmètre **vide** rend UTC lui aussi, et c'est sans conséquence : il
+    n'y a rien à agréger.
+    """
+    if restaurant_ids is None:
+        return "UTC", False
+
+    # Un fuseau vide ou absent est écarté plutôt que retenu comme une valeur :
+    # `ZoneInfo("")` lèverait, et une cuisine mal configurée ne doit pas rendre
+    # tout le rapport indisponible — elle rend seulement le fuseau incertain.
+    fuseaux = {
+        nom
+        for nom in Restaurant.objects.filter(pk__in=restaurant_ids)
+        .values_list("zone__city__country__timezone", flat=True)
+        .distinct()
+        if nom
+    }
+
+    if len(fuseaux) == 1:
+        return next(iter(fuseaux)), True
+    return "UTC", False
 
 
 def _restaurants_demandes(params: dict[str, Any]) -> frozenset[uuid.UUID] | None:

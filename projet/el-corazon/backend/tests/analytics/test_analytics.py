@@ -73,7 +73,11 @@ def as_analyst(restaurant: Restaurant) -> APIClient:
 #: Les appels directs au service le passent explicitement : depuis que les
 #: rapports sont cloisonnés, « sans périmètre » n'est plus une valeur par
 #: défaut qu'on peut omettre, et c'est précisément ce qu'on veut voir écrit.
-ENSEIGNE = Perimetre(restaurant_ids=None)
+#: Le fuseau est UTC et **incertain**, ce qui est la réponse juste pour toute
+#: l'enseigne : elle traverse plusieurs pays, et « la journée » n'y a pas de
+#: sens unique. Les cas qui portent sur le découpage d'une journée passent, eux,
+#: un périmètre d'un seul établissement.
+ENSEIGNE = Perimetre(restaurant_ids=None, timezone_name="UTC", timezone_est_certain=False)
 
 
 class TestEvenements:

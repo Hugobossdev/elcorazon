@@ -188,6 +188,10 @@ class AnalyticsOverview {
     required this.couriersOnline,
     required this.menuItemsAvailable,
     required this.menuItemsTotal,
+    required this.start,
+    required this.end,
+    required this.timezoneName,
+    required this.timezoneCertain,
   });
 
   factory AnalyticsOverview.fromJson(Map<String, dynamic> json) {
@@ -201,6 +205,10 @@ class AnalyticsOverview {
       couriersOnline: json['couriers_online'] as int,
       menuItemsAvailable: json['menu_items_available'] as int,
       menuItemsTotal: json['menu_items_total'] as int,
+      start: DateTime.parse(json['start'] as String),
+      end: DateTime.parse(json['end'] as String),
+      timezoneName: json['timezone_name'] as String? ?? 'UTC',
+      timezoneCertain: json['timezone_certain'] as bool? ?? false,
     );
   }
 
@@ -213,6 +221,28 @@ class AnalyticsOverview {
   final int couriersOnline;
   final int menuItemsAvailable;
   final int menuItemsTotal;
+
+  /// La fenêtre que le serveur a **réellement** agrégée, et le fuseau qui l'a
+  /// découpée.
+  ///
+  /// Republiée parce que l'écran ne la connaît pas forcément : il peut ne rien
+  /// demander, et obtenir la journée en cours de l'établissement. C'est la
+  /// seule façon d'être sûr de la journée dont on parle — l'horloge du poste
+  /// qui consulte ne la donne pas.
+  ///
+  /// Des dates, sans heure : la journée est celle du calendrier de la cuisine.
+  final DateTime start;
+  final DateTime end;
+  final String timezoneName;
+
+  /// Faux quand le périmètre traverse plusieurs fuseaux.
+  ///
+  /// « La journée » n'y a pas de sens unique, et l'écran doit le dire plutôt
+  /// que d'afficher une date qui ne vaut pour personne.
+  final bool timezoneCertain;
+
+  /// La fenêtre porte sur une seule journée.
+  bool get estUneJournee => start == end;
 
   /// Part des commandes menées jusqu'au bout, en pourcentage.
   double get completionRate =>

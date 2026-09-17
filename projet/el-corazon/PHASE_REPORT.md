@@ -29,11 +29,11 @@
 > | --- | --- | --- | --- |
 > | `flutter analyze` socle / client / admin | No issues found | No issues found | No issues found |
 > | `flutter analyze` dely | **13 problèmes, dont 3 erreurs en `lib/`** | No issues found | No issues found |
-> | `flutter test` socle | non exécuté | 509 | **526** |
+> | `flutter test` socle | non exécuté | 509 | **533** |
 > | `flutter test` client | non exécuté | 443 | **461** |
-> | `flutter test` admin | non exécuté | 238 | **257** |
+> | `flutter test` admin | non exécuté | 238 | **267** |
 > | `flutter test` livreur | non exécuté | 168 | **183** |
-> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 084 passés, 0 échec** |
+> | `pytest` | non exécuté | **2 041 passés, 2 échecs** | **2 102 passés, 0 échec** |
 > | `ruff check` · `ruff format --check` · `mypy --strict` | non exécutés | verts | verts (444 fichiers, 296 sources) |
 > | `spectacular --fail-on-warn` | non exécuté | non exécuté | vert |
 > | `tools/code_mort.py` | aucun fichier injoignable | idem | idem |
@@ -87,7 +87,8 @@ porte ses mesures.
 | 4 | `7686859` | back-office : refus affichés, affectation unique, fuseau, code mort |
 | 5 | `d4b4bcf`, `f99b646` | contrats, scénarios, trace (`AUDIT_2026-09-15.md`) |
 | 2 *(reprise)* | `39879e7`, `2a34956` | suivi après coupure, notification, barre de l'app |
-| 3 *(reprise)* | — | le règlement cesse de se déduire du moyen de paiement |
+| 3 *(reprise)* | `ba692ba` | le règlement cesse de se déduire du moyen de paiement |
+| 4 *(reprise)* | — | la journée d'un rapport commence chez la cuisine |
 
 **Deux phases ont été rouvertes**, et c'est le résultat de la relecture plutôt
 qu'un oubli d'ordonnancement :
@@ -98,8 +99,13 @@ qu'un oubli d'ordonnancement :
 * la phase 3 **se trompait sur son propre correctif**. Elle annonçait que le
   montant à encaisser venait désormais du serveur « qui connaît l'état réel du
   règlement » ; le serveur, lui, le déduisait du moyen de paiement. La
-  déduction fautive avait été déplacée, pas corrigée. Voir
-  `AUDIT_2026-09-15.md`, section B bis.
+  déduction fautive avait été déplacée, pas corrigée ;
+* la phase 4 avait corrigé **une** convention d'heure — les fermetures
+  exceptionnelles — et laissé intacte celle des rapports, qui tranchait les
+  journées à minuit UTC. Elle avait aussi retiré onze méthodes mortes en
+  laissant les neuf de la couche suivante.
+
+Voir `AUDIT_2026-09-15.md`, section B bis, pour les deux.
 
 ## Phase 1 — ce qui a changé de règle
 

@@ -17,13 +17,14 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db.models import Count, Max, Min, Q, Sum
 from django.db.models.functions import TruncDate
 
 from apps.accounts.models import User, UserType
-from apps.analytics.perimetre import Perimetre
+from apps.analytics.perimetre import Perimetre, fenetre_metier
 from apps.catalog.models import MenuItem
 from apps.delivery.models import Assignment, CourierProfile
 from apps.delivery.states import DeliveryStatus, VerificationStatus
@@ -143,6 +144,23 @@ class Overview:
     menu_items_available: int
     menu_items_total: int
 
+    #: La fenêtre effectivement agrégée, et le fuseau dans lequel elle a été
+    #: découpée.
+    #:
+    #: Republiées parce que l'écran ne les connaît plus : il envoyait deux dates
+    #: calculées sur l'horloge du **poste** du back-office, si bien qu'un siège
+    #: consultant à minuit et demi demandait les chiffres d'une journée qui
+    #: n'avait pas commencé chez la cuisine. Il peut désormais ne rien envoyer,
+    #: et c'est le serveur qui dit de quelle journée il parle.
+    #:
+    #: `timezone_certain` est faux quand le périmètre traverse plusieurs
+    #: fuseaux : « la journée » n'y a pas de sens unique, et l'écran doit le dire
+    #: plutôt que d'afficher une date qui ne vaut pour personne.
+    start: dt.date
+    end: dt.date
+    timezone_name: str
+    timezone_certain: bool
+
 
 @dataclass(frozen=True, slots=True)
 class CustomerStats:
@@ -223,13 +241,18 @@ class ReportingService:
 
     @staticmethod
     def revenue_by_day(*, start: dt.date, end: dt.date, perimetre: Perimetre) -> list[RevenueRow]:
+        debut, fin = fenetre_metier(start=start, end=end, timezone_name=perimetre.timezone_name)
         rows = (
             Order.objects.filter(
                 status=OrderStatus.DELIVERED,
-                delivered_at__date__range=(start, end),
+                delivered_at__gte=debut,
+                delivered_at__lt=fin,
                 **perimetre.filtre("restaurant_id"),
             )
-            .annotate(day=TruncDate("delivered_at"))
+            # Le regroupement se fait dans le **même** fuseau que les bornes :
+            # trancher la fenêtre chez la cuisine puis grouper les jours en UTC
+            # rendrait des lignes coupées au milieu de la nuit locale.
+            .annotate(day=TruncDate("delivered_at", tzinfo=ZoneInfo(perimetre.timezone_name)))
             .values("day")
             .annotate(orders_count=Count("id"), revenue_minor=Sum("total_minor"))
             .order_by("day")
@@ -245,10 +268,12 @@ class ReportingService:
     def top_products(
         *, start: dt.date, end: dt.date, perimetre: Perimetre, limit: int = 10
     ) -> list[TopProductRow]:
+        debut, fin = fenetre_metier(start=start, end=end, timezone_name=perimetre.timezone_name)
         rows = (
             OrderLine.objects.filter(
                 order__status=OrderStatus.DELIVERED,
-                order__delivered_at__date__range=(start, end),
+                order__delivered_at__gte=debut,
+                order__delivered_at__lt=fin,
                 **perimetre.filtre("order__restaurant_id"),
             )
             .values("menu_item_id", "item_name")
@@ -275,9 +300,12 @@ class ReportingService:
         les commandes annulées, qui ne sont jamais livrées — et c'est
         précisément ce qu'on vient regarder.
         """
+        debut, fin = fenetre_metier(start=start, end=end, timezone_name=perimetre.timezone_name)
         rows = (
             Order.objects.filter(
-                placed_at__date__range=(start, end), **perimetre.filtre("restaurant_id")
+                placed_at__gte=debut,
+                placed_at__lt=fin,
+                **perimetre.filtre("restaurant_id"),
             )
             .values("status")
             .annotate(orders_count=Count("id"), revenue_minor=Sum("total_minor"))
@@ -303,10 +331,12 @@ class ReportingService:
         (`item_name`) mais pas sa catégorie, parce qu'un article peut changer de
         rayon sans que la commande passée en soit affectée.
         """
+        debut, fin = fenetre_metier(start=start, end=end, timezone_name=perimetre.timezone_name)
         rows = (
             OrderLine.objects.filter(
                 order__status=OrderStatus.DELIVERED,
-                order__delivered_at__date__range=(start, end),
+                order__delivered_at__gte=debut,
+                order__delivered_at__lt=fin,
                 menu_item__isnull=False,
                 **perimetre.filtre("order__restaurant_id"),
             )
@@ -344,9 +374,12 @@ class ReportingService:
         ligne sans clé plutôt que de disparaître : un total qui ne retombe pas
         sur celui des commandes serait une réponse fausse.
         """
+        debut, fin = fenetre_metier(start=start, end=end, timezone_name=perimetre.timezone_name)
         cle, libelle = NETWORK_LEVELS[level]
         commandes = Order.objects.filter(
-            placed_at__date__range=(start, end), **perimetre.filtre("restaurant_id")
+            placed_at__gte=debut,
+            placed_at__lt=fin,
+            **perimetre.filtre("restaurant_id"),
         )
         if zone_id:
             commandes = commandes.filter(delivery_zone_id=zone_id)
@@ -394,8 +427,11 @@ class ReportingService:
         plateforme grandissait, et les totaux dépendaient de ce que la
         pagination avait rendu.
         """
+        debut, fin = fenetre_metier(start=start, end=end, timezone_name=perimetre.timezone_name)
         commandes = Order.objects.filter(
-            placed_at__date__range=(start, end), **perimetre.filtre("restaurant_id")
+            placed_at__gte=debut,
+            placed_at__lt=fin,
+            **perimetre.filtre("restaurant_id"),
         ).aggregate(
             total=Count("id"),
             livrees=Count("id", filter=Q(status=OrderStatus.DELIVERED)),
@@ -435,6 +471,10 @@ class ReportingService:
             ).count(),
             menu_items_available=catalogue["disponibles"],
             menu_items_total=catalogue["total"],
+            start=start,
+            end=end,
+            timezone_name=perimetre.timezone_name,
+            timezone_certain=perimetre.timezone_est_certain,
         )
 
     @staticmethod
@@ -466,10 +506,12 @@ class ReportingService:
     def courier_performance(
         *, start: dt.date, end: dt.date, perimetre: Perimetre
     ) -> list[CourierPerformanceRow]:
+        debut, fin = fenetre_metier(start=start, end=end, timezone_name=perimetre.timezone_name)
         rows = (
             Assignment.objects.filter(
                 status=DeliveryStatus.DELIVERED,
-                delivered_at__date__range=(start, end),
+                delivered_at__gte=debut,
+                delivered_at__lt=fin,
                 **perimetre.filtre("order__restaurant_id"),
             )
             .values("courier_id", "courier__user__full_name")

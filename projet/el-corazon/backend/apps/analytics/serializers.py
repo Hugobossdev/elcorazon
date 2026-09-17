@@ -36,12 +36,38 @@ class EventWriteSerializer(serializers.Serializer[Any]):
 
 
 class ReportQuerySerializer(serializers.Serializer[Any]):
-    start = serializers.DateField()
-    end = serializers.DateField()
+    """La fenêtre d'un rapport — deux dates **murales**, ou rien.
+
+    ## Pourquoi elles sont devenues facultatives
+
+    Elles étaient obligatoires, et l'application les calculait sur
+    `DateTime.now()` : l'horloge du **poste** du back-office. Un siège qui
+    consulte à minuit et demi demandait donc les chiffres d'une journée que la
+    cuisine n'avait pas commencée, et lisait un tableau de bord vide sans que
+    rien ne l'explique. La question « quel jour sommes-nous ? » n'a de réponse
+    que là où l'activité a lieu, et c'est le serveur qui connaît ce fuseau.
+
+    Omises, elles valent donc **la journée en cours chez l'établissement**. Le
+    rapport republie ce qu'il a retenu (voir `OverviewSerializer`).
+
+    Les deux vont ensemble : n'en donner qu'une est refusé plutôt que complété
+    d'office — « du 12 à aujourd'hui » et « d'aujourd'hui au 12 » sont deux
+    fenêtres différentes, et deviner laquelle est demandée rendrait des chiffres
+    pour une question que personne n'a posée.
+    """
+
+    start = serializers.DateField(required=False, default=None)
+    end = serializers.DateField(required=False, default=None)
     limit = serializers.IntegerField(min_value=1, max_value=100, required=False, default=10)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        if attrs["end"] < attrs["start"]:
+        debut, fin = attrs["start"], attrs["end"]
+        if (debut is None) != (fin is None):
+            raise serializers.ValidationError(
+                "`start` et `end` vont ensemble : donnez les deux, ou aucune des deux "
+                "pour obtenir la journée en cours de l'établissement."
+            )
+        if debut is not None and fin is not None and fin < debut:
             raise serializers.ValidationError("`end` doit être postérieure ou égale à `start`.")
         return attrs
 
@@ -119,3 +145,12 @@ class OverviewSerializer(serializers.Serializer[Any]):
     couriers_online = serializers.IntegerField(read_only=True)
     menu_items_available = serializers.IntegerField(read_only=True)
     menu_items_total = serializers.IntegerField(read_only=True)
+
+    # La fenêtre telle qu'elle a été agrégée, et le fuseau qui l'a découpée.
+    # L'écran n'a plus à la deviner : il la demandait sur l'horloge de son
+    # propre poste, ce qui donnait la mauvaise journée dès que le siège et la
+    # cuisine ne sont pas dans le même fuseau.
+    start = serializers.DateField(read_only=True)
+    end = serializers.DateField(read_only=True)
+    timezone_name = serializers.CharField(read_only=True)
+    timezone_certain = serializers.BooleanField(read_only=True)
