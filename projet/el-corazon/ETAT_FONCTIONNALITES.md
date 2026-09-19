@@ -1,6 +1,6 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Dernière révision** : 8 septembre 2026
+**Dernière révision** : 19 septembre 2026
 
 > ⚠️ **Inventaire fonctionnel daté.** Le corps de ce document a été écrit en
 > décembre 2024, quand les trois applications parlaient directement à Supabase.
@@ -11,6 +11,96 @@
 >
 > La référence à jour est **[docs/architecture/04-migration-flutter.md](docs/architecture/04-migration-flutter.md)**,
 > qui trace domaine par domaine ce qui a été migré, construit ou supprimé.
+
+## 🧰 Le back-office, complété là où l'argent et les clients attendaient (19 septembre 2026)
+
+L'analyse du 18 septembre a confronté les 23 écrans du back-office au cahier
+des charges (§4) et aux 209 routes du serveur. Les écrans appelaient tous des
+routes qui existaient ; ce qui manquait, c'étaient des **domaines entiers sans
+porte d'entrée pour le personnel**. Ce lot en ferme cinq.
+
+### Ce qui restait coincé
+
+- **Les retraits des livreurs ne se soldaient nulle part.** La demande débitait
+  les gains à l'instant ; `WithdrawalService.settle` et `fail` n'avaient
+  **aucun appelant** hors des tests, et `Withdrawal` n'était même pas dans
+  l'administration Django. Nouvel écran **Caisse › Retraits livreurs** :
+  constater un versement (référence du virement exigée) ou le refuser (gains
+  rendus, motif lu par le livreur). Permissions `payouts.read` et
+  `payouts.settle`, séparées pour le quatre-yeux. L'exploitation est prévenue
+  d'une demande, le livreur de la décision.
+- **Le support client n'avait pas de côté personnel.** Tickets, réclamations et
+  retours n'étaient ouverts qu'aux clients (`IsCustomer`) : le back-office ne
+  pouvait ni les lire ni y répondre, et une réponse saisie dans
+  l'administration Django ne partait vers personne. Nouvel écran
+  **Utilisateurs › Service client** : fil du ticket et réponse, résolution
+  motivée, réclamations et retours tranchés — motif exigé pour tout refus.
+  Chaque geste parvient au client en notification (type `support`).
+  Permissions `support.read` et `support.write`. Un retour refusé porte
+  désormais sa réponse (`resolution`), lisible par le client.
+- **Les remboursements ne se clôturaient que dans l'administration Django.**
+  Nouvel écran **Caisse › Remboursements** ; le constat relit la ligne sous
+  verrou, ce que l'action d'administration ne faisait pas.
+- **Aucun compte du personnel ne se créait depuis le back-office**, et aucun ne
+  se rattachait à une cuisine — alors que le poste de cuisine renvoyait « vers
+  un responsable du siège ». Le serveur savait tout faire ; le dépôt Dart
+  n'exposait que la liste, les rôles et l'activation. L'écran des rôles ouvre
+  maintenant un compte (mot de passe provisoire généré), édite son périmètre en
+  arbre marché → ville → cuisine, et remplace un mot de passe perdu. Un compte
+  rattaché à rien est signalé comme **ne voyant rien** ; le siège se distingue
+  enfin de lui (`is_superuser`, en lecture seule).
+- **Le journal d'audit était écrit et lisible nulle part.** Nouvel écran
+  **Système › Journal d'audit** (`audit.read`), cloisonné comme le reste. Il
+  consigne en plus les **droits** : permissions d'un rôle, rôles, périmètre,
+  activation et mot de passe d'un compte, blocage d'un client — dont le motif,
+  pourtant exigé par la route, n'était jusqu'ici conservé nulle part.
+
+### Ce qui mentait à l'écran
+
+- L'onglet **Statistiques** des commandes affichait « Livraison à temps 0 % »
+  et « Satisfaction 0.0/5 » en toutes circonstances : il lisait des clés que le
+  service ne produit pas. La satisfaction laisse la place au taux d'annulation,
+  qui se lit dans les données.
+- La **déconnexion automatique** ignorait l'activité (`recordActivity` sans
+  appelant) et le délai choisi ne s'appliquait qu'après être repassé par les
+  Paramètres.
+- La **pastille des notifications** était allumée en dur ; elle suit le
+  compteur de non-lues, relu chaque minute.
+- Un **refus de validation** (400) s'affichait « Une erreur est survenue. » dans
+  les trois applications : la raison, rangée champ par champ, n'était pas lue.
+
+### Ajouté à la supervision des commandes
+
+- Filtre **par client** et **période choisie au calendrier** (borne haute
+  comprise). Le serveur les acceptait depuis l'origine.
+
+### Seconde vague — quatre exigences du cahier des charges
+
+- **Notes internes**, sur la fiche d'une commande et sur celle d'un client
+  (`/orders/manage/{id}/notes/`, `/administration/customers/{id}/notes/`).
+  Jamais rendues au client ni au livreur ; elles ne se modifient ni ne
+  s'effacent. Un test vérifie qu'aucune ne fuit dans la commande que lit le
+  client.
+- **Expiration des pièces livreur** : trois dates relevées à l'instruction du
+  dossier, remises à nul quand le livreur redépose la pièce. On ne **valide**
+  pas un dossier sur une pièce déjà expirée (409) ; un dossier validé dont une
+  pièce expire ensuite **ne bascule pas seul** — L1 ne dépend que du dossier,
+  et retirer quelqu'un du service à minuit en pleine tournée serait pire que
+  le mal. Rappel quotidien au livreur et à l'équipe à J-30, J-7, J-1 et J0.
+- **Bilan des campagnes** : taux d'ouverture, destinataires ayant commandé
+  dans les 7 jours, chiffre associé par devise — cloisonné au périmètre de qui
+  regarde. L'écran dit qu'il s'agit d'une corrélation, pas d'un effet prouvé.
+- **Modération des avis** (Catalogue › Avis clients) : un avis se masque,
+  motif exigé, sous `catalog.write` ; masqué, il sort de la vitrine **et de la
+  note moyenne**, et le geste est au journal d'audit.
+
+### Ce que ce chantier n'a pas fait
+
+Vue Kanban des commandes, rapports PDF/Excel/planifiés, OTP du personnel,
+programmation des campagnes, modération du social, formules d'abonnement,
+images de catégorie et images multiples, contenus FAQ/CGV, éditeur de contour
+de zone, filtre des commandes par livreur (il demanderait à `orders` de
+connaître `delivery`, ce que l'ADR-002 interdit).
 
 ## 🌍 Le multi-cuisine, rendu utilisable (8 septembre 2026)
 
@@ -687,8 +777,11 @@ n'y vaut que si elle est vraie **du code déployé**, pas du code écrit.
 - ✅ Connexion admin sécurisée
 - ✅ Gestion des rôles (Super Admin, Manager, Opérateur)
 - ✅ Système de permissions granulaire
-- ✅ Journal d'audit des actions
+- ✅ **Journal d'audit** — lisible depuis le 19 septembre 2026. L'entrée était
+  cochée auparavant alors qu'aucune route ni aucun écran ne le lisait
+- ✅ Comptes du personnel : création, rattachement, mot de passe (19 septembre)
 - ✅ Gestion des sessions
+- ❌ Vérification OTP du personnel — absente
 
 #### 📊 Tableau de Bord
 - ✅ Vue d'ensemble des métriques
@@ -698,12 +791,17 @@ n'y vaut que si elle est vraie **du code déployé**, pas du code écrit.
 - ⚠️ **TODO** : Compléter les graphiques fl_chart
 
 #### 🛒 Gestion des Commandes
-- ✅ Vue Kanban des commandes
+- ❌ **Vue Kanban — n'existe pas.** L'entrée était cochée ; aucun écran ne
+  l'implémente (vérifié le 18 septembre 2026)
 - ✅ Vue Liste des commandes
 - ✅ Changement de statut
 - ✅ Attribution de livreurs
-- ✅ Gestion des remboursements
-- ✅ Notes internes
+- ✅ Gestion des remboursements — demande depuis la commande, constat dans
+  « Remboursements » (19 septembre)
+- ✅ **Notes internes** — depuis le 19 septembre 2026. L'entrée était cochée
+  auparavant alors qu'elles n'existaient pas (`Order.notes` est la note du
+  client)
+- ✅ Filtres par client et par période choisie (19 septembre)
 - ✅ Recherche globale
 - ✅ **Recherche dans la supervision** (id, destinataire, adresse) — elle
   appelait `searchOrders(value)` **en jetant la valeur de retour** : la barre
@@ -891,7 +989,11 @@ n'y vaut que si elle est vraie **du code déployé**, pas du code écrit.
    dans `core/widgets/`, réutilisable telle quelle. À retirer si personne ne
    s'en sert d'ici la prochaine revue
 
-### 📈 Taux de Complétion : **~97%** (graphiques fl_chart et upload d'images complétés)
+### 📈 Taux de Complétion
+
+Le « ~97 % » affiché ici reposait sur des entrées fausses (Kanban, notes
+internes, journal d'audit). Il est retiré plutôt que recalculé : voir la
+section du 19 septembre 2026 pour ce qui reste à faire.
 
 ---
 

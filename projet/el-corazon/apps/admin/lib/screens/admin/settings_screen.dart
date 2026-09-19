@@ -71,9 +71,9 @@ class _SettingsScreenState extends State<SettingsScreen>
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
 
-    final timeoutMinutes = prefs.getInt('inactivity_timeout_minutes') ?? 30;
+    final timeoutMinutes = prefs.getInt(AdminAuthService.cleDelaiInactivite) ?? 30;
     _inactivityTimeout = Duration(minutes: timeoutMinutes);
-    _autoLogoutEnabled = prefs.getBool('auto_logout_enabled') ?? true;
+    _autoLogoutEnabled = prefs.getBool(AdminAuthService.cleDeconnexionAuto) ?? true;
 
     setState(() {});
   }
@@ -92,11 +92,12 @@ class _SettingsScreenState extends State<SettingsScreen>
     // n'allaient nulle part. Un bouton « Sauvegarder » global au-dessus
     // d'onglets qui enregistrent chacun de leur côté laisse croire que rien
     // n'est enregistré tant qu'on ne l'a pas pressé.
+    // Les clés sont celles que `AdminAuthService` relit au démarrage.
     await prefs.setInt(
-      'inactivity_timeout_minutes',
+      AdminAuthService.cleDelaiInactivite,
       _inactivityTimeout.inMinutes,
     );
-    await prefs.setBool('auto_logout_enabled', _autoLogoutEnabled);
+    await prefs.setBool(AdminAuthService.cleDeconnexionAuto, _autoLogoutEnabled);
 
     // Appliquer les paramètres d'auto-logout
     if (!mounted) return;

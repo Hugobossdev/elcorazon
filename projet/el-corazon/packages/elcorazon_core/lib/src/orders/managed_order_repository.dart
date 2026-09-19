@@ -1,3 +1,4 @@
+import 'package:elcorazon_core/src/models/internal_note.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/network/page.dart';
 import 'package:elcorazon_core/src/orders/kitchen_order.dart';
@@ -164,6 +165,7 @@ class ManagedOrderRepository {
     String? deliveryZoneId,
     String? restaurantSlug,
     String? search,
+    String? customerId,
     DateTime? placedFrom,
     DateTime? placedTo,
   }) async {
@@ -172,6 +174,10 @@ class ManagedOrderRepository {
       queryParameters: {
         ..._geographie(countryIsoCode, citySlug, deliveryZoneId),
         if (restaurantSlug != null) 'restaurant__slug': restaurantSlug,
+        // Les compteurs portent sur la même sélection que la liste : un
+        // onglet qui compterait toute la clientèle quand la liste n'en montre
+        // qu'un client annoncerait des commandes qu'on ne trouve pas.
+        if (customerId != null) 'customer': customerId,
         if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
         if (placedFrom != null) 'placed_at__gte': placedFrom.toUtc().toIso8601String(),
         if (placedTo != null) 'placed_at__lte': placedTo.toUtc().toIso8601String(),
@@ -216,6 +222,27 @@ class ManagedOrderRepository {
       data: {'reason': reason},
     );
     return Order.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Les notes internes de la commande, dans l'ordre où elles ont été écrites.
+  ///
+  /// Ni le client ni le livreur ne les lisent : la route n'existe que sous
+  /// `/orders/manage/`. C'est là que l'équipe se passe le relais — « client
+  /// rappelé, attend un geste », « livreur prévenu du retard ».
+  Future<List<InternalNote>> notes(String orderId) async {
+    final response = await apiClient.get('/orders/manage/$orderId/notes/');
+    return (response.data as List<dynamic>)
+        .map((json) => InternalNote.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Ajoute une note. Elle ne se modifie ni ne s'efface ensuite.
+  Future<InternalNote> addNote({required String orderId, required String content}) async {
+    final response = await apiClient.post(
+      '/orders/manage/$orderId/notes/',
+      data: {'content': content},
+    );
+    return InternalNote.fromJson(response.data as Map<String, dynamic>);
   }
 
   /// Pays → ville → zone, sous les noms de filtres du serveur.

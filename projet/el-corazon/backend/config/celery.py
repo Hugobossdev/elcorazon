@@ -37,6 +37,12 @@ app.conf.beat_schedule = {
         "task": "apps.orders.tasks.purge_idempotency_keys",
         "schedule": 3600.0,
     },
+    "remind-document-expiry": {
+        # Quotidien : les rappels tombent à J-30, J-7, J-1 et J0, et une passe
+        # par jour suffit à n'en manquer aucun.
+        "task": "apps.delivery.tasks.remind_document_expiry",
+        "schedule": 86400.0,
+    },
     "expire-points": {
         # Les points s'éteignent après une période sans mouvement. Quotidien :
         # la fenêtre se compte en mois, une passe par jour suffit largement.

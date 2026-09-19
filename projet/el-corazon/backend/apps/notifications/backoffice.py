@@ -33,8 +33,8 @@ from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
 from apps.notifications.models import Campaign, CampaignStatus
-from apps.notifications.serializers import CampaignSerializer
-from apps.notifications.services import recipients_of, send_campaign
+from apps.notifications.serializers import CampaignSerializer, CampaignStatsSerializer
+from apps.notifications.services import campaign_stats, recipients_of, send_campaign
 from common.permissions import HasPermission, authenticated_user
 
 __all__ = ["CampaignViewSet"]
@@ -83,6 +83,17 @@ class CampaignViewSet(
         au lieu d'une erreur qui ferait croire à un échec.
         """
         return Response(CampaignSerializer(send_campaign(self.get_object())).data)
+
+    @extend_schema(responses={200: CampaignStatsSerializer}, tags=["notifications"])
+    @action(detail=True, methods=["get"], permission_classes=[SEND_PERMISSION])
+    def stats(self, request: Request, pk: str) -> Response:
+        """Le bilan d'une campagne : ouvertures, commandes, chiffre attribué.
+
+        Rendu aussi pour un brouillon, à zéro : l'écran n'a pas à distinguer
+        « rien envoyé » de « route absente ».
+        """
+        bilan = campaign_stats(self.get_object(), viewer=authenticated_user(request))
+        return Response(CampaignStatsSerializer(bilan).data)
 
     @extend_schema(
         responses={200: {"type": "object", "properties": {"recipients": {"type": "integer"}}}},

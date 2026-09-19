@@ -108,6 +108,20 @@ class CourierProfile(UUIDModel, TimeStampedModel):
         upload_to="couriers/vehicle/", storage=courier_documents, null=True, blank=True
     )
 
+    # Date d'expiration de chaque pièce — relevée par le personnel à la
+    # validation, quand il a la pièce sous les yeux (`CourierService.review`),
+    # et remise à nul quand le livreur dépose une nouvelle pièce, qui porte sa
+    # propre date (`replace_documents`).
+    #
+    # Le cahier des charges demande ce suivi (§4.2.5). Un permis expiré ne rend
+    # pas le livreur inéligible de lui-même : L1 ne dépend que du dossier, et
+    # une règle qui le retirerait du service à minuit, en pleine tournée,
+    # serait pire que le mal. L'équipe est prévenue avant l'échéance
+    # (`remind_document_expiry`) et suspend si elle le décide.
+    id_document_expires_on = models.DateField(null=True, blank=True)
+    licence_document_expires_on = models.DateField(null=True, blank=True)
+    vehicle_document_expires_on = models.DateField(null=True, blank=True)
+
     # --- Disponibilité et position ---------------------------------------
     is_online = models.BooleanField(
         default=False, help_text="Bascule volontaire du livreur : accepte-t-il des courses ?"

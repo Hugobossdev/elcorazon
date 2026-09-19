@@ -213,6 +213,39 @@ class TestPersonnel:
         assert membre.user_type == UserType.STAFF
         assert membre.check_password("MotDePasseSolide!42")
 
+    def test_le_siege_se_distingue_d_un_compte_rattache_a_rien(
+        self, siege: User, restaurant: Restaurant
+    ) -> None:
+        """Les deux n'ont aucun rattachement, et l'un voit tout quand l'autre ne
+        voit rien (`is_unscoped`). Sans `is_superuser` dans la réponse, l'écran
+        des rôles les affichait de la même façon."""
+        oublie = personnel("oublie@elcorazon.test", None, "orders.read")
+
+        fiches = {
+            fiche["email"]: fiche
+            for fiche in connecte(siege).get(reverse("v1:restaurants:staff-list")).data["results"]
+        }
+
+        assert fiches[oublie.email]["is_superuser"] is False
+        assert fiches[oublie.email]["restaurants"] == []
+
+    def test_on_ne_se_fait_pas_super_utilisateur_par_cette_route(
+        self, siege: User, restaurant: Restaurant
+    ) -> None:
+        """Le champ se lit ; l'écrire depuis un formulaire serait une élévation
+        que ni `roles.write` ni aucune garde de périmètre ne couvre."""
+        membre = personnel("ambitieux@elcorazon.test", restaurant, "orders.read")
+
+        response = connecte(siege).patch(
+            reverse("v1:restaurants:staff-detail", args=[membre.pk]),
+            {"is_superuser": True},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        membre.refresh_from_db()
+        assert membre.is_superuser is False
+
     def test_un_compte_se_cree_avec_un_mot_de_passe(self, siege: User) -> None:
         response = connecte(siege).post(
             reverse("v1:restaurants:staff-list"),

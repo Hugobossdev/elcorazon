@@ -33,6 +33,42 @@ void main() {
     });
   });
 
+  group('Le serveur a répondu champ par champ', () {
+    test('un refus de validation rend les raisons, pas le repli', () {
+      // Forme exacte d'un 400 DRF passé par `problem_detail_handler` : pas de
+      // `detail`, les raisons dans `errors`.
+      final erreur = ApiException.fromProblemDetail(400, {
+        'type': 'https://api.elcorazon.app/errors/invalid',
+        'title': 'Requête invalide.',
+        'status': 400,
+        'code': 'invalid',
+        'errors': {
+          'password': ['Ce mot de passe est trop courant.'],
+          'email': ['Un utilisateur avec cette adresse existe déjà.'],
+        },
+      });
+
+      final message = messageErreurApi(erreur);
+
+      expect(message, contains('Ce mot de passe est trop courant.'));
+      expect(message, contains('Un utilisateur avec cette adresse existe déjà.'));
+      expect(message, isNot(contains('Une erreur est survenue')));
+    });
+
+    test('une phrase d’ensemble, quand il y en a une, reste prioritaire', () {
+      const erreur = ApiException(
+        status: 400,
+        code: 'invalid',
+        detail: 'Le motif est obligatoire.',
+        errors: {
+          'reason': ['Le motif est obligatoire.'],
+        },
+      );
+
+      expect(messageErreurApi(erreur), 'Le motif est obligatoire.');
+    });
+  });
+
   group('Le serveur n’a rien dit d’utile', () {
     test('une panne de transport parle de réseau, pas du serveur', () {
       final erreur = ApiException.network('Connection refused');

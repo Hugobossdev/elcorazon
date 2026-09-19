@@ -106,6 +106,13 @@ class ClientManagementService extends ChangeNotifier {
   /// Le motif n'est plus facultatif : un compte fermé sans motif est un litige
   /// qu'on ne saura pas instruire six mois plus tard, quand le client
   /// rappellera. Le serveur le refuse à vide.
+  /// Les notes internes d'un client. Lève `ApiException` : la fiche dit la
+  /// panne à l'endroit où les notes auraient été.
+  Future<List<eccore.InternalNote>> notesOf(String clientId) => _admin.customerNotes(clientId);
+
+  Future<eccore.InternalNote> addNote(String clientId, String contenu) =>
+      _admin.addCustomerNote(customerId: clientId, content: contenu);
+
   Future<bool> suspendClient(String clientId, {required String reason}) async {
     try {
       final maj = await _admin.blockCustomer(

@@ -13,6 +13,8 @@ class ReturnRequest {
     required this.refundAmount,
     required this.status,
     required this.createdAt,
+    this.resolution = '',
+    this.resolvedAt,
   });
 
   factory ReturnRequest.fromJson(Map<String, dynamic> json) {
@@ -23,6 +25,10 @@ class ReturnRequest {
       items: (json['items'] as List<dynamic>).map((e) => e.toString()).toList(),
       refundAmount: Money.fromJson(json['refund_amount'] as Map<String, dynamic>),
       status: json['status'] as String,
+      resolution: json['resolution'] as String? ?? '',
+      resolvedAt: json['resolved_at'] == null
+          ? null
+          : DateTime.parse(json['resolved_at'] as String),
       createdAt: DateTime.parse(json['created_at'] as String),
     );
   }
@@ -35,5 +41,10 @@ class ReturnRequest {
 
   /// `pending` | `approved` | `rejected` | `refunded` (`ReturnStatus`).
   final String status;
+
+  /// Ce que l'exploitation a répondu — le motif d'un refus, d'abord. Vide
+  /// tant qu'elle n'a pas statué, et pour un serveur antérieur au champ.
+  final String resolution;
+  final DateTime? resolvedAt;
   final DateTime createdAt;
 }

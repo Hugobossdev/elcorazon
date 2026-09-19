@@ -15,6 +15,7 @@ __all__ = [
     "assignment_declined",
     "assignment_offered",
     "courier_went_online",
+    "document_expiring",
 ]
 
 #: Arguments : `assignment`.
@@ -62,3 +63,10 @@ assignment_declined = django.dispatch.Signal()
 #: Émis quand un livreur **passe** en ligne — pas quand il y reste. Les commandes
 #: prêtes qui attendaient faute de livreur lui sont alors proposées.
 courier_went_online = django.dispatch.Signal()
+
+#: Arguments : `courier`, `piece` (nom du champ de la pièce), `expires_on`,
+#: `days_left` (0 le jour même).
+#:
+#: Émis par le rappel quotidien (`remind_document_expiry`) aux échéances qui
+#: laissent le temps d'agir — un mois, une semaine, la veille, le jour même.
+document_expiring = django.dispatch.Signal()

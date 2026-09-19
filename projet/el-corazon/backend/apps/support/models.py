@@ -153,6 +153,10 @@ class ReturnRequest(UUIDModel, TimeStampedModel):
     status = models.CharField(
         max_length=16, choices=ReturnStatus.choices, default=ReturnStatus.PENDING
     )
+    #: Ce que l'exploitation répond au client — le motif d'un refus, surtout.
+    #: Les tickets et les réclamations l'avaient ; une demande de retour
+    #: refusée ne pouvait rien dire de pourquoi.
+    resolution = models.TextField(blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:

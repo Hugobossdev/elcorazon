@@ -109,6 +109,22 @@ class _LigneDeStat extends StatelessWidget {
   }
 }
 
+/// Les trois chiffres de [OrderManagementService.getPerformanceStats], lus
+/// comme les lit la section « Performance » de l'écran principal.
+///
+/// Deux cartes sur trois affichaient zéro en toutes circonstances :
+///
+/// * « Livraison à temps » lisait `on_time_delivery_rate`, une clé que le
+///   service ne produit pas — il rend `on_time_rate`, **déjà en pourcentage**,
+///   que la carte multipliait en plus par cent ;
+/// * « Satisfaction » lisait `customer_satisfaction`, que rien ne produit
+///   depuis que la formule qui l'inventait a été retirée (voir
+///   `statistiques_livraison_test.dart`). Aucun client ne note une commande :
+///   la carte laisse la place au taux d'annulation, qui se lit dans les
+///   données.
+///
+/// Un chiffre qui n'a rien mesuré s'affiche « — » : « 0 min » et « 0 % » se
+/// lisent comme des résultats.
 class _CartesDePerformance extends StatelessWidget {
   const _CartesDePerformance({required this.stats});
 
@@ -116,9 +132,13 @@ class _CartesDePerformance extends StatelessWidget {
 
   double _nombre(String cle) => (stats[cle] as num?)?.toDouble() ?? 0.0;
 
+  int _entier(String cle) => (stats[cle] as num?)?.toInt() ?? 0;
+
   @override
   Widget build(BuildContext context) {
     final sem = AdminColorTokens.semantic(Theme.of(context).colorScheme);
+    final mesurees = _entier('measured_orders');
+    final annoncees = _entier('on_time_measured');
 
     return GridView.count(
       shrinkWrap: true,
@@ -129,21 +149,21 @@ class _CartesDePerformance extends StatelessWidget {
       childAspectRatio: 1.5,
       children: [
         _CartePerformance(
-          titre: 'Temps moyen',
-          valeur: '${_nombre('average_delivery_time').toInt()} min',
+          titre: mesurees == 0 ? 'Temps moyen' : 'Temps moyen · $mesurees livraison(s)',
+          valeur: mesurees == 0 ? '—' : '${_nombre('average_delivery_time').round()} min',
           icone: Icons.timer,
           couleur: sem.info,
         ),
         _CartePerformance(
-          titre: 'Livraison à temps',
-          valeur: '${_nombre('on_time_delivery_rate') * 100}%',
+          titre: annoncees == 0 ? 'Livraison à temps' : 'À temps · $annoncees annoncée(s)',
+          valeur: annoncees == 0 ? '—' : '${_nombre('on_time_rate').toStringAsFixed(0)} %',
           icone: Icons.schedule,
           couleur: sem.success,
         ),
         _CartePerformance(
-          titre: 'Satisfaction',
-          valeur: '${_nombre('customer_satisfaction')}/5',
-          icone: Icons.star,
+          titre: 'Annulations',
+          valeur: '${_nombre('cancellation_rate').toStringAsFixed(1)} %',
+          icone: Icons.cancel_outlined,
           couleur: sem.warning,
         ),
       ],

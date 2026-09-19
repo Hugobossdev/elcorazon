@@ -1,3 +1,5 @@
+import 'package:elcorazon_core/src/models/money.dart';
+
 /// Segments adressables par une campagne — valeurs d'`Audience` côté serveur.
 ///
 /// Volontairement **fermé** : « les clients qui n'ont pas commandé depuis
@@ -98,3 +100,46 @@ class Campaign {
   /// trace, et « qu'a-t-on envoyé le 3 mars ? » n'aurait plus de réponse.
   bool get isSent => status == CampaignStatus.sent;
 }
+
+/// Le bilan d'une campagne envoyée — `GET /notifications/campaigns/{id}/stats/`.
+///
+/// Le cahier des charges demande taux d'ouverture, de conversion et ROI
+/// (§4.2.7). La conversion est une **corrélation** : un destinataire qui a
+/// commandé dans la fenêtre qui suit l'envoi. Le chiffre qui l'accompagne est
+/// cloisonné au périmètre de qui regarde, et tenu **par devise**.
+class CampaignStats {
+  const CampaignStats({
+    required this.recipients,
+    required this.read,
+    required this.windowDays,
+    required this.customersWhoOrdered,
+    required this.revenue,
+    this.openRate,
+    this.conversionRate,
+  });
+
+  factory CampaignStats.fromJson(Map<String, dynamic> json) => CampaignStats(
+        recipients: json['recipients'] as int,
+        read: json['read'] as int,
+        openRate: (json['open_rate'] as num?)?.toDouble(),
+        windowDays: json['window_days'] as int,
+        customersWhoOrdered: json['customers_who_ordered'] as int,
+        conversionRate: (json['conversion_rate'] as num?)?.toDouble(),
+        revenue: [
+          for (final ligne in json['revenue'] as List<dynamic>? ?? const [])
+            Money.fromJson(Map<String, dynamic>.from(ligne as Map)),
+        ],
+      );
+
+  final int recipients;
+  final int read;
+
+  /// Entre 0 et 1 ; nul quand personne n'a rien reçu — un taux sur zéro
+  /// destinataire n'est pas 0 %, il n'existe pas.
+  final double? openRate;
+  final int windowDays;
+  final int customersWhoOrdered;
+  final double? conversionRate;
+  final List<Money> revenue;
+}
+

@@ -34,6 +34,7 @@ from typing import ClassVar
 from django.db.models import Count, QuerySet
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.request import Request
@@ -46,6 +47,7 @@ from apps.orders.queries import avec_compteurs
 from apps.orders.serializers import (
     KitchenOrderSerializer,
     OrderDetailSerializer,
+    OrderNoteSerializer,
     OrderSerializer,
     StaffCancelSerializer,
     StatusTransitionSerializer,
@@ -319,6 +321,34 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
     @extend_schema(
         request=StaffCancelSerializer, responses={200: OrderDetailSerializer}, tags=["orders"]
     )
+    @extend_schema(
+        methods=["GET"], responses={200: OrderNoteSerializer(many=True)}, tags=["orders"]
+    )
+    @extend_schema(
+        methods=["POST"],
+        request=OrderNoteSerializer,
+        responses={201: OrderNoteSerializer},
+        tags=["orders"],
+    )
+    @action(detail=True, methods=["get", "post"], url_path="notes", url_name="notes")
+    def notes(self, request: Request, pk: str) -> Response:
+        """Les notes internes de la commande — lire, ou en ajouter une.
+
+        Même permission que la lecture de la commande : une note ne change
+        rien à la commande, elle dit ce qu'on en sait. La restreindre à ceux
+        qui font avancer le statut priverait le poste qui décroche le
+        téléphone du seul endroit où consigner ce qu'il vient d'apprendre.
+        """
+        order = self.get_object()
+        if request.method == "GET":
+            notes = order.internal_notes.select_related("author")
+            return Response(OrderNoteSerializer(notes, many=True).data)
+
+        serializer = OrderNoteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        note = serializer.save(order=order, author=authenticated_user(request))
+        return Response(OrderNoteSerializer(note).data, status=status.HTTP_201_CREATED)
+
     @action(
         detail=True,
         methods=["post"],

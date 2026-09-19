@@ -468,3 +468,37 @@ class ApplyTemplateSerializer(serializers.Serializer[Any]):
         queryset=OptionTemplate.objects.filter(is_active=True)
     )
     group_name = serializers.CharField(max_length=80, required=False, allow_blank=True, default="")
+
+
+class ManagedReviewSerializer(serializers.ModelSerializer[Review]):
+    """Un avis vu de la modération : qui, sur quoi, et s'il est masqué."""
+
+    user = ReviewAuthorSerializer(read_only=True)
+    menu_item_name = serializers.CharField(source="menu_item.name", read_only=True)
+    restaurant_name = serializers.CharField(source="menu_item.restaurant.name", read_only=True)
+    hidden_by_name = serializers.CharField(
+        source="hidden_by.full_name", read_only=True, default=None
+    )
+
+    class Meta:
+        model = Review
+        fields = [
+            "id",
+            "menu_item",
+            "menu_item_name",
+            "restaurant_name",
+            "user",
+            "rating",
+            "title",
+            "comment",
+            "is_verified_purchase",
+            "hidden_at",
+            "hidden_reason",
+            "hidden_by_name",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class ReviewHideSerializer(serializers.Serializer[Any]):
+    reason = serializers.CharField(max_length=500, trim_whitespace=True)

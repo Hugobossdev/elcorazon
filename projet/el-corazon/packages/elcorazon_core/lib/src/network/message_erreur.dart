@@ -59,6 +59,14 @@ String messageErreurApi(
     if (erreur.status >= 500) {
       return 'Le serveur ne répond pas correctement. Réessayez dans un instant.';
     }
+    // Un refus de validation n'a pas de phrase d'ensemble : DRF range la
+    // raison champ par champ. Sans cette branche, « ce mot de passe est trop
+    // courant » ou « cette adresse est déjà utilisée » s'affichaient
+    // « Une erreur est survenue. » — la raison était dans la réponse, et
+    // personne ne la lisait.
+    if (erreur.detail == ApiException.detailParDefaut && erreur.errors.isNotEmpty) {
+      return erreur.errors.values.expand((messages) => messages).join(' ');
+    }
     // Le cas nominal : 400, 403, 404, 409 portent une phrase écrite pour la
     // personne qui la lira. C'est celle-là, et rien d'autre.
     return erreur.detail;

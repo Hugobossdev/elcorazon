@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/presentation/export_commandes.dart';
+import 'package:admin/presentation/notes_internes.dart';
 import 'package:admin/services/client_management_service.dart';
 import 'package:admin/services/app_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -395,6 +396,18 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
                 _buildDetailRow(
                   'Membre depuis',
                   '${client.createdAt.day}/${client.createdAt.month}/${client.createdAt.year}',
+                ),
+                const Divider(height: 24),
+                // Ce que l'équipe sait du client et qu'il ne lit pas : un
+                // litige en cours, une adresse difficile, un geste consenti.
+                // Le cahier des charges les demande (§4.2.6) ; aucune fiche
+                // ne les portait.
+                SizedBox(
+                  width: 480,
+                  child: NotesInternes(
+                    lire: () => clientService.notesOf(client.id),
+                    ajouter: (contenu) => clientService.addNote(client.id, contenu),
+                  ),
                 ),
               ],
             ),

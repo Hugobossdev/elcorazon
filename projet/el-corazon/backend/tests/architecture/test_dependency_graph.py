@@ -130,7 +130,18 @@ ALLOWED: dict[str, set[str]] = {
     #
     # Le sens reste celui de l'abonné vers l'émetteur — ni `payments` ni
     # `restaurants` ne connaissent `notifications` — donc pas de cycle.
-    "notifications": {"accounts", "delivery", "orders", "payments", "restaurants"},
+    #
+    # `support` depuis que le back-office répond aux clients : une réponse à
+    # un ticket, une réclamation tranchée, un retour décidé partent vers le
+    # client par ici. `support` ne connaît pas `notifications` ; il émet.
+    "notifications": {
+        "accounts",
+        "delivery",
+        "orders",
+        "payments",
+        "restaurants",
+        "support",
+    },
     # Comme `notifications` : l'abonné connaît l'émetteur, jamais l'inverse
     # (voir `test_orders_ne_connait_aucun_de_ses_abonnes`). `loyalty` réagit à
     # la livraison par signal et frappe ses codes via `promotions`. `payments`
@@ -146,7 +157,13 @@ ALLOWED: dict[str, set[str]] = {
     "social": {"accounts", "orders"},
     # Une réclamation ou une demande de retour désigne une commande existante ;
     # aucune écriture dans l'autre sens.
-    "support": {"accounts", "orders"},
+    #
+    # `restaurants` pour le seul cloisonnement du back-office
+    # (`support/backoffice.py`) : une réclamation se lit dans le périmètre de
+    # l'établissement de sa commande, par la même fonction que partout
+    # ailleurs. La même arête qu'ont `payments` et `search`, pour la même
+    # raison.
+    "support": {"accounts", "orders", "restaurants"},
     # Écoute `orders` par signal, comme `loyalty` et `gamification` ; ses
     # rapports agrègent directement les commandes, leurs lignes et les
     # courses — la source de vérité, plutôt qu'une table dupliquée.

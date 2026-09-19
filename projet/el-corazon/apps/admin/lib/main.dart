@@ -17,6 +17,9 @@ import 'package:admin/services/app_service.dart';
 import 'package:admin/services/promotion_service.dart';
 import 'package:admin/services/marketing_service.dart';
 import 'package:admin/services/payments_service.dart';
+import 'package:admin/services/versements_service.dart';
+import 'package:admin/services/support_client_service.dart';
+import 'package:admin/services/journal_audit_service.dart';
 import 'package:admin/services/client_management_service.dart';
 import 'package:admin/services/gamification_service.dart';
 import 'package:admin/services/driver_schedule_service.dart';
@@ -29,7 +32,9 @@ import 'package:admin/services/lieu_service.dart';
 import 'package:admin/services/network_service.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/screens/admin/admin_navigation_screen.dart';
+import 'package:admin/screens/admin/avis_clients_screen.dart';
 import 'package:admin/screens/auth/admin_auth_screen.dart';
+import 'package:admin/widgets/suivi_activite.dart';
 import 'package:elcorazon_core/elcorazon_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart' hide Provider, Consumer;
 
@@ -137,6 +142,14 @@ class AdminApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => MarketingService()..initialize()),
         ChangeNotifierProvider(create: (_) => AppService()),
         ChangeNotifierProvider(create: (_) => PaymentsService()),
+        // Les sorties d'argent : retraits livreurs et remboursements, à
+        // constater une fois le virement fait chez le prestataire.
+        ChangeNotifierProvider(create: (_) => VersementsService()),
+        // Tickets, réclamations, retours — ce que les clients écrivent.
+        ChangeNotifierProvider(create: (_) => SupportClientService()),
+        // Le journal des décisions — écrit depuis longtemps, lisible ici.
+        ChangeNotifierProvider(create: (_) => JournalAuditService()),
+        ChangeNotifierProvider(create: (_) => AvisClientsService()),
         ChangeNotifierProvider(
           create: (_) => ClientManagementService()..initialize(),
         ),
@@ -185,14 +198,19 @@ class AdminApp extends StatelessWidget {
         ),
         debugShowCheckedModeBanner: false,
         builder: (context, child) {
-          // Gestion globale des erreurs de rendu
-          return MediaQuery(
-            data: MediaQuery.of(context).copyWith(
-              textScaler: MediaQuery.of(
-                context,
-              ).textScaler.clamp(minScaleFactor: 0.8, maxScaleFactor: 1.2),
+          // Chaque interaction repousse la déconnexion automatique — voir
+          // `SuiviActivite` : sans lui, elle tombait trente minutes après la
+          // connexion, que l'opérateur travaille ou non.
+          return SuiviActivite(
+            onActivite: () => context.read<AdminAuthService>().recordActivity(),
+            child: MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: MediaQuery.of(
+                  context,
+                ).textScaler.clamp(minScaleFactor: 0.8, maxScaleFactor: 1.2),
+              ),
+              child: child ?? const SizedBox.shrink(),
             ),
-            child: child ?? const SizedBox.shrink(),
           );
         },
       ),

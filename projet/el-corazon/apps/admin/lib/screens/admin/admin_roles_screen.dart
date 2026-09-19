@@ -2,6 +2,10 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:admin/presentation/perimetre_personnel.dart';
+import 'package:admin/screens/admin/personnel/dialogues_personnel.dart';
+import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/network_service.dart';
 import 'package:admin/services/role_management_service.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/widgets/loading_widget.dart';
@@ -31,7 +35,12 @@ class _AdminRolesScreenState extends State<AdminRolesScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<RoleManagementService>().initialize();
+      if (!mounted) return;
+      context.read<RoleManagementService>().initialize();
+      // Pour nommer les périmètres (« Lomé » plutôt que `lome`). Un refus —
+      // compte sans `restaurants.read` — laisse les clés affichées, rien de
+      // plus.
+      context.read<NetworkService>().resolve();
     });
   }
 
@@ -48,11 +57,12 @@ class _AdminRolesScreenState extends State<AdminRolesScreen> {
             onPressed: () => context.read<RoleManagementService>().refresh(),
             tooltip: 'Recharger',
           ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _ouvrirFormulaire(null),
-            tooltip: 'Créer un rôle',
-          ),
+          if (context.watch<AdminAuthService>().can('roles.write'))
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => _ouvrirFormulaire(null),
+              tooltip: 'Créer un rôle',
+            ),
         ],
       ),
       body: Consumer<RoleManagementService>(
@@ -179,18 +189,39 @@ class _AdminRolesScreenState extends State<AdminRolesScreen> {
   // ------------------------------------------------------------- personnel
 
   Widget _sectionPersonnel(RoleManagementService service) {
-    if (service.staff.isEmpty) return const SizedBox.shrink();
+    final peutEcrire = context.watch<AdminAuthService>().can('roles.write');
+    final reseau = context.watch<NetworkService>();
+    final theme = Theme.of(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Text(
-            'Personnel',
-            style: Theme.of(context).textTheme.titleMedium,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text('Personnel', style: theme.textTheme.titleMedium),
+              ),
+              // Ouvrir un compte passait par `django-admin` : le serveur le
+              // permettait, aucun écran ne le proposait.
+              if (peutEcrire)
+                FilledButton.tonalIcon(
+                  onPressed: _nouveauCompte,
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('Nouveau compte'),
+                ),
+            ],
           ),
         ),
+        if (service.staff.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(
+              'Aucun compte du personnel dans votre périmètre.',
+              style: TextStyle(color: theme.hintColor),
+            ),
+          ),
         for (final membre in service.staff)
           Card(
             margin: const EdgeInsets.only(bottom: 8),
@@ -203,19 +234,128 @@ class _AdminRolesScreenState extends State<AdminRolesScreen> {
                 ),
               ),
               title: Text(membre.fullName),
-              subtitle: Text(
-                membre.roleIds.isEmpty
-                    ? 'Aucun rôle · ${membre.email}'
-                    : '${membre.roleIds.map((id) => service.roleById(id)?.name ?? '—').join(', ')} · ${membre.email}',
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    membre.roleIds.isEmpty
+                        ? 'Aucun rôle · ${membre.email}'
+                        : '${membre.roleIds.map((id) => service.roleById(id)?.name ?? '—').join(', ')} · ${membre.email}',
+                  ),
+                  // Sur quoi ce compte travaille. Un compte rattaché à rien ne
+                  // voit rien : c'est l'oubli qui ouvre un poste de cuisine
+                  // vide, et il se lit ici avant qu'on l'y découvre.
+                  Text(
+                    resumeDuPerimetre(
+                      membre,
+                      nomDuPays: (iso) => reseau.countryByIso(iso)?.name ?? iso,
+                      nomDeVille: (slug) => _nomDeVille(reseau, slug),
+                      nomDEtablissement: (slug) =>
+                          reseau.restaurantBySlug(slug)?.name ?? slug,
+                    ),
+                    style: TextStyle(
+                      color: membre.sansPerimetre ? theme.colorScheme.error : null,
+                    ),
+                  ),
+                ],
               ),
-              trailing: Switch(
-                value: membre.isActive,
-                onChanged: (actif) => _basculerCompte(service, membre, actif),
+              isThreeLine: true,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Switch(
+                    value: membre.isActive,
+                    onChanged: peutEcrire
+                        ? (actif) => _basculerCompte(service, membre, actif)
+                        : null,
+                  ),
+                  if (peutEcrire)
+                    PopupMenuButton<_GesteCompte>(
+                      tooltip: 'Actions',
+                      onSelected: (geste) => switch (geste) {
+                        _GesteCompte.roles => _attribuerRoles(service, membre),
+                        _GesteCompte.perimetre => _modifierPerimetre(membre),
+                        _GesteCompte.motDePasse => _nouveauMotDePasse(membre),
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: _GesteCompte.roles,
+                          child: ListTile(
+                            leading: Icon(Icons.badge_outlined),
+                            title: Text('Rôles'),
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: _GesteCompte.perimetre,
+                          child: ListTile(
+                            leading: Icon(Icons.store_mall_directory_outlined),
+                            title: Text('Périmètre'),
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: _GesteCompte.motDePasse,
+                          child: ListTile(
+                            leading: Icon(Icons.password_rounded),
+                            title: Text('Nouveau mot de passe'),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
               ),
-              onTap: () => _attribuerRoles(service, membre),
+              onTap: peutEcrire ? () => _attribuerRoles(service, membre) : null,
             ),
           ),
       ],
+    );
+  }
+
+  String _nomDeVille(NetworkService reseau, String slug) {
+    for (final ville in reseau.cities) {
+      if (ville.slug == slug) return ville.name;
+    }
+    return slug;
+  }
+
+  Future<void> _nouveauCompte() async {
+    final messager = ScaffoldMessenger.of(context);
+    final cree = await DialogHelper.showSafeDialog<eccore.StaffMember>(
+      context: context,
+      builder: (_) => const DialogueNouveauCompte(),
+    );
+    if (cree == null || !mounted) return;
+    messager.showSnackBar(
+      SnackBar(
+        content: Text(
+          cree.sansPerimetre
+              ? 'Compte de ${cree.fullName} créé — rattaché à aucun établissement, il ne voit rien.'
+              : 'Compte de ${cree.fullName} créé. Transmettez-lui son mot de passe provisoire.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _modifierPerimetre(eccore.StaffMember membre) async {
+    final messager = ScaffoldMessenger.of(context);
+    final ok = await DialogHelper.showSafeDialog<bool>(
+      context: context,
+      builder: (_) => DialoguePerimetre(membre: membre),
+    );
+    if (ok != true || !mounted) return;
+    messager.showSnackBar(
+      SnackBar(content: Text('Périmètre de ${membre.fullName} enregistré')),
+    );
+  }
+
+  Future<void> _nouveauMotDePasse(eccore.StaffMember membre) async {
+    final messager = ScaffoldMessenger.of(context);
+    final ok = await DialogHelper.showSafeDialog<bool>(
+      context: context,
+      builder: (_) => DialogueMotDePasse(membre: membre),
+    );
+    if (ok != true || !mounted) return;
+    messager.showSnackBar(
+      SnackBar(content: Text('Mot de passe de ${membre.fullName} remplacé')),
     );
   }
 
@@ -497,3 +637,5 @@ class _Message extends StatelessWidget {
     );
   }
 }
+
+enum _GesteCompte { roles, perimetre, motDePasse }

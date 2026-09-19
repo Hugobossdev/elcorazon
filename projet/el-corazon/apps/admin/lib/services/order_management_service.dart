@@ -199,6 +199,7 @@ class OrderManagementService extends ChangeNotifier {
         search: filtres.recherche.trim().isEmpty ? null : filtres.recherche.trim(),
         placedFrom: filtres.depuis,
         placedTo: filtres.jusqua,
+        customerId: filtres.clientId,
         restaurantSlug: filtres.restaurantSlug,
         countryIsoCode: filtres.paysIso,
         citySlug: filtres.villeSlug,
@@ -234,6 +235,7 @@ class OrderManagementService extends ChangeNotifier {
         citySlug: _filtres.villeSlug,
         deliveryZoneId: _filtres.zoneId,
         search: _filtres.recherche,
+        customerId: _filtres.clientId,
         placedFrom: _filtres.depuis,
         placedTo: _filtres.jusqua,
       );
@@ -652,6 +654,13 @@ class OrderManagementService extends ChangeNotifier {
       return null;
     }
   }
+
+  /// Les notes internes d'une commande. Lève `ApiException` : l'écran qui
+  /// les affiche dit la panne à l'endroit où les notes auraient été.
+  Future<List<eccore.InternalNote>> notesOf(String orderId) => _orders.notes(orderId);
+
+  Future<eccore.InternalNote> addNote(String orderId, String contenu) =>
+      _orders.addNote(orderId: orderId, content: contenu);
 
   /// Les [limit] commandes les plus récentes.
   Future<List<eccore.Order>> loadRecentOrdersFromDB({int limit = 5}) async {

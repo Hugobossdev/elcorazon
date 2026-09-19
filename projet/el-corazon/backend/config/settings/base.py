@@ -416,6 +416,12 @@ SPECTACULAR_SETTINGS = {
         "GroupKindEnum": "apps.social.models.GroupKind.choices",
         "PostKindEnum": "apps.social.models.PostKind.choices",
         "ComplaintKindEnum": "apps.support.models.ComplaintKind.choices",
+        # Les trois statuts du support : lus par le client **et** par le
+        # back-office (`support/backoffice.py`), ils entrent en collision sur
+        # le nom de champ `status` et sortiraient en `Status990Enum`.
+        "TicketStatusEnum": "apps.support.models.TicketStatus.choices",
+        "ComplaintStatusEnum": "apps.support.models.ComplaintStatus.choices",
+        "ReturnStatusEnum": "apps.support.models.ReturnStatus.choices",
         "DiscountKindEnum": "apps.promotions.models.DiscountKind.choices",
         "SubscriptionStatusEnum": "apps.loyalty.models.SubscriptionStatus.choices",
         "RewardKindEnum": "apps.loyalty.models.RewardKind.choices",

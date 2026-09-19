@@ -2,6 +2,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/services/marketing_service.dart';
 import 'package:admin/ui/ui.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -192,6 +193,10 @@ class _MarketingScreenState extends State<MarketingScreen> {
                   ),
               ],
             ),
+            if (campagne.isSent) ...[
+              const SizedBox(height: 8),
+              _BilanDeCampagne(campagne: campagne),
+            ],
             if (campagne.createdByEmail != null) ...[
               const SizedBox(height: 4),
               Text(
@@ -493,3 +498,57 @@ class _Vide extends StatelessWidget {
     );
   }
 }
+
+/// Ce qu'une campagne envoyée a produit — ouvertures, commandes, chiffre.
+///
+/// Le cahier des charges demande ces trois mesures (§4.2.7) ; l'écran ne
+/// montrait que le nombre de destinataires. La conversion est dite pour ce
+/// qu'elle est : des destinataires qui ont commandé ensuite, pas des commandes
+/// que la campagne a causées.
+class _BilanDeCampagne extends StatelessWidget {
+  const _BilanDeCampagne({required this.campagne});
+
+  final eccore.Campaign campagne;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder<eccore.CampaignStats>(
+      future: context.read<MarketingService>().statsOf(campagne.id),
+      builder: (context, instantane) {
+        if (instantane.connectionState != ConnectionState.done) {
+          return const LinearProgressIndicator();
+        }
+        final bilan = instantane.data;
+        if (bilan == null) {
+          return Text(
+            'Bilan indisponible : ${messageErreur(instantane.error ?? 'erreur inconnue')}',
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+          );
+        }
+        String pourcent(double? taux) =>
+            taux == null ? '—' : '${(taux * 100).toStringAsFixed(1)} %';
+        final chiffre = bilan.revenue.isEmpty
+            ? ''
+            : ' · ${bilan.revenue.map((m) => m.format()).join(' + ')}';
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ouvertures : ${bilan.read} (${pourcent(bilan.openRate)}) · '
+              'ont commandé sous ${bilan.windowDays} j : ${bilan.customersWhoOrdered} '
+              '(${pourcent(bilan.conversionRate)})$chiffre',
+              style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            Text(
+              'Commandes passées après l’envoi, par des destinataires — une corrélation, '
+              'pas une preuve d’effet.',
+              style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+

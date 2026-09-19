@@ -1,6 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/documents_livreur.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
@@ -92,8 +93,9 @@ class DriverDocumentService extends ChangeNotifier {
     final statut = StatutVerification.depuisServeur(courier.verificationStatus);
     final notes = courier.verificationNotes.isEmpty ? null : courier.verificationNotes;
 
-    PieceLivreur ligne(PieceDossier piece, String? url) {
+    PieceLivreur ligne(PieceDossier piece, String? url, DateTime? expireLe) {
       return PieceLivreur(
+        expireLe: expireLe,
         courierId: courier.id,
         piece: piece,
         statut: statut,
@@ -108,9 +110,9 @@ class DriverDocumentService extends ChangeNotifier {
     }
 
     return [
-      ligne(PieceDossier.identite, courier.idDocument),
-      ligne(PieceDossier.permis, courier.licenceDocument),
-      ligne(PieceDossier.carteGrise, courier.vehicleDocument),
+      ligne(PieceDossier.identite, courier.idDocument, courier.idDocumentExpiresOn),
+      ligne(PieceDossier.permis, courier.licenceDocument, courier.licenceDocumentExpiresOn),
+      ligne(PieceDossier.carteGrise, courier.vehicleDocument, courier.vehicleDocumentExpiresOn),
     ];
   }
 
@@ -136,12 +138,45 @@ class DriverDocumentService extends ChangeNotifier {
   Future<bool> suspendCourier(String courierId, String reason) =>
       _decider(courierId, 'suspended', reason);
 
-  Future<bool> _decider(String courierId, String status, String notes) async {
+  /// Enregistre la date d'expiration d'une pièce, sans toucher à la décision.
+  ///
+  /// La route de vérification écrit les dates même quand le statut ne change
+  /// pas : on renvoie donc le statut courant du dossier, et seule la date
+  /// bouge. Le serveur refusera ensuite de **valider** un dossier dont une
+  /// pièce est déjà expirée.
+  Future<bool> enregistrerExpiration(
+    String courierId,
+    PieceDossier piece,
+    DateTime expireLe,
+  ) async {
+    final dossier = courierById(courierId);
+    if (dossier == null) return false;
+    return _decider(
+      courierId,
+      dossier.verificationStatus,
+      dossier.verificationNotes,
+      idDocumentExpiresOn: piece == PieceDossier.identite ? expireLe : null,
+      licenceDocumentExpiresOn: piece == PieceDossier.permis ? expireLe : null,
+      vehicleDocumentExpiresOn: piece == PieceDossier.carteGrise ? expireLe : null,
+    );
+  }
+
+  Future<bool> _decider(
+    String courierId,
+    String status,
+    String notes, {
+    DateTime? idDocumentExpiresOn,
+    DateTime? licenceDocumentExpiresOn,
+    DateTime? vehicleDocumentExpiresOn,
+  }) async {
     try {
       final maj = await _fleet.setVerification(
         courierId: courierId,
         status: status,
         notes: notes,
+        idDocumentExpiresOn: idDocumentExpiresOn,
+        licenceDocumentExpiresOn: licenceDocumentExpiresOn,
+        vehicleDocumentExpiresOn: vehicleDocumentExpiresOn,
       );
       final index = _couriers.indexWhere((c) => c.id == courierId);
       if (index != -1) _couriers[index] = maj;
@@ -150,7 +185,7 @@ class DriverDocumentService extends ChangeNotifier {
     } on eccore.ApiException catch (e) {
       // La machine à états refuse les transitions impossibles : un dossier
       // rejeté ne repasse pas « validé » sans nouveau dépôt du livreur.
-      _error = e.detail;
+      _error = messageErreur(e);
       eccore.Journal.trace('Dossiers livreurs : décision refusée — ${e.code}');
       notifyListeners();
       return false;

@@ -5,12 +5,20 @@ from __future__ import annotations
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.payments import views
+from apps.payments import backoffice, views
 
 app_name = "payments"
 
 router = DefaultRouter()
 router.register("transactions", views.TransactionViewSet, basename="transaction")
+# Le back-office des sorties d'argent. `manage/` et non `withdrawals/…` : la
+# route du livreur (`withdrawals/`) rend **ses** retraits, celle-ci ceux d'un
+# périmètre ; les confondre sous un même chemin ferait dépendre la réponse du
+# type de compte, ce que le reste de l'API évite.
+router.register(
+    "manage/withdrawals", backoffice.ManagedWithdrawalViewSet, basename="managed-withdrawal"
+)
+router.register("manage/refunds", backoffice.ManagedRefundViewSet, basename="managed-refund")
 
 urlpatterns = [
     # Déclarées avant le routeur : `webhook/` et les actions par commande ne

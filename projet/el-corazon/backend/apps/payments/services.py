@@ -34,6 +34,9 @@ from apps.payments.models import (
 from apps.payments.signals import (
     payment_transaction_failed,
     payment_transaction_settled,
+    withdrawal_failed,
+    withdrawal_requested,
+    withdrawal_settled,
 )
 from common.exceptions import BusinessRuleViolation, InsufficientBalance
 from common.money import Money
@@ -482,7 +485,15 @@ class RefundService:
 
         La comparaison porte donc sur le **cumul** des remboursements soldés de
         cette transaction, et non sur celui qu'on vient de constater.
+
+        ## Relu sous verrou
+
+        Une route l'appelle désormais (`ManagedRefundViewSet.settle`), et non
+        plus seulement une action d'administration qu'une personne déclenche à
+        la fois. Deux constats simultanés passeraient tous deux la machine à
+        états sur l'état lu en mémoire.
         """
+        refund = Refund.objects.select_for_update().get(pk=refund.pk)
         PAYMENT_MACHINE.validate(refund.status, PaymentStatus.PROCESSING)
         PAYMENT_MACHINE.validate(PaymentStatus.PROCESSING, PaymentStatus.COMPLETED)
 
@@ -559,33 +570,61 @@ class WithdrawalService:
         # `MoneyField` est un type composite ajouté par `contribute_to_class` :
         # django-stubs ne le voit pas comme un attribut de modèle, comme pour
         # `Refund` ci-dessus.
-        return Withdrawal.objects.create(  # type: ignore[misc]
+        withdrawal = Withdrawal.objects.create(  # type: ignore[misc]
             courier=locked, amount=amount, status=PaymentStatus.PENDING
         )
+        withdrawal_requested.send(sender=Withdrawal, withdrawal=withdrawal)
+        return withdrawal
 
     @staticmethod
     @transaction.atomic
-    def settle(*, withdrawal: Withdrawal, provider_reference: str) -> Withdrawal:
-        """Le versement a été exécuté — geste de l'exploitation, pas du livreur."""
+    def settle(
+        *, withdrawal: Withdrawal, provider_reference: str, actor: User | None = None
+    ) -> Withdrawal:
+        """Le versement a été exécuté — geste de l'exploitation, pas du livreur.
+
+        **Aucun appelant jusqu'ici**, hors des tests : ni route, ni action
+        d'administration. Chaque demande restait en attente pour toujours, gains
+        débités — l'argent n'était plus dans l'application et n'était pas
+        davantage chez le livreur. Il est appelé depuis
+        `ManagedWithdrawalViewSet.settle`.
+
+        Le verrou relit la ligne : deux opérateurs qui constatent le même
+        versement à la même seconde ne doivent pas le signer deux fois.
+        """
+        withdrawal = Withdrawal.objects.select_for_update().get(pk=withdrawal.pk)
         PAYMENT_MACHINE.validate(withdrawal.status, PaymentStatus.PROCESSING)
         PAYMENT_MACHINE.validate(PaymentStatus.PROCESSING, PaymentStatus.COMPLETED)
 
         withdrawal.status = PaymentStatus.COMPLETED
         withdrawal.provider_reference = provider_reference
         withdrawal.completed_at = timezone.now()
+        withdrawal.processed_by = actor
         withdrawal.save(
-            update_fields=["status", "provider_reference", "completed_at", "updated_at"]
+            update_fields=[
+                "status",
+                "provider_reference",
+                "completed_at",
+                "processed_by",
+                "updated_at",
+            ]
         )
+        withdrawal_settled.send(sender=Withdrawal, withdrawal=withdrawal)
         return withdrawal
 
     @staticmethod
     @transaction.atomic
-    def fail(*, withdrawal: Withdrawal, reason: str) -> Withdrawal:
+    def fail(*, withdrawal: Withdrawal, reason: str, actor: User | None = None) -> Withdrawal:
         """Le versement n'a pas abouti : les gains sont **rendus**.
 
         Sans ce recrédit, un virement échoué ferait disparaître le solde du
         livreur — l'argent ne serait ni sur son compte, ni dans l'application.
+
+        La ligne est relue sous verrou **avant** la validation : sans cela, deux
+        refus simultanés passeraient tous deux la machine à états sur l'état lu
+        en mémoire, et recréditeraient deux fois.
         """
+        withdrawal = Withdrawal.objects.select_for_update().get(pk=withdrawal.pk)
         PAYMENT_MACHINE.validate(withdrawal.status, PaymentStatus.FAILED)
 
         locked = CourierProfile.objects.select_for_update().get(pk=withdrawal.courier_id)
@@ -595,5 +634,7 @@ class WithdrawalService:
 
         withdrawal.status = PaymentStatus.FAILED
         withdrawal.failure_reason = reason
-        withdrawal.save(update_fields=["status", "failure_reason", "updated_at"])
+        withdrawal.processed_by = actor
+        withdrawal.save(update_fields=["status", "failure_reason", "processed_by", "updated_at"])
+        withdrawal_failed.send(sender=Withdrawal, withdrawal=withdrawal)
         return withdrawal

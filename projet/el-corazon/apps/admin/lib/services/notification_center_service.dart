@@ -90,6 +90,29 @@ class NotificationCenterService extends ChangeNotifier {
     }
   }
 
+  /// Relit **le seul compteur** — ce qu'affiche la pastille de la barre.
+  ///
+  /// La pastille était allumée en dur (`hasBadge: true`) : elle annonçait des
+  /// notifications en permanence, y compris à qui les avait toutes lues, et
+  /// n'apprenait donc plus rien à personne. Le compteur n'était relu qu'à
+  /// l'ouverture de la boîte, c'est-à-dire trop tard pour inviter à l'ouvrir.
+  ///
+  /// Une panne laisse la dernière valeur connue : éteindre la pastille sur une
+  /// erreur réseau dirait « rien de nouveau » sans le savoir.
+  Future<void> refreshUnreadCount() async {
+    try {
+      final compte = await _notifications.getUnreadCount();
+      if (compte != _unread) {
+        _unread = compte;
+        notifyListeners();
+      }
+    } on eccore.ApiException catch (e) {
+      eccore.Journal.trace('NotificationCenterService: compteur illisible — ${e.code}');
+    } catch (e) {
+      eccore.Journal.trace('NotificationCenterService: compteur illisible — $e');
+    }
+  }
+
   /// Marque une notification lue.
   ///
   /// L'état local est corrigé avec ce que le serveur rend, pas avec ce qu'on
@@ -97,12 +120,16 @@ class NotificationCenterService extends ChangeNotifier {
   /// première lecture, et l'inventer ici ferait diverger les deux.
   Future<void> markRead(String id) async {
     try {
+      final etaitNonLue = _items.any((item) => item.id == id && !item.isRead);
       final maj = await _notifications.markRead(id);
       _items = [
         for (final item in _items)
           if (item.id == maj.id) maj else item,
       ];
-      _unread = _items.where((item) => !item.isRead).length;
+      // Décompter, pas recompter : la liste est **paginée** (voir [refresh]),
+      // et recompter les non-lues de la page ramenait le compteur à ce
+      // qu'elle contenait — une vingt-et-unième non-lue disparaissait.
+      if (etaitNonLue && maj.isRead && _unread > 0) _unread -= 1;
       notifyListeners();
     } on eccore.ApiException catch (e) {
       eccore.Journal.trace('NotificationCenterService: marquage impossible — ${e.code}');

@@ -93,10 +93,15 @@ class AdminAuthService extends ChangeNotifier {
 
   void _onSessionChanged(AsyncValue<eccore.User?> next) {
     next.whenData((user) {
+      final ouverture = _staff == null && user != null;
       _staff = user;
-      if (user != null) {
+      // Le minuteur s'arme à l'**ouverture** d'une session, pas à chaque
+      // émission du fournisseur : une relecture du profil n'est pas une
+      // activité de l'opérateur, et ne doit pas repousser la déconnexion d'un
+      // poste laissé ouvert.
+      if (ouverture) {
         _startInactivityTimer();
-      } else {
+      } else if (user == null) {
         _stopInactivityTimer();
       }
       notifyListeners();
@@ -108,6 +113,11 @@ class AdminAuthService extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
     try {
+      // Les réglages du poste d'abord : sans eux, le délai choisi dans
+      // « Paramètres » ne valait qu'après être repassé par cet écran, et un
+      // poste réglé sur dix minutes se déconnectait au bout de trente après
+      // chaque redémarrage.
+      await _chargerReglagesDuPoste();
       await _container.read(eccore.sessionProvider.notifier).restoreSession();
     } finally {
       _isLoading = false;
@@ -195,10 +205,36 @@ class AdminAuthService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Clés des réglages locaux au poste — celles qu'écrit `SettingsScreen`.
+  static const cleDelaiInactivite = 'inactivity_timeout_minutes';
+  static const cleDeconnexionAuto = 'auto_logout_enabled';
+
+  Future<void> _chargerReglagesDuPoste() async {
+    final prefs = await SharedPreferences.getInstance();
+    final minutes = prefs.getInt(cleDelaiInactivite);
+    if (minutes != null && minutes > 0) {
+      _inactivityTimeout = Duration(minutes: minutes);
+    }
+    _autoLogoutEnabled = prefs.getBool(cleDeconnexionAuto) ?? true;
+  }
+
+  /// En deçà, une nouvelle interaction ne réarme pas le minuteur : un
+  /// défilement émet des dizaines d'événements par seconde, et la précision
+  /// utile d'un délai de trente minutes n'est pas la milliseconde.
+  static const _pasDeReamorcage = Duration(seconds: 5);
+
   /// À appeler sur une interaction : repousse la déconnexion automatique.
+  ///
+  /// **Appelée par `SuiviActivite`**, posé au-dessus de toute l'application
+  /// (`main.dart`). Elle n'avait aucun appelant : le minuteur partait à la
+  /// connexion et rien ne le repoussait, si bien qu'un opérateur en plein
+  /// service était déconnecté trente minutes après s'être connecté — au milieu
+  /// d'un formulaire s'il le fallait.
   void recordActivity() {
     if (!isAuthenticated || !_autoLogoutEnabled) return;
-    _lastActivity = DateTime.now();
+    final maintenant = DateTime.now();
+    final derniere = _lastActivity;
+    if (derniere != null && maintenant.difference(derniere) < _pasDeReamorcage) return;
     _startInactivityTimer();
   }
 

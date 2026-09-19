@@ -33,6 +33,7 @@ from apps.restaurants.models import (
     zone_anchoring_problem,
 )
 from apps.restaurants.states import RestaurantStatus
+from common.audit import AuditEntry
 from common.availability import Unavailability
 from common.serializers import LocationField, MoneyField
 
@@ -810,6 +811,33 @@ class ManagedOpeningHoursSerializer(serializers.ModelSerializer[OpeningHours]):
         return attrs
 
 
+class AuditEntrySerializer(serializers.ModelSerializer[AuditEntry]):
+    """Une entrée du journal des décisions, telle qu'on la relit.
+
+    `actor_name` est lu au moment de la réponse — un compte désactivé garde son
+    nom. Un acteur nul (commande de peuplement, `shell`) se rend `null`, et
+    l'écran le dit plutôt que d'inventer quelqu'un.
+    """
+
+    actor_name = serializers.CharField(source="actor.full_name", read_only=True, default=None)
+
+    class Meta:
+        model = AuditEntry
+        fields = [
+            "id",
+            "actor",
+            "actor_name",
+            "action",
+            "target_type",
+            "target_id",
+            "target_label",
+            "before",
+            "after",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
 class StaffSerializer(serializers.ModelSerializer[User]):
     """Compte du personnel : ce qu'il sait faire et sur quoi.
 
@@ -884,11 +912,25 @@ class StaffSerializer(serializers.ModelSerializer[User]):
             "countries",
             "cities",
             "permissions",
+            "is_superuser",
             "last_seen_at",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "permissions", "last_seen_at", "created_at", "updated_at"]
+        # `is_superuser` se lit et ne s'écrit pas ici. C'est le seul compte qui
+        # voit l'enseigne entière (`is_unscoped`) : sans lui, l'écran ne peut
+        # pas distinguer « rattaché à rien, donc ne voit rien » de « siège » —
+        # et affiche l'un pour l'autre. L'accorder depuis un formulaire serait
+        # une élévation de privilège que ni `roles.write` ni aucune garde ne
+        # couvre : elle reste réservée à `createsuperuser`.
+        read_only_fields = [
+            "id",
+            "permissions",
+            "is_superuser",
+            "last_seen_at",
+            "created_at",
+            "updated_at",
+        ]
 
     def get_permissions(self, obj: User) -> list[str]:
         return sorted(obj.permission_codes())

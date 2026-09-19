@@ -18,7 +18,9 @@ import datetime as dt
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
+from typing import ClassVar
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -200,6 +202,7 @@ class CourierService:
         target: str,
         actor: User,
         notes: str = "",
+        expirations: dict[str, date] | None = None,
     ) -> CourierProfile:
         """Fait avancer le dossier — validation, rejet, suspension.
 
@@ -209,7 +212,19 @@ class CourierService:
         — on ne suspend pas un dossier jamais validé.
         """
         locked = CourierProfile.objects.select_for_update().get(pk=courier.pk)
+
+        # Les dates d'expiration se relèvent au moment où quelqu'un a la pièce
+        # sous les yeux — donc ici. Elles s'écrivent même si le statut ne
+        # change pas : compléter la date d'un dossier déjà validé est un geste
+        # ordinaire, et le refuser au motif du « rien à faire » la rendrait
+        # impossible à saisir après coup.
+        champs_dates = CourierService._poser_expirations(locked, expirations or {})
+        if target == VerificationStatus.APPROVED:
+            CourierService._refuser_si_expire(locked)
+
         if VERIFICATION_MACHINE.is_noop(locked.verification_status, target):
+            if champs_dates:
+                locked.save(update_fields=[*champs_dates, "updated_at"])
             return locked
 
         VERIFICATION_MACHINE.validate(locked.verification_status, target)
@@ -233,10 +248,56 @@ class CourierService:
                 "verified_by",
                 "verified_at",
                 "is_online",
+                *champs_dates,
                 "updated_at",
             ]
         )
         return locked
+
+    #: Les pièces du dossier et le champ qui porte leur date d'expiration.
+    PIECES_DATEES: ClassVar[dict[str, str]] = {
+        "id_document": "id_document_expires_on",
+        "licence_document": "licence_document_expires_on",
+        "vehicle_document": "vehicle_document_expires_on",
+    }
+
+    #: Les libellés que lit un livreur, ou un opérateur.
+    LIBELLES_PIECES: ClassVar[dict[str, str]] = {
+        "id_document": "pièce d'identité",
+        "licence_document": "permis de conduire",
+        "vehicle_document": "carte grise",
+    }
+
+    @staticmethod
+    def _poser_expirations(courier: CourierProfile, expirations: dict[str, date]) -> list[str]:
+        """Écrit les dates reçues, et rend les champs touchés."""
+        touches = []
+        for champ, valeur in expirations.items():
+            if champ not in CourierService.PIECES_DATEES.values():
+                continue
+            setattr(courier, champ, valeur)
+            touches.append(champ)
+        return touches
+
+    @staticmethod
+    def _refuser_si_expire(courier: CourierProfile) -> None:
+        """On ne valide pas un dossier sur une pièce déjà expirée.
+
+        Seule garde **dure** de l'expiration, et placée au seul moment où
+        quelqu'un décide : valider, c'est affirmer que les pièces sont bonnes.
+        Un dossier déjà validé dont une pièce expire ensuite ne bascule pas de
+        lui-même — voir le commentaire du modèle.
+        """
+        aujourd_hui = timezone.localdate()
+        for piece, champ in CourierService.PIECES_DATEES.items():
+            echeance = getattr(courier, champ)
+            if echeance is not None and echeance < aujourd_hui:
+                raise BusinessRuleViolation(
+                    f"La {CourierService.LIBELLES_PIECES[piece]} a expiré le "
+                    f"{echeance:%d/%m/%Y} : demandez au livreur d'en déposer une nouvelle.",
+                    piece=piece,
+                    expires_on=echeance.isoformat(),
+                )
 
     @staticmethod
     def earnings(*, courier: CourierProfile) -> dict[str, object]:
@@ -416,7 +477,18 @@ class CourierService:
         for field, value in documents.items():
             setattr(courier, field, value)
 
-        touched = [*documents]
+        # Une nouvelle pièce porte sa propre date : garder celle de l'ancienne
+        # ferait croire à un document valide jusqu'à une échéance qui n'est
+        # pas la sienne.
+        dates = [
+            CourierService.PIECES_DATEES[field]
+            for field in documents
+            if field in CourierService.PIECES_DATEES
+        ]
+        for champ in dates:
+            setattr(courier, champ, None)
+
+        touched = [*documents, *dates]
         if courier.verification_status in CourierService.ROUVRE_L_INSTRUCTION:
             courier.verification_status = VerificationStatus.PENDING
             courier.is_online = False

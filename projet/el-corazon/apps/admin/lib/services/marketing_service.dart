@@ -45,6 +45,15 @@ class MarketingService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
+  /// Bilans déjà demandés, par campagne. Une campagne envoyée est
+  /// immuable, mais son bilan bouge encore (lectures, commandes) : il se
+  /// relit à chaque rechargement de l'écran, pas à chaque reconstruction.
+  final Map<String, Future<eccore.CampaignStats>> _bilans = {};
+
+  /// Le bilan d'une campagne envoyée. Lève `ApiException`.
+  Future<eccore.CampaignStats> statsOf(String campaignId) =>
+      _bilans.putIfAbsent(campaignId, () => _campaignsApi.stats(campaignId));
+
   Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
@@ -52,6 +61,7 @@ class MarketingService extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
+    _bilans.clear();
     _isLoading = true;
     _error = null;
     notifyListeners();

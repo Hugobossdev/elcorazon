@@ -271,6 +271,16 @@ class Review(UUIDModel, TimeStampedModel):
 
     helpful_count = models.PositiveIntegerField(default=0)
 
+    # Modération. Un avis se **masque**, il ne s'efface pas : le client l'a
+    # écrit, et le retirer sans trace ferait disparaître jusqu'à la question
+    # « pourquoi mon avis n'apparaît plus ? ». Masqué, il sort de la liste
+    # publique et de la note moyenne ; le motif et l'auteur du geste restent.
+    hidden_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    hidden_reason = models.TextField(blank=True)
+    hidden_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
     class Meta:
         verbose_name = "avis"
         verbose_name_plural = "avis"

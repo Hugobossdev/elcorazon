@@ -132,14 +132,31 @@ class ManagedCourierRepository {
   /// `couriers.suspend` retire du service quelqu'un qui travaillait. C'est le
   /// statut demandé qui départage — les deux gestes n'ont ni la même urgence ni
   /// le même auteur.
+  ///
+  /// Les dates d'expiration se relèvent **à la validation** : c'est le moment
+  /// où quelqu'un a la pièce sous les yeux. Seules celles fournies sont
+  /// écrites ; le serveur refuse (409) de valider sur une pièce déjà expirée.
   Future<CourierProfile> setVerification({
     required String courierId,
     required String status,
     String notes = '',
+    DateTime? idDocumentExpiresOn,
+    DateTime? licenceDocumentExpiresOn,
+    DateTime? vehicleDocumentExpiresOn,
   }) async {
+    String jour(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
     final response = await apiClient.post(
       '/delivery/couriers/$courierId/verification/',
-      data: {'status': status, if (notes.isNotEmpty) 'notes': notes},
+      data: {
+        'status': status,
+        if (notes.isNotEmpty) 'notes': notes,
+        if (idDocumentExpiresOn != null) 'id_document_expires_on': jour(idDocumentExpiresOn),
+        if (licenceDocumentExpiresOn != null)
+          'licence_document_expires_on': jour(licenceDocumentExpiresOn),
+        if (vehicleDocumentExpiresOn != null)
+          'vehicle_document_expires_on': jour(vehicleDocumentExpiresOn),
+      },
     );
     return CourierProfile.fromJson(response.data as Map<String, dynamic>);
   }

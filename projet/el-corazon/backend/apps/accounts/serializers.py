@@ -12,7 +12,7 @@ from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from apps.accounts.models import Device, DevicePlatform, Role, User
+from apps.accounts.models import CustomerNote, Device, DevicePlatform, Role, User
 from apps.accounts.permissions import PERMISSIONS
 from common.serializers import MoneyField
 
@@ -361,3 +361,20 @@ class DeviceSerializer(serializers.ModelSerializer[Device]):
         model = Device
         fields = ["id", "token", "platform", "last_used_at", "created_at"]
         read_only_fields = ["id", "last_used_at", "created_at"]
+
+
+class CustomerNoteSerializer(serializers.ModelSerializer[CustomerNote]):
+    """Une note interne sur un client — jamais rendue au client."""
+
+    author_name = serializers.CharField(source="author.full_name", read_only=True, default=None)
+
+    class Meta:
+        model = CustomerNote
+        fields = ["id", "author_name", "content", "created_at"]
+        read_only_fields = ["id", "author_name", "created_at"]
+
+    def validate_content(self, value: str) -> str:
+        texte = value.strip()
+        if not texte:
+            raise serializers.ValidationError("Une note vide n'apprend rien à personne.")
+        return texte

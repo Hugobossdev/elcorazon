@@ -47,6 +47,13 @@ PERMISSIONS: Final[dict[str, str]] = {
     "orders.assign_courier": "Affecter un livreur à une commande",
     "orders.cancel": "Annuler une commande",
     "orders.refund": "Rembourser tout ou partie d'une commande",
+    # Versements aux livreurs — distincts des remboursements : l'argent sort
+    # vers un livreur, pas vers un client, et le geste qui le constate engage
+    # la caisse. Lire et verser sont séparés pour que le quatre-yeux soit
+    # possible : qui prépare la liste des virements n'est pas forcément qui les
+    # exécute.
+    "payouts.read": "Consulter les demandes de retrait des livreurs",
+    "payouts.settle": "Constater le versement d'un retrait livreur, ou le refuser",
     # Flotte
     "couriers.read": "Consulter les livreurs et leur position",
     "couriers.write": "Créer un compte livreur",
@@ -55,6 +62,11 @@ PERMISSIONS: Final[dict[str, str]] = {
     # Clients
     "customers.read": "Consulter les comptes clients",
     "customers.block": "Bloquer ou débloquer un compte client",
+    # Support — la parole des clients. Distinct de `customers.*` : lire un
+    # compte n'est pas lire ce qu'un client a écrit pour se plaindre, et statuer
+    # sur une réclamation engage l'enseigne envers lui.
+    "support.read": "Consulter les tickets, réclamations et demandes de retour",
+    "support.write": "Répondre aux clients et statuer sur leurs demandes",
     # Commercial
     "promotions.read": "Consulter les promotions",
     "promotions.write": "Créer et modifier des promotions",
@@ -73,6 +85,10 @@ PERMISSIONS: Final[dict[str, str]] = {
     # Administration
     "roles.read": "Consulter les rôles, les permissions et les comptes du personnel",
     "roles.write": "Créer et modifier des rôles, et les attribuer au personnel",
+    # Le journal des décisions (`common.audit`) : qui a changé un barème, une
+    # zone, un rôle, un périmètre — et depuis quelle valeur. Il était écrit et
+    # lisible nulle part : ni route, ni administration.
+    "audit.read": "Consulter le journal des décisions d'exploitation et des droits",
 }
 
 PERMISSION_CHOICES: Final[list[tuple[str, str]]] = sorted(PERMISSIONS.items())
@@ -97,11 +113,15 @@ SYSTEM_ROLES: Final[dict[str, tuple[str, ...]]] = {
         "orders.assign_courier",
         "orders.cancel",
         "orders.refund",
+        "payouts.read",
+        "payouts.settle",
         "couriers.read",
         "couriers.write",
         "couriers.approve",
         "couriers.suspend",
         "customers.read",
+        "support.read",
+        "support.write",
         "promotions.read",
         "promotions.write",
         "notifications.send",
@@ -111,6 +131,9 @@ SYSTEM_ROLES: Final[dict[str, tuple[str, ...]]] = {
         "gamification.write",
         "restaurants.read",
         "analytics.read",
+        # Un gérant relit ce qui a changé sur **ses** établissements : le
+        # journal est cloisonné comme le reste (`AuditEntryViewSet`).
+        "audit.read",
     ),
     "Opérateur": (
         "catalog.read",
@@ -126,6 +149,12 @@ SYSTEM_ROLES: Final[dict[str, tuple[str, ...]]] = {
         "orders.assign_courier",
         "couriers.read",
         "customers.read",
+        # Le poste qui décroche le téléphone répond aussi par écrit : un ticket
+        # est la même question que l'appel, arrivée par un autre canal. Statuer
+        # sur un retour ne verse rien — le remboursement exige `orders.refund`,
+        # que ce rôle n'a pas.
+        "support.read",
+        "support.write",
     ),
 }
 

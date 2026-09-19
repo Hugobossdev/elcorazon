@@ -200,3 +200,105 @@ class RefundRequestSerializer(serializers.Serializer[Any]):
     transaction = serializers.UUIDField()
     amount = MoneyField()
     reason = serializers.CharField(max_length=500)
+
+
+# ------------------------------------------------------------- back-office
+
+
+class ManagedWithdrawalSerializer(serializers.ModelSerializer[Withdrawal]):
+    """Une demande de retrait, telle que l'exploitation l'instruit.
+
+    Porte **de quoi verser** sans rouvrir le dossier livreur : à qui, sur quel
+    numéro, pour quelle cuisine. Le numéro est celui du compte — le dossier
+    livreur ne porte pas de coordonnées de versement distinctes, et en inventer
+    un champ ici ferait croire qu'il existe.
+    """
+
+    amount = MoneyField(read_only=True)
+    courier_name = serializers.CharField(source="courier.user.full_name", read_only=True)
+    courier_phone = serializers.CharField(source="courier.user.phone", read_only=True)
+    restaurant = serializers.CharField(source="courier.restaurant.slug", read_only=True)
+    restaurant_name = serializers.CharField(source="courier.restaurant.name", read_only=True)
+    processed_by_name = serializers.CharField(
+        source="processed_by.full_name", read_only=True, default=None
+    )
+
+    class Meta:
+        model = Withdrawal
+        fields = [
+            "id",
+            "courier",
+            "courier_name",
+            "courier_phone",
+            "restaurant",
+            "restaurant_name",
+            "amount",
+            "status",
+            "provider_reference",
+            "failure_reason",
+            "processed_by_name",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class WithdrawalSettleSerializer(serializers.Serializer[Any]):
+    """Constater un versement : la référence du virement est **exigée**.
+
+    C'est ce qu'on cherchera le jour où le livreur affirmera n'avoir rien reçu.
+    Un constat sans référence ne prouve rien — ni à lui, ni à la comptabilité.
+    """
+
+    provider_reference = serializers.CharField(max_length=128, trim_whitespace=True)
+
+
+class WithdrawalRejectSerializer(serializers.Serializer[Any]):
+    """Refuser un versement : le motif est exigé, et lu par le livreur."""
+
+    reason = serializers.CharField(max_length=500, trim_whitespace=True)
+
+
+class ManagedRefundSerializer(serializers.ModelSerializer[Refund]):
+    """Un remboursement, vu de l'exploitation qui doit l'exécuter."""
+
+    amount = MoneyField(read_only=True)
+    order_reference = serializers.CharField(source="order.reference", read_only=True)
+    restaurant_name = serializers.CharField(source="order.restaurant.name", read_only=True)
+    customer_name = serializers.CharField(source="order.customer.full_name", read_only=True)
+    customer_phone = serializers.CharField(source="order.customer.phone", read_only=True)
+    requested_by_name = serializers.CharField(source="requested_by.full_name", read_only=True)
+    provider = serializers.CharField(source="transaction.provider", read_only=True)
+
+    class Meta:
+        model = Refund
+        fields = [
+            "id",
+            "order",
+            "order_reference",
+            "restaurant_name",
+            "customer_name",
+            "customer_phone",
+            "transaction",
+            "provider",
+            "amount",
+            "reason",
+            "status",
+            "requested_by_name",
+            "completed_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class RefundSettleSerializer(serializers.Serializer[Any]):
+    """Constater un remboursement versé — la référence est facultative ici.
+
+    Un remboursement en espèces, rendu au comptoir, n'en a pas. Un virement en
+    a une, et `RefundService.settle` la joint au motif.
+    """
+
+    provider_reference = serializers.CharField(
+        max_length=128, required=False, allow_blank=True, trim_whitespace=True
+    )

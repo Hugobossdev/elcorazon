@@ -16,7 +16,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.geography.models import Country, DeliveryZone
-from apps.orders.models import Order, OrderLine, OrderStatusEvent, PaymentMethod
+from apps.orders.models import Order, OrderLine, OrderNote, OrderStatusEvent, PaymentMethod
 from apps.orders.states import ORDER_MACHINE
 from apps.profiles.models import Address
 from apps.promotions.serializers import PromotionSerializer
@@ -380,3 +380,20 @@ class StaffCancelSerializer(serializers.Serializer[Any]):
     """
 
     reason = serializers.CharField(max_length=500, allow_blank=False)
+
+
+class OrderNoteSerializer(serializers.ModelSerializer[OrderNote]):
+    """Une note interne — lue et écrite par le personnel seul."""
+
+    author_name = serializers.CharField(source="author.full_name", read_only=True, default=None)
+
+    class Meta:
+        model = OrderNote
+        fields = ["id", "author_name", "content", "created_at"]
+        read_only_fields = ["id", "author_name", "created_at"]
+
+    def validate_content(self, value: str) -> str:
+        texte = value.strip()
+        if not texte:
+            raise serializers.ValidationError("Une note vide n'apprend rien à personne.")
+        return texte

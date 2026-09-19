@@ -30,9 +30,9 @@ from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from apps.catalog.models import Category, MenuItem, Option, OptionGroup, OptionTemplate
+from apps.catalog.models import Category, MenuItem, Option, OptionGroup, OptionTemplate, Review
 from apps.catalog.serializers import (
     ApplyTemplateSerializer,
     ManagedCategorySerializer,
@@ -40,12 +40,15 @@ from apps.catalog.serializers import (
     ManagedOptionGroupSerializer,
     ManagedOptionSerializer,
     ManagedOptionTemplateSerializer,
+    ManagedReviewSerializer,
     OptionGroupSerializer,
+    ReviewHideSerializer,
     StockSerializer,
 )
+from apps.catalog.services import ReviewModerationService
 from apps.restaurants.scoping import assert_in_scope, is_unscoped, staff_restaurant_ids
 from common.exceptions import BusinessRuleViolation
-from common.permissions import HasReadWritePermission, authenticated_user
+from common.permissions import HasPermission, HasReadWritePermission, authenticated_user
 
 __all__ = [
     "ManagedCategoryViewSet",
@@ -365,3 +368,67 @@ class ManagedOptionTemplateViewSet(_ScopedCatalogViewSet[OptionTemplate]):
         if restaurant is not None:
             assert_in_scope(authenticated_user(self.request), restaurant.pk)
         serializer.save()
+
+
+class ManagedReviewViewSet(ReadOnlyModelViewSet[Review]):
+    """`/catalog/manage/reviews/` — la modération des avis.
+
+    Lire suit le catalogue (`catalog.read`) ; masquer et réafficher exigent
+    `catalog.write`. Le périmètre est celui de la cuisine de l'article : un
+    gérant modère les avis de sa carte, pas ceux d'une autre ville.
+    """
+
+    serializer_class = ManagedReviewSerializer
+    permission_classes = (HasPermission.of("catalog.read"),)
+    queryset = Review.objects.none()  # pour le générateur de schéma
+    filterset_fields: ClassVar[dict[str, list[str]]] = {
+        "menu_item": ["exact"],
+        "rating": ["exact", "lte", "gte"],
+        "hidden_at": ["isnull"],
+    }
+    search_fields: ClassVar[list[str]] = ["comment", "title", "menu_item__name", "user__full_name"]
+
+    def get_queryset(self) -> QuerySet[Review]:
+        user = authenticated_user(self.request)
+        base = Review.objects.select_related("user", "menu_item__restaurant", "hidden_by").order_by(
+            "-created_at"
+        )
+        if is_unscoped(user):
+            return base
+        return base.filter(menu_item__restaurant_id__in=staff_restaurant_ids(user))
+
+    @extend_schema(
+        request=ReviewHideSerializer, responses={200: ManagedReviewSerializer}, tags=["catalog"]
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="hide",
+        url_name="hide",
+        permission_classes=[HasPermission.of("catalog.write")],
+    )
+    def hide(self, request: Request, pk: str) -> Response:
+        """Masque l'avis — motif exigé, geste journalisé, note recalculée."""
+        serializer = ReviewHideSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        avis = ReviewModerationService.hide(
+            review=self.get_object(),
+            actor=authenticated_user(request),
+            reason=serializer.validated_data["reason"],
+        )
+        return Response(ManagedReviewSerializer(self.get_queryset().get(pk=avis.pk)).data)
+
+    @extend_schema(request=None, responses={200: ManagedReviewSerializer}, tags=["catalog"])
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="show",
+        url_name="show",
+        permission_classes=[HasPermission.of("catalog.write")],
+    )
+    def show(self, request: Request, pk: str) -> Response:
+        """Réaffiche un avis masqué."""
+        avis = ReviewModerationService.show(
+            review=self.get_object(), actor=authenticated_user(request)
+        )
+        return Response(ManagedReviewSerializer(self.get_queryset().get(pk=avis.pk)).data)

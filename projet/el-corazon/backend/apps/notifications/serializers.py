@@ -62,3 +62,17 @@ class CampaignSerializer(serializers.ModelSerializer[Campaign]):
             "created_at",
             "updated_at",
         ]
+
+
+class CampaignStatsSerializer(serializers.Serializer[Any]):
+    """Le bilan d'une campagne envoyée — voir `campaign_stats`."""
+
+    recipients = serializers.IntegerField()
+    read = serializers.IntegerField()
+    open_rate = serializers.FloatField(allow_null=True)
+    window_days = serializers.IntegerField()
+    customers_who_ordered = serializers.IntegerField()
+    conversion_rate = serializers.FloatField(allow_null=True)
+    revenue = serializers.ListField(
+        child=serializers.DictField(), help_text="`amount` (unité mineure) et `currency`."
+    )

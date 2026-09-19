@@ -15,8 +15,12 @@ ne reçoit plus.
 
 ## Ce qui est journalisé, et ce qui ne l'est pas
 
-Seulement ce que l'exploitation a besoin de reconstituer : la géographie et les
-barèmes. Journaliser toute écriture produirait un volume qui rend le journal
+Seulement ce que l'exploitation a besoin de reconstituer : la géographie, les
+barèmes, et **les droits** — permissions d'un rôle, rôles et périmètre d'un
+compte du personnel, blocage d'un client. Les droits ont la même propriété que
+les barèmes : un rôle qui gagne `orders.refund` ne se voit dans aucun écran.
+
+Journaliser toute écriture produirait un volume qui rend le journal
 illisible — et donc inutilisé, ce qui est pire qu'absent.
 
 Les transitions d'état ont déjà leur trace ailleurs (machines à états,
@@ -63,6 +67,24 @@ class AuditAction:
     ZONE_TARIFF = "zone.tariff"
     ZONE_ACTIVATION = "zone.activation"
     COUNTRY_ACTIVATION = "country.activation"
+
+    # Les droits — qui peut faire quoi, et sur quoi. Même propriété que la
+    # géographie : silencieux et coûteux. Une permission `orders.refund`
+    # ajoutée à un rôle ne se voit dans aucun écran, et se découvre dans les
+    # remboursements qu'elle a permis.
+    ROLE_PERMISSIONS = "role.permissions"
+    STAFF_ROLES = "staff.roles"
+    STAFF_SCOPE = "staff.scope"
+    STAFF_ACTIVATION = "staff.activation"
+    #: Le mot de passe lui-même n'est **jamais** consigné — seulement le fait
+    #: qu'un tiers l'a remplacé, ce qui est une reprise de compte possible.
+    STAFF_PASSWORD = "staff.password"  # noqa: S105 — un nom d'action, pas un secret
+    #: Le motif était exigé par la route de blocage, puis jeté : il n'était
+    #: écrit nulle part. C'est ici qu'il vit désormais.
+    CUSTOMER_BLOCK = "customer.block"
+    #: Un avis client masqué ou réaffiché — ce que dit la clientèle ne sort pas
+    #: de la vitrine sans que l'on sache qui l'a décidé, et pourquoi.
+    REVIEW_VISIBILITY = "review.visibility"
 
 
 def record_change(

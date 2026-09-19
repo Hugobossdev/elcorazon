@@ -1,6 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
+import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Rôles et permissions du personnel — `/administration/roles/` et
@@ -172,6 +173,85 @@ class RoleManagementService extends ChangeNotifier {
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace("Rôles : changement d'état refusé — ${e.code}");
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Ouvre un compte du personnel, avec ses rôles et son périmètre.
+  ///
+  /// Rend le compte créé, ou `null` — [error] dit alors pourquoi, dans les
+  /// mots du serveur : adresse déjà prise, mot de passe trop faible,
+  /// rattachement hors de votre périmètre.
+  Future<eccore.StaffMember?> createStaff({
+    required String email,
+    required String fullName,
+    required String password,
+    String? phone,
+    List<String> roleIds = const [],
+    List<String> restaurantSlugs = const [],
+    List<String> countryCodes = const [],
+    List<String> citySlugs = const [],
+  }) async {
+    try {
+      final cree = await _admin.createStaff(
+        email: email,
+        fullName: fullName,
+        password: password,
+        phone: phone,
+        roleIds: roleIds,
+        restaurantSlugs: restaurantSlugs,
+        countryCodes: countryCodes,
+        citySlugs: citySlugs,
+      );
+      _staff = [..._staff, cree]..sort((a, b) => a.fullName.compareTo(b.fullName));
+      _error = null;
+      notifyListeners();
+      return cree;
+    } on eccore.ApiException catch (e) {
+      _error = messageErreur(e);
+      eccore.Journal.trace('Personnel : création refusée — ${e.code}');
+      notifyListeners();
+      return null;
+    }
+  }
+
+  /// Remplace le périmètre d'un compte — établissements, villes, marchés.
+  Future<bool> updateStaffScope({
+    required String staffId,
+    required Set<String> restaurantSlugs,
+    required Set<String> countryCodes,
+    required Set<String> citySlugs,
+  }) async {
+    try {
+      final maj = await _admin.updateStaffScope(
+        staffId: staffId,
+        restaurantSlugs: restaurantSlugs.toList()..sort(),
+        countryCodes: countryCodes.toList()..sort(),
+        citySlugs: citySlugs.toList()..sort(),
+      );
+      _remplacer(maj);
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = messageErreur(e);
+      eccore.Journal.trace('Personnel : périmètre refusé — ${e.code}');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Pose un nouveau mot de passe sur un compte du personnel.
+  Future<bool> setStaffPassword({
+    required String staffId,
+    required String password,
+  }) async {
+    try {
+      final maj = await _admin.setStaffPassword(staffId: staffId, password: password);
+      _remplacer(maj);
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = messageErreur(e);
+      eccore.Journal.trace('Personnel : mot de passe refusé — ${e.code}');
       notifyListeners();
       return false;
     }

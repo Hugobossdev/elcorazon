@@ -18,6 +18,7 @@ router = DefaultRouter()
 # « l'établissement à administrer dont le slug est *hours* ». Les ressources
 # nommées passent donc avant celle qui les capterait.
 router.register("staff", backoffice.StaffViewSet, basename="staff")
+router.register("audit", backoffice.AuditEntryViewSet, basename="audit")
 router.register(
     "manage/hours", backoffice.ManagedOpeningHoursViewSet, basename="managed-opening-hours"
 )

@@ -38,16 +38,18 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
-from apps.accounts.models import Role, User, UserType
+from apps.accounts.models import CustomerNote, Role, User, UserType
 from apps.accounts.permissions import PERMISSIONS
 from apps.accounts.serializers import (
     BlockSerializer,
+    CustomerNoteSerializer,
     CustomerSerializer,
     PermissionSerializer,
     RoleSerializer,
 )
 from apps.accounts.services import AuthService
-from common.permissions import HasPermission, HasReadWritePermission
+from common.audit import AuditAction, record_change
+from common.permissions import HasPermission, HasReadWritePermission, authenticated_user
 
 __all__ = ["CustomerViewSet", "RoleViewSet"]
 
@@ -97,9 +99,22 @@ class CustomerViewSet(ReadOnlyModelViewSet[User]):
         serializer.is_valid(raise_exception=True)
 
         customer = self.get_object()
+        etait_actif = customer.is_active
         customer.is_active = False
         customer.save(update_fields=["is_active", "updated_at"])
         AuthService.revoke_all_sessions(customer)
+
+        # Le motif était exigé, puis jeté : rien ne le conservait. Six mois
+        # plus tard, quand le client rappelle, c'est lui qu'on cherche.
+        record_change(
+            actor=authenticated_user(request),
+            action=AuditAction.CUSTOMER_BLOCK,
+            target_type="customer",
+            target_id=customer.pk,
+            target_label=customer.email,
+            before={"is_active": etait_actif},
+            after={"is_active": False, "reason": serializer.validated_data["reason"]},
+        )
 
         return Response(CustomerSerializer(customer).data)
 
@@ -112,9 +127,46 @@ class CustomerViewSet(ReadOnlyModelViewSet[User]):
     def unblock(self, request: Request, pk: str) -> Response:
         """Rouvre un compte. L'utilisateur devra se reconnecter."""
         customer = self.get_object()
+        etait_actif = customer.is_active
         customer.is_active = True
         customer.save(update_fields=["is_active", "updated_at"])
+        record_change(
+            actor=authenticated_user(request),
+            action=AuditAction.CUSTOMER_BLOCK,
+            target_type="customer",
+            target_id=customer.pk,
+            target_label=customer.email,
+            before={"is_active": etait_actif},
+            after={"is_active": True},
+        )
         return Response(CustomerSerializer(customer).data)
+
+    @extend_schema(
+        methods=["GET"], responses={200: CustomerNoteSerializer(many=True)}, tags=["accounts"]
+    )
+    @extend_schema(
+        methods=["POST"],
+        request=CustomerNoteSerializer,
+        responses={201: CustomerNoteSerializer},
+        tags=["accounts"],
+    )
+    @action(detail=True, methods=["get", "post"], url_path="notes", url_name="notes")
+    def notes(self, request: Request, pk: str) -> Response:
+        """Les notes internes sur ce client — lire, ou en ajouter une.
+
+        Sous `customers.read` : le poste du service client qui consulte un
+        dossier est celui qui a quelque chose à y consigner. Une note ne change
+        rien au compte ; fermer un compte, lui, reste sous `customers.block`.
+        """
+        customer = self.get_object()
+        if request.method == "GET":
+            notes = CustomerNote.objects.filter(customer=customer).select_related("author")
+            return Response(CustomerNoteSerializer(notes, many=True).data)
+
+        serializer = CustomerNoteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        note = serializer.save(customer=customer, author=authenticated_user(request))
+        return Response(CustomerNoteSerializer(note).data, status=status.HTTP_201_CREATED)
 
 
 class RoleViewSet(
@@ -142,13 +194,19 @@ class RoleViewSet(
     queryset = Role.objects.order_by("name")
     search_fields: ClassVar[list[str]] = ["name"]
 
+    def perform_create(self, serializer: Any) -> None:
+        role = serializer.save()
+        _consigner_permissions(self.request, role, avant=[])
+
     def perform_update(self, serializer: Any) -> None:
         if serializer.instance.is_system:
             raise PermissionDenied(
                 "Les rôles fournis à l'installation ne se modifient pas : "
                 "créez-en un sur mesure et attribuez-le."
             )
-        serializer.save()
+        avant = sorted(serializer.instance.permissions)
+        role = serializer.save()
+        _consigner_permissions(self.request, role, avant=avant)
 
     @extend_schema(responses={200: PermissionSerializer(many=True)}, tags=["accounts"])
     @action(detail=False, methods=["get"], url_path="permissions", url_name="permissions")
@@ -164,3 +222,22 @@ class RoleViewSet(
             {"code": code, "description": libelle} for code, libelle in sorted(PERMISSIONS.items())
         ]
         return Response(PermissionSerializer(registre, many=True).data, status=status.HTTP_200_OK)
+
+
+def _consigner_permissions(request: Request, role: Role, *, avant: list[str]) -> None:
+    """Journalise ce qu'un rôle accorde, avant et après.
+
+    Un rôle qui gagne `orders.refund` ne se voit dans aucun écran ; il se
+    découvre dans les remboursements qu'il a permis. `record_change` n'écrit
+    rien si la liste n'a pas bougé — un renommage seul ne pollue pas le
+    journal.
+    """
+    record_change(
+        actor=authenticated_user(request),
+        action=AuditAction.ROLE_PERMISSIONS,
+        target_type="role",
+        target_id=role.pk,
+        target_label=role.name,
+        before={"permissions": avant},
+        after={"permissions": sorted(role.permissions)},
+    )

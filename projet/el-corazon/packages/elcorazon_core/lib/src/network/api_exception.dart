@@ -50,7 +50,7 @@ class ApiException implements Exception {
     return ApiException(
       status: status,
       code: (body['code'] as String?) ?? 'unknown_error',
-      detail: (body['detail'] as String?) ?? 'Une erreur est survenue.',
+      detail: (body['detail'] as String?) ?? detailParDefaut,
       errors: errors is Map
           ? errors.map(
               (key, value) => MapEntry(
@@ -65,6 +65,13 @@ class ApiException implements Exception {
       }),
     );
   }
+
+  /// Ce que vaut [detail] quand le serveur n'en a pas écrit.
+  ///
+  /// C'est le cas des refus de **validation** (400) : DRF range la raison
+  /// champ par champ dans `errors` et ne pose aucun `detail`. Nommer ce repli
+  /// permet à `messageErreurApi` de le reconnaître et d'aller lire [errors].
+  static const detailParDefaut = 'Une erreur est survenue.';
 
   /// Membres définis par la RFC 9457 elle-même. Tout le reste est une extension
   /// posée par le serveur, et c'est cela que [members] recueille.

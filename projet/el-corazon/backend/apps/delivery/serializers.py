@@ -126,6 +126,9 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
             "id_document",
             "licence_document",
             "vehicle_document",
+            "id_document_expires_on",
+            "licence_document_expires_on",
+            "vehicle_document_expires_on",
             "vehicle_type",
             "vehicle_plate",
             "is_online",
@@ -463,6 +466,11 @@ class DeliveryTransitionSerializer(serializers.Serializer[Any]):
 class VerificationSerializer(serializers.Serializer[Any]):
     status = serializers.ChoiceField(choices=sorted(VERIFICATION_MACHINE.states))
     notes = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    # Dates relevées sur les pièces, au moment de les instruire. Facultatives :
+    # seules celles fournies sont écrites.
+    id_document_expires_on = serializers.DateField(required=False)
+    licence_document_expires_on = serializers.DateField(required=False)
+    vehicle_document_expires_on = serializers.DateField(required=False)
 
 
 class OnlineSerializer(serializers.Serializer[Any]):

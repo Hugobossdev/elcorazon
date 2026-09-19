@@ -17,6 +17,7 @@ router.register("reviews", views.ReviewViewSet, basename="review")
 # l'exploitation. Les deux vivent dans la même app — c'est le même domaine —
 # mais aucune route ne fait les deux : un chemin, un public, une permission.
 router.register("manage/categories", backoffice.ManagedCategoryViewSet, basename="managed-category")
+router.register("manage/reviews", backoffice.ManagedReviewViewSet, basename="managed-review")
 router.register("manage/items", backoffice.ManagedMenuItemViewSet, basename="managed-item")
 router.register(
     "manage/option-groups", backoffice.ManagedOptionGroupViewSet, basename="managed-option-group"

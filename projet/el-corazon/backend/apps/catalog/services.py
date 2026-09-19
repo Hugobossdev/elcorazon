@@ -21,9 +21,11 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import transaction
 from django.db.models import Avg, Count, F
+from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.catalog.models import MenuItem, Review, VerifiedPurchase
+from common.audit import AuditAction, record_change
 from common.exceptions import BusinessRuleViolation
 
 __all__ = ["ReviewService", "StockService", "record_purchase"]
@@ -157,7 +159,10 @@ class ReviewService:
         `(menu_item, -created_at)`, payé à l'écriture d'un avis — soit
         plusieurs milliers de fois moins souvent qu'une lecture de menu.
         """
-        aggregate = Review.objects.filter(menu_item=menu_item).aggregate(
+        # Les avis masqués sortent de la note : un avis retiré pour insulte
+        # qui continuerait de peser sur la moyenne resterait publié par un
+        # autre moyen.
+        aggregate = Review.objects.filter(menu_item=menu_item, hidden_at__isnull=True).aggregate(
             average=Avg("rating"), total=Count("id")
         )
         average = Decimal(aggregate["average"] or 0).quantize(
@@ -172,3 +177,58 @@ class ReviewService:
         # d'écrire.
         menu_item.rating_average = average
         menu_item.rating_count = aggregate["total"]
+
+
+class ReviewModerationService:
+    """Masquer et réafficher un avis — le seul geste de modération.
+
+    Le module disait l'attendre : « ce sont des gestes de modération, qui
+    appellent une trace d'audit et une permission dédiée ». Les voici — sous
+    `catalog.write`, journalisés, motif exigé pour masquer.
+    """
+
+    @staticmethod
+    @transaction.atomic
+    def hide(*, review: Review, actor: User, reason: str) -> Review:
+        if not reason.strip():
+            raise BusinessRuleViolation("Dites pourquoi cet avis est masqué.")
+        verrouille = (
+            Review.objects.select_for_update().select_related("menu_item").get(pk=review.pk)
+        )
+        if verrouille.hidden_at is not None:
+            return verrouille
+        verrouille.hidden_at = timezone.now()
+        verrouille.hidden_reason = reason.strip()
+        verrouille.hidden_by = actor
+        verrouille.save(update_fields=["hidden_at", "hidden_reason", "hidden_by", "updated_at"])
+        ReviewModerationService._consigner(verrouille, actor, visible_avant=True)
+        ReviewService.refresh_rating(verrouille.menu_item)
+        return verrouille
+
+    @staticmethod
+    @transaction.atomic
+    def show(*, review: Review, actor: User) -> Review:
+        verrouille = (
+            Review.objects.select_for_update().select_related("menu_item").get(pk=review.pk)
+        )
+        if verrouille.hidden_at is None:
+            return verrouille
+        verrouille.hidden_at = None
+        verrouille.hidden_reason = ""
+        verrouille.hidden_by = None
+        verrouille.save(update_fields=["hidden_at", "hidden_reason", "hidden_by", "updated_at"])
+        ReviewModerationService._consigner(verrouille, actor, visible_avant=False)
+        ReviewService.refresh_rating(verrouille.menu_item)
+        return verrouille
+
+    @staticmethod
+    def _consigner(review: Review, actor: User, *, visible_avant: bool) -> None:
+        record_change(
+            actor=actor,
+            action=AuditAction.REVIEW_VISIBILITY,
+            target_type="review",
+            target_id=review.pk,
+            target_label=f"{review.rating}/5 — {review.menu_item.name}",
+            before={"visible": visible_avant},
+            after={"visible": not visible_avant, "reason": review.hidden_reason},
+        )

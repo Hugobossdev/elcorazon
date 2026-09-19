@@ -22,6 +22,8 @@ import 'package:admin/presentation/dialogues/contact_commande.dart';
 import 'package:admin/presentation/dialogues/details_commande.dart';
 import 'package:admin/presentation/filtres_geographiques.dart';
 import 'package:admin/presentation/filtres_supervision.dart';
+import 'package:admin/presentation/champ_client_commande.dart';
+import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/presentation/export_commandes.dart';
 import 'package:admin/presentation/onglets/statistiques_commandes.dart';
@@ -554,9 +556,13 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
     if (_filtres.recherche.trim().isNotEmpty) {
       return 'Aucune commande ne correspond à « ${_filtres.recherche.trim()} »';
     }
+    if (_filtres.clientNom != null) {
+      return 'Aucune commande de ${_filtres.clientNom} sur cette étape '
+          '(${_filtres.libellePeriode.toLowerCase()}).';
+    }
     if (_filtres.fenetre != FenetreCommandes.toutes) {
       return 'Aucune commande sur cette étape pour la période choisie '
-          '(${_filtres.fenetre.libelle.toLowerCase()}).';
+          '(${_filtres.libellePeriode.toLowerCase()}).';
     }
     return 'Aucune commande à cette étape.';
   }
@@ -1056,6 +1062,35 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
 
   // Méthode _showSearchDialog supprimée car la recherche est maintenant intégrée directement dans l'interface
 
+  /// Ouvre le calendrier, et rend les filtres avec la période choisie — ou
+  /// `null` si l'on a renoncé.
+  ///
+  /// Borné à aujourd'hui : une commande n'est jamais passée demain, et une
+  /// période future ne rendrait qu'une liste vide sans rien expliquer.
+  Future<FiltresCommandes?> _choisirPeriode(BuildContext context) async {
+    final maintenant = DateTime.now();
+    final aujourdhui = DateTime(maintenant.year, maintenant.month, maintenant.day);
+    final plage = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024),
+      lastDate: aujourdhui,
+      initialDateRange: _filtres.du != null && _filtres.au != null
+          ? DateTimeRange(start: _filtres.du!, end: _filtres.au!)
+          : DateTimeRange(
+              start: aujourdhui.subtract(const Duration(days: 6)),
+              end: aujourdhui,
+            ),
+      helpText: 'Commandes passées',
+      saveText: 'Appliquer',
+    );
+    if (plage == null) return null;
+    return _filtres.copyWith(
+      fenetre: FenetreCommandes.periode,
+      du: plage.start,
+      au: plage.end,
+    );
+  }
+
   /// Les filtres qui ne tiennent pas dans la barre : période, établissement,
   /// tri, taille de page.
   ///
@@ -1084,6 +1119,10 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     DropdownButtonFormField<FenetreCommandes>(
+                      // Clé sur la fenêtre : si l'on renonce au calendrier, la
+                      // liste doit revenir à la fenêtre réellement appliquée,
+                      // pas rester sur « Période choisie ».
+                      key: ValueKey(_filtres.fenetre),
                       initialValue: _filtres.fenetre,
                       decoration: const InputDecoration(
                         labelText: 'Période',
@@ -1099,13 +1138,55 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                             child: Text(fenetre.libelle),
                           ),
                       ],
-                      onChanged: (fenetre) {
-                        if (fenetre != null) {
+                      onChanged: (fenetre) async {
+                        if (fenetre == null) return;
+                        if (fenetre != FenetreCommandes.periode) {
                           poser(_filtres.copyWith(fenetre: fenetre));
+                          return;
                         }
+                        final choisie = await _choisirPeriode(context);
+                        if (choisie != null) poser(choisie);
+                        setDialogState(() {});
                       },
                     ),
+                    if (_filtres.fenetre == FenetreCommandes.periode)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.date_range_rounded, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(_filtres.libellePeriode)),
+                            TextButton(
+                              onPressed: () async {
+                                final choisie = await _choisirPeriode(context);
+                                if (choisie != null) poser(choisie);
+                              },
+                              child: const Text('Modifier'),
+                            ),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 16),
+                    // Le serveur filtre par client (`customer`) depuis
+                    // l'origine ; l'écran ne l'envoyait pas. L'historique d'un
+                    // client n'était lisible que depuis sa fiche, sans les
+                    // gestes de la supervision.
+                    if (context.read<AdminAuthService>().can('customers.read')) ...[
+                      ChampClientDeCommande(
+                        clientId: _filtres.clientId,
+                        clientNom: _filtres.clientNom,
+                        onChoisi: (client) => poser(
+                          client == null
+                              ? _filtres.copyWith(effacerClient: true)
+                              : _filtres.copyWith(
+                                  clientId: client.id,
+                                  clientNom: client.fullName,
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     // Pays → ville → zone → cuisine : la géographie figée de
                     // la commande, proposée depuis ce que le compte voit. Chaque
                     // étage ne propose que ce que l'étage du dessus contient.

@@ -218,6 +218,28 @@ class User(UUIDModel, AbstractBaseUser, TimeStampedModel):
         self.save(update_fields=["last_seen_at"])
 
 
+class CustomerNote(UUIDModel, TimeStampedModel):
+    """Note **interne** du personnel sur un client.
+
+    Ce que l'équipe sait et que le client ne lit pas : un litige en cours, une
+    adresse difficile, un geste consenti. Demandée par le cahier des charges
+    (§4.2.6), absente jusqu'ici. Elle ne se modifie ni ne s'efface.
+    """
+
+    customer = models.ForeignKey("User", on_delete=models.CASCADE, related_name="staff_notes_about")
+    author = models.ForeignKey("User", on_delete=models.PROTECT, related_name="+")
+    content = models.TextField()
+
+    class Meta:
+        verbose_name = "note interne sur un client"
+        verbose_name_plural = "notes internes sur un client"
+        ordering: ClassVar[list[str]] = ["created_at"]
+        indexes: ClassVar[list[models.Index]] = [models.Index(fields=["customer", "created_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.customer_id} — {self.author_id}"
+
+
 class DevicePlatform(models.TextChoices):
     IOS = "ios", "iOS"
     ANDROID = "android", "Android"

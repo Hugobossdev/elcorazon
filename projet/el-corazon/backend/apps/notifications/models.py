@@ -24,6 +24,9 @@ class NotificationKind(models.TextChoices):
     DELIVERY_OFFER = "delivery_offer", "Course proposée"
     PAYMENT = "payment", "Paiement"
     ACCOUNT = "account", "Compte"
+    #: Une réponse du service client. Transactionnelle : le client a écrit, il
+    #: attend — la couper avec le marketing lui ferait manquer la réponse.
+    SUPPORT = "support", "Service client"
     MARKETING = "marketing", "Marketing"
 
 

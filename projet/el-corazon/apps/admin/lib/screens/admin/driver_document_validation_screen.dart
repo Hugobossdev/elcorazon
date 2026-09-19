@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/documents_livreur.dart';
+import 'package:admin/presentation/expiration_piece.dart';
 import 'package:admin/services/driver_document_service.dart' as svc;
 import 'package:admin/ui/ui.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
@@ -189,6 +190,20 @@ class _DriverDocumentValidationScreenState
         );
       }
 
+      if (!success) {
+        // Le refus du serveur passait sous silence : le bouton semblait sans
+        // effet, et l'opérateur recommençait. Il dit maintenant pourquoi — une
+        // pièce expirée, un dossier déjà décidé.
+        if (mounted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_documentService.error ?? 'Décision refusée par le serveur.'),
+              backgroundColor: inverseSurfaceColor,
+            ),
+          );
+        }
+      }
+
       if (success) {
         // Recharger les documents
         await _loadDocumentStatus();
@@ -222,6 +237,26 @@ class _DriverDocumentValidationScreenState
         });
       }
     }
+  }
+
+  Future<void> _enregistrerExpiration(PieceLivreur document, DateTime date) async {
+    final messager = ScaffoldMessenger.of(context);
+    final ok = await _documentService.enregistrerExpiration(
+      document.courierId,
+      document.piece,
+      date,
+    );
+    if (!mounted) return;
+    messager.showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Date d’expiration de la ${document.piece.libelle.toLowerCase()} enregistrée'
+              : _documentService.error ?? 'Date refusée par le serveur.',
+        ),
+      ),
+    );
+    if (ok) await _loadDocumentStatus();
   }
 
   Future<void> _viewDocument(PieceLivreur document) async {
@@ -521,6 +556,13 @@ class _DriverDocumentValidationScreenState
                       ),
                     ),
             ),
+            if (document != null && document.estDeposee) ...[
+              const SizedBox(height: 8),
+              _LigneExpiration(
+                document: document,
+                onChoisir: (date) => _enregistrerExpiration(document, date),
+              ),
+            ],
             if (document?.motifDeRefus != null) ...[
               const SizedBox(height: 8),
               Container(
@@ -646,3 +688,58 @@ class _DriverDocumentValidationScreenState
   }
 
 }
+
+/// La date d'expiration d'une pièce, et de quoi la saisir.
+///
+/// Elle se relève pièce en main : le bouton ouvre un calendrier borné à partir
+/// d'aujourd'hui — saisir une date passée reviendrait à consigner une pièce
+/// déjà invalide, que le serveur refuserait de toute façon à la validation.
+class _LigneExpiration extends StatelessWidget {
+  const _LigneExpiration({required this.document, required this.onChoisir});
+
+  final PieceLivreur document;
+  final ValueChanged<DateTime> onChoisir;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final sem = AdminColorTokens.semantic(scheme);
+    final etat = EtatExpiration.de(document.expireLe);
+    final couleur = switch (etat) {
+      EtatExpiration.expiree => sem.danger,
+      EtatExpiration.bientot => sem.warning,
+      EtatExpiration.valide => sem.success,
+      EtatExpiration.inconnue => scheme.onSurfaceVariant,
+    };
+
+    return Row(
+      children: [
+        Icon(Icons.event_rounded, size: 18, color: couleur),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            libelleExpiration(document.expireLe),
+            style: TextStyle(color: couleur, fontWeight: FontWeight.w600, fontSize: 12),
+          ),
+        ),
+        TextButton(
+          onPressed: () async {
+            final aujourdhui = DateTime.now();
+            final choisie = await showDatePicker(
+              context: context,
+              firstDate: DateTime(aujourdhui.year, aujourdhui.month, aujourdhui.day),
+              lastDate: DateTime(aujourdhui.year + 30),
+              initialDate: document.expireLe != null && !document.expireLe!.isBefore(aujourdhui)
+                  ? document.expireLe!
+                  : aujourdhui,
+              helpText: 'Date d’expiration de la pièce',
+            );
+            if (choisie != null) onChoisir(choisie);
+          },
+          child: Text(document.expireLe == null ? 'Saisir' : 'Modifier'),
+        ),
+      ],
+    );
+  }
+}
+

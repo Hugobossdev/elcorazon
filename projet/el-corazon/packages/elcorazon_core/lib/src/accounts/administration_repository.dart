@@ -2,6 +2,7 @@ import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/accounts/admin_role.dart';
 import 'package:elcorazon_core/src/accounts/customer.dart';
 import 'package:elcorazon_core/src/accounts/customer_stats.dart';
+import 'package:elcorazon_core/src/models/internal_note.dart';
 
 /// Administration des comptes — `/api/v1/administration/`,
 /// `/api/v1/restaurants/staff/` et la fiche client de `/api/v1/analytics/`
@@ -78,6 +79,26 @@ class AdministrationRepository {
     return CustomerStats.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// Notes internes sur un client — ce que l'équipe sait de lui et qu'il ne
+  /// lit pas : un litige en cours, une adresse difficile, un geste consenti.
+  Future<List<InternalNote>> customerNotes(String customerId) async {
+    final response = await apiClient.get('/administration/customers/$customerId/notes/');
+    return (response.data as List<dynamic>)
+        .map((json) => InternalNote.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<InternalNote> addCustomerNote({
+    required String customerId,
+    required String content,
+  }) async {
+    final response = await apiClient.post(
+      '/administration/customers/$customerId/notes/',
+      data: {'content': content},
+    );
+    return InternalNote.fromJson(response.data as Map<String, dynamic>);
+  }
+
   // ---------------------------------------------------------------- rôles
 
   Future<List<AdminRole>> roles() {
@@ -143,6 +164,78 @@ class AdministrationRepository {
         if (search != null && search.isNotEmpty) 'search': search,
       },
     );
+  }
+
+  /// Ouvre un compte du personnel (permission `roles.write`).
+  ///
+  /// Le type de compte n'est pas envoyé : la ressource ne crée que du
+  /// personnel, et le serveur refuserait de s'en laisser dicter un autre — sans
+  /// quoi l'écran des rôles fabriquerait un livreur validé.
+  ///
+  /// Hors du siège, le serveur refuse (403) un rattachement ou un rôle que le
+  /// compte connecté ne détient pas lui-même : on ne nomme pas plus haut que
+  /// soi, ni ailleurs que chez soi.
+  Future<StaffMember> createStaff({
+    required String email,
+    required String fullName,
+    required String password,
+    String? phone,
+    List<String> roleIds = const [],
+    List<String> restaurantSlugs = const [],
+    List<String> countryCodes = const [],
+    List<String> citySlugs = const [],
+  }) async {
+    final response = await apiClient.post(
+      '/restaurants/staff/',
+      data: {
+        'email': email,
+        'full_name': fullName,
+        'password': password,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+        'roles': roleIds,
+        'restaurants': restaurantSlugs,
+        'countries': countryCodes,
+        'cities': citySlugs,
+      },
+    );
+    return StaffMember.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Remplace le périmètre d'un membre : établissements, villes et marchés.
+  ///
+  /// Les trois listes partent ensemble, et en bloc : « sur quoi travaille ce
+  /// compte » est une seule question. Le serveur aligne par différence, si
+  /// bien qu'un rattachement conservé garde sa date d'origine.
+  Future<StaffMember> updateStaffScope({
+    required String staffId,
+    required List<String> restaurantSlugs,
+    required List<String> countryCodes,
+    required List<String> citySlugs,
+  }) async {
+    final response = await apiClient.patch(
+      '/restaurants/staff/$staffId/',
+      data: {
+        'restaurants': restaurantSlugs,
+        'countries': countryCodes,
+        'cities': citySlugs,
+      },
+    );
+    return StaffMember.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Pose un nouveau mot de passe — pour qui a perdu le sien au poste.
+  ///
+  /// Les règles de robustesse sont celles du serveur (`validate_password`) ;
+  /// son refus arrive en 400 avec la raison, que l'écran affiche telle quelle.
+  Future<StaffMember> setStaffPassword({
+    required String staffId,
+    required String password,
+  }) async {
+    final response = await apiClient.patch(
+      '/restaurants/staff/$staffId/',
+      data: {'password': password},
+    );
+    return StaffMember.fromJson(response.data as Map<String, dynamic>);
   }
 
   /// Remplace les rôles d'un membre du personnel.

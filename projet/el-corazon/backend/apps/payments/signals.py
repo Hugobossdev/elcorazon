@@ -15,7 +15,13 @@ from __future__ import annotations
 
 import django.dispatch
 
-__all__ = ["payment_transaction_failed", "payment_transaction_settled"]
+__all__ = [
+    "payment_transaction_failed",
+    "payment_transaction_settled",
+    "withdrawal_failed",
+    "withdrawal_requested",
+    "withdrawal_settled",
+]
 
 #: Argument : `transaction` (l'instance `payments.models.Transaction` soldée).
 payment_transaction_settled = django.dispatch.Signal()
@@ -32,3 +38,21 @@ payment_transaction_settled = django.dispatch.Signal()
 #: passait en `failed`, la commande restait où elle était, et personne
 #: n'apprenait rien. `NotificationKind.PAYMENT` existait sans jamais être émis.
 payment_transaction_failed = django.dispatch.Signal()
+
+
+# Retraits des livreurs — argument : `withdrawal` (l'instance
+# `payments.models.Withdrawal`).
+#
+# Sans eux, un retrait était muet de bout en bout : l'exploitation n'apprenait
+# pas qu'on lui demandait un versement, et le livreur n'apprenait pas qu'il
+# avait été fait — ou refusé, gains rendus. `payments` ne connaît pas
+# `notifications` (ADR-002) : c'est elle qui s'abonne.
+
+#: Une demande vient d'être déposée — les gains sont déjà débités.
+withdrawal_requested = django.dispatch.Signal()
+
+#: L'exploitation a constaté le versement.
+withdrawal_settled = django.dispatch.Signal()
+
+#: Le versement est refusé, ou a échoué ; les gains sont rendus au livreur.
+withdrawal_failed = django.dispatch.Signal()

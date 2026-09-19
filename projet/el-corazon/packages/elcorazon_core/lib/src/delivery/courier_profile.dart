@@ -75,6 +75,9 @@ class CourierProfile {
     this.totalEarnings,
     this.phone = '',
     this.serviceZones = const [],
+    this.idDocumentExpiresOn,
+    this.licenceDocumentExpiresOn,
+    this.vehicleDocumentExpiresOn,
   });
 
   factory CourierProfile.fromJson(Map<String, dynamic> json) {
@@ -113,6 +116,9 @@ class CourierProfile {
       serviceZones: (json['service_zones'] as List<dynamic>? ?? const [])
           .map((zone) => ZoneRef.fromJson(zone as Map<String, dynamic>))
           .toList(growable: false),
+      idDocumentExpiresOn: _parseDate(json['id_document_expires_on']),
+      licenceDocumentExpiresOn: _parseDate(json['licence_document_expires_on']),
+      vehicleDocumentExpiresOn: _parseDate(json['vehicle_document_expires_on']),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );
@@ -153,6 +159,27 @@ class CourierProfile {
   final String? idDocument;
   final String? licenceDocument;
   final String? vehicleDocument;
+
+  /// Date d'expiration de chaque pièce, relevée par le personnel à la
+  /// validation du dossier. Nulle tant que personne ne l'a saisie — et
+  /// remise à nul quand le livreur dépose une nouvelle pièce, qui porte sa
+  /// propre date.
+  ///
+  /// Le cahier des charges demande le suivi de l'expiration (§4.2.5) ;
+  /// l'ancien modèle portait un champ « expiration » que rien ne
+  /// renseignait, lu derrière un `!` dans une branche morte.
+  final DateTime? idDocumentExpiresOn;
+  final DateTime? licenceDocumentExpiresOn;
+  final DateTime? vehicleDocumentExpiresOn;
+
+  /// La plus proche des dates d'expiration connues, ou `null`.
+  DateTime? get prochaineExpiration {
+    final dates = [idDocumentExpiresOn, licenceDocumentExpiresOn, vehicleDocumentExpiresOn]
+        .whereType<DateTime>()
+        .toList()
+      ..sort();
+    return dates.isEmpty ? null : dates.first;
+  }
 
   /// Le dossier porte-t-il ses trois pièces ?
   bool get hasAllDocuments => piecesManquantes.isEmpty;

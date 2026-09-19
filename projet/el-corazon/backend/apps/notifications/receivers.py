@@ -12,32 +12,70 @@ from typing import Any
 
 from django.dispatch import receiver
 
-from apps.delivery.models import Assignment
+from apps.delivery.models import Assignment, CourierProfile
+from apps.delivery.services import CourierService
 from apps.delivery.signals import (
     assignment_accepted,
     assignment_cancelled,
     assignment_offered,
+    document_expiring,
 )
 from apps.notifications.models import NotificationKind
 from apps.notifications.services import notify, staff_to_alert
 from apps.orders.models import Order
 from apps.orders.signals import order_created, order_status_changed
 from apps.orders.states import OrderStatus
-from apps.payments.models import Transaction
-from apps.payments.signals import payment_transaction_failed
+from apps.payments.models import Transaction, Withdrawal
+from apps.payments.signals import (
+    payment_transaction_failed,
+    withdrawal_failed,
+    withdrawal_requested,
+    withdrawal_settled,
+)
 from apps.restaurants.models import Restaurant
 from apps.restaurants.signals import restaurant_status_changed
 from apps.restaurants.states import RestaurantStatus
+from apps.support.models import (
+    Complaint,
+    ComplaintStatus,
+    ReturnRequest,
+    ReturnStatus,
+    SupportMessage,
+    SupportTicket,
+    TicketStatus,
+)
+from apps.support.signals import (
+    complaint_decided,
+    complaint_filed,
+    return_decided,
+    return_requested,
+    ticket_answered,
+    ticket_status_changed,
+)
 
 __all__ = [
     "on_assignment_accepted",
     "on_assignment_offered",
+    "on_complaint_decided",
+    "on_complaint_filed",
+    "on_document_expiring",
     "on_order_created_for_staff",
     "on_order_status_changed",
     "on_order_status_changed_for_staff",
     "on_payment_failed",
     "on_restaurant_status_changed",
+    "on_return_decided",
+    "on_return_requested",
+    "on_ticket_answered",
+    "on_ticket_status_changed",
+    "on_withdrawal_failed",
+    "on_withdrawal_requested",
+    "on_withdrawal_settled",
 ]
+
+#: Permission qu'il faut détenir pour être prévenu d'une demande de retrait —
+#: celle que `ManagedWithdrawalViewSet` oppose à la lecture.
+PAYOUTS_READ = "payouts.read"
 
 #: Permission qu'il faut détenir pour être prévenu d'un événement de commande.
 #:
@@ -405,4 +443,228 @@ def on_restaurant_status_changed(
                 "previous": previous,
                 "status": target,
             },
+        )
+
+
+@receiver(
+    withdrawal_requested, sender=Withdrawal, dispatch_uid="notifications.withdrawal_requested"
+)
+def on_withdrawal_requested(
+    sender: type[Withdrawal], *, withdrawal: Withdrawal, **kwargs: Any
+) -> None:
+    """Prévient l'exploitation qu'un livreur attend un versement.
+
+    Sans elle, une demande n'apparaissait nulle part : il fallait ouvrir la
+    liste des retraits pour découvrir qu'on en attendait un, et le livreur,
+    gains déjà débités, attendait sans savoir si quelqu'un l'avait vu.
+    """
+    courier = withdrawal.courier
+    for membre in staff_to_alert(restaurant_id=courier.restaurant_id, permission=PAYOUTS_READ):
+        notify(
+            user=membre,
+            kind=NotificationKind.PAYMENT,
+            title="Retrait à verser",
+            body=f"{courier.user.full_name} demande le versement de {withdrawal.amount}.",
+            data={"withdrawal": str(withdrawal.pk)},
+        )
+
+
+@receiver(withdrawal_settled, sender=Withdrawal, dispatch_uid="notifications.withdrawal_settled")
+def on_withdrawal_settled(
+    sender: type[Withdrawal], *, withdrawal: Withdrawal, **kwargs: Any
+) -> None:
+    """Dit au livreur que son versement est parti, et sous quelle référence.
+
+    La référence est ce qu'il donnera à son opérateur de paiement mobile si
+    l'argent tarde : sans elle, « c'est versé » ne se vérifie pas.
+    """
+    notify(
+        user=withdrawal.courier.user,
+        kind=NotificationKind.PAYMENT,
+        title="Retrait versé",
+        body=(
+            f"Votre retrait de {withdrawal.amount} a été versé "
+            f"(référence {withdrawal.provider_reference})."
+        ),
+        data={"withdrawal": str(withdrawal.pk), "status": withdrawal.status},
+    )
+
+
+@receiver(withdrawal_failed, sender=Withdrawal, dispatch_uid="notifications.withdrawal_failed")
+def on_withdrawal_failed(
+    sender: type[Withdrawal], *, withdrawal: Withdrawal, **kwargs: Any
+) -> None:
+    """Dit au livreur que son retrait est refusé, pourquoi, et que ses gains
+    lui sont rendus — c'est la phrase qui évite l'appel inquiet."""
+    motif = withdrawal.failure_reason.strip().rstrip(".")
+    notify(
+        user=withdrawal.courier.user,
+        kind=NotificationKind.PAYMENT,
+        title="Retrait non versé",
+        body=(
+            f"Votre retrait de {withdrawal.amount} n'a pas été versé : {motif}. "
+            "Le montant est rendu à vos gains."
+        ),
+        data={"withdrawal": str(withdrawal.pk), "status": withdrawal.status},
+    )
+
+
+# --------------------------------------------------------------- support
+#
+# Le client écrivait au support et n'apprenait jamais qu'on l'avait lu. Ces
+# abonnés portent la réponse jusqu'à lui ; ceux de l'exploitation l'alertent
+# d'une réclamation ou d'un retour sur une commande de son périmètre.
+
+#: Permission qu'il faut détenir pour être prévenu d'une demande client —
+#: celle que les vues du support opposent à la lecture.
+SUPPORT_READ = "support.read"
+
+
+def _extrait(texte: str, limite: int = 140) -> str:
+    """Le début d'un message, pour le corps d'une notification."""
+    propre = " ".join(texte.split())
+    return propre if len(propre) <= limite else propre[: limite - 1].rstrip() + "…"
+
+
+@receiver(ticket_answered, sender=SupportTicket, dispatch_uid="notifications.ticket_answered")
+def on_ticket_answered(
+    sender: type[SupportTicket], *, ticket: SupportTicket, message: SupportMessage, **kwargs: Any
+) -> None:
+    notify(
+        user=ticket.user,
+        kind=NotificationKind.SUPPORT,
+        title=f"Réponse du service client — {ticket.subject}",
+        body=_extrait(message.content),
+        data={"ticket": str(ticket.pk)},
+    )
+
+
+@receiver(ticket_status_changed, sender=SupportTicket, dispatch_uid="notifications.ticket_status")
+def on_ticket_status_changed(
+    sender: type[SupportTicket], *, ticket: SupportTicket, **kwargs: Any
+) -> None:
+    """Seule la résolution se dit : « fermé » ou « rouvert » n'apprennent rien
+    que la prochaine réponse ne dira mieux."""
+    if ticket.status != TicketStatus.RESOLVED:
+        return
+    notify(
+        user=ticket.user,
+        kind=NotificationKind.SUPPORT,
+        title=f"Demande résolue — {ticket.subject}",
+        body=_extrait(ticket.resolution),
+        data={"ticket": str(ticket.pk), "status": ticket.status},
+    )
+
+
+@receiver(complaint_filed, sender=Complaint, dispatch_uid="notifications.complaint_filed")
+def on_complaint_filed(sender: type[Complaint], *, complaint: Complaint, **kwargs: Any) -> None:
+    """Prévient le personnel de la cuisine concernée, habilité à la lire."""
+    for membre in staff_to_alert(
+        restaurant_id=complaint.order.restaurant_id, permission=SUPPORT_READ
+    ):
+        notify(
+            user=membre,
+            kind=NotificationKind.SUPPORT,
+            title="Nouvelle réclamation",
+            body=f"Commande {complaint.order.reference} — {complaint.subject}",
+            data={"complaint": str(complaint.pk), "order": str(complaint.order_id)},
+        )
+
+
+@receiver(complaint_decided, sender=Complaint, dispatch_uid="notifications.complaint_decided")
+def on_complaint_decided(sender: type[Complaint], *, complaint: Complaint, **kwargs: Any) -> None:
+    titre = (
+        "Réclamation résolue"
+        if complaint.status == ComplaintStatus.RESOLVED
+        else "Réclamation non retenue"
+    )
+    notify(
+        user=complaint.user,
+        kind=NotificationKind.SUPPORT,
+        title=f"{titre} — commande {complaint.order.reference}",
+        body=_extrait(complaint.resolution),
+        data={"complaint": str(complaint.pk), "status": complaint.status},
+    )
+
+
+@receiver(return_requested, sender=ReturnRequest, dispatch_uid="notifications.return_requested")
+def on_return_requested(
+    sender: type[ReturnRequest], *, return_request: ReturnRequest, **kwargs: Any
+) -> None:
+    for membre in staff_to_alert(
+        restaurant_id=return_request.order.restaurant_id, permission=SUPPORT_READ
+    ):
+        notify(
+            user=membre,
+            kind=NotificationKind.SUPPORT,
+            title="Demande de retour",
+            body=(
+                f"Commande {return_request.order.reference} — "
+                f"{return_request.refund_amount} demandés."
+            ),
+            data={"return": str(return_request.pk), "order": str(return_request.order_id)},
+        )
+
+
+#: Ce qu'on dit au client selon la décision. « Approuvée » n'annonce pas
+#: l'argent : il part ensuite, par un remboursement que `payments` constate.
+_RETOUR_ANNONCE: dict[str, str] = {
+    ReturnStatus.APPROVED: "Retour accepté — le remboursement va suivre",
+    ReturnStatus.REJECTED: "Retour refusé",
+    ReturnStatus.REFUNDED: "Retour remboursé",
+}
+
+
+@receiver(return_decided, sender=ReturnRequest, dispatch_uid="notifications.return_decided")
+def on_return_decided(
+    sender: type[ReturnRequest], *, return_request: ReturnRequest, **kwargs: Any
+) -> None:
+    titre = _RETOUR_ANNONCE.get(return_request.status)
+    if titre is None:
+        return
+    corps = return_request.resolution or f"Commande {return_request.order.reference}."
+    notify(
+        user=return_request.user,
+        kind=NotificationKind.SUPPORT,
+        title=f"{titre} — commande {return_request.order.reference}",
+        body=_extrait(corps),
+        data={"return": str(return_request.pk), "status": return_request.status},
+    )
+
+
+# ------------------------------------------------- pièces du livreur
+
+
+@receiver(document_expiring, sender=CourierProfile, dispatch_uid="notifications.document_expiring")
+def on_document_expiring(
+    sender: type[CourierProfile],
+    *,
+    courier: CourierProfile,
+    piece: str,
+    expires_on: Any,
+    days_left: int,
+    **kwargs: Any,
+) -> None:
+    """Prévient le livreur et l'équipe de sa cuisine qu'une pièce expire.
+
+    Le livreur, parce que c'est lui qui renouvelle ; l'équipe habilitée à lire
+    les livreurs, parce que c'est elle qui décidera s'il roule encore.
+    """
+    libelle = CourierService.LIBELLES_PIECES.get(piece, piece)
+    quand = "aujourd'hui" if days_left == 0 else f"le {expires_on:%d/%m/%Y}"
+    donnees = {"courier": str(courier.pk), "piece": piece, "expires_on": str(expires_on)}
+    notify(
+        user=courier.user,
+        kind=NotificationKind.ACCOUNT,
+        title="Pièce bientôt expirée" if days_left else "Pièce expirée aujourd'hui",
+        body=f"Votre {libelle} expire {quand}. Déposez la nouvelle depuis votre profil.",
+        data=donnees,
+    )
+    for membre in staff_to_alert(restaurant_id=courier.restaurant_id, permission="couriers.read"):
+        notify(
+            user=membre,
+            kind=NotificationKind.ACCOUNT,
+            title="Pièce livreur à renouveler",
+            body=f"La {libelle} de {courier.user.full_name} expire {quand}.",
+            data=donnees,
         )

@@ -258,6 +258,36 @@ class OrderStatusEvent(UUIDModel):
         return f"{self.from_status} → {self.to_status}"
 
 
+class OrderNote(UUIDModel, TimeStampedModel):
+    """Note **interne** du personnel sur une commande.
+
+    Le relais entre ceux qui traitent la commande — « client rappelé, attend un
+    geste », « livreur prévenu du retard ». Le cahier des charges la demande et
+    l'état des fonctionnalités la disait faite ; elle n'existait pas.
+    `OrderLine.notes` est la note **du client** sur une ligne, et
+    `delivery_instructions` ses consignes : ni l'un ni l'autre n'est un canal
+    de l'équipe.
+
+    Jamais exposée au client ni au livreur : elle ne figure dans aucun
+    sérialiseur de commande, et ne se lit que par `/orders/manage/{id}/notes/`.
+    Elle ne se modifie ni ne s'efface — on en ajoute une seconde pour corriger
+    la première.
+    """
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="internal_notes")
+    author = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
+    content = models.TextField()
+
+    class Meta:
+        verbose_name = "note interne de commande"
+        verbose_name_plural = "notes internes de commande"
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["order", "created_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.order_id} — {self.author_id}"
+
+
 class IdempotencyKey(UUIDModel):
     """Clé d'idempotence de création — ADR-009.
 

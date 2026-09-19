@@ -40,7 +40,7 @@ from rest_framework.mixins import (
 )
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet, ModelViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
 from apps.accounts.models import User, UserType
 from apps.accounts.services import AuthService
@@ -51,6 +51,7 @@ from apps.restaurants.models import (
     KitchenClosure,
     OpeningHours,
     Restaurant,
+    StaffMembership,
     kitchen_state_prefetches,
 )
 from apps.restaurants.scoping import (
@@ -60,6 +61,7 @@ from apps.restaurants.scoping import (
     staff_restaurant_ids,
 )
 from apps.restaurants.serializers import (
+    AuditEntrySerializer,
     ManagedKitchenClosureSerializer,
     ManagedOpeningHoursSerializer,
     ManagedRestaurantSerializer,
@@ -69,9 +71,9 @@ from apps.restaurants.serializers import (
     StaffSerializer,
 )
 from apps.restaurants.states import RestaurantStatus
-from common.audit import AuditAction, record_change
+from common.audit import AuditAction, AuditEntry, record_change
 from common.exceptions import BusinessRuleViolation
-from common.permissions import HasReadWritePermission, authenticated_user
+from common.permissions import HasPermission, HasReadWritePermission, authenticated_user
 
 __all__ = [
     "ManagedOpeningHoursViewSet",
@@ -128,11 +130,18 @@ class StaffViewSet(
 
     def perform_create(self, serializer: Any) -> None:
         self._assert_grantable(serializer.validated_data)
-        serializer.save()
+        membre = serializer.save()
+        _consigner_personnel(
+            authenticated_user(self.request),
+            membre,
+            avant=_EMPREINTE_VIDE,
+            mot_de_passe_change=False,
+        )
 
     def perform_update(self, serializer: Any) -> None:
         self._assert_grantable(serializer.validated_data)
         etait_actif = serializer.instance.is_active
+        avant = _empreinte_du_personnel(serializer.instance)
         membre = serializer.save()
 
         # La révocation suit la désactivation dans la même requête : les deux
@@ -141,6 +150,13 @@ class StaffViewSet(
         # rembourser une commande.
         if etait_actif and not membre.is_active:
             AuthService.revoke_all_sessions(membre)
+
+        _consigner_personnel(
+            authenticated_user(self.request),
+            membre,
+            avant=avant,
+            mot_de_passe_change=bool(serializer.validated_data.get("password")),
+        )
 
     # --------------------------------------------------------- garde-fous
 
@@ -754,3 +770,126 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
             after={"exists": False},
         )
         instance.delete()
+
+
+# ------------------------------------------------ journal du personnel
+
+_EMPREINTE_VIDE: dict[str, Any] = {
+    "roles": [],
+    "restaurants": [],
+    "countries": [],
+    "cities": [],
+    "is_active": None,
+}
+
+
+def _empreinte_du_personnel(membre: User) -> dict[str, Any]:
+    """Ce qu'un compte du personnel peut faire, et sur quoi — lu en base.
+
+    Les rôles par leur **nom** : c'est ce qu'on lit dans un journal, et un
+    identifiant ne dirait rien le jour où le rôle aura été vidé.
+    """
+    zones = AreaMembership.objects.filter(user=membre).select_related("country", "city")
+    return {
+        "roles": sorted(membre.roles.values_list("name", flat=True)),
+        "restaurants": sorted(
+            StaffMembership.objects.filter(user=membre).values_list("restaurant__slug", flat=True)
+        ),
+        "countries": sorted(z.country.iso_code for z in zones if z.country is not None),
+        "cities": sorted(z.city.slug for z in zones if z.city is not None),
+        "is_active": membre.is_active,
+    }
+
+
+def _consigner_personnel(
+    acteur: User, membre: User, *, avant: dict[str, Any], mot_de_passe_change: bool
+) -> None:
+    """Journalise rôles, périmètre, activation et remplacement de mot de passe.
+
+    Trois entrées distinctes plutôt qu'une : « qui a donné `Manager` à Kofi »
+    et « qui l'a rattaché à Lomé » sont deux questions, qu'on pose séparément.
+    `record_change` n'écrit rien pour ce qui n'a pas bougé.
+    """
+    apres = _empreinte_du_personnel(membre)
+
+    def consigner(action: str, before: dict[str, Any], after: dict[str, Any]) -> None:
+        record_change(
+            actor=acteur,
+            action=action,
+            target_type="staff",
+            target_id=membre.pk,
+            target_label=membre.email,
+            before=before,
+            after=after,
+        )
+
+    perimetre = ("restaurants", "countries", "cities")
+    consigner(AuditAction.STAFF_ROLES, {"roles": avant["roles"]}, {"roles": apres["roles"]})
+    consigner(
+        AuditAction.STAFF_SCOPE,
+        {k: avant[k] for k in perimetre},
+        {k: apres[k] for k in perimetre},
+    )
+    if avant["is_active"] is not None:
+        consigner(
+            AuditAction.STAFF_ACTIVATION,
+            {"is_active": avant["is_active"]},
+            {"is_active": apres["is_active"]},
+        )
+    if mot_de_passe_change:
+        consigner(AuditAction.STAFF_PASSWORD, {}, {"password": "remplacé"})
+
+
+# ------------------------------------------------------------ journal
+
+
+class AuditEntryViewSet(ReadOnlyModelViewSet[AuditEntry]):
+    """`/restaurants/audit/` — le journal des décisions, en lecture.
+
+    Il était écrit à chaque changement de barème, de zone ou d'emplacement, et
+    ne se lisait **nulle part** : ni route, ni administration Django. Le jour
+    où les frais d'un quartier changeaient sans explication, la trace existait
+    et personne ne pouvait l'ouvrir.
+
+    ## Cloisonnement
+
+    Le siège lit tout. Un compte rattaché lit ce qui touche **son** périmètre :
+    ses établissements, leurs zones, et le personnel qui y est rattaché. Les
+    rôles, les clients et les pays ne relèvent d'aucun établissement : ils ne
+    se lisent qu'au siège — le défaut sûr, comme `assert_unscoped` pour les
+    écritures.
+
+    Il vit ici parce que c'est ici que vit le périmètre (`scoping`) ; le modèle,
+    lui, est dans `common`, qui ne connaît pas les établissements (ADR-002).
+    """
+
+    serializer_class = AuditEntrySerializer
+    permission_classes = (HasPermission.of("audit.read"),)
+    queryset = AuditEntry.objects.none()  # pour le générateur de schéma
+    filterset_fields: ClassVar[dict[str, list[str]]] = {
+        "action": ["exact", "startswith"],
+        "target_type": ["exact"],
+        "target_id": ["exact"],
+        "actor": ["exact"],
+        "created_at": ["gte", "lte"],
+    }
+    search_fields: ClassVar[list[str]] = ["target_label", "actor__full_name", "action"]
+
+    def get_queryset(self) -> QuerySet[AuditEntry]:
+        user = authenticated_user(self.request)
+        base = AuditEntry.objects.select_related("actor").order_by("-created_at")
+        if is_unscoped(user):
+            return base
+
+        etablissements = set(staff_restaurant_ids(user))
+        zones = Restaurant.objects.filter(pk__in=etablissements).values_list("zone_id", flat=True)
+        personnel = StaffMembership.objects.filter(restaurant_id__in=etablissements).values_list(
+            "user_id", flat=True
+        )
+        # `target_id` est une chaîne (le journal survit à ce qu'il décrit, sans
+        # clé étrangère) : les identifiants sont comparés sous cette forme.
+        return base.filter(
+            Q(target_type="restaurant", target_id__in=[str(pk) for pk in etablissements])
+            | Q(target_type="zone", target_id__in=[str(pk) for pk in zones])
+            | Q(target_type="staff", target_id__in=[str(pk) for pk in personnel])
+        )

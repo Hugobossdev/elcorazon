@@ -28,7 +28,9 @@ from apps.notifications.models import (
     Notification,
     NotificationKind,
 )
-from apps.restaurants.scoping import staff_user_ids_for
+from apps.orders.models import Order
+from apps.orders.states import OrderStatus
+from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids, staff_user_ids_for
 
 __all__ = ["MARKETING_KINDS", "notify", "recipients_of", "send_campaign", "staff_to_alert"]
 
@@ -217,3 +219,68 @@ def send_campaign(campaign: Campaign) -> Campaign:
     verrouillee.recipient_count = envoyees
     verrouillee.save(update_fields=["status", "sent_at", "recipient_count", "updated_at"])
     return verrouillee
+
+
+#: Fenêtre d'attribution d'une commande à une campagne, en jours.
+#:
+#: Une semaine : assez pour qu'un « −20 % ce week-end » envoyé le lundi compte,
+#: assez court pour ne pas attribuer à une campagne les habitudes d'un client
+#: qui commande chaque vendredi. Le chiffre est une **corrélation**, pas une
+#: causalité, et l'écran le dit.
+FENETRE_DE_CONVERSION = dt.timedelta(days=7)
+
+
+def campaign_stats(campaign: Campaign, *, viewer: User) -> dict[str, Any]:
+    """Ce qu'une campagne envoyée a produit — ouvertures, commandes, chiffre.
+
+    Le cahier des charges demande taux d'ouverture, de conversion et ROI
+    (§4.2.7). Rien ne les calculait, alors que chaque notification porte déjà
+    l'identifiant de sa campagne (`data.campaign`) et son heure de lecture.
+
+    * **Ouverture** : notifications lues sur notifications écrites — donc hors
+      comptes ayant refusé le marketing, que `recipient_count` exclut déjà.
+    * **Conversion** : destinataires ayant commandé dans la fenêtre qui suit
+      l'envoi, commandes annulées exclues.
+    * **Chiffre** : total de ces commandes, **par devise** — jamais additionné
+      d'une devise à l'autre.
+
+    Les commandes sont cloisonnées au périmètre de qui regarde, comme tout
+    rapport : une campagne est un objet d'enseigne, mais le chiffre d'une
+    cuisine de Lomé n'a pas à se lire depuis un compte d'Abidjan.
+    """
+    envoyees = Notification.objects.filter(
+        kind=NotificationKind.MARKETING, data__campaign=str(campaign.pk)
+    )
+    lues = envoyees.filter(read_at__isnull=False).count()
+    destinataires = campaign.recipient_count
+
+    resultat: dict[str, Any] = {
+        "recipients": destinataires,
+        "read": lues,
+        "open_rate": (lues / destinataires) if destinataires else None,
+        "window_days": FENETRE_DE_CONVERSION.days,
+        "customers_who_ordered": 0,
+        "conversion_rate": None,
+        "revenue": [],
+    }
+    if campaign.sent_at is None or not destinataires:
+        return resultat
+
+    commandes = Order.objects.filter(
+        customer_id__in=envoyees.values("user_id"),
+        placed_at__gte=campaign.sent_at,
+        placed_at__lt=campaign.sent_at + FENETRE_DE_CONVERSION,
+    ).exclude(status=OrderStatus.CANCELLED)
+    if not is_unscoped(viewer):
+        commandes = commandes.filter(restaurant_id__in=staff_restaurant_ids(viewer))
+
+    clients = commandes.values("customer_id").distinct().count()
+    resultat["customers_who_ordered"] = clients
+    resultat["conversion_rate"] = clients / destinataires
+    resultat["revenue"] = [
+        {"amount": str(ligne["somme"]), "currency": ligne["total_currency"]}
+        for ligne in commandes.values("total_currency")
+        .annotate(somme=models.Sum("total_minor"))
+        .order_by("total_currency")
+    ]
+    return resultat

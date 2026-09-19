@@ -6,6 +6,7 @@ import 'package:admin/presentation/anciennete_commande.dart';
 import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/dialogues/annulation_commande.dart';
 import 'package:admin/presentation/dialogues/remboursement_commande.dart';
+import 'package:admin/presentation/notes_internes.dart';
 import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/payments_service.dart';
@@ -175,6 +176,26 @@ class _DetailsCommandeState extends State<_DetailsCommande> {
                     _Encaissements(
                       transactions: _encaissements,
                       chargement: _chargement,
+                    ),
+                    const SizedBox(height: 16),
+                    // Le relais entre ceux qui traitent la commande — « client
+                    // rappelé », « livreur prévenu ». Le cahier des charges le
+                    // demande, l'état des fonctionnalités le cochait, et il
+                    // n'existait pas.
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: NotesInternes(
+                        lire: () =>
+                            context.read<OrderManagementService>().notesOf(widget.apercu.id),
+                        ajouter: (contenu) => context
+                            .read<OrderManagementService>()
+                            .addNote(widget.apercu.id, contenu),
+                      ),
                     ),
                     if (commande.statusEvents.isNotEmpty) ...[
                       const SizedBox(height: 16),

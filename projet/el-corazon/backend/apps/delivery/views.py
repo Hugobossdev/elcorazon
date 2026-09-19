@@ -520,6 +520,11 @@ class StaffCourierViewSet(CreateModelMixin, UpdateModelMixin, ReadOnlyModelViewS
             target=serializer.validated_data["status"],
             actor=authenticated_user(request),
             notes=serializer.validated_data["notes"],
+            expirations={
+                champ: serializer.validated_data[champ]
+                for champ in CourierService.PIECES_DATEES.values()
+                if champ in serializer.validated_data
+            },
         )
         return Response(CourierProfileSerializer(courier).data)
 

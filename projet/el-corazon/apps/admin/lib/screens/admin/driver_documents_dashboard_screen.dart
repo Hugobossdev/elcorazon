@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:admin/presentation/expiration_piece.dart';
 import 'package:admin/presentation/documents_livreur.dart';
 import 'package:admin/services/driver_document_service.dart' as svc;
 import 'package:admin/services/driver_management_service.dart';
@@ -203,6 +204,18 @@ class _DriverDocumentsDashboardScreenState
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 Text('Date: ${_formatDate(doc.deposeeLe)}'),
+                if (doc.estDeposee)
+                  Text(
+                    libelleExpiration(doc.expireLe),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: switch (EtatExpiration.de(doc.expireLe)) {
+                        EtatExpiration.expiree || EtatExpiration.bientot =>
+                          Theme.of(context).colorScheme.error,
+                        _ => Theme.of(context).colorScheme.onSurfaceVariant,
+                      },
+                    ),
+                  ),
               ],
             ),
             trailing: const Icon(Icons.chevron_right),

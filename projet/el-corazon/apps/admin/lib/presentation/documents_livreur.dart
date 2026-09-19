@@ -80,6 +80,7 @@ class PieceLivreur {
     this.motifDeRefus,
     this.nomLivreur,
     this.emailLivreur,
+    this.expireLe,
   });
 
   /// Identifiant du **dossier**, pas de la pièce : c'est lui qui porte la
@@ -101,6 +102,10 @@ class PieceLivreur {
   final DateTime deposeeLe;
   final String? nomLivreur;
   final String? emailLivreur;
+
+  /// Date d'expiration relevée par le personnel, ou `null` si personne ne l'a
+  /// saisie. Remise à nul par le serveur quand le livreur redépose la pièce.
+  final DateTime? expireLe;
 
   bool get estDeposee => url != null && url!.isNotEmpty;
   bool get demandeUneDecision => statut == StatutVerification.enAttente;

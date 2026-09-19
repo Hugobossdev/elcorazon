@@ -94,6 +94,12 @@ class CampaignRepository {
     return (response.data as Map<String, dynamic>)['recipients'] as int;
   }
 
+  /// Le bilan d'une campagne : ouvertures, commandes, chiffre attribué.
+  Future<CampaignStats> stats(String campaignId) async {
+    final response = await apiClient.get('/notifications/campaigns/$campaignId/stats/');
+    return CampaignStats.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// Envoie la campagne, une seule fois.
   ///
   /// Le rejeu est absorbé plutôt que refusé : un double clic renvoie la

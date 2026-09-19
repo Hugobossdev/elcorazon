@@ -338,6 +338,15 @@ class Withdrawal(UUIDModel, TimeStampedModel, PositiveAmountModel):
     failure_reason = models.TextField(blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
+    #: Qui a constaté le versement, ou l'a refusé. Nul tant que la demande
+    #: attend — et pour les retraits soldés avant que ce champ existe.
+    #:
+    #: `PROTECT` et non `SET_NULL` : c'est une signature sur un mouvement
+    #: d'argent, et un compte du personnel se désactive, il ne se supprime pas.
+    processed_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="+", null=True, blank=True
+    )
+
     class Meta:
         verbose_name = "retrait"
         ordering = ["-created_at"]

@@ -118,7 +118,8 @@ class ReviewViewSet(ListModelMixin, CreateModelMixin, GenericViewSet[Review]):
 
     queryset = (
         Review.objects.select_related("user", "menu_item")
-        .filter(menu_item__deleted_at__isnull=True)
+        # Un avis masqué par la modération ne se lit plus en public.
+        .filter(menu_item__deleted_at__isnull=True, hidden_at__isnull=True)
         .order_by("-created_at")
     )
     filterset_fields = {"menu_item": ["exact"], "rating": ["exact", "gte"]}

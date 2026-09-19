@@ -15,12 +15,17 @@ import 'package:admin/screens/admin/category_management_screen.dart';
 import 'package:admin/screens/admin/customization_management_screen.dart';
 import 'package:admin/screens/admin/menu_management_screen.dart';
 import 'package:admin/screens/admin/payments_screen.dart';
+import 'package:admin/screens/admin/versements/remboursements_screen.dart';
+import 'package:admin/screens/admin/versements/retraits_livreurs_screen.dart';
 import 'package:admin/screens/admin/reseau/reseau_screen.dart';
 import 'package:admin/screens/admin/selecteur_etablissement.dart';
 import 'package:admin/screens/admin/marketing_screen.dart';
 import 'package:admin/screens/admin/promotions_screen.dart';
 import 'package:admin/screens/admin/gamification_management_screen.dart';
 import 'package:admin/screens/admin/client_management_screen.dart';
+import 'package:admin/screens/admin/avis_clients_screen.dart';
+import 'package:admin/screens/admin/journal_audit_screen.dart';
+import 'package:admin/screens/admin/service_client_screen.dart';
 import 'package:admin/screens/admin/settings_screen.dart';
 import 'package:admin/screens/admin/driver_map_screen.dart';
 import 'package:admin/screens/admin/global_search_screen.dart';
@@ -32,6 +37,7 @@ import 'package:admin/screens/inventaire/stock_screen.dart';
 import 'package:admin/screens/inventaire/validations_screen.dart';
 import 'package:admin/screens/kitchen/kitchen_screen.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
+import 'package:admin/services/notification_center_service.dart';
 
 /// Ce que le poste de cuisine affiche quand aucun établissement n'est résolu.
 ///
@@ -172,6 +178,31 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
   int _selectedIndex = 0;
   bool _isSidebarExpanded = true;
 
+  /// Relecture du compteur de notifications non lues, qui allume la pastille.
+  ///
+  /// Une minute : le back-office n'a pas de push (voir
+  /// `NotificationCenterService`), et c'est le rythme auquel une alerte de
+  /// commande doit au plus tard devenir visible sans que personne n'ouvre rien.
+  /// La route ne rend qu'un entier.
+  Timer? _releveNotifications;
+
+  @override
+  void initState() {
+    super.initState();
+    final centre = NotificationCenterService();
+    unawaited(centre.refreshUnreadCount());
+    _releveNotifications = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => unawaited(centre.refreshUnreadCount()),
+    );
+  }
+
+  @override
+  void dispose() {
+    _releveNotifications?.cancel();
+    super.dispose();
+  }
+
   // État d'expansion des groupes dans la sidebar
   // ignore: unused_field
   final Map<String, bool> _expandedGroups = {
@@ -233,6 +264,17 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           index: 11,
           permission: 'couriers.read',
         ),
+      ],
+    ),
+    // L'argent qui entre, et celui qui sort.
+    //
+    // Les sorties n'avaient aucun écran : un remboursement demandé ici ne se
+    // clôturait que dans l'administration Django, et une demande de retrait
+    // livreur ne se soldait nulle part — ses gains restaient débités sans
+    // qu'aucun versement puisse être constaté.
+    NavigationGroup(
+      title: 'CAISSE',
+      items: [
         // Les encaissements suivent les commandes : c'est la même question
         // posée du côté de la caisse. Le service existait et n'était ouvert
         // par aucune entrée de menu.
@@ -243,6 +285,21 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           // La liste se lit avec les commandes ; le remboursement, seul geste
           // d'écriture de l'écran, exige en plus `orders.refund`.
           permission: 'orders.read',
+        ),
+        NavigationItem(
+          title: 'Remboursements',
+          icon: Icons.currency_exchange_rounded,
+          index: 24,
+          // Lire suit les commandes ; constater exige `orders.refund`, que le
+          // serveur vérifie et que l'écran suit pour son bouton.
+          permission: 'orders.read',
+        ),
+        NavigationItem(
+          title: 'Retraits livreurs',
+          icon: Icons.account_balance_wallet_rounded,
+          index: 23,
+          // Constater ou refuser exige en plus `payouts.settle`.
+          permission: 'payouts.read',
         ),
       ],
     ),
@@ -265,6 +322,14 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           title: 'Personnalisations',
           icon: Icons.tune_rounded,
           index: 13,
+          permission: 'catalog.read',
+        ),
+        // Ce que la clientèle dit des plats. Masquer un avis exige
+        // `catalog.write`, que le serveur vérifie et journalise.
+        NavigationItem(
+          title: 'Avis clients',
+          icon: Icons.reviews_rounded,
+          index: 27,
           permission: 'catalog.read',
         ),
       ],
@@ -315,6 +380,15 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           icon: Icons.people_rounded,
           index: 5,
           permission: 'customers.read',
+        ),
+        // Ce que les clients écrivent. Les routes du support n'étaient
+        // ouvertes qu'à eux : le back-office ne pouvait ni lire un ticket, ni
+        // y répondre. Répondre et statuer exigent `support.write`.
+        NavigationItem(
+          title: 'Service client',
+          icon: Icons.support_agent_rounded,
+          index: 25,
+          permission: 'support.read',
         ),
         NavigationItem(
           title: 'Livreurs',
@@ -379,6 +453,14 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
           icon: Icons.admin_panel_settings_rounded,
           index: 7,
           permission: 'roles.read',
+        ),
+        // Écrit depuis longtemps, lisible nulle part. Le serveur le cloisonne :
+        // un gérant n'y lit que ce qui touche ses établissements.
+        NavigationItem(
+          title: 'Journal d’audit',
+          icon: Icons.history_edu_rounded,
+          index: 26,
+          permission: 'audit.read',
         ),
         NavigationItem(
           title: 'Paramètres',
@@ -511,6 +593,21 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
         // Le référentiel, lui, est celui de l'enseigne : il ne dépend
         // d'aucune cuisine.
         screen = const IngredientsScreen();
+        break;
+      case 23:
+        screen = const RetraitsLivreursScreen();
+        break;
+      case 24:
+        screen = const RemboursementsScreen();
+        break;
+      case 25:
+        screen = const ServiceClientScreen();
+        break;
+      case 26:
+        screen = const JournalAuditScreen();
+        break;
+      case 27:
+        screen = const AvisClientsScreen();
         break;
       default:
         screen = const AdminDashboardScreen();
@@ -663,6 +760,14 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
         return scheme.primary;
       case 16: // Paiements
         return sem.success;
+      case 23: // Retraits livreurs
+        return sem.warning;
+      case 24: // Remboursements
+        return sem.danger;
+      case 25: // Service client
+        return sem.info;
+      case 26: // Journal d'audit
+        return scheme.onSurfaceVariant;
       case 12: // Settings
         return scheme.onSurfaceVariant;
       default:
@@ -1083,7 +1188,9 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
             context,
             icon: Icons.notifications_outlined,
             tooltip: 'Notifications',
-            hasBadge: true,
+            // Allumée en dur jusqu'ici : elle annonçait des notifications en
+            // permanence, et n'apprenait donc plus rien à personne.
+            hasBadge: context.watch<NotificationCenterService>().unreadCount > 0,
             onTap: () => _showNotifications(context),
           ),
           const SizedBox(width: 12),
@@ -1175,7 +1282,12 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
       iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
       actions: [
         IconButton(
-          icon: const Icon(Icons.notifications_outlined),
+          icon: Badge(
+            isLabelVisible: context.watch<NotificationCenterService>().unreadCount > 0,
+            smallSize: 8,
+            child: const Icon(Icons.notifications_outlined),
+          ),
+          tooltip: 'Notifications',
           onPressed: () => _showNotifications(context),
         ),
       ],

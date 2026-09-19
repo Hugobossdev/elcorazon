@@ -19,10 +19,13 @@ from apps.orders.models import Order
 from apps.support.models import (
     Complaint,
     ComplaintKind,
+    ComplaintStatus,
     ReturnRequest,
+    ReturnStatus,
     SupportMessage,
     SupportTicket,
     TicketCategory,
+    TicketStatus,
 )
 from common.serializers import MoneyField
 
@@ -128,7 +131,19 @@ class ReturnRequestSerializer(serializers.ModelSerializer[ReturnRequest]):
 
     class Meta:
         model = ReturnRequest
-        fields = ["id", "order", "reason", "items", "refund_amount", "status", "created_at"]
+        # `resolution` : ce que l'exploitation a répondu — le motif d'un refus,
+        # d'abord. Le client ne pouvait pas savoir pourquoi son retour l'était.
+        fields = [
+            "id",
+            "order",
+            "reason",
+            "items",
+            "refund_amount",
+            "status",
+            "resolution",
+            "resolved_at",
+            "created_at",
+        ]
         read_only_fields = fields
 
 
@@ -137,3 +152,134 @@ class ReturnRequestWriteSerializer(serializers.Serializer[Any]):
     reason = serializers.CharField()
     items = serializers.ListField(child=serializers.CharField(max_length=200))
     refund_amount = MoneyField()
+
+
+# ------------------------------------------------------------- back-office
+
+
+class ManagedTicketSerializer(serializers.ModelSerializer[SupportTicket]):
+    """Un ticket vu du support : qui écrit, sur quoi, et depuis quand.
+
+    Le fil (`messages`) n'est rendu qu'au détail : la liste en porterait des
+    centaines pour n'en afficher aucun.
+    """
+
+    customer_name = serializers.CharField(source="user.full_name", read_only=True)
+    customer_email = serializers.CharField(source="user.email", read_only=True)
+    customer_phone = serializers.CharField(source="user.phone", read_only=True)
+    messages_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = SupportTicket
+        fields = [
+            "id",
+            "user",
+            "customer_name",
+            "customer_email",
+            "customer_phone",
+            "category",
+            "subject",
+            "description",
+            "attachments",
+            "status",
+            "resolution",
+            "resolved_at",
+            "messages_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class ManagedTicketDetailSerializer(ManagedTicketSerializer):
+    messages = SupportMessageSerializer(many=True, read_only=True)
+
+    class Meta(ManagedTicketSerializer.Meta):
+        fields = [*ManagedTicketSerializer.Meta.fields, "messages"]
+        read_only_fields = fields
+
+
+class TicketStatusSerializer(serializers.Serializer[Any]):
+    status = serializers.ChoiceField(choices=TicketStatus.choices)
+    resolution = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class ManagedComplaintSerializer(serializers.ModelSerializer[Complaint]):
+    customer_name = serializers.CharField(source="user.full_name", read_only=True)
+    customer_phone = serializers.CharField(source="user.phone", read_only=True)
+    order_reference = serializers.CharField(source="order.reference", read_only=True)
+    restaurant_name = serializers.CharField(source="order.restaurant.name", read_only=True)
+
+    class Meta:
+        model = Complaint
+        fields = [
+            "id",
+            "order",
+            "order_reference",
+            "restaurant_name",
+            "customer_name",
+            "customer_phone",
+            "kind",
+            "subject",
+            "description",
+            "photos",
+            "status",
+            "resolution",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class ComplaintDecisionSerializer(serializers.Serializer[Any]):
+    #: `pending` n'y est pas : on ne remet pas une réclamation « en attente »,
+    #: on la prend en examen ou on statue.
+    status = serializers.ChoiceField(
+        choices=[
+            (ComplaintStatus.UNDER_REVIEW, ComplaintStatus.UNDER_REVIEW.label),
+            (ComplaintStatus.RESOLVED, ComplaintStatus.RESOLVED.label),
+            (ComplaintStatus.REJECTED, ComplaintStatus.REJECTED.label),
+        ]
+    )
+    resolution = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class ManagedReturnSerializer(serializers.ModelSerializer[ReturnRequest]):
+    refund_amount = MoneyField(read_only=True)
+    customer_name = serializers.CharField(source="user.full_name", read_only=True)
+    customer_phone = serializers.CharField(source="user.phone", read_only=True)
+    order_reference = serializers.CharField(source="order.reference", read_only=True)
+    order_total = MoneyField(source="order.total", read_only=True)
+    restaurant_name = serializers.CharField(source="order.restaurant.name", read_only=True)
+
+    class Meta:
+        model = ReturnRequest
+        fields = [
+            "id",
+            "order",
+            "order_reference",
+            "order_total",
+            "restaurant_name",
+            "customer_name",
+            "customer_phone",
+            "reason",
+            "items",
+            "refund_amount",
+            "status",
+            "resolution",
+            "resolved_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class ReturnDecisionSerializer(serializers.Serializer[Any]):
+    status = serializers.ChoiceField(
+        choices=[
+            (ReturnStatus.APPROVED, ReturnStatus.APPROVED.label),
+            (ReturnStatus.REJECTED, ReturnStatus.REJECTED.label),
+            (ReturnStatus.REFUNDED, ReturnStatus.REFUNDED.label),
+        ]
+    )
+    resolution = serializers.CharField(required=False, allow_blank=True, default="")

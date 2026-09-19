@@ -75,6 +75,9 @@ class StaffMember {
     required this.permissions,
     required this.createdAt,
     required this.updatedAt,
+    this.countryCodes = const [],
+    this.citySlugs = const [],
+    this.isSuperuser = false,
     this.phone,
     this.lastSeenAt,
   });
@@ -92,6 +95,13 @@ class StaffMember {
       restaurantSlugs: (json['restaurants'] as List<dynamic>? ?? const [])
           .map((slug) => slug.toString())
           .toList(),
+      countryCodes: (json['countries'] as List<dynamic>? ?? const [])
+          .map((code) => code.toString())
+          .toList(),
+      citySlugs: (json['cities'] as List<dynamic>? ?? const [])
+          .map((slug) => slug.toString())
+          .toList(),
+      isSuperuser: json['is_superuser'] as bool? ?? false,
       permissions: (json['permissions'] as List<dynamic>? ?? const [])
           .map((permission) => permission.toString())
           .toList(),
@@ -110,10 +120,29 @@ class StaffMember {
   final bool isActive;
   final List<String> roleIds;
   final List<String> restaurantSlugs;
+
+  /// Marchés dont ce compte est directeur (codes ISO) : il voit **tous** leurs
+  /// établissements, y compris ceux ouverts après sa nomination.
+  final List<String> countryCodes;
+
+  /// Villes dont ce compte est responsable (slugs), même règle.
+  final List<String> citySlugs;
+
   final List<String> permissions;
   final DateTime? lastSeenAt;
   final DateTime createdAt;
   final DateTime updatedAt;
 
   bool hasPermission(String code) => permissions.contains(code);
+
+  /// Compte du siège : il voit l'enseigne entière, quels que soient ses
+  /// rattachements (`is_unscoped` côté serveur). Lu, jamais écrit — il ne
+  /// s'accorde que par `createsuperuser`.
+  final bool isSuperuser;
+
+  /// Rattaché à rien **et** hors du siège : ce compte ne voit aucun
+  /// établissement. Le serveur ne confond jamais « aucun rattachement » avec
+  /// « tout » — un oubli de configuration ne doit pas devenir une fuite.
+  bool get sansPerimetre =>
+      !isSuperuser && restaurantSlugs.isEmpty && countryCodes.isEmpty && citySlugs.isEmpty;
 }
