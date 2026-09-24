@@ -231,7 +231,7 @@ Future<void> ouvrirFormulairePromotion(BuildContext context, {eccore.Promotion? 
   var deviseNationale = code?.amount?.currency ??
       code?.minOrderAmount?.currency ??
       code?.maxDiscount?.currency ??
-      (perimetre.devises.isEmpty ? 'XOF' : perimetre.devises.first);
+      (perimetre.devises.firstOrNull ?? '');
 
   String devise() =>
       porteur == _national ? deviseNationale : (perimetre.parSlug(porteur)?.currency ?? deviseNationale);
@@ -392,7 +392,7 @@ Future<void> ouvrirFormulairePromotion(BuildContext context, {eccore.Promotion? 
                 helperText: 'Vide : sans plafond.',
                 errorText: echec?.pourLeChamp('max_discount'),
               ),
-              validator: Valider.montantFacultatif,
+              validator: (v) => Valider.montantEn(devise(), v, facultatif: true),
             ),
           ],
           if (nature == eccore.DiscountKind.fixed)
@@ -400,7 +400,7 @@ Future<void> ouvrirFormulairePromotion(BuildContext context, {eccore.Promotion? 
               controller: montant,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: InputDecoration(labelText: 'Montant de la remise (${devise()}) *', errorText: echec?.pourLeChamp('amount')),
-              validator: Valider.montant,
+              validator: (v) => Valider.montantEn(devise(), v),
             ),
           const SizedBox(height: 12),
           TextFormField(
@@ -411,7 +411,7 @@ Future<void> ouvrirFormulairePromotion(BuildContext context, {eccore.Promotion? 
               helperText: 'Vide : sans minimum.',
               errorText: echec?.pourLeChamp('min_order_amount'),
             ),
-            validator: Valider.montantFacultatif,
+            validator: (v) => Valider.montantEn(devise(), v, facultatif: true),
           ),
           const SizedBox(height: 12),
           Row(

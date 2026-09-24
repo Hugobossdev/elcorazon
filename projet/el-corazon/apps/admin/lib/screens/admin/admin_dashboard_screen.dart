@@ -131,7 +131,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Accueil(nom: auth.currentAdmin?.fullName),
+              _Accueil(nom: auth.nomAffiche),
               const SizedBox(height: 20),
               if (voitAnalyses) ...[
                 _Journee(onOuvrir: _ouvrir),
@@ -220,7 +220,7 @@ class _Accueil extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$salut, ${nom ?? 'Admin'}',
+                  nom == null || nom!.isEmpty ? salut : '$salut, $nom',
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: scheme.onPrimary,

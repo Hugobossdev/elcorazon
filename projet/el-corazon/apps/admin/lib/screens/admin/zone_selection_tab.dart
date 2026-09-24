@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/screens/admin/zone_form_dialog.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 /// Sélection des zones desservies.
 ///
@@ -372,16 +373,13 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
   /// Ce que coûte la zone, en une ligne : c'est l'information qui décide de
   /// l'ouvrir ou non.
   String _resume(DeliveryZone zone) {
-    final devise = zone.currency == 'XOF' ? 'FCFA' : zone.currency;
-    String montant(double valeur) => valeur == valeur.roundToDouble()
-        ? valeur.toStringAsFixed(0)
-        : valeur.toStringAsFixed(2);
+    String montant(double valeur) => formatMajeur(valeur, zone.currency);
 
     final parties = [
-      '${montant(zone.deliveryFee)} $devise + ${montant(zone.feePerKm)} $devise/km',
+      '${montant(zone.deliveryFee)} + ${montant(zone.feePerKm)}/km',
       '~${zone.estimatedTimeMinutes} min',
       if (zone.freeDeliveryThreshold != null)
-        'offerte dès ${montant(zone.freeDeliveryThreshold!)} $devise',
+        'offerte dès ${montant(zone.freeDeliveryThreshold!)}',
     ];
     return parties.join(' · ');
   }

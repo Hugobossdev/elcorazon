@@ -234,13 +234,12 @@ void main() {
       expect(monte1.scope.versMoney(3500).amountMinor, 3500);
     });
 
-    test('sans périmètre lu, le repli ne prétend rien — le serveur tranchera', () {
-      final monte1 = monte(() => [etablissement(slug: 'el-corazon-lome')]);
+    test('sans périmètre lu, aucune devise n’est devinée', () {
+      final monte1 = monte(() => [etablissement(slug: 'el-corazon-accra', currency: 'GHS')]);
 
-      // Volontairement pas `null` : un montant doit bien porter une devise
-      // pour partir. Le serveur refuse et le dit clairement si elle est
-      // fausse, ce qui vaut mieux qu'un écran bloqué.
-      expect(monte1.scope.devise, 'XOF');
+      // Le repli était `XOF` : un établissement d'Accra affichait ses prix
+      // « en XOF » le temps que le périmètre se lise. Vide dit « inconnue ».
+      expect(monte1.scope.devise, isEmpty);
     });
   });
 

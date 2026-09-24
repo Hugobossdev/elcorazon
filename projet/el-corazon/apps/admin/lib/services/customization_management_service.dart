@@ -18,6 +18,11 @@ class CustomizationOptionModel {
   final String name;
 
   /// Groupe suggéré à l'application — « Cuisson », « Suppléments ».
+  ///
+  /// Texte libre côté serveur (`OptionTemplate.group_name`), vide permis : à
+  /// l'application, le serveur range alors l'option dans « Options ». Ce
+  /// n'est pas une énumération — l'écran en proposait douze, en anglais
+  /// (`size`, `tiers`, `icing`…), héritées d'une pâtisserie.
   final String category;
   final double priceModifier;
 
@@ -35,8 +40,8 @@ class CustomizationOptionModel {
     required this.id,
     required this.name,
     required this.category,
+    required this.devise,
     this.priceModifier = 0.0,
-    this.devise = 'XOF',
     this.isDefault = false,
     this.isActive = true,
     this.sortOrder = 0,
@@ -340,12 +345,15 @@ class CustomizationManagementService extends ChangeNotifier {
         .toList();
   }
 
-  Map<String, List<CustomizationOptionModel>> getOptionsByCategory() {
-    final parCategorie = <String, List<CustomizationOptionModel>>{};
-    for (final option in _options) {
-      parCategorie.putIfAbsent(option.category, () => []).add(option);
-    }
-    return parCategorie;
+  /// Les groupes que la bibliothèque emploie réellement, triés — ceux que
+  /// l'écran propose en filtre et en suggestion de saisie.
+  List<String> get groupes {
+    final noms = {
+      for (final option in _options)
+        if (option.category.trim().isNotEmpty) option.category.trim(),
+    }.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return noms;
   }
 
   // ---------------------------------------------------------- traduction
@@ -354,7 +362,7 @@ class CustomizationManagementService extends ChangeNotifier {
     return CustomizationOptionModel(
       id: modele.id,
       name: modele.name,
-      category: modele.groupName.isEmpty ? 'extra' : modele.groupName,
+      category: modele.groupName,
       priceModifier: modele.priceDelta.toMajorUnits(),
       devise: modele.priceDelta.currency,
       isDefault: modele.isDefault,

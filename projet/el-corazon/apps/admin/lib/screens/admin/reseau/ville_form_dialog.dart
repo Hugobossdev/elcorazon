@@ -218,7 +218,6 @@ class _VilleFormDialogState extends State<VilleFormDialog> {
                     Expanded(
                       child: CustomTextField(
                         label: 'Latitude du centre',
-                        hint: '5.3600',
                         controller: _latitude,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
@@ -231,7 +230,6 @@ class _VilleFormDialogState extends State<VilleFormDialog> {
                     Expanded(
                       child: CustomTextField(
                         label: 'Longitude du centre',
-                        hint: '-4.0083',
                         controller: _longitude,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,

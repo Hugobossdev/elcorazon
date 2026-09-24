@@ -3,6 +3,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 class OptionGroupsEditor extends StatefulWidget {
   final String menuItemId;
@@ -354,9 +355,9 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
             const SizedBox(height: 16),
             TextField(
               controller: priceController,
-              decoration: const InputDecoration(
-                  labelText: 'Prix Supplémentaire (FCFA)',),
-              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                  labelText: _devise.isEmpty ? 'Prix supplémentaire' : 'Prix supplémentaire ($_devise)',),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
           ],
         ),
@@ -367,8 +368,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
           FilledButton(
             onPressed: () {
               if (nameController.text.trim().isEmpty) return;
-              // Les francs CFA n'ont pas de décimale : l'unité mineure est le
-              // franc. La saisie est relue avant d'entrer dans `setState` —
+              // La saisie est relue avant d'entrer dans `setState` —
               // `double.parse` à nu y levait une `FormatException` sur un champ
               // vidé, et l'écran se refermait sans rien enregistrer.
               final prix = _prixSaisi(priceController.text);
@@ -425,9 +425,9 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
               const SizedBox(height: 16),
               TextField(
                 controller: priceController,
-                decoration: const InputDecoration(
-                    labelText: 'Prix Supplémentaire (FCFA)',),
-                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                    labelText: 'Prix supplémentaire (${option.priceDelta.currency})',),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
               ),
               const SizedBox(height: 8),
               // La disponibilité se pilote depuis ici : elle était figée à
@@ -462,7 +462,13 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                   final newOptions = List<eccore.Option>.from(group.options);
                   newOptions[optionIndex] = option.copyWith(
                     name: nameController.text.trim(),
-                    priceDelta: eccore.Money.fromMajorUnits(prix, _devise),
+                    // La devise **de l'option**, pas celle de l'établissement
+                    // sélectionné : les deux diffèrent quand on modifie un
+                    // article d'un autre marché.
+                    priceDelta: eccore.Money.fromMajorUnits(
+                      prix,
+                      option.priceDelta.currency,
+                    ),
                     isAvailable: isAvailable,
                   );
                   _groups[groupIndex] = group.copyWith(options: newOptions);
@@ -480,9 +486,11 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
 
   /// Ce qu'on inscrit dans le champ « prix » pour un montant existant.
   ///
-  /// Les francs CFA n'ont pas de décimale : l'unité mineure **est** le franc,
-  /// et le champ se relit donc tel quel.
-  static String _saisiePrix(eccore.Money montant) => '${montant.amountMinor}';
+  /// En unité **majeure**, comme la saisie est relue : l'unité mineure n'est
+  /// le franc qu'en francs CFA. Un prix de 1,50 EUR (150 en unité mineure)
+  /// s'ouvrait à « 150 » et s'enregistrait à 150 EUR.
+  static String _saisiePrix(eccore.Money montant) =>
+      montantPourSaisie(montant.toMajorUnits(), montant.currency);
 
   /// Le montant saisi, en unités mineures — `null` si la saisie n'en est pas un.
   ///

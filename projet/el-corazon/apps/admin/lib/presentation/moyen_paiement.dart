@@ -9,18 +9,16 @@ import 'package:flutter/material.dart';
 /// serveur n'en connaît que quatre. `debitCard` n'avait aucune contrepartie —
 /// `DjangoOrderMapper` ne pouvait pas le produire.
 ///
-/// Les libellés sont repris tels quels, en anglais : « Credit Card », « Cash on
-/// Delivery », « FastFoodGo Wallet » dans un back-office français. Les traduire
-/// changerait ce que lit l'opérateur, et cela ne se décide pas ici.
+/// Les libellés sont ceux du serveur (`apps.orders.models.PaymentMethod`). Ils
+/// étaient en anglais — « Credit Card », « Cash on Delivery » — et le
+/// portefeuille portait le nom d'une autre marque, « FastFoodGo Wallet », hérité
+/// d'un gabarit : ce que l'opérateur lisait ici ne correspondait ni au produit
+/// ni à ce que le client voit.
 enum MoyenPaiement {
   mobileMoney('mobile_money', 'Mobile Money', Icons.smartphone_rounded),
-  especes('cash', 'Cash on Delivery', Icons.payments_rounded),
-  portefeuille(
-    'wallet',
-    'FastFoodGo Wallet',
-    Icons.account_balance_wallet_rounded,
-  ),
-  carte('card', 'Credit Card', Icons.credit_card_rounded);
+  especes('cash', 'Espèces à la livraison', Icons.payments_rounded),
+  portefeuille('wallet', 'Portefeuille', Icons.account_balance_wallet_rounded),
+  carte('card', 'Carte bancaire', Icons.credit_card_rounded);
 
   const MoyenPaiement(this.versServeur, this.libelle, this.icone);
 

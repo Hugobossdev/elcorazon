@@ -99,10 +99,11 @@ class RestaurantScopeService extends ChangeNotifier {
   /// franc CFA — alors que l'écran « Réseau » permet précisément d'ouvrir un
   /// marché dans un autre pays, avec sa propre devise.
   ///
-  /// Le repli sur `XOF` n'est pas un choix mais un dernier recours, pour le
-  /// court instant où le périmètre n'est pas encore lu : le serveur tranchera
-  /// de toute façon, et il le dira clairement.
-  String get devise => current?.currency ?? 'XOF';
+  /// **Vide** tant que le périmètre n'est pas lu. Il retombait sur `XOF` :
+  /// une devise devinée s'affichait dans les libellés de prix d'un
+  /// établissement ghanéen comme s'il la pratiquait. Aucune écriture ne part
+  /// de toute façon sans établissement ([requireSlug]).
+  String get devise => current?.currency ?? '';
 
   /// Convertit une saisie en unité **majeure** (ce que le formulaire affiche)
   /// vers le montant que l'API attend.

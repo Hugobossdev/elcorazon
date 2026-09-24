@@ -4,6 +4,7 @@ import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/utils/price_formatter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:admin/screens/admin/onglet_horaires.dart';
@@ -45,7 +46,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // un bloc-notes qui prétend en être une.
 
   // Auto-logout
-  Duration _inactivityTimeout = const Duration(minutes: 30);
+  Duration _inactivityTimeout = AdminAuthService.delaiInactiviteParDefaut;
   bool _autoLogoutEnabled = true;
 
   @override
@@ -61,7 +62,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
 
-    final timeoutMinutes = prefs.getInt(AdminAuthService.cleDelaiInactivite) ?? 30;
+    final timeoutMinutes = prefs.getInt(AdminAuthService.cleDelaiInactivite) ??
+        AdminAuthService.delaiInactiviteParDefaut.inMinutes;
     _inactivityTimeout = Duration(minutes: timeoutMinutes);
     _autoLogoutEnabled = prefs.getBool(AdminAuthService.cleDeconnexionAuto) ?? true;
 
@@ -291,10 +293,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     DeliveryZone zone,
     ColorScheme scheme,
   ) {
-    final devise = zone.currency == 'XOF' ? 'FCFA' : zone.currency;
-    String montant(double valeur) => valeur == valeur.roundToDouble()
-        ? valeur.toStringAsFixed(0)
-        : valeur.toStringAsFixed(2);
+    // La devise de la zone, en code ISO comme partout au back-office : un
+    // « FCFA » écrit ici confondait XOF et XAF.
+    String montant(double valeur) => formatMajeur(valeur, zone.currency);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -354,13 +355,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _buildZoneFact(
                   Icons.monetization_on_outlined,
                   'Forfait',
-                  '${montant(zone.deliveryFee)} $devise',
+                  montant(zone.deliveryFee),
                   scheme,
                 ),
                 _buildZoneFact(
                   Icons.straighten,
                   'Par kilomètre',
-                  '${montant(zone.feePerKm)} $devise',
+                  '${montant(zone.feePerKm)}/km',
                   scheme,
                 ),
                 _buildZoneFact(
@@ -368,7 +369,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'Livraison offerte',
                   zone.freeDeliveryThreshold == null
                       ? 'Jamais'
-                      : 'dès ${montant(zone.freeDeliveryThreshold!)} $devise',
+                      : 'dès ${montant(zone.freeDeliveryThreshold!)}',
                   scheme,
                 ),
                 _buildZoneFact(
@@ -381,7 +382,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildZoneFact(
                     Icons.shopping_basket_outlined,
                     'Commande minimum',
-                    '${montant(zone.minOrderAmount!)} $devise',
+                    montant(zone.minOrderAmount!),
                     scheme,
                   ),
               ],

@@ -63,7 +63,11 @@ class AdminAuthService extends ChangeNotifier {
   // validité du jeton, que le serveur tient de son côté.
   Timer? _inactivityTimer;
   DateTime? _lastActivity;
-  Duration _inactivityTimeout = const Duration(minutes: 30);
+  Duration _inactivityTimeout = delaiInactiviteParDefaut;
+
+  /// Délai de déconnexion tant que le poste n'en a pas enregistré d'autre —
+  /// une seule définition, relue par l'écran des réglages.
+  static const delaiInactiviteParDefaut = Duration(minutes: 30);
   bool _autoLogoutEnabled = true;
 
   eccore.User? get currentAdmin => _staff;
@@ -102,6 +106,15 @@ class AdminAuthService extends ChangeNotifier {
   /// (ADR-005). Renommer « Manager » ne doit rien changer, donc ce nom n'a pas
   /// à circuler avec le jeton. Les rôles eux-mêmes se gèrent sur leur écran
   /// dédié (`/administration/roles/`).
+  /// Le nom à afficher pour le compte connecté : son nom complet, sinon son
+  /// adresse. Les écrans écrivaient « Admin » quand le nom manquait — un
+  /// titre que personne ne porte, et qui ne dit pas qui est connecté.
+  String get nomAffiche {
+    final compte = currentAdmin;
+    if (compte == null) return '';
+    return compte.fullName.trim().isNotEmpty ? compte.fullName.trim() : compte.email;
+  }
+
   String get roleLabel {
     if (currentAdmin == null) return '';
     final total = permissions.length;

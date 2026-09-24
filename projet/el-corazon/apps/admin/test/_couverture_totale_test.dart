@@ -6,7 +6,6 @@
 // pourcentage qui en sort ne veut rien dire.
 // ignore_for_file: unused_import
 
-import 'package:admin/core/constants/admin_constants.dart';
 import 'package:admin/core/utils/admin_helpers.dart';
 import 'package:admin/dialogs/notifications_dialog.dart';
 import 'package:admin/main.dart';
@@ -32,6 +31,7 @@ import 'package:admin/presentation/expiration_piece.dart';
 import 'package:admin/presentation/export_commandes.dart';
 import 'package:admin/presentation/filtres_geographiques.dart';
 import 'package:admin/presentation/filtres_supervision.dart';
+import 'package:admin/presentation/flotte.dart';
 import 'package:admin/presentation/inventaire.dart';
 import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/moyen_paiement.dart';

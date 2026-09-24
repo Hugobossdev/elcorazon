@@ -50,8 +50,28 @@ void main() {
     for (final montant in [0.0, 999.0, 1000.0, 1234567.0, -1500.0]) {
       expect(
         formatMajeur(montant, 'XOF'),
-        socle.formatPrice(montant, codeIso: true),
+        socle.formatPrice(montant, currency: 'XOF', codeIso: true),
       );
     }
+  });
+
+  group('La saisie suit la devise, pas un marché écrit en dur', () {
+    test('le pré-remplissage garde les décimales de la devise', () {
+      expect(montantPourSaisie(1500, 'XOF'), '1500');
+      expect(montantPourSaisie(1.5, 'EUR'), '1.50');
+      expect(montantPourSaisie(12.5, 'GHS'), '12.50');
+    });
+
+    test('un franc sans subdivision refuse les centimes, XAF et GNF compris', () {
+      for (final devise in ['XOF', 'XAF', 'GNF']) {
+        expect(erreurDePrecision(1500, devise), isNull, reason: devise);
+        expect(erreurDePrecision(1500.5, devise), isNotNull, reason: devise);
+      }
+    });
+
+    test('une devise à deux décimales en accepte deux, pas trois', () {
+      expect(erreurDePrecision(12.5, 'EUR'), isNull);
+      expect(erreurDePrecision(12.505, 'EUR'), isNotNull);
+    });
   });
 }

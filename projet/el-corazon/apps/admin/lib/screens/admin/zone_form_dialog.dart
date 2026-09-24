@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:admin/services/delivery_zone_service.dart';
+import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/custom_text_field.dart';
 
@@ -77,13 +78,12 @@ class _ZoneFormDialogState extends State<ZoneFormDialog> {
 
   /// Un franc CFA n'a pas de décimale, un euro en a deux. Afficher « 600,00 »
   /// sur un barème en francs inviterait à saisir des centimes qui n'existent
-  /// pas.
-  String _montant(double valeur) =>
-      valeur == valeur.roundToDouble() ? valeur.toStringAsFixed(0) : valeur.toStringAsFixed(2);
+  /// pas : le nombre de décimales vient de la devise.
+  String _montant(double valeur) => montantPourSaisie(valeur, widget.zone.currency);
 
-  /// Libellé usuel de la devise. `XOF` est le code ISO ; « FCFA » est ce que
-  /// lit l'exploitant sur ses tickets.
-  String get _devise => widget.zone.currency == 'XOF' ? 'FCFA' : widget.zone.currency;
+  /// Code ISO de la devise, comme partout au back-office. Un « FCFA » écrit
+  /// ici ne connaissait que le XOF, et confondait XOF et XAF.
+  String get _devise => widget.zone.currency;
 
   @override
   Widget build(BuildContext context) {
@@ -182,7 +182,7 @@ class _ZoneFormDialogState extends State<ZoneFormDialog> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Le client paie ce forfait plus ${_montant(widget.zone.feePerKm)} $_devise '
+          'Le client paie ce forfait plus ${formatMajeur(widget.zone.feePerKm, _devise)} '
           'par kilomètre. Le total est calculé par le serveur au moment de la commande.',
           style: Theme.of(context)
               .textTheme
@@ -221,7 +221,6 @@ class _ZoneFormDialogState extends State<ZoneFormDialog> {
                   const SizedBox(height: 8),
                   CustomTextField(
                     label: 'Seuil de gratuité ($_devise)',
-                    hint: 'Par exemple 12000',
                     controller: _freeThresholdController,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     prefixIcon: Icons.card_giftcard,
@@ -321,12 +320,7 @@ class _ZoneFormDialogState extends State<ZoneFormDialog> {
     final montant = double.tryParse(texte.replaceAll(',', '.'));
     if (montant == null) return 'Entrez un montant en chiffres';
     if (montant < 0) return 'Le montant ne peut pas être négatif';
-    if (montant > 10000000) return 'Montant hors des ordres de grandeur attendus';
-
-    if (widget.zone.currency == 'XOF' && montant != montant.roundToDouble()) {
-      return 'Le franc CFA n’a pas de centimes';
-    }
-    return null;
+    return erreurDePrecision(montant, widget.zone.currency);
   }
 
   String? _validerDelai(String? valeur) {

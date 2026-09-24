@@ -4,6 +4,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
 import 'package:admin/presentation/echec.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 /// Construit le corps d'un formulaire. [echec] porte le dernier refus du
 /// serveur : `echec?.pourLeChamp('points_cost')` se pose en `errorText` sous
@@ -195,6 +196,21 @@ abstract final class Valider {
   /// Champ facultatif : vide accepté, sinon montant > 0.
   static String? montantFacultatif(String? valeur) =>
       (valeur == null || valeur.trim().isEmpty) ? null : montant(valeur);
+
+  /// Montant libellé en [devise] : les règles de [montant] (ou de
+  /// [montantFacultatif]), plus la précision de la devise.
+  ///
+  /// Une [devise] vide signifie qu'aucune n'est connue — aucun établissement
+  /// dans le périmètre. On le dit au champ plutôt que d'en supposer une : les
+  /// formulaires retombaient sur `XOF`, que le serveur refusait ensuite pour
+  /// un marché qui facture dans une autre monnaie.
+  static String? montantEn(String devise, String? valeur, {bool facultatif = false}) {
+    if (facultatif && (valeur == null || valeur.trim().isEmpty)) return null;
+    final regle = facultatif ? montantFacultatif(valeur) : montant(valeur);
+    if (regle != null) return regle;
+    if (devise.isEmpty) return 'Devise inconnue : aucun établissement dans votre périmètre';
+    return erreurDePrecision(lireMontant(valeur!)!, devise);
+  }
 }
 
 /// Lit un montant saisi (virgule ou point).

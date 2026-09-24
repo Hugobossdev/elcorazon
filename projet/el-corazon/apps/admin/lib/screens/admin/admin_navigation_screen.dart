@@ -1105,7 +1105,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        adminAuth.currentAdmin?.fullName ?? 'Admin',
+                        adminAuth.nomAffiche,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -1405,7 +1405,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
               ),
             ),
             accountName: Text(
-              adminAuth.currentAdmin?.fullName ?? 'Admin',
+              adminAuth.nomAffiche,
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             accountEmail: Text(

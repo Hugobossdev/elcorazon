@@ -24,43 +24,22 @@ class _CustomizationOptionFormDialogState
   final _nameController = TextEditingController();
   final _priceModifierController = TextEditingController();
 
-  late String _selectedCategory;
+  /// Groupe suggéré (`group_name`) : texte libre côté serveur, pas une liste.
+  final _groupeController = TextEditingController();
   bool _isDefault = false;
   bool _isActive = true;
 
-  // Catégories principales en premier
-  final List<String> _mainCategories = [
-    'size', // Taille
-    'ingredient', // Ingrédient
-    'sauce', // Sauces
-    'extra', // Suppléments
-  ];
-
-  final List<String> _otherCategories = [
-    'cooking',
-    'shape',
-    'flavor',
-    'filling',
-    'decoration',
-    'tiers',
-    'icing',
-    'dietary',
-  ];
-
-  List<String> get _categories => [..._mainCategories, ..._otherCategories];
 
   @override
   void initState() {
     super.initState();
     // Initialiser la catégorie : option existante > catégorie présélectionnée > défaut
-    _selectedCategory =
-        widget.option?.category ?? widget.preselectedCategory ?? 'extra';
+    _groupeController.text = widget.option?.category ?? widget.preselectedCategory ?? '';
 
     if (widget.option != null) {
       final option = widget.option!;
       _nameController.text = option.name;
-      _priceModifierController.text = option.priceModifier.toStringAsFixed(0);
-      _selectedCategory = option.category;
+      _priceModifierController.text = montantPourSaisie(option.priceModifier, option.devise);
       _isDefault = option.isDefault;
       _isActive = option.isActive;
     }
@@ -76,9 +55,19 @@ class _CustomizationOptionFormDialogState
     });
   }
 
+  /// La devise du modèle, ou celle de l'établissement où il sera créé.
+  String get _devise =>
+      widget.option?.devise ??
+      context.read<CustomizationManagementService>().deviseDeCreation;
+
+  /// Le supplément saisi, en unité majeure — virgule acceptée.
+  double? get _prixSaisi =>
+      double.tryParse(_priceModifierController.text.trim().replaceAll(',', '.'));
+
   @override
   void dispose() {
     _nameController.dispose();
+    _groupeController.dispose();
     _priceModifierController.dispose();
     super.dispose();
   }
@@ -143,25 +132,37 @@ class _CustomizationOptionFormDialogState
                         },
                       ),
                       const SizedBox(height: 16),
-                      DropdownButtonFormField<String>(
-                        initialValue: _selectedCategory,
+                      TextFormField(
+                        controller: _groupeController,
                         decoration: const InputDecoration(
-                          labelText: 'Catégorie *',
+                          labelText: 'Groupe suggéré',
+                          hintText: 'Cuisson, Suppléments, Sauces…',
+                          helperText: 'Vide : l’option sera rangée dans « Options » '
+                              'lorsqu’on l’appliquera à un article.',
                         ),
-                        items: _categories.map((category) {
-                          return DropdownMenuItem(
-                            value: category,
-                            child: Text(_translateCategory(category)),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() {
-                              _selectedCategory = value;
-                            });
-                          }
-                        },
+                        maxLength: 80,
                       ),
+                      // Les groupes que la bibliothèque emploie déjà, en un
+                      // geste : deux orthographes du même groupe feraient
+                      // deux groupes chez le client.
+                      Builder(builder: (context) {
+                        final groupes = context
+                            .read<CustomizationManagementService>()
+                            .groupes;
+                        if (groupes.isEmpty) return const SizedBox.shrink();
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            for (final groupe in groupes)
+                              ActionChip(
+                                label: Text(groupe),
+                                onPressed: () =>
+                                    setState(() => _groupeController.text = groupe),
+                              ),
+                          ],
+                        );
+                      },),
                       const SizedBox(height: 16),
                       Row(
                         children: [
@@ -169,21 +170,21 @@ class _CustomizationOptionFormDialogState
                             flex: 2,
                             child: TextFormField(
                               controller: _priceModifierController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Prix supplémentaire',
                                 hintText: '0',
-                                prefixText: 'FCFA ',
+                                suffixText: _devise,
                                 helperText: 'Prix ajouté au prix de base',
                               ),
-                              keyboardType: TextInputType.number,
+                              keyboardType: const TextInputType.numberWithOptions(
+                                decimal: true,
+                                signed: true,
+                              ),
                               validator: (value) {
-                                if (value != null && value.isNotEmpty) {
-                                  final price = double.tryParse(value);
-                                  if (price == null) {
-                                    return 'Prix invalide';
-                                  }
-                                }
-                                return null;
+                                if (value == null || value.trim().isEmpty) return null;
+                                final price = _prixSaisi;
+                                if (price == null) return 'Prix invalide';
+                                return erreurDePrecision(price, _devise);
                               },
                             ),
                           ),
@@ -211,15 +212,8 @@ class _CustomizationOptionFormDialogState
                                   const SizedBox(height: 4),
                                   Builder(
                                     builder: (context) {
-                                      final price =
-                                          double.tryParse(
-                                            _priceModifierController.text,
-                                          ) ??
-                                          0.0;
-                                      final devise = widget.option?.devise ??
-                                          context
-                                              .read<CustomizationManagementService>()
-                                              .deviseDeCreation;
+                                      final price = _prixSaisi ?? 0.0;
+                                      final devise = _devise;
                                       return Text(
                                         price > 0
                                             ? '+${formatMajeur(price, devise)}'
@@ -316,13 +310,13 @@ class _CustomizationOptionFormDialogState
       listen: false,
     );
 
-    final priceModifier = double.tryParse(_priceModifierController.text) ?? 0.0;
+    final priceModifier = _prixSaisi ?? 0.0;
 
     if (widget.option == null) {
       // Créer
       final newOption = await service.createOption(
         name: _nameController.text.trim(),
-        category: _selectedCategory,
+        category: _groupeController.text.trim(),
         priceModifier: priceModifier,
         isDefault: _isDefault,
       );
@@ -346,7 +340,7 @@ class _CustomizationOptionFormDialogState
       // Modifier
       final updatedOption = widget.option!.copyWith(
         name: _nameController.text.trim(),
-        category: _selectedCategory,
+        category: _groupeController.text.trim(),
         priceModifier: priceModifier,
         isDefault: _isDefault,
         isActive: _isActive,
@@ -369,37 +363,6 @@ class _CustomizationOptionFormDialogState
           ),
         );
       }
-    }
-  }
-
-  String _translateCategory(String category) {
-    switch (category) {
-      case 'size':
-        return 'Taille';
-      case 'cooking':
-        return 'Cuisson';
-      case 'ingredient':
-        return 'Ingrédient';
-      case 'sauce':
-        return 'Sauces';
-      case 'extra':
-        return 'Suppléments';
-      case 'shape':
-        return 'Forme';
-      case 'flavor':
-        return 'Saveur';
-      case 'filling':
-        return 'Garniture';
-      case 'decoration':
-        return 'Décoration';
-      case 'tiers':
-        return 'Étages';
-      case 'icing':
-        return 'Glaçage';
-      case 'dietary':
-        return 'Préférence alimentaire';
-      default:
-        return category;
     }
   }
 }

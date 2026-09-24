@@ -58,12 +58,15 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
   final _nom = TextEditingController();
   final _latitude = TextEditingController();
   final _longitude = TextEditingController();
-  final _rayon = TextEditingController(text: '10');
+  final _rayon = TextEditingController();
   final _forfait = TextEditingController();
   final _parKm = TextEditingController();
   final _franco = TextEditingController();
   final _minimum = TextEditingController();
-  final _delai = TextEditingController(text: '35');
+  /// Pré-rempli avec la valeur par défaut du serveur
+  /// (`DeliveryZone.estimated_delivery_minutes`, 30), et non un chiffre choisi
+  /// ici : le formulaire propose ce que la base aurait retenu.
+  final _delai = TextEditingController(text: '30');
 
   bool _envoiEnCours = false;
   String? _erreur;
@@ -72,6 +75,15 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
   void initState() {
     super.initState();
     _nom.text = '${widget.ville.name} — centre';
+    // Le centre de la ville tel que le serveur le connaît : un point de départ
+    // plausible, là où le formulaire montrait des coordonnées d'Abidjan en
+    // exemple, pour toutes les villes.
+    final lat = widget.ville.centroidLatitude;
+    final lon = widget.ville.centroidLongitude;
+    if (lat != null && lon != null) {
+      _latitude.text = lat.toStringAsFixed(4);
+      _longitude.text = lon.toStringAsFixed(4);
+    }
   }
 
   @override
@@ -92,12 +104,19 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
     super.dispose();
   }
 
-  /// Devise héritée du pays de la ville.
-  String _devise(NetworkService reseau) =>
-      reseau.countryByIso(widget.ville.countryIsoCode)?.currency ?? 'XOF';
+  /// Devise héritée du pays de la ville — `null` tant que le pays n'est pas
+  /// chargé. Aucune devise de repli : un barème libellé dans une devise
+  /// devinée serait refusé par le serveur (« Ce pays facture en … »).
+  String? _devise(NetworkService reseau) =>
+      reseau.countryByIso(widget.ville.countryIsoCode)?.currency;
 
   Future<void> _enregistrer() async {
     if (!_formKey.currentState!.validate()) return;
+    final devise = _devise(context.read<NetworkService>());
+    if (devise == null) {
+      setState(() => _erreur = 'Le pays de cette ville n’est pas chargé : sa devise est inconnue.');
+      return;
+    }
     setState(() {
       _envoiEnCours = true;
       _erreur = null;
@@ -110,7 +129,7 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
       centerLatitude: double.parse(_latitude.text.trim()),
       centerLongitude: double.parse(_longitude.text.trim()),
       radiusKm: double.parse(_rayon.text.trim()),
-      currency: _devise(context.read<NetworkService>()),
+      currency: devise,
       baseFee: double.parse(_forfait.text.trim()),
       feePerKm: double.parse(_parKm.text.trim()),
       freeDeliveryThreshold: _optionnel(_franco),
@@ -152,7 +171,7 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
               children: [
                 CustomTextField(
                   label: 'Nom de la zone',
-                  hint: 'Abidjan — Plateau et Cocody',
+                  hint: '${widget.ville.name} — quartiers desservis',
                   controller: _nom,
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Nom obligatoire' : null,
@@ -164,7 +183,6 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
                     Expanded(
                       child: CustomTextField(
                         label: 'Latitude du centre',
-                        hint: '5.3600',
                         controller: _latitude,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
@@ -177,7 +195,6 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
                     Expanded(
                       child: CustomTextField(
                         label: 'Longitude du centre',
-                        hint: '-4.0083',
                         controller: _longitude,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
@@ -190,13 +207,12 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
                     Expanded(
                       child: CustomTextField(
                         label: 'Rayon (km)',
-                        hint: '10',
                         controller: _rayon,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         validator: (v) {
                           final rayon = double.tryParse((v ?? '').trim());
                           if (rayon == null) return 'Nombre attendu';
-                          if (rayon <= 0 || rayon > 100) return 'Entre 0 et 100 km';
+                          if (rayon <= 0) return 'Le rayon doit être positif';
                           return null;
                         },
                       ),
@@ -211,7 +227,7 @@ class _ZoneCreationDialogState extends State<ZoneCreationDialog> {
                   style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
-                _Section(titre: 'Barème — en $devise', scheme: scheme),
+                _Section(titre: 'Barème — en ${devise ?? '…'}', scheme: scheme),
                 Row(
                   children: [
                     Expanded(

@@ -94,6 +94,8 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
   late final TextEditingController _montant = TextEditingController(
     text: _enSaisie(_transaction.amount.toMajorUnits()),
   );
+
+  String get _devise => _transaction.amount.currency;
   bool _enCours = false;
   Echec? _echec;
   final _motif = TextEditingController();
@@ -107,9 +109,9 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
 
   double get _plafond => _transaction.amount.toMajorUnits();
 
-  /// Un montant majeur tel qu'on le saisit : sans décimale inutile.
-  static String _enSaisie(double montant) =>
-      montant == montant.roundToDouble() ? montant.toStringAsFixed(0) : montant.toStringAsFixed(2);
+  /// Un montant majeur tel qu'on le saisit, avec les décimales de la devise
+  /// de l'encaissement.
+  String _enSaisie(double montant) => montantPourSaisie(montant, _devise);
 
   /// Exécute le remboursement **avant** de fermer : un refus du serveur
   /// s'affiche dans le dialogue, la saisie intacte.
@@ -216,7 +218,7 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
                             _transaction =
                                 widget.encaissements.firstWhere((t) => t.id == id);
                             _montant.text =
-                                _transaction.amount.toMajorUnits().toStringAsFixed(0);
+                                _enSaisie(_transaction.amount.toMajorUnits());
                           });
                         },
                       ),
@@ -233,7 +235,9 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       decoration: InputDecoration(
                         labelText: 'Montant à rembourser',
-                        suffixText: 'CFA',
+                        // La devise de l'encaissement choisi : un « CFA »
+                        // écrit ici s'affichait aussi sous un paiement en GHS.
+                        suffixText: _devise,
                         border: const OutlineInputBorder(),
                         errorText: _montant.text.isEmpty || _saisi != null
                             ? (_saisi != null && _saisi! > _plafond

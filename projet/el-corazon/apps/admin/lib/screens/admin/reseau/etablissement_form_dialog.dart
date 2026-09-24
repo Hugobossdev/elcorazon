@@ -130,6 +130,15 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
     return ville?.countryIsoCode;
   }
 
+  /// Indicatif du pays de la zone choisie (`phone_prefix`), vide sinon.
+  ///
+  /// L'exemple du champ téléphone était un numéro ivoirien écrit en dur,
+  /// proposé aussi pour un établissement de Lomé ou de Douala.
+  String _indicatif(DeliveryZoneService zones, NetworkService reseau) {
+    final iso = _paysDeLaZoneChoisie(zones, reseau);
+    return iso == null ? '' : (reseau.countryByIso(iso)?.phonePrefix ?? '');
+  }
+
   /// Applique ce que le sélecteur a rapporté.
   ///
   /// **L'adresse n'est écrasée que si elle est vide.** Quelqu'un qui a saisi
@@ -335,13 +344,17 @@ class _EtablissementFormDialogState extends State<EtablissementFormDialog> {
                     Expanded(
                       child: CustomTextField(
                         label: 'Téléphone',
-                        hint: '+22507000000',
+                        hint: _indicatif(zones, reseau).isEmpty
+                            ? 'Format international : +indicatif puis numéro'
+                            : '${_indicatif(zones, reseau)}…',
                         controller: _telephone,
                         keyboardType: TextInputType.phone,
                         validator: (v) =>
                             RegExp(r'^\+\d{6,15}$').hasMatch((v ?? '').trim())
                             ? null
-                            : 'Format international, par exemple +22507000000',
+                            : _indicatif(zones, reseau).isEmpty
+                                ? 'Format international : + suivi de 6 à 15 chiffres'
+                                : 'Format international, commençant par ${_indicatif(zones, reseau)}',
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -669,7 +682,6 @@ class _ChoixDeLaPosition extends StatelessWidget {
             Expanded(
               child: CustomTextField(
                 label: 'Latitude',
-                hint: '5.3600',
                 controller: latitude,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
@@ -682,7 +694,6 @@ class _ChoixDeLaPosition extends StatelessWidget {
             Expanded(
               child: CustomTextField(
                 label: 'Longitude',
-                hint: '-4.0083',
                 controller: longitude,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/presentation/autorisations.dart';
+import 'package:admin/presentation/commande.dart' show libelleDeGroupe;
 import 'package:admin/services/customization_management_service.dart';
 import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/screens/admin/customization_option_form_dialog.dart';
@@ -18,25 +19,11 @@ class CustomizationManagementScreen extends StatefulWidget {
 
 class _CustomizationManagementScreenState
     extends State<CustomizationManagementScreen> {
-  String _selectedCategory = 'all';
+  /// Groupe filtré, `null` pour tous. Les groupes proposés sont ceux que la
+  /// bibliothèque emploie (`group_name`, texte libre côté serveur).
+  String? _groupeFiltre;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
-
-  final List<String> _categories = [
-    'all',
-    'size',
-    'ingredient',
-    'sauce',
-    'extra',
-    'cooking',
-    'shape',
-    'flavor',
-    'filling',
-    'decoration',
-    'tiers',
-    'icing',
-    'dietary',
-  ];
 
   @override
   void initState() {
@@ -56,38 +43,10 @@ class _CustomizationManagementScreenState
     super.dispose();
   }
 
-  String _translateCategory(String category) {
-    switch (category) {
-      case 'all':
-        return 'Toutes';
-      case 'size':
-        return 'Taille';
-      case 'cooking':
-        return 'Cuisson';
-      case 'ingredient':
-        return 'Ingrédient';
-      case 'sauce':
-        return 'Sauces';
-      case 'extra':
-        return 'Suppléments';
-      case 'shape':
-        return 'Forme';
-      case 'flavor':
-        return 'Saveur';
-      case 'filling':
-        return 'Garniture';
-      case 'decoration':
-        return 'Décoration';
-      case 'tiers':
-        return 'Étages';
-      case 'icing':
-        return 'Glaçage';
-      case 'dietary':
-        return 'Préférence alimentaire';
-      default:
-        return category;
-    }
-  }
+  /// Un modèle sans groupe est rangé par le serveur dans « Options » quand
+  /// on l'applique — c'est ce qu'on affiche.
+  static String _libelleGroupe(String groupe) =>
+      groupe.isEmpty ? 'Options' : libelleDeGroupe(groupe);
 
   @override
   Widget build(BuildContext context) {
@@ -103,8 +62,7 @@ class _CustomizationManagementScreenState
           // Filtrer les options
           final filteredOptions = service.options.where((option) {
             // Filtre par catégorie
-            if (_selectedCategory != 'all' &&
-                option.category != _selectedCategory) {
+            if (_groupeFiltre != null && option.category.trim() != _groupeFiltre) {
               return false;
             }
 
@@ -120,8 +78,8 @@ class _CustomizationManagementScreenState
           // Grouper par catégorie
           final Map<String, List<CustomizationOptionModel>> groupedOptions = {};
           for (final option in filteredOptions) {
-            groupedOptions.putIfAbsent(option.category, () => []);
-            groupedOptions[option.category]!.add(option);
+            groupedOptions.putIfAbsent(option.category.trim(), () => []);
+            groupedOptions[option.category.trim()]!.add(option);
           }
 
           return Column(
@@ -194,18 +152,15 @@ class _CustomizationManagementScreenState
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
-                        children: _categories.map((category) {
-                          final isSelected = _selectedCategory == category;
+                        children: [null, ...service.groupes].map((groupe) {
                           return Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: FilterChip(
-                              label: Text(_translateCategory(category)),
-                              selected: isSelected,
-                              onSelected: (selected) {
-                                setState(() {
-                                  _selectedCategory = category;
-                                });
-                              },
+                              label: Text(
+                                groupe == null ? 'Tous les groupes' : _libelleGroupe(groupe),
+                              ),
+                              selected: _groupeFiltre == groupe,
+                              onSelected: (_) => setState(() => _groupeFiltre = groupe),
                             ),
                           );
                         }).toList(),
@@ -268,7 +223,7 @@ class _CustomizationManagementScreenState
                                 child: Row(
                                   children: [
                                     Icon(
-                                      _getCategoryIcon(category),
+                                      Icons.tune,
                                       size: 20,
                                       color: Theme.of(context)
                                           .colorScheme
@@ -276,7 +231,7 @@ class _CustomizationManagementScreenState
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
-                                      _translateCategory(category),
+                                      _libelleGroupe(category),
                                       style: Theme.of(context)
                                           .textTheme
                                           .titleMedium
@@ -309,37 +264,6 @@ class _CustomizationManagementScreenState
         },
       ),
     );
-  }
-
-  IconData _getCategoryIcon(String category) {
-    switch (category) {
-      case 'size':
-        return Icons.straighten;
-      case 'ingredient':
-        return Icons.restaurant;
-      case 'sauce':
-        return Icons.water_drop;
-      case 'extra':
-        return Icons.add_circle;
-      case 'cooking':
-        return Icons.local_fire_department;
-      case 'shape':
-        return Icons.crop_square;
-      case 'flavor':
-        return Icons.emoji_food_beverage;
-      case 'filling':
-        return Icons.layers;
-      case 'decoration':
-        return Icons.auto_awesome;
-      case 'tiers':
-        return Icons.cake;
-      case 'icing':
-        return Icons.icecream;
-      case 'dietary':
-        return Icons.eco;
-      default:
-        return Icons.tune;
-    }
   }
 
   Widget _buildOptionCard(
@@ -445,37 +369,6 @@ class _OptionCardWidget extends StatefulWidget {
 class _OptionCardWidgetState extends State<_OptionCardWidget> {
   bool _isHovered = false;
 
-  IconData _getCategoryIcon(String category) {
-    switch (category) {
-      case 'size':
-        return Icons.straighten;
-      case 'ingredient':
-        return Icons.restaurant;
-      case 'sauce':
-        return Icons.water_drop;
-      case 'extra':
-        return Icons.add_circle;
-      case 'cooking':
-        return Icons.local_fire_department;
-      case 'shape':
-        return Icons.crop_square;
-      case 'flavor':
-        return Icons.emoji_food_beverage;
-      case 'filling':
-        return Icons.layers;
-      case 'decoration':
-        return Icons.auto_awesome;
-      case 'tiers':
-        return Icons.cake;
-      case 'icing':
-        return Icons.icecream;
-      case 'dietary':
-        return Icons.eco;
-      default:
-        return Icons.tune;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
@@ -508,7 +401,7 @@ class _OptionCardWidgetState extends State<_OptionCardWidget> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
-                    _getCategoryIcon(widget.option.category),
+                    Icons.tune,
                     color: widget.theme.colorScheme.onPrimaryContainer,
                   ),
                 ),

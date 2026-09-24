@@ -11,6 +11,8 @@ import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/screens/admin/option_groups_editor.dart'; // Import du nouveau widget
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 import 'package:admin/presentation/messages_erreur.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
+import 'package:admin/utils/price_formatter.dart';
 
 class MenuItemFormDialog extends StatefulWidget {
   final eccore.ManagedMenuItem? menuItem;
@@ -183,6 +185,15 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
     }
   }
 
+  /// La devise du prix : celle de l'article, sinon celle de l'établissement
+  /// dans lequel il sera créé.
+  String get _devise => widget.menuItem?.price.currency ?? RestaurantScopeService().devise;
+
+  /// Le prix saisi, en unité majeure. La virgule est acceptée : c'est la
+  /// touche du clavier français.
+  double? get _prixSaisi =>
+      double.tryParse(_priceController.text.trim().replaceAll(',', '.'));
+
   @override
   void initState() {
     super.initState();
@@ -191,7 +202,9 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
     final item = widget.menuItem;
     _nameController = TextEditingController(text: item?.name);
     _descriptionController = TextEditingController(text: item?.description);
-    _priceController = TextEditingController(text: item?.price.toMajorUnits().toStringAsFixed(0));
+    _priceController = TextEditingController(
+      text: item == null ? null : montantPourSaisie(item.price.toMajorUnits(), item.price.currency),
+    );
     _imageUrlController = TextEditingController(text: item?.image);
     _stockController =
         TextEditingController(text: '${item?.stockQuantity ?? 0}');
@@ -383,16 +396,20 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
               Expanded(
                 child: TextFormField(
                   controller: _priceController,
-                  decoration: const InputDecoration(
-                    labelText: 'Prix (FCFA)',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.attach_money),
+                  decoration: InputDecoration(
+                    // La devise dans laquelle l'établissement facture : c'est
+                    // celle que `MenuService` appose au prix envoyé.
+                    labelText: _devise.isEmpty ? 'Prix' : 'Prix ($_devise)',
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.payments_outlined),
                   ),
-                  keyboardType: TextInputType.number,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   validator: (value) {
-                    if (value?.isEmpty ?? true) return 'Requis';
-                    if (double.tryParse(value!) == null) return 'Invalide';
-                    return null;
+                    if (value?.trim().isEmpty ?? true) return 'Requis';
+                    final prix = _prixSaisi;
+                    if (prix == null) return 'Invalide';
+                    if (prix < 0) return 'Le prix ne peut pas être négatif';
+                    return erreurDePrecision(prix, _devise);
                   },
                 ),
               ),
@@ -659,7 +676,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
         final createdItem = await menuService.createMenuItem(
           categoryId: _selectedCategoryId!,
           name: _nameController.text,
-          basePrice: double.parse(_priceController.text),
+          basePrice: _prixSaisi!,
           dietaryTags: regimes,
           description: _descriptionController.text,
           isAvailable: _isAvailable,
@@ -712,7 +729,7 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
           menuItemId: existant.id,
           categoryId: _selectedCategoryId!,
           name: _nameController.text,
-          basePrice: double.parse(_priceController.text),
+          basePrice: _prixSaisi!,
           dietaryTags: regimes,
           description: _descriptionController.text,
           isAvailable: _isAvailable,

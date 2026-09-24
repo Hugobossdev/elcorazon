@@ -76,6 +76,13 @@ const _libellesDeGroupe = <String, String>{
   'dietary': 'Régime',
 };
 
+/// Le libellé d'un nom de groupe d'options : sa traduction s'il s'agit d'un
+/// identifiant technique hérité (`extra`, `cooking`…), le nom tel quel sinon.
+///
+/// Partagé par la commande et la bibliothèque d'options, pour qu'un même
+/// groupe ne se lise pas « Supplément » ici et « extra » là.
+String libelleDeGroupe(String groupe) => _libellesDeGroupe[groupe.toLowerCase()] ?? groupe;
+
 extension LigneAffichee on eccore.OrderLine {
   /// Les montants en unité majeure, pour l'affichage seulement.
   double get prixUnitaireAffiche => unitPrice.toMajorUnits();
@@ -89,7 +96,7 @@ extension LigneAffichee on eccore.OrderLine {
   List<String> get personnalisations => [
         for (final choix in options)
           if (choix.optionName.isNotEmpty)
-            '${_libellesDeGroupe[choix.groupName.toLowerCase()] ?? choix.groupName}'
+            '${libelleDeGroupe(choix.groupName)}'
                 ': ${choix.optionName}',
       ];
 

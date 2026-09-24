@@ -96,7 +96,7 @@ Future<void> ouvrirFormulaireRecompense(
   // monnaies, et un code libellé dans l'une est refusé dans l'autre.
   var deviseNationale = recompense?.isNational ?? false
       ? recompense!.discount.currency
-      : (perimetre.devises.isEmpty ? 'XOF' : perimetre.devises.first);
+      : (perimetre.devises.firstOrNull ?? '');
 
   String devise() =>
       porteur == _nationale ? deviseNationale : (perimetre.parId(porteur)?.currency ?? deviseNationale);
@@ -211,7 +211,7 @@ Future<void> ouvrirFormulaireRecompense(
                 helperText: 'Un montant, pas un pourcentage.',
                 errorText: echec?.pourLeChamp('discount'),
               ),
-              validator: Valider.montant,
+              validator: (v) => Valider.montantEn(devise(), v),
             ),
           ],
           const SizedBox(height: 12),
