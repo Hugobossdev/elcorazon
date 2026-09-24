@@ -1,6 +1,129 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Dernière révision** : 19 septembre 2026
+**Dernière révision** : 23 septembre 2026
+
+## ✅ État vérifiable au 21 septembre 2026 (audit pré-production)
+
+Ce tableau remplace tout pourcentage global : un « ~97 % » ne dit ni ce qui
+manque, ni ce qui a été éprouvé. Chaque case porte l'un de cinq états, et un
+état n'est **COMPLET** que si le code, les tests ou un parcours réel l'ont
+montré le 21 septembre.
+
+| État | Sens |
+| --- | --- |
+| COMPLET | Présent et éprouvé (code relu, tests verts, ou parcours réel) |
+| PARTIEL | Présent, avec un manque nommé dans la colonne ou la note |
+| À FAIRE | Absent du code |
+| BLOQUÉ | Ne peut pas avancer sans une action extérieure au code |
+| À VÉRIFIER | Présent, mais pas encore vu fonctionner par un humain ou en parcours réel |
+
+**E2E** = parcours rejoué contre la pile locale complète (API, PostgreSQL,
+Redis, worker et beat Celery), par HTTP, avec les comptes de test.
+**Manuel** = vérification visuelle d'un écran par une personne : aucune n'a été
+faite dans cet audit, faute d'émulateur. **Production** : le service Render ne
+répond plus (délai dépassé, 21/09 15 h) et son dépôt n'est pas synchronisé — voir
+plus bas.
+
+| Fonctionnalité | Backend | API | Flutter (client/livreur) | Admin | Permissions | Tests | E2E | Manuel | Production |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Retraits livreurs (demande, versement, refus + restitution) | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET | PARTIEL — refus, restitution unique et rejeu 409 éprouvés ; constat du versement éprouvé en tests seulement | À VÉRIFIER | BLOQUÉ |
+| Remboursements (demande, constat, abandon) | COMPLET | COMPLET | — | COMPLET | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Service client (tickets, réclamations, retours) | COMPLET | COMPLET | COMPLET | COMPLET | PARTIEL — tickets lisibles par tout `support.read`, tous pays (décision D1) | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Notes internes (commande, fiche client) | COMPLET | COMPLET | — (jamais rendues) | COMPLET | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Notes internes sur un ticket support | À FAIRE (décision D2) | À FAIRE | — | À FAIRE | — | — | — | — | — |
+| Comptes du personnel, rôles, périmètres | COMPLET | COMPLET | — | COMPLET | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Journal d'audit | COMPLET | COMPLET | — | COMPLET | COMPLET | COMPLET | COMPLET — refus de retrait et décisions de dossier relus au journal | À VÉRIFIER | BLOQUÉ |
+| Dossier livreur : validation, refus, suspension | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET — motif exigé, livreur prévenu, deux entrées d'audit | À VÉRIFIER | BLOQUÉ |
+| Expiration des pièces et rappels J-30/J-7/J-1/J0 | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET | À VÉRIFIER (dépend du beat) | À VÉRIFIER | BLOQUÉ |
+| Campagnes : rédaction, envoi, bilan cloisonné | COMPLET | COMPLET | — | COMPLET | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Campagnes : programmation | COMPLET | COMPLET | — | COMPLET | COMPLET | COMPLET | COMPLET — partie seule, par le beat, en ~4 min | À VÉRIFIER | BLOQUÉ |
+| Modération des avis | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Filtres des commandes (client, période, statut, cuisine) | COMPLET | COMPLET | — | COMPLET | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Onglet Statistiques (données réelles) | COMPLET | COMPLET | — | COMPLET | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Déconnexion automatique sur inactivité | — | — | — | COMPLET | — | COMPLET | — | À VÉRIFIER | BLOQUÉ |
+| Pastille de notifications | COMPLET | COMPLET | PARTIEL — le client recharge tout l'historique ; une panne réseau éteint la pastille | COMPLET | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Erreurs 400 et pannes réseau lisibles | COMPLET | COMPLET | COMPLET | COMPLET | — | COMPLET | PARTIEL — réponses 400 du serveur vérifiées en parcours réel ; affichage vérifié par tests seulement | À VÉRIFIER | BLOQUÉ |
+| Chat client ↔ livreur | COMPLET | COMPLET | PARTIEL — reprise sans perte après coupure ; message perdu si l'autre partie est absente plus de 15 min (décision D3) | — | COMPLET | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Vue Kanban des commandes | — (aucune route neuve) | COMPLET | — | COMPLET — onglet « Tableau » de la supervision | COMPLET — seuls les gestes que le serveur déclare jouables | COMPLET | À VÉRIFIER | À VÉRIFIER | BLOQUÉ |
+| Rapports PDF / Excel / planifiés | PARTIEL — export CSV seulement | PARTIEL | — | PARTIEL | COMPLET | PARTIEL | — | — | — |
+| OTP du personnel | À FAIRE (décision D4) | À FAIRE | — | À FAIRE | — | — | — | — | — |
+| Modération des publications sociales | À FAIRE (décision D5) | À FAIRE | — | À FAIRE | — | — | — | — | — |
+| Formules d'abonnement | PARTIEL — lues par le client, gérées seulement dans l'administration Django | PARTIEL | COMPLET | À FAIRE | — | PARTIEL | — | — | — |
+| Images de catégorie | À FAIRE (pas de champ) | À FAIRE | À FAIRE | À FAIRE | — | — | — | — | — |
+| Contenus FAQ / CGV | À FAIRE (contenu à fournir, D6) | À FAIRE | À FAIRE | À FAIRE | — | — | — | — | — |
+| Éditeur de contour de zone | COMPLET (le contour est accepté) | COMPLET | — | À FAIRE (saisie centre + rayon) | COMPLET | — | — | — | — |
+| Zones propres à un établissement | COMPLET | COMPLET | — | À FAIRE (aucun écran) | COMPLET | COMPLET | — | — | — |
+
+### Ce que l'audit du 21 septembre a corrigé
+
+Chaque correction porte un test, et les quatre qui fermaient une faille ont
+été **prouvées** : le test échoue sur l'ancien code, passe sur le nouveau.
+
+- **Une campagne programmée pouvait partir deux fois.** Programmer ou
+  déprogrammer lisait l'état hors verrou : un clic pendant l'envoi reposait
+  « programmée » sur une campagne partie, qui repartait à la nouvelle heure vers
+  toute la clientèle. Le battement, lui, envoyait une campagne qu'on venait de
+  déprogrammer, et une campagne en échec bloquait toutes les suivantes.
+- **Remplacer le mot de passe d'un membre du personnel ne coupait pas ses
+  sessions** : qui détenait l'ancien gardait trente jours de jeton.
+- **Tout compte du personnel lisait les encaissements** de son établissement
+  (`/payments/transactions/`), permission ou pas.
+- **Un refus de dossier livreur ne parvenait pas au livreur**, n'exigeait pas de
+  motif et n'entrait pas au journal ; le formulaire affichait « Modification
+  refusée », voire le refus précédent.
+- **Une soixantaine d'écrans affichaient « Une erreur est survenue. » sur un
+  refus de validation**, et le message technique anglais du transport sur une
+  panne réseau. Corrigé une fois, dans `ApiException`, pour les trois
+  applications.
+- **Le temps réel perdait ce qui était publié pendant une coupure**, et fermait
+  définitivement un canal à la deuxième coupure d'une même livraison.
+- **Un retrait de montant négatif** n'était arrêté que par la base, en erreur
+  d'intégrité.
+- **`bootstrap_roles` n'était exécuté par aucun déploiement** : les permissions
+  `payouts.*`, `support.*` et `audit.read` n'auraient atteint aucun rôle en
+  production. Il suit désormais `migrate` au démarrage de l'API (Render, VPS,
+  développement).
+- **La programmation des campagnes** avait un serveur et aucun écran : elle est
+  terminée dans le back-office.
+- **La vue Kanban** (cahier des charges §4.2.4) existe : onglet « Tableau » de
+  la supervision, une colonne par étape du service — celles des onglets, sans
+  regroupement inventé —, les plus anciennes en tête, les livrées du jour
+  seulement. Chaque carte porte les gestes de la liste, donc uniquement les
+  transitions que le serveur déclare jouables : pas de glisser-déposer qui
+  laisserait croire qu'on pose une commande à n'importe quelle étape.
+
+### Décisions métier en attente
+
+Ces points ne se tranchent pas dans le code ; aucune règle n'a été inventée.
+
+- **D1 — Qui lit un ticket ?** Un ticket ne porte ni commande ni cuisine : tout
+  compte muni de `support.read` lit ceux de tous les pays. Rattacher un ticket à
+  une cuisine (par la dernière commande du client ? par un choix à la
+  création ?) est une règle à fixer.
+- **D2 — Notes internes sur un ticket.** Aujourd'hui tout message de ticket est
+  lu par le client ; les notes internes vivent sur la fiche client et la
+  commande.
+- **D3 — Conserver le chat ?** Il n'est pas persisté (choix de confidentialité,
+  Phase 1 §5) : un message à un destinataire absent plus de quinze minutes est
+  perdu, sans push de secours.
+- **D4 — OTP du personnel** : quel facteur (application TOTP, SMS, courriel),
+  pour quels rôles, et quelle procédure de perte.
+- **D5 — Modération sociale** : masquer ou supprimer, qui signale, l'auteur
+  est-il prévenu.
+- **D6 — FAQ et CGV** : le texte juridique est à fournir ; son mode de
+  publication (texte dans l'application, ou page servie) est à choisir.
+
+### Verdict
+
+**NOT PRODUCTION READY.** Les suites sont vertes et aucune régression n'est
+connue, mais trois blocages restent hors du code : le service Render ne répond
+plus et son dépôt n'est pas synchronisé ; aucun écran n'a été vérifié à l'œil ;
+des exigences du cahier des charges ne sont pas livrées (OTP du personnel,
+FAQ/CGV, modération sociale, rapports PDF/Excel…), dont quatre attendent une
+décision. Le détail et la liste de déploiement sont
+dans `AUDIT_2026-09-21.md`.
+
+---
 
 > ⚠️ **Inventaire fonctionnel daté.** Le corps de ce document a été écrit en
 > décembre 2024, quand les trois applications parlaient directement à Supabase.
@@ -11,6 +134,95 @@
 >
 > La référence à jour est **[docs/architecture/04-migration-flutter.md](docs/architecture/04-migration-flutter.md)**,
 > qui trace domaine par domaine ce qui a été migré, construit ou supprimé.
+
+## 🔍 Le back-office repris écran par écran (22–23 septembre 2026)
+
+Cette campagne n'a pas ajouté de fonction : elle a remis d'accord ce que le
+back-office **affiche** avec ce que le serveur **tient**. Les défauts corrigés
+ont tous la même forme — un écran qui répond à une question que le serveur ne
+lui a pas posée.
+
+### Les chiffres qui n'en étaient pas
+
+- **Les devises ne s'additionnent plus.** XOF (Lomé, Abidjan, Cotonou) et XAF
+  (Douala) étaient sommés sous le libellé « FCFA » : le chiffre d'affaires du
+  réseau, les gains des livreurs, les encaissements et les versements rendaient
+  un nombre qui ne correspondait à aucune monnaie. `/analytics/reports/` rend
+  désormais une ligne **par devise**, le total global est nul quand le périmètre
+  en compte deux, et `formatPrice(double)` a été retirée du socle — le
+  compilateur exige une devise à chaque affichage d'un montant.
+- **Les agrégats viennent du serveur.** Chiffre d'affaires, durées de livraison,
+  ponctualité, taux d'annulation et répartition par statut étaient recalculés
+  dans le navigateur sur une fenêtre partielle — un an de commandes téléchargé
+  page par page, puis filtré. Trois de ces calculs étaient faux (une journée de
+  trois jours, une semaine bornée à l'heure courante, un classement de plats lu
+  sur un champ absent). Ils sont maintenant agrégés en SQL, cloisonnés par
+  périmètre : `/orders/manage/statistics/`, `/payments/transactions/summary/`,
+  `/delivery/manage/assignments/summary/`.
+- **La note d'un livreur non noté ne vaut plus 0,0.** La moyenne de la flotte
+  divisait par l'effectif entier ; embaucher faisait chuter la note. Les notes
+  par critère — « Rapidité », « Relation client », « Soin du colis » — ont été
+  retirées : elles n'existent pas au contrat, et se repliaient sur la note
+  globale, affichant trois fois le même chiffre sous trois libellés.
+- **« Courses actives : null »** disparaît : le compteur n'était produit par
+  personne. Le dossier d'un livreur ne dit rien de ses affectations.
+
+### Ce qui se dit quand ça échoue
+
+- **Un refus n'est plus une absence de données.** Un 403 sur une liste
+  s'affichait « Aucun établissement rattaché », « Aucun livreur disponible »,
+  « Aucune catégorie ». `Echec` classe l'échec par nature — saisie, droit,
+  introuvable, conflit, session, réseau, serveur — et n'offre « Réessayer » que
+  là où réessayer peut aboutir.
+- **Un formulaire attend le serveur.** Les dialogues se fermaient avant la
+  réponse : la saisie était perdue et le motif du refus s'affichait sur l'écran
+  d'en dessous, ou nulle part. `DialogueDeFormulaire` ne se ferme qu'après
+  confirmation, garde la saisie, et pose chaque erreur sous son champ.
+- **Un succès ne s'annonce plus d'avance.** « Horaires mis à jour avec succès »
+  partait avant sept écritures non attendues ; « Livreur assigné » s'affichait
+  quoi qu'il advienne.
+
+### Ce que le serveur décide, et que l'écran ne refait plus
+
+- **Les livreurs éligibles à une commande** viennent de
+  `GET /delivery/couriers/available/{commande}/`, triés par distance à la
+  cuisine. L'écran recomposait trois des cinq conditions et oubliait les deux
+  qui comptent : la cuisine de la commande et le périmètre de zone. Un siège se
+  voyait proposer Douala pour une commande de Lomé.
+- **Le rangement des catégories est atomique** : une route, une transaction
+  (`POST /catalog/manage/categories/reorder/`). Le back-office envoyait un
+  `PATCH` par catégorie déplacée ; au quatrième refus, les trois premiers rangs
+  étaient écrits et l'écran affichait l'ordre d'avant.
+- **Les vocabulaires sont miroités et vérifiés en CI** (`tools/contrat_vocabulaire.py`) :
+  types de défi, conditions de succès, natures de récompense, statuts de
+  paiement. Une valeur inventée côté Flutter — `weekly` contre `week` — produit
+  un 400 à chaque enregistrement, et rien ne le signalait.
+
+### Ce qui manquait à l'exploitation
+
+- **Neuf étapes de commande, et non cinq** : « Récupérées », « Livrées » et
+  « Annulées » n'avaient aucun onglet, plus une liste « Toutes ». La recherche
+  n'est plus prisonnière de l'onglet : chercher une référence bascule sur
+  « Toutes », au lieu de répondre « aucune commande » pour une commande partie
+  en livraison.
+- **Le planning d'un livreur porte plusieurs créneaux par jour** (service du
+  midi, service du soir), se supprime, et le serveur refuse désormais deux
+  créneaux qui se recouvrent — la contrainte d'unicité ne voyait que deux
+  départs à la même minute.
+- **`restaurants.operate`** : une permission neuve, donnée au rôle « Manager »,
+  pour ses horaires, ses fermetures exceptionnelles et ses zones. Il n'avait que
+  `restaurants.read` et récoltait un 403 ; lui donner `restaurants.write` lui
+  aurait permis de relever son propre plafond d'ajustement de stock.
+- **Les gestes sont présentés selon les droits** — avancer une commande,
+  l'annuler, la rembourser, affecter un livreur, tenir la carte, instruire un
+  dossier, embaucher. Rien ici n'est une sécurité : le serveur refuse de toute
+  façon. L'interface cesse seulement de promettre ce qu'il refusera.
+- **L'adresse d'un livreur embauché est vérifiée** comme celle d'un candidat :
+  un code part à l'embauche. Une faute de frappe ne se découvrait qu'au premier
+  « mot de passe oublié ».
+- **Le back-office parle français jusque dans ses sélecteurs** : `Select date`,
+  `JULY` et les heures en `9:00 AM` venaient de l'absence de
+  `flutter_localizations`.
 
 ## 🧰 Le back-office, complété là où l'argent et les clients attendaient (19 septembre 2026)
 
@@ -660,7 +872,10 @@ applications de l'écosystème El Corazón.
    - Algorithme à améliorer
    - **Action requise** : Affiner les algorithmes de recommandation
 
-### 📈 Taux de Complétion : **~85%**
+### 📈 Taux de Complétion
+
+Retiré : un pourcentage global ne dit pas ce qui manque. Voir le tableau
+d'états vérifiables du 21 septembre 2026, en tête de ce document.
 
 ---
 
@@ -1060,11 +1275,15 @@ section du 19 septembre 2026 pour ce qui reste à faire.
 
 ## 📊 Résumé Global
 
-| Application | Taux de Complétion | Services | Écrans | État |
-|------------|-------------------|----------|--------|------|
-| **elcora_fast** | ~85% | 60+ | 30+ | ✅ Fonctionnel (config requis) |
-| **elcora_dely** | ~90% | 30+ | 15+ | ✅ Fonctionnel (config requis) |
-| **admin** | ~90% | 50+ | 20+ | ✅ Fonctionnel (config requis) |
+Les pourcentages de complétion de ce tableau ont été retirés le 21 septembre
+2026 : ils ne reposaient sur aucune mesure. L'état par fonctionnalité est dans
+le tableau en tête du document.
+
+| Application | Tests (21/09/2026) | Analyse statique |
+|------------|--------------------|------------------|
+| **elcora_fast** | voir `AUDIT_2026-09-21.md` | `flutter analyze` : aucun problème |
+| **elcora_dely** | voir `AUDIT_2026-09-21.md` | `flutter analyze` : aucun problème |
+| **admin** | voir `AUDIT_2026-09-21.md` | `flutter analyze` : aucun problème |
 
 ### ✅ Points Forts
 
