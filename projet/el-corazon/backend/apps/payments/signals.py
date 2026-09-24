@@ -18,6 +18,7 @@ import django.dispatch
 __all__ = [
     "payment_transaction_failed",
     "payment_transaction_settled",
+    "refund_settled",
     "withdrawal_failed",
     "withdrawal_requested",
     "withdrawal_settled",
@@ -38,6 +39,14 @@ payment_transaction_settled = django.dispatch.Signal()
 #: passait en `failed`, la commande restait où elle était, et personne
 #: n'apprenait rien. `NotificationKind.PAYMENT` existait sans jamais être émis.
 payment_transaction_failed = django.dispatch.Signal()
+
+
+#: Argument : `refund` (l'instance `payments.models.Refund` constatée versée).
+#:
+#: Un remboursement versé ne disait rien au client : l'annulation lui était
+#: notifiée, le remboursement jamais, et il guettait son compte sans savoir si
+#: quelque chose était parti.
+refund_settled = django.dispatch.Signal()
 
 
 # Retraits des livreurs — argument : `withdrawal` (l'instance

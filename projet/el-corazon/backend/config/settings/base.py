@@ -659,6 +659,24 @@ PAYMENT_GATEWAYS: dict[str, str] = {
     "wallet": "apps.payments.gateway.SandboxGateway",
 }
 
+# Moyens de paiement **acceptés** à la commande, dans l'ordre où le client les
+# voit (`GET /payments/methods/`). La création de commande refuse les autres.
+#
+# La décision vivait dans l'application client, qui désactivait en dur mobile
+# money et carte « bientôt » pendant que le panier collaboratif, lui, payait en
+# mobile money : deux règles pour un même serveur. Le portefeuille est absent
+# par défaut — abandonné côté produit, il n'a aucun encaissement réel derrière
+# lui (bac à sable ci-dessus).
+PAYMENT_METHODS: list[str] = config("PAYMENT_METHODS", default="mobile_money,card,cash", cast=Csv())
+
+# Délai après lequel une commande payable en ligne, toujours impayée, est
+# annulée (`apps.payments.tasks.expire_unpaid_orders`). Compté depuis la
+# dernière tentative de paiement : le stock qu'elle réserve est rendu, et le
+# client cesse de suivre une commande qui ne sera jamais préparée.
+PAYMENT_UNPAID_ORDER_TTL_MINUTES: int = config(
+    "PAYMENT_UNPAID_ORDER_TTL_MINUTES", default=30, cast=int
+)
+
 # PayDunya. `test` vise le bac à sable du prestataire, `live` encaisse pour de
 # bon : c'est la seule variable dont une erreur se paie en argent réel.
 PAYDUNYA_MODE: str = config("PAYDUNYA_MODE", default="test")

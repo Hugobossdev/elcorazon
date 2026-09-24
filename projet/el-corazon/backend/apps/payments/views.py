@@ -28,7 +28,7 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from apps.accounts.models import UserType
 from apps.delivery.views import courier_of
-from apps.orders.models import Order
+from apps.orders.models import Order, accepted_payment_methods
 from apps.payments.gateway import GatewayError, gateway_for
 from apps.payments.models import (
     PaymentProvider,
@@ -40,6 +40,7 @@ from apps.payments.models import (
 )
 from apps.payments.serializers import (
     CheckoutSerializer,
+    PaymentMethodSerializer,
     RefundRequestSerializer,
     RefundSerializer,
     ShareCheckoutSerializer,
@@ -165,13 +166,38 @@ class TransactionViewSet(ReadOnlyModelViewSet[Transaction]):
         return queryset.filter(order__customer=user)
 
 
+class PaymentMethodsView(APIView):
+    """`GET /payments/methods/` — les moyens de paiement acceptés, dans l'ordre.
+
+    Public : ils ne disent rien de personne, et l'application les montre avant
+    même que le client ne soit connecté. La création de commande refuse ce que
+    cette liste ne contient pas (`OrderService.create_from_selection`).
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes: list[type[Any]] = []
+
+    @extend_schema(responses={200: PaymentMethodSerializer(many=True)}, tags=["payments"])
+    def get(self, request: Request) -> Response:
+        moyens = [{"code": m.value, "label": m.label} for m in accepted_payment_methods()]
+        return Response(PaymentMethodSerializer(moyens, many=True).data)
+
+
 class InitiatePaymentView(APIView):
     """`POST /payments/{order}/initiate/` — ouvre une demande de paiement."""
 
     permission_classes = [IsCustomer]
     throttle_classes = [PaymentInitiationThrottle]
 
-    @extend_schema(request=None, responses={201: CheckoutSerializer}, tags=["payments"])
+    @extend_schema(
+        request=None,
+        responses={
+            201: CheckoutSerializer,
+            # Une demande était déjà ouverte : c'est elle qui est rendue.
+            200: CheckoutSerializer,
+        },
+        tags=["payments"],
+    )
     def post(self, request: Request, order_id: str) -> Response:
         user = authenticated_user(request)
         order = get_object_or_404(Order, pk=order_id, customer=user)
@@ -185,7 +211,7 @@ class InitiatePaymentView(APIView):
                     "instructions": instruction.instructions,
                 }
             ).data,
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_200_OK if instruction.reused else status.HTTP_201_CREATED,
         )
 
 

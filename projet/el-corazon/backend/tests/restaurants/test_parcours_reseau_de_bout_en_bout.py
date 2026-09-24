@@ -20,6 +20,9 @@ cuisine que celui de Yopougon.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import uuid
 from typing import Any
 
@@ -59,10 +62,41 @@ def ok(reponse: Any, attendu: int = status.HTTP_200_OK) -> dict[str, Any]:
     return dict(reponse.data)
 
 
+SECRET_WEBHOOK = "secret-e2e"
+
+
+def notifier_encaissement(reference: str, montant: int) -> None:
+    """Le prestataire confirme l'encaissement — notification signée, seule
+    source de vérité du paiement (`apps.payments.services`)."""
+    corps = json.dumps(
+        {
+            "event_id": f"evt-{reference}",
+            "provider_reference": reference,
+            "status": "completed",
+            "amount": montant,
+            "currency": XOF,
+        }
+    ).encode()
+    signature = hmac.new(SECRET_WEBHOOK.encode(), corps, hashlib.sha256).hexdigest()
+    reponse = APIClient().post(
+        reverse("v1:payments:webhook", args=["paydunya"]),
+        data=corps,
+        content_type="application/json",
+        headers={"X-Signature": signature},
+    )
+    assert reponse.status_code == status.HTTP_200_OK, reponse.data
+
+
 class TestReseauDeBoutEnBout:
+    # Les deux chemins d'encaissement : à la porte, et en ligne avant la
+    # préparation. Le second n'était éprouvé nulle part de bout en bout — ni
+    # l'ouverture du paiement, ni sa confirmation par le prestataire, ni ce que
+    # le livreur lit ensuite.
+    @pytest.mark.parametrize("moyen", ["cash", "mobile_money"])
     def test_de_l_ouverture_du_marche_a_la_commande_livree(
-        self, django_capture_on_commit_callbacks: Any
+        self, moyen: str, settings: Any, django_capture_on_commit_callbacks: Any
     ) -> None:
+        settings.PAYMENT_WEBHOOK_SECRET = SECRET_WEBHOOK
         siege = connecte(User.objects.create_superuser("siege.e2e@elcorazon.test", "motdepasse"))
 
         # ================================================= 1-3. le marché
@@ -337,7 +371,7 @@ class TestReseauDeBoutEnBout:
         commande = ok(
             client.post(
                 reverse("v1:orders:order-list"),
-                {"restaurant": slug, "address": adresse["id"], "payment_method": "cash"},
+                {"restaurant": slug, "address": adresse["id"], "payment_method": moyen},
                 format="json",
                 headers={"Idempotency-Key": str(uuid.uuid4())},
             ),
@@ -354,11 +388,35 @@ class TestReseauDeBoutEnBout:
             "Cocody",
         )
 
+        # ========================================== 16 bis. le paiement en ligne
+        if moyen == "mobile_money":
+            # Le moyen est publié par le serveur : c'est cette liste que la
+            # caisse propose.
+            moyens = client.get(reverse("v1:payments:methods"))
+            assert moyens.status_code == status.HTTP_200_OK
+            assert "mobile_money" in [m["code"] for m in moyens.data]
+
+            ouverture = ok(
+                client.post(reverse("v1:payments:initiate", args=[commande["id"]])),
+                status.HTTP_201_CREATED,
+            )
+            assert ouverture["transaction"]["amount"] == {"amount": "8400", "currency": XOF}
+            # « Réessayer » : la même demande, jamais une seconde facture.
+            reprise = ok(client.post(reverse("v1:payments:initiate", args=[commande["id"]])))
+            assert reprise["transaction"]["id"] == ouverture["transaction"]["id"]
+
+            notifier_encaissement(ouverture["transaction"]["provider_reference"], 8400)
+            payee = ok(client.get(reverse("v1:orders:order-detail", args=[commande["id"]])))
+            # Confirmée par l'encaissement, pas par la cuisine.
+            assert payee["status"] == OrderStatus.CONFIRMED
+            assert payee["amount_paid"] == {"amount": "8400", "currency": XOF}
+
         # ============================================ 17-19. la cuisine
         poste = connecte(cuisinier)
-        file = ok(poste.get(reverse("v1:orders:managed-order-list"), {"status": "pending"}))
+        a_prendre = "pending" if moyen == "cash" else "confirmed"
+        file = ok(poste.get(reverse("v1:orders:managed-order-list"), {"status": a_prendre}))
         assert [c["reference"] for c in file["results"]] == [commande["reference"]]
-        for cible in ("confirmed", "preparing"):
+        for cible in ("confirmed", "preparing") if moyen == "cash" else ("preparing",):
             ok(
                 poste.post(
                     reverse("v1:orders:managed-order-status", args=[commande["id"]]),
@@ -390,7 +448,10 @@ class TestReseauDeBoutEnBout:
             livreur_cocody.get(reverse("v1:delivery:assignment-detail", args=[course.pk]))
         )
         assert proposee["delivery_zone_name"] == "Cocody"
-        assert proposee["amount_to_collect"] == {"amount": "8400", "currency": XOF}
+        # À la porte, le livreur encaisse le tout ; payée en ligne, rien.
+        assert proposee["amount_to_collect"] == (
+            {"amount": "8400", "currency": XOF} if moyen == "cash" else None
+        )
         assert proposee["delivery_instructions"] == "Portail vert"
         assert proposee["recipient_phone"] == ""  # pas avant l'acceptation
 

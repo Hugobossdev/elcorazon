@@ -130,6 +130,13 @@ class Transaction(UUIDModel, TimeStampedModel, PositiveAmountModel):
     completed_at = models.DateTimeField(null=True, blank=True)
     failure_reason = models.TextField(blank=True)
 
+    # Où payer, tel que le prestataire l'a rendu à l'ouverture. Conservé pour
+    # **rendre la même demande** à un second appel tant qu'elle est ouverte :
+    # sans lui, `PaymentService.initiate` ne pouvait que rouvrir une facture, et
+    # le client qui validait les deux payait deux fois.
+    checkout_url = models.URLField(max_length=500, blank=True)
+    checkout_instructions = models.TextField(blank=True)
+
     class Meta:
         verbose_name = "transaction"
         ordering = ["-created_at"]

@@ -217,6 +217,8 @@ class SplitService:
         )
         instruction = gateway_for(provider).open_checkout(pending)
         pending.provider_reference = instruction.provider_reference
+        pending.checkout_url = instruction.checkout_url
+        pending.checkout_instructions = instruction.instructions
         pending.save()
 
         # La part pointe vers sa transaction **avant** l'encaissement : c'est ce

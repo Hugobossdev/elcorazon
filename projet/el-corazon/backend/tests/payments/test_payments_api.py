@@ -140,6 +140,49 @@ class TestInitiation:
         assert response.status_code == status.HTTP_409_CONFLICT
         assert "déjà réglée" in response.data["detail"]
 
+    def test_un_second_appel_rend_le_paiement_deja_ouvert(
+        self, as_customer: APIClient, order: Order
+    ) -> None:
+        """Idempotence du paiement — un « Réessayer », un retour sur l'écran.
+
+        Chaque appel ouvrait une facture de plus chez le prestataire, pour le
+        même solde : le client qui validait les deux demandes reçues sur son
+        téléphone payait deux fois, et rien ne le relevait. Le solde restant
+        n'y changeait rien, puisqu'il ne compte que l'**encaissé**.
+        """
+        url = reverse("v1:payments:initiate", args=[order.pk])
+
+        premier = as_customer.post(url)
+        second = as_customer.post(url)
+
+        assert premier.status_code == status.HTTP_201_CREATED
+        assert second.status_code == status.HTTP_200_OK
+        assert Transaction.objects.filter(order=order).count() == 1
+        assert second.data["transaction"]["id"] == premier.data["transaction"]["id"]
+        assert second.data["checkout_url"] == premier.data["checkout_url"]
+        assert second.data["instructions"] == premier.data["instructions"]
+
+    @signed
+    def test_apres_un_echec_un_nouveau_paiement_s_ouvre(
+        self, as_customer: APIClient, client: APIClient, order: Order, initiated: Transaction
+    ) -> None:
+        """La reprise ne doit pas bloquer le client : seule une demande encore
+        **ouverte** est rendue, une demande échouée n'engage plus rien."""
+        post_webhook(
+            client,
+            {
+                "event_id": "evt-echec",
+                "provider_reference": initiated.provider_reference,
+                "status": PaymentStatus.FAILED,
+            },
+        )
+
+        response = as_customer.post(reverse("v1:payments:initiate", args=[order.pk]))
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert Transaction.objects.filter(order=order).count() == 2
+        assert response.data["transaction"]["id"] != str(initiated.pk)
+
     def test_la_commande_d_autrui_est_introuvable(
         self, client: APIClient, courier_user: User, order: Order
     ) -> None:

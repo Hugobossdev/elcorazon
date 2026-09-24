@@ -63,6 +63,12 @@ class CheckoutInstruction:
     checkout_url: str
     instructions: str = ""
 
+    #: Vrai quand la demande n'a pas été ouverte par cet appel mais **rendue** :
+    #: une demande était déjà en cours pour la commande. Aucun prestataire ne le
+    #: pose ; c'est `PaymentService.initiate` qui le dit, et la vue qui en tire
+    #: 200 plutôt que 201.
+    reused: bool = False
+
 
 @dataclass(frozen=True, slots=True)
 class Notification:

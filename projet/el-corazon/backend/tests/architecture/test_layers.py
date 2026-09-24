@@ -70,6 +70,10 @@ ROUTES_PUBLIQUES: set[str] = {
     # d'avoir écrit quoi que ce soit, et les fermer obligerait à authentifier
     # une réponse identique pour tout le monde.
     "v1:geography:reference",
+    # Moyens de paiement acceptés. Un réglage de la plateforme, identique pour
+    # tous : la caisse les montre avant même la connexion, et ils ne disent
+    # rien de personne.
+    "v1:payments:methods",
     # Livrabilité d'une position — « me livrez-vous ici, par qui, à quel prix ».
     # Ouverte pour la même raison que la géographie : exiger une inscription
     # pour répondre « non, pas encore chez vous » est le meilleur moyen de ne

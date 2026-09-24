@@ -98,6 +98,13 @@ app.conf.beat_schedule = {
         "task": "apps.notifications.tasks.send_scheduled_campaigns",
         "schedule": 300.0,
     },
+    "expire-unpaid-orders": {
+        # Toutes les cinq minutes, face à un délai de trente : une commande
+        # abandonnée rend son stock au plus tard trente-cinq minutes après la
+        # dernière tentative de paiement.
+        "task": "apps.payments.tasks.expire_unpaid_orders",
+        "schedule": 300.0,
+    },
     "expire-stale-offers": {
         # Chaque minute : une proposition sans réponse bloque un repas prêt. Le
         # tour clôt ce qui a dépassé `DELIVERY_OFFER_TTL_SECONDS`, propose au

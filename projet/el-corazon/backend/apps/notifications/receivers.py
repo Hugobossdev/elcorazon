@@ -27,9 +27,11 @@ from apps.notifications.services import notify, staff_to_alert
 from apps.orders.models import Order
 from apps.orders.signals import order_created, order_status_changed
 from apps.orders.states import OrderStatus
-from apps.payments.models import Transaction, Withdrawal
+from apps.payments.models import Refund, Transaction, Withdrawal
 from apps.payments.signals import (
     payment_transaction_failed,
+    payment_transaction_settled,
+    refund_settled,
     withdrawal_failed,
     withdrawal_requested,
     withdrawal_settled,
@@ -65,6 +67,8 @@ __all__ = [
     "on_order_status_changed",
     "on_order_status_changed_for_staff",
     "on_payment_failed",
+    "on_payment_to_refund",
+    "on_refund_settled",
     "on_restaurant_status_changed",
     "on_return_decided",
     "on_return_requested",
@@ -242,6 +246,73 @@ def on_payment_failed(
             body=f"Le paiement de la commande {order.reference} a échoué.",
             data={"order": str(order.pk), "transaction": str(transaction.pk)},
         )
+
+
+@receiver(
+    payment_transaction_settled,
+    sender=Transaction,
+    dispatch_uid="notifications.payment_to_refund",
+)
+def on_payment_to_refund(
+    sender: type[Transaction], *, transaction: Transaction, **kwargs: Any
+) -> None:
+    """Prévient l'exploitation d'un encaissement que la commande n'appelait pas.
+
+    Deux cas, que rien ne relevait : la commande est **déjà soldée** — deux
+    demandes de paiement ouvertes, validées toutes les deux — ou elle est
+    **annulée**, et la notification du prestataire arrive après coup. Le
+    webhook ne peut pas refuser l'argent, déjà pris chez le prestataire ; il
+    l'enregistre, et `_confirm_order` ne confirme rien. Sans cette alerte, la
+    somme restait chez nous sans que personne le sache.
+
+    Le client n'est pas prévenu ici : c'est le remboursement, une fois fait,
+    qui le concerne.
+
+    Lit `order.amount_paid`, que `report_settled_total` a mis à jour **avant**
+    l'émission du signal.
+    """
+    order = transaction.order
+    if order is None:
+        return
+
+    order.refresh_from_db(fields=["status", "amount_paid_minor", "amount_paid_currency"])
+    encaisse = order.amount_paid
+    if encaisse is None or not encaisse.is_positive:
+        return
+    annulee = order.status == OrderStatus.CANCELLED
+    if not (annulee or encaisse > order.total):
+        return
+
+    motif = "commande annulée" if annulee else f"déjà réglée ({order.total})"
+    for membre in staff_to_alert(restaurant_id=order.restaurant_id, permission=ORDERS_READ):
+        notify(
+            user=membre,
+            kind=NotificationKind.PAYMENT,
+            title="Encaissement à rembourser",
+            body=(
+                f"{transaction.amount} encaissés sur la commande {order.reference}, {motif}. "
+                "À rembourser au client."
+            ),
+            data={"order": str(order.pk), "transaction": str(transaction.pk)},
+        )
+
+
+@receiver(refund_settled, sender=Refund, dispatch_uid="notifications.refund_settled")
+def on_refund_settled(sender: type[Refund], *, refund: Refund, **kwargs: Any) -> None:
+    """Dit au client que son argent lui est rendu, combien, et pour quelle commande.
+
+    Au **versement** constaté, pas à la demande : `RefundService.refund` n'écrit
+    qu'une intention, que l'exploitation peut encore abandonner. Annoncer
+    « remboursé » à ce moment-là serait promettre ce qui n'est pas fait.
+    """
+    order = refund.order
+    notify(
+        user=order.customer,
+        kind=NotificationKind.PAYMENT,
+        title="Remboursement effectué",
+        body=f"{refund.amount} vous ont été remboursés pour la commande {order.reference}.",
+        data={"order": str(order.pk), "refund": str(refund.pk)},
+    )
 
 
 @receiver(assignment_accepted, sender=Assignment, dispatch_uid="notifications.delivery_accepted")

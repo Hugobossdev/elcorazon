@@ -52,6 +52,16 @@ class TransactionSerializer(serializers.ModelSerializer[Transaction]):
         read_only_fields = fields
 
 
+class PaymentMethodSerializer(serializers.Serializer[Any]):
+    """Un moyen de paiement accepté — code à renvoyer, libellé à afficher."""
+
+    code = serializers.CharField(read_only=True)
+    # `label` est aussi un attribut de `Field` (le libellé du formulaire) ; la
+    # clé est gardée parce que c'est celle des `TextChoices` qu'elle recopie,
+    # et que le client la lit sous ce nom.
+    label = serializers.CharField(read_only=True)  # type: ignore[assignment]
+
+
 class CheckoutSerializer(serializers.Serializer[Any]):
     """Réponse à l'initiation : la transaction ouverte et où aller payer."""
 

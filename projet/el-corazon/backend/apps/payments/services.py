@@ -34,6 +34,7 @@ from apps.payments.models import (
 from apps.payments.signals import (
     payment_transaction_failed,
     payment_transaction_settled,
+    refund_settled,
     withdrawal_failed,
     withdrawal_requested,
     withdrawal_settled,
@@ -147,6 +148,34 @@ class PaymentService:
                 "Cette commande est déjà réglée.", current_status=locked.status
             )
 
+        # Une demande encore ouverte est **rendue**, jamais doublée.
+        #
+        # Le solde restant ne protégeait pas de ce cas : il ne compte que
+        # l'encaissé, et une demande ouverte n'a rien encaissé. Un « Réessayer »,
+        # un retour sur l'écran de paiement, ouvraient donc une seconde facture
+        # pour le même solde — et le client qui validait les deux demandes
+        # reçues sur son téléphone payait deux fois. La rendre plutôt que la
+        # refuser : le client qui a perdu la page de paiement doit pouvoir la
+        # retrouver. Le verrou posé sur la commande ci-dessus sérialise deux
+        # appels simultanés, si bien que le second voit la demande du premier.
+        ouverte = (
+            locked.transactions.filter(
+                status__in=(PaymentStatus.PENDING, PaymentStatus.PROCESSING),
+                amount_minor=outstanding.amount_minor,
+                amount_currency=outstanding.currency,
+            )
+            .exclude(checkout_url="")
+            .order_by("-created_at")
+            .first()
+        )
+        if ouverte is not None:
+            return ouverte, CheckoutInstruction(
+                provider_reference=ouverte.provider_reference,
+                checkout_url=ouverte.checkout_url,
+                instructions=ouverte.checkout_instructions,
+                reused=True,
+            )
+
         provider = PROVIDER_FOR_METHOD[PaymentMethod(locked.payment_method)]
         # `amount` est un `MoneyField` — voir la note dans `orders.services`.
         pending = Transaction(  # type: ignore[misc]
@@ -162,6 +191,8 @@ class PaymentService:
         # généré côté Python, donc connue avant l'insertion.
         instruction = gateway_for(provider).open_checkout(pending)
         pending.provider_reference = instruction.provider_reference
+        pending.checkout_url = instruction.checkout_url
+        pending.checkout_instructions = instruction.instructions
         pending.save()
 
         # `pending → processing` dit que la main est passée au prestataire.
@@ -197,6 +228,8 @@ class PaymentService:
         )
         instruction = gateway_for(provider).open_checkout(pending)
         pending.provider_reference = instruction.provider_reference
+        pending.checkout_url = instruction.checkout_url
+        pending.checkout_instructions = instruction.instructions
         pending.save()
 
         PaymentService._move(pending, PaymentStatus.PROCESSING)
@@ -587,6 +620,7 @@ class RefundService:
             avant={"status": avant},
             provider_reference=provider_reference,
         )
+        refund_settled.send(sender=Refund, refund=refund)
         return refund
 
     @staticmethod

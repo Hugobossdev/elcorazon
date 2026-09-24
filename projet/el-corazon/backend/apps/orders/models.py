@@ -15,6 +15,8 @@ répondant à une faille prouvée de l'implémentation précédente :
 
 from __future__ import annotations
 
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 
 from apps.accounts.models import User
@@ -25,7 +27,14 @@ from apps.restaurants.models import Restaurant
 from common.fields import MoneyField
 from common.models import TimeStampedModel, UUIDModel, state_check_constraint
 
-__all__ = ["IdempotencyKey", "Order", "OrderLine", "OrderStatusEvent", "PaymentMethod"]
+__all__ = [
+    "IdempotencyKey",
+    "Order",
+    "OrderLine",
+    "OrderStatusEvent",
+    "PaymentMethod",
+    "accepted_payment_methods",
+]
 
 
 class PaymentMethod(models.TextChoices):
@@ -33,6 +42,28 @@ class PaymentMethod(models.TextChoices):
     CASH = "cash", "Espèces à la livraison"
     WALLET = "wallet", "Portefeuille"
     CARD = "card", "Carte bancaire"
+
+
+def accepted_payment_methods() -> list[PaymentMethod]:
+    """Moyens de paiement acceptés à la commande, dans l'ordre du réglage.
+
+    **La** règle, lue par la création de commande et publiée au client
+    (`GET /payments/methods/`). Elle vivait dans l'application client, qui
+    désactivait en dur mobile money et carte pendant que le panier collaboratif
+    payait en mobile money.
+
+    Un code inconnu dans `PAYMENT_METHODS` est une erreur de configuration, pas
+    un moyen à ignorer : le taire publierait une liste amputée sans que
+    personne comprenne pourquoi.
+    """
+    codes: list[str] = list(settings.PAYMENT_METHODS)
+    inconnus = [code for code in codes if code not in PaymentMethod.values]
+    if inconnus:
+        raise ImproperlyConfigured(
+            f"PAYMENT_METHODS cite des moyens inconnus : {', '.join(inconnus)}. "
+            f"Valeurs possibles : {', '.join(PaymentMethod.values)}."
+        )
+    return [PaymentMethod(code) for code in codes]
 
 
 class Order(UUIDModel, TimeStampedModel):

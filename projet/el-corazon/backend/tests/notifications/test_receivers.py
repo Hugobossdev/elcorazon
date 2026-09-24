@@ -30,8 +30,9 @@ from apps.notifications.services import staff_to_alert
 from apps.orders.models import Order
 from apps.orders.services import OrderService
 from apps.orders.states import OrderStatus
-from apps.payments.models import PaymentProvider, Transaction
-from apps.payments.signals import payment_transaction_failed
+from apps.payments.models import PaymentProvider, PaymentStatus, Transaction
+from apps.payments.services import RefundService
+from apps.payments.signals import payment_transaction_failed, payment_transaction_settled
 from apps.restaurants.models import AreaMembership, Restaurant, StaffMembership
 from apps.restaurants.signals import restaurant_status_changed
 from apps.restaurants.states import RestaurantStatus
@@ -226,6 +227,102 @@ class TestPaiementRefuse:
 
         assert not notifications_de(customer, NotificationKind.PAYMENT)
         assert not notifications_de(operateur, NotificationKind.PAYMENT)
+
+
+class TestEncaissementARembourser:
+    """Un encaissement que la commande n'appelait pas — « un paiement est reçu
+    deux fois », ou reçu pour une commande annulée.
+
+    L'argent est pris chez le prestataire : le refuser n'est pas possible, et le
+    taire le laisserait chez nous. Seule l'exploitation peut rembourser ; c'est
+    donc elle qu'on prévient, et elle seule.
+    """
+
+    @staticmethod
+    def _encaisser(order: Order, reference: str) -> Transaction:
+        return Transaction.objects.create(
+            order=order,
+            provider=PaymentProvider.PAYDUNYA,
+            provider_reference=reference,
+            amount=order.total,
+        )
+
+    def test_un_trop_percu_previent_l_exploitation(self, order: Order, operateur: User) -> None:
+        Order.objects.filter(pk=order.pk).update(
+            amount_paid_minor=order.total.amount_minor * 2,
+            amount_paid_currency=order.total.currency,
+        )
+        order.refresh_from_db()
+        txn = self._encaisser(order, "PD-DOUBLE-002")
+
+        payment_transaction_settled.send(sender=Transaction, transaction=txn)
+
+        alertes = notifications_de(operateur, NotificationKind.PAYMENT)
+        assert len(alertes) == 1
+        assert order.reference in alertes[0].body
+        assert alertes[0].data["transaction"] == str(txn.pk)
+        assert not notifications_de(order.customer, NotificationKind.PAYMENT)
+
+    def test_un_encaissement_sur_commande_annulee_previent_l_exploitation(
+        self, order: Order, operateur: User
+    ) -> None:
+        Order.objects.filter(pk=order.pk).update(
+            status=OrderStatus.CANCELLED,
+            amount_paid_minor=order.total.amount_minor,
+            amount_paid_currency=order.total.currency,
+        )
+        order.refresh_from_db()
+        txn = self._encaisser(order, "PD-ANNULEE-001")
+
+        payment_transaction_settled.send(sender=Transaction, transaction=txn)
+
+        assert len(notifications_de(operateur, NotificationKind.PAYMENT)) == 1
+
+    def test_un_encaissement_ordinaire_ne_derange_personne(
+        self, order: Order, operateur: User
+    ) -> None:
+        Order.objects.filter(pk=order.pk).update(
+            amount_paid_minor=order.total.amount_minor,
+            amount_paid_currency=order.total.currency,
+        )
+        order.refresh_from_db()
+        txn = self._encaisser(order, "PD-NORMAL-001")
+
+        payment_transaction_settled.send(sender=Transaction, transaction=txn)
+
+        assert not notifications_de(operateur, NotificationKind.PAYMENT)
+
+
+class TestRemboursementVerse:
+    """Le client apprend que son argent lui est rendu.
+
+    Un remboursement constaté par l'exploitation ne disait rien au client :
+    l'annulation lui avait été notifiée, le remboursement jamais. Il restait à
+    guetter son compte mobile money sans savoir si quelque chose était parti.
+    """
+
+    def test_le_versement_constate_previent_le_client(self, order: Order, operateur: User) -> None:
+        txn = Transaction.objects.create(
+            order=order,
+            provider=PaymentProvider.PAYDUNYA,
+            provider_reference="PD-REMB-001",
+            amount=order.total,
+            status=PaymentStatus.COMPLETED,
+        )
+        remboursement = RefundService.refund(
+            order=order,
+            transaction_id=str(txn.pk),
+            amount=order.total,
+            reason="Commande annulée",
+            actor=operateur,
+        )
+        assert not notifications_de(order.customer, NotificationKind.PAYMENT)
+
+        RefundService.settle(refund=remboursement, actor=operateur)
+
+        [avis] = notifications_de(order.customer, NotificationKind.PAYMENT)
+        assert order.reference in avis.body
+        assert avis.data == {"order": str(order.pk), "refund": str(remboursement.pk)}
 
 
 class TestCourseAcceptee:

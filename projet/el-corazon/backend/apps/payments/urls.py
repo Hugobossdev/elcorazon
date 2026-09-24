@@ -25,6 +25,7 @@ urlpatterns = [
     # sont pas des détails de la collection des transactions.
     path("webhook/<str:provider>/", views.WebhookView.as_view(), name="webhook"),
     path("withdrawals/", views.WithdrawalView.as_view(), name="withdrawals"),
+    path("methods/", views.PaymentMethodsView.as_view(), name="methods"),
     path("<uuid:order_id>/initiate/", views.InitiatePaymentView.as_view(), name="initiate"),
     path("<uuid:order_id>/split/", views.SplitPaymentView.as_view(), name="split"),
     # Le jeton d'une part, pour un convive sans compte. Pas d'identifiant de

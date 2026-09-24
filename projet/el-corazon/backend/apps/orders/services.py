@@ -30,7 +30,13 @@ from apps.carts.models import Cart
 from apps.carts.services import CartService, PricedLine, PricedSelection, price_cart
 from apps.catalog.services import StockService, record_purchase
 from apps.geography.services import DeliveryQuote
-from apps.orders.models import Order, OrderLine, OrderStatusEvent
+from apps.orders.models import (
+    Order,
+    OrderLine,
+    OrderStatusEvent,
+    PaymentMethod,
+    accepted_payment_methods,
+)
 from apps.orders.signals import order_created, order_status_changed
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from apps.production.services import MaterialService, ProducedLine
@@ -219,6 +225,22 @@ class OrderService:
         personnel, ou clore le panier collaboratif.
         """
         priced = selection
+
+        # Le moyen de paiement d'abord : rien n'est verrouillé ni décompté pour
+        # une commande que le serveur n'encaissera pas. Le client lit la même
+        # liste (`GET /payments/methods/`) ; ce refus est le filet d'une
+        # application ancienne, ou d'un réglage changé entre-temps.
+        if payment_method not in accepted_payment_methods():
+            libelle = (
+                PaymentMethod(payment_method).label
+                if payment_method in PaymentMethod.values
+                else payment_method
+            )
+            raise BusinessRuleViolation(
+                f"Le paiement « {libelle} » n'est pas accepté pour le moment. "
+                "Choisissez un autre moyen de paiement.",
+                payment_method=payment_method,
+            )
 
         # **La** règle, au moment d'écrire — et non d'après le verdict que la
         # sélection a pu emporter à sa lecture : un panier collaboratif se
