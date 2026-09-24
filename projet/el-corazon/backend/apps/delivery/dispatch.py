@@ -263,6 +263,20 @@ def on_order_ready(sender: type[Order], *, order: Order, target: str, **kwargs: 
         _apres_commit(lambda: DispatchService.dispatch(order_id))
 
 
+@receiver(order_status_changed, sender=Order, dispatch_uid="delivery.close_on_order_cancelled")
+def on_order_cancelled(sender: type[Order], *, order: Order, target: str, **kwargs: Any) -> None:
+    """Une commande annulée referme sa course encore ouverte.
+
+    Synchrone, et non `_apres_commit` : la fermeture doit tenir ou tomber avec
+    l'annulation. Une course laissée « proposée » sur une commande annulée
+    pouvait être acceptée par le livreur.
+    """
+    if target == OrderStatus.CANCELLED:
+        AssignmentService.close_for_cancelled_order(
+            order=order, reason="La commande a été annulée."
+        )
+
+
 @receiver(assignment_declined, sender=Assignment, dispatch_uid="delivery.dispatch_on_decline")
 def on_assignment_declined(
     sender: type[Assignment], *, assignment: Assignment, **kwargs: Any

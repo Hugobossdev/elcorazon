@@ -20,6 +20,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
+from functools import partial
 from typing import ClassVar
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -691,11 +692,19 @@ class AssignmentService:
         est posé sur la commande, dans le même ordre que `offer`, pour que deux
         chemins concurrents ne s'interbloquent pas.
         """
-        Order.objects.select_for_update().get(pk=assignment.order_id)
+        commande = Order.objects.select_for_update().get(pk=assignment.order_id)
         current = Assignment.objects.select_related("order").get(pk=assignment.pk)
 
         if current.courier_id != courier.pk:
             raise BusinessRuleViolation("Cette course est proposée à un autre livreur.")
+        # La commande verrouillée ci-dessus n'était jamais lue : la garde
+        # « commande annulée » ne vivait que dans `transition_to`, et un livreur
+        # acceptait (200) la course d'un repas qui ne partirait jamais.
+        if commande.status == OrderStatus.CANCELLED:
+            raise BusinessRuleViolation(
+                "La commande a été annulée ; cette course ne peut plus être acceptée.",
+                order_status=commande.status,
+            )
         if not courier.can_accept_orders:
             raise BusinessRuleViolation(
                 "Votre dossier ne vous permet pas d'accepter une course.",
@@ -740,6 +749,47 @@ class AssignmentService:
         # doit le faire de façon atomique avec l'acceptation qui le déclenche.
         assignment_accepted.send(sender=Assignment, assignment=current)
         return current
+
+    @staticmethod
+    def close_for_cancelled_order(*, order: Order, reason: str) -> list[Assignment]:
+        """Referme les courses encore ouvertes d'une commande qu'on vient d'annuler.
+
+        Appelée par le récepteur de `order_status_changed`, **dans** la
+        transaction de l'annulation : la commande et sa course basculent
+        ensemble, ou pas du tout. Sans elle, la course restait « proposée »,
+        visible et acceptable par le livreur.
+
+        Pas `transition_to` : celui-ci compte l'annulation contre le livreur
+        (`deliveries_cancelled`, qui mesure sa fiabilité), alors qu'il n'y est
+        pour rien. Seules `offered` et `accepted` sont concernées — une commande
+        ne s'annule plus une fois le repas enlevé, et une course close le reste.
+        """
+        fermees: list[Assignment] = []
+        ouvertes = (
+            Assignment.objects.select_for_update()
+            .select_related("courier__user")
+            .filter(order=order, status__in=(DeliveryStatus.OFFERED, DeliveryStatus.ACCEPTED))
+        )
+        for course in ouvertes:
+            DELIVERY_MACHINE.validate(course.status, DeliveryStatus.CANCELLED)
+            course.status = DeliveryStatus.CANCELLED
+            course.decline_reason = reason
+            course.save(update_fields=["status", "decline_reason", "updated_at"])
+
+            charge = {
+                "assignment": str(course.pk),
+                "order": str(course.order_id),
+                "status": DeliveryStatus.CANCELLED,
+                "courier": course.courier.user.full_name,
+            }
+            transaction.on_commit(
+                partial(publish, order_group(order.pk), "delivery.status", charge)
+            )
+            # Le livreur l'apprend par son propre canal — même signal que
+            # l'annulation d'une course, que `notifications` relaie déjà.
+            assignment_cancelled.send(sender=Assignment, assignment=course, reason=reason)
+            fermees.append(course)
+        return fermees
 
     @staticmethod
     @transaction.atomic
