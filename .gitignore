@@ -18,3 +18,13 @@
 !/render.yaml
 !/.github/
 !/projet/
+
+# Ce qu'aucun outil ne doit jamais faire suivre, où qu'il soit sous le projet.
+# Placé après la liste blanche : une règle plus tardive l'emporte.
+#
+# Le bytecode Python se régénère à chaque exécution de `tools/*.py` ; suivi, il
+# réapparaît modifié après chaque lancement d'une garde de CI.
+__pycache__/
+*.py[cod]
+# Traces laissées par un plantage de `bash.exe` (Git Bash) sous Windows.
+*.stackdump
