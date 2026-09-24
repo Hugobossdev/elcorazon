@@ -41,8 +41,15 @@ Ce qu'il ne voit pas
 
 Une adresse construite morceau par morceau à l'exécution. Le projet n'en écrit
 pas — les chemins sont des littéraux à interpolation — mais c'est la limite à
-garder en tête. Il ne vérifie pas non plus les **verbes** : qu'une adresse
-existe ne dit pas qu'elle accepte le `POST` que le client lui envoie.
+garder en tête.
+
+Les **verbes** sont vérifiés depuis le 20 septembre 2026, et seulement là où
+l'appel les donne d'un seul tenant (`apiClient.post('/…/')`). Un chemin rangé
+dans une variable avant l'appel échappe au contrôle du verbe, pas à celui de
+l'adresse. Ce que ce contrôle attrape : une action `@action(methods=["post"])`
+appelée en `GET`, un `PATCH` là où le serveur n'expose que `PUT` — pannes qui
+sortent en `405` à l'exécution, sur l'écran qui s'en sert, et qu'aucune suite
+ne voyait.
 
 Il ne dit rien de la valeur d'`API_BASE_URL`. C'est une autre question, tenue
 par `apps/fastfood/test/adresse_api_test.dart`, et elle ne se vérifie qu'à
@@ -92,6 +99,13 @@ LITTERAL = re.compile(r"'(/[a-z][A-Za-z0-9_/{}$.-]*)'")
 #: `apiClient` ou `_client`, et l'adresse tomber à la ligne suivante.
 APPEL_CLIENT = re.compile(
     r"""(?:apiClient|_client|_apiClient)\s*\.\s*(?:get|post|patch|put|delete)\s*"""
+    r"""(?:<[^>]*>)?\s*\(\s*(?:\r?\n\s*)?'(/[^']+)'""",
+)
+
+#: Le même appel, verbe compris. Sert au contrôle des **méthodes** : une adresse
+#: qui existe n'accepte pas forcément le verbe qu'on lui envoie.
+APPEL_AVEC_VERBE = re.compile(
+    r"""(?:apiClient|_client|_apiClient)\s*\.\s*(get|post|patch|put|delete)\s*"""
     r"""(?:<[^>]*>)?\s*\(\s*(?:\r?\n\s*)?'(/[^']+)'""",
 )
 
@@ -173,6 +187,27 @@ def adresses_demandees() -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     return http, websocket
 
 
+def verbes_demandes() -> dict[tuple[str, str], set[str]]:
+    """Couples (verbe, adresse) écrits d'un seul tenant, et leurs sources.
+
+    Restreint aux appels où le verbe et le chemin se lisent ensemble : un chemin
+    rangé dans une variable avant l'appel garde son contrôle d'adresse et perd
+    celui de la méthode. Mieux vaut un contrôle partiel et sûr qu'une
+    heuristique qui suivrait les variables et se tromperait.
+    """
+    trouves: dict[tuple[str, str], set[str]] = {}
+    for chemin in fichiers_dart():
+        with open(chemin, encoding="utf-8", errors="ignore") as fh:
+            contenu = fh.read()
+        relatif = os.path.relpath(chemin, RACINE).replace(os.sep, "/")
+        for verbe, brut in APPEL_AVEC_VERBE.findall(contenu):
+            if brut.startswith("/ws/") or brut.startswith(ETRANGERS):
+                continue
+            cle = (verbe.lower(), normalise(brut, _PARAM_DART))
+            trouves.setdefault(cle, set()).add(relatif)
+    return trouves
+
+
 def python_du_backend() -> str:
     """L'interpréteur du `.venv` du backend, où vivent Django et drf-spectacular."""
     for suffixe in (os.path.join("Scripts", "python.exe"), os.path.join("bin", "python")):
@@ -191,15 +226,23 @@ django.setup()
 from drf_spectacular.generators import SchemaGenerator
 from config.routing import websocket_urlpatterns
 
+chemins = SchemaGenerator().get_schema(request=None, public=True)["paths"]
 print(json.dumps({
-    "http": sorted(SchemaGenerator().get_schema(request=None, public=True)["paths"]),
+    "http": sorted(chemins),
+    "verbes": {
+        chemin: sorted(v for v in route if v in ("get", "post", "patch", "put", "delete"))
+        for chemin, route in chemins.items()
+    },
     "websocket": ["/" + str(p.pattern) for p in websocket_urlpatterns],
 }))
 """
 
 
-def adresses_servies() -> tuple[set[str], set[str]]:
-    """Ce que le serveur monte réellement, schéma OpenAPI et routage Channels."""
+def adresses_servies() -> tuple[set[str], set[str], dict[str, set[str]]]:
+    """Ce que le serveur monte réellement, schéma OpenAPI et routage Channels.
+
+    Le troisième élément donne, par adresse normalisée, les verbes servis.
+    """
     resultat = subprocess.run(  # noqa: S603
         [python_du_backend(), "-c", _EXTRACTION],
         cwd=BACKEND,
@@ -216,7 +259,13 @@ def adresses_servies() -> tuple[set[str], set[str]]:
     charge = json.loads(resultat.stdout.strip().splitlines()[-1])
     http = {normalise(c, _PARAM_SCHEMA) for c in charge["http"]}
     websocket = {normalise(c, _PARAM_CHANNELS) for c in charge["websocket"]}
-    return http, websocket
+
+    # Deux adresses distinctes peuvent se normaliser en la même forme — un
+    # identifiant et un slug au même emplacement : leurs verbes s'unissent.
+    verbes: dict[str, set[str]] = {}
+    for chemin, methodes in charge["verbes"].items():
+        verbes.setdefault(normalise(chemin, _PARAM_SCHEMA), set()).update(methodes)
+    return http, websocket, verbes
 
 
 def rapport(
@@ -243,6 +292,37 @@ def rapport(
     return orphelines
 
 
+def rapport_des_verbes(
+    demandes: dict[tuple[str, str], set[str]],
+    servies: set[str],
+    verbes: dict[str, set[str]],
+) -> list[tuple[str, set[str]]]:
+    """Les appels dont l'adresse existe mais qui emploient un verbe non servi.
+
+    Les adresses absentes ne sont pas redites ici : `rapport` les a déjà
+    nommées, et les compter deux fois ferait croire à deux défauts.
+    """
+    fautifs = sorted(
+        (f"{verbe.upper()} {adresse}", sources)
+        for (verbe, adresse), sources in demandes.items()
+        if PREFIXE_API + adresse in servies
+        and verbe not in verbes.get(PREFIXE_API + adresse, set())
+    )
+
+    print(f"\nVerbes — {len(demandes)} appels lisibles d'un seul tenant")
+    if not fautifs:
+        print("    tous servis")
+        return []
+
+    for appel, sources in fautifs:
+        verbe, adresse = appel.split(" ", 1)
+        attendus = ", ".join(sorted(verbes.get(PREFIXE_API + adresse, set())) or ["aucun"])
+        print(f"    REFUSÉ   {appel}  (servi : {attendus})")
+        for source in sorted(sources):
+            print(f"             appelée par {source}")
+    return fautifs
+
+
 def main(argv: list[str]) -> int:
     parseur = argparse.ArgumentParser(description=__doc__)
     parseur.add_argument(
@@ -251,15 +331,17 @@ def main(argv: list[str]) -> int:
     args = parseur.parse_args(argv)
 
     http_demandees, ws_demandees = adresses_demandees()
-    http_servies, ws_servies = adresses_servies()
+    http_servies, ws_servies, verbes_servis = adresses_servies()
 
     if args.lister:
         print("Routes servies par le backend :")
         for adresse in sorted(http_servies | ws_servies):
-            print(f"    {adresse}")
+            methodes = ", ".join(sorted(verbes_servis.get(adresse, set())))
+            print(f"    {adresse}" + (f"  [{methodes}]" if methodes else ""))
 
     orphelines = rapport("HTTP", http_demandees, http_servies, PREFIXE_API)
     orphelines += rapport("WebSocket", ws_demandees, ws_servies, "")
+    mauvais_verbes = rapport_des_verbes(verbes_demandes(), http_servies, verbes_servis)
 
     if orphelines:
         print(
@@ -270,7 +352,15 @@ def main(argv: list[str]) -> int:
         )
         return 1
 
-    print("\nToutes les adresses appelées par l'application existent côté serveur.")
+    if mauvais_verbes:
+        print(
+            f"\nÉCHEC : {len(mauvais_verbes)} appels emploient un verbe que la route "
+            f"ne sert pas.\nLa panne sort en 405 à l'exécution, sur l'écran qui s'en sert."
+        )
+        return 1
+
+    print("\nToutes les adresses appelées par l'application existent côté serveur, ")
+    print("et les verbes lisibles d'un seul tenant sont tous servis.")
     return 0
 
 

@@ -34,6 +34,11 @@ on:
       # déclencher, sans quoi la dérive n'apparaîtrait qu'au prochain commit
       # Flutter — ou à l'exécution.
       - "projet/el-corazon/backend/apps/**/urls.py"
+      # Même raison pour les vocabulaires : un `TextChoices` renommé côté
+      # Django doit faire échouer `contrat_vocabulaire.py` tout de suite, pas
+      # au prochain commit Flutter.
+      - "projet/el-corazon/backend/apps/**/models.py"
+      - "projet/el-corazon/backend/apps/**/states.py"
       - "projet/el-corazon/backend/config/**"
       - ".github/workflows/flutter-ci.yml"
   pull_request:
@@ -45,6 +50,8 @@ on:
       # modifier change ce que la CI exige, il doit donc la déclencher.
       - "projet/el-corazon/analysis_options.yaml"
       - "projet/el-corazon/backend/apps/**/urls.py"
+      - "projet/el-corazon/backend/apps/**/models.py"
+      - "projet/el-corazon/backend/apps/**/states.py"
       - "projet/el-corazon/backend/config/**"
       - ".github/workflows/flutter-ci.yml"
 
@@ -97,6 +104,11 @@ jobs:
         # Un outil de garde a besoin de sa propre garde.
         run: python -m pytest tools/test_code_mort.py -q
 
+      - name: La garde des vocabulaires, gardée à son tour
+        # Rejoue l'écart du 21 septembre 2026 (natures de défi inventées côté
+        # Dart) : si la comparaison le laissait passer, elle ne garderait rien.
+        run: python -m pytest tools/test_contrat_vocabulaire.py -q
+
   contrat:
     name: Contrat d'API (adresses appelées vs servies)
     runs-on: ubuntu-latest
@@ -133,6 +145,13 @@ jobs:
         # déploiement Render a servi sans son préfixe `/api/v1`, toutes les
         # routes revenant en 404 sans qu'aucune suite ne bronche.
         run: python tools/contrat_routes.py
+
+      - name: Aucune valeur d'énumération que le serveur refuse
+        # Les adresses ne suffisent pas : l'écran des défis appelait la bonne
+        # route avec une nature (`orders_count`) que le serveur ne connaît pas,
+        # et chaque création revenait en 400. Ce contrôle confronte chaque
+        # vocabulaire Dart aux `TextChoices` Django qu'il reflète.
+        run: python tools/contrat_vocabulaire.py
 
   paquet:
     name: Paquet partagé (analyse + tests)
