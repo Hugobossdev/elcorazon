@@ -24,3 +24,25 @@ abstract final class PaymentStatus {
         _ => valeur,
       };
 }
+
+/// Un moyen de paiement **accepté** à la commande — `GET /payments/methods/`.
+///
+/// La liste vient du serveur (réglage `PAYMENT_METHODS`), qui refuse à la
+/// création tout moyen qu'il ne publie pas. L'application client la désactivait
+/// en dur (« bientôt ») ; elle n'en décide plus.
+class AcceptedPaymentMethod {
+  const AcceptedPaymentMethod({required this.code, required this.label});
+
+  factory AcceptedPaymentMethod.fromJson(Map<String, dynamic> json) {
+    return AcceptedPaymentMethod(
+      code: json['code'] as String,
+      label: json['label'] as String,
+    );
+  }
+
+  /// La valeur à renvoyer dans `payment_method` — `apps.orders.models.PaymentMethod`.
+  final String code;
+
+  /// Le libellé du serveur, tel qu'il le montre partout ailleurs.
+  final String label;
+}

@@ -70,6 +70,17 @@ class _FakeServer implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (options.path.endsWith('/payments/methods/') && options.method == 'GET') {
+      return ResponseBody.fromString(
+        jsonEncode([
+          {'code': 'mobile_money', 'label': 'Mobile Money'},
+          {'code': 'cash', 'label': 'Espèces à la livraison'},
+        ]),
+        200,
+        headers: _jsonHeaders,
+      );
+    }
+
     if (options.path.contains('/payments/order-1/initiate/') && options.method == 'POST') {
       return ResponseBody.fromString(
         jsonEncode({
@@ -149,6 +160,13 @@ void main() {
       expect(checkout.checkoutUrl, 'https://sandbox.elcorazon.app/checkout/txn-1');
       expect(checkout.transaction.status, 'processing');
       expect(checkout.transaction.amount.amountMinor, 3000);
+    });
+
+    test('acceptedMethods rend la liste du serveur, dans son ordre', () async {
+      final moyens = await repository.acceptedMethods();
+
+      expect(moyens.map((m) => m.code), ['mobile_money', 'cash']);
+      expect(moyens.last.label, 'Espèces à la livraison');
     });
 
     test('getTransactions mappe l\'historique filtré par commande', () async {

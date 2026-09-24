@@ -17,6 +17,8 @@ class ManagedCity {
     required this.slug,
     required this.countryIsoCode,
     required this.isActive,
+    this.centroidLatitude,
+    this.centroidLongitude,
   });
 
   factory ManagedCity.fromJson(Map<String, dynamic> json) {
@@ -26,6 +28,8 @@ class ManagedCity {
       slug: json['slug'] as String,
       countryIsoCode: json['country'].toString(),
       isActive: json['is_active'] as bool? ?? true,
+      centroidLatitude: ((json['centroid'] as Map<String, dynamic>?)?['lat'] as num?)?.toDouble(),
+      centroidLongitude: ((json['centroid'] as Map<String, dynamic>?)?['lon'] as num?)?.toDouble(),
     );
   }
 
@@ -39,4 +43,11 @@ class ManagedCity {
   final String countryIsoCode;
 
   final bool isActive;
+
+  /// Centre de la ville (`centroid`, `{"lat", "lon"}`), nul s'il n'a pas été
+  /// saisi. Il sert de point de départ aux écrans qui placent quelque chose
+  /// dans la ville — une zone, un établissement — au lieu de coordonnées
+  /// d'exemple écrites en dur.
+  final double? centroidLatitude;
+  final double? centroidLongitude;
 }

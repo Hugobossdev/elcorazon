@@ -177,7 +177,10 @@ class GroupCart {
       perMember: (json['per_member'] as List<dynamic>? ?? const [])
           .map((json) => GroupCartMemberTotal.fromJson(json as Map<String, dynamic>))
           .toList(),
-      currency: json['currency'] as String? ?? 'XOF',
+      // À défaut du champ, la devise du sous-total que le serveur a chiffré —
+      // plus le franc CFA écrit en dur, faux hors de la zone UEMOA.
+      currency: json['currency'] as String? ??
+          (json['subtotal'] as Map<String, dynamic>)['currency'] as String,
       subtotal: Money.fromJson(json['subtotal'] as Map<String, dynamic>),
       isOrderable: json['is_orderable'] as bool? ?? false,
       unavailableCode: json['unavailable_code'] as String? ?? '',

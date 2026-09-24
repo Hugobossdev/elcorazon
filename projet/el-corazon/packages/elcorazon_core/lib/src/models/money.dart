@@ -59,6 +59,13 @@ class Money {
     );
   }
 
+  /// Nombre de décimales de [currency] — 0 pour le franc CFA, 2 pour l'euro.
+  ///
+  /// Pour les formulaires qui valident une saisie : « le franc CFA n'a pas de
+  /// centimes » se déduisait d'un `currency == 'XOF'`, aveugle au XAF et au
+  /// GNF qui n'en ont pas davantage.
+  static int exponentOf(String currency) => _exponents[currency] ?? 0;
+
   static int _pow10(int exponent) {
     var result = 1;
     for (var i = 0; i < exponent; i++) {
@@ -125,7 +132,10 @@ const _separateurMilliers = ' ';
 ///
 /// [codeIso] remplace le symbole d'usage (« CFA ») par le code de la devise
 /// (« XOF », « XAF ») — voir [Money.formatIso].
-String formatPrice(double amount, {String currency = 'XOF', bool codeIso = false}) {
+///
+/// [currency] est **exigée** : elle retombait sur le franc CFA, et un montant
+/// d'Accra s'affichait en « CFA » sans que rien ne le signale.
+String formatPrice(double amount, {required String currency, bool codeIso = false}) {
   final symbole = codeIso ? currency : (Money._symboles[currency] ?? currency);
   if (amount.isNaN || amount.isInfinite) return '0 $symbole';
 

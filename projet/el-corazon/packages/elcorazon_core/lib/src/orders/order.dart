@@ -3,7 +3,8 @@ import 'package:elcorazon_core/src/models/money.dart';
 /// Option retenue sur une ligne de commande — copie figée du choix du client.
 ///
 /// Miroir du JSON écrit par `OrderService` :
-/// `{"group": "Cuisson", "option": "À point", "delta": 0, "currency": "XOF"}`.
+/// `{"group": "Cuisson", "option": "À point", "delta": 0}` — sans devise : le
+/// supplément est dans celle de sa ligne, que [OrderLine.fromJson] transmet.
 ///
 /// C'est ce que le client a demandé : « sans oignon », « bien cuit », « taille
 /// L ». Une cuisine qui ne le voit pas prépare autre chose que ce qui a été
@@ -16,13 +17,15 @@ class ChosenOption {
     required this.priceDelta,
   });
 
-  factory ChosenOption.fromJson(Map<String, dynamic> json) {
+  /// [devise] est celle de la ligne. Le franc CFA était écrit ici en dur :
+  /// une commande d'Accra affichait ses suppléments en « CFA ».
+  factory ChosenOption.fromJson(Map<String, dynamic> json, {required String devise}) {
     return ChosenOption(
       groupName: json['group'] as String? ?? '',
       optionName: json['option'] as String? ?? '',
       priceDelta: Money(
         amountMinor: (json['delta'] as num?)?.toInt() ?? 0,
-        currency: json['currency'] as String? ?? 'XOF',
+        currency: json['currency'] as String? ?? devise,
       ),
     );
   }
@@ -54,17 +57,21 @@ class OrderLine {
   });
 
   factory OrderLine.fromJson(Map<String, dynamic> json) {
+    final unitPrice = Money.fromJson(json['unit_price'] as Map<String, dynamic>);
     return OrderLine(
       id: json['id'] as String,
       menuItemId: json['menu_item'] as String,
       itemName: json['item_name'] as String,
       itemImage: json['item_image'] as String?,
-      unitPrice: Money.fromJson(json['unit_price'] as Map<String, dynamic>),
+      unitPrice: unitPrice,
       quantity: json['quantity'] as int,
       lineTotal: Money.fromJson(json['line_total'] as Map<String, dynamic>),
       notes: json['notes'] as String? ?? '',
       options: (json['options'] as List<dynamic>? ?? const [])
-          .map((o) => ChosenOption.fromJson(o as Map<String, dynamic>))
+          .map((o) => ChosenOption.fromJson(
+                o as Map<String, dynamic>,
+                devise: unitPrice.currency,
+              ),)
           .toList(),
     );
   }

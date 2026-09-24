@@ -41,7 +41,8 @@ class Transaction {
   final String providerReference;
   final Money amount;
 
-  /// `pending` | `processing` | `completed` | `failed` (`PaymentStatus`).
+  /// `pending` | `processing` | `completed` | `failed` | `cancelled` |
+  /// `refunded` — `PaymentStatus`, `backend/apps/payments/models.py`.
   final String status;
   final DateTime? completedAt;
   final String failureReason;
@@ -50,6 +51,10 @@ class Transaction {
 
   bool get isCompleted => status == 'completed';
   bool get isFailed => status == 'failed';
+
+  /// Demande annulée avant d'avoir abouti (`pending → cancelled`). Rien n'a
+  /// été encaissé ; un écran qui ne la reconnaît pas attend indéfiniment.
+  bool get isCancelled => status == 'cancelled';
 }
 
 /// Ce que le client doit faire pour payer — miroir de `CheckoutSerializer`.

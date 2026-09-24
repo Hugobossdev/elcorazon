@@ -3,6 +3,7 @@ import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/network/page.dart';
 import 'package:elcorazon_core/src/payments/split_payment.dart';
 import 'package:elcorazon_core/src/payments/transaction.dart';
+import 'package:elcorazon_core/src/payments/vocabulaire_paiement.dart';
 
 /// Accès à `/api/v1/payments/*` — voir
 /// `backend/apps/payments/{serializers,views,services}.py`. Le client ouvre
@@ -13,6 +14,17 @@ class PaymentRepository {
 
   final ApiClient apiClient;
 
+  /// Les moyens de paiement acceptés, dans l'ordre où les proposer.
+  Future<List<AcceptedPaymentMethod>> acceptedMethods() async {
+    final response = await apiClient.get('/payments/methods/');
+    return (response.data as List<dynamic>)
+        .map((json) => AcceptedPaymentMethod.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Ouvre la demande de paiement de la commande — ou **rend** celle qui est
+  /// déjà ouverte (200 au lieu de 201) : un second appel ne crée jamais une
+  /// seconde facture chez le prestataire.
   Future<CheckoutInstruction> initiate(String orderId) async {
     final response = await apiClient.post('/payments/$orderId/initiate/');
     return CheckoutInstruction.fromJson(response.data as Map<String, dynamic>);

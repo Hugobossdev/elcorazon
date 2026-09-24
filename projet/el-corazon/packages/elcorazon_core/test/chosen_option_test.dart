@@ -60,6 +60,19 @@ void main() {
     });
   });
 
+  group('La devise', () {
+    test('est celle de la ligne, le serveur ne la répète pas sur l’option', () {
+      final ligne = OrderLine.fromJson({
+        ..._ligne(options: [
+          {'group': 'Taille', 'option': 'Grande', 'delta': 300},
+        ],),
+        'unit_price': {'amount': '4500', 'currency': 'GHS'},
+      });
+
+      expect(ligne.options.single.priceDelta.currency, 'GHS');
+    });
+  });
+
   group('Un JSON incomplet', () {
     test('ne fait pas tomber la lecture d’une commande', () {
       // Une commande ancienne peut porter des options écrites autrement. Mieux

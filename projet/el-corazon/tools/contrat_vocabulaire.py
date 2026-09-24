@@ -112,6 +112,25 @@ REGISTRE: tuple[Vocabulaire, ...] = (
         "StatutCommande",
         "apps.orders.states.OrderStatus",
     ),
+    Vocabulaire(
+        "apps/admin/lib/presentation/moyen_paiement.dart",
+        "MoyenPaiement",
+        "apps.orders.models.PaymentMethod",
+    ),
+    # L'application client déclarait `refunded` et `failed`, sans contrepartie
+    # serveur, et traitait un statut inconnu comme `pending`.
+    Vocabulaire(
+        "apps/fastfood/lib/models/order.dart",
+        "OrderStatus",
+        "apps.orders.states.OrderStatus",
+    ),
+    # `support` y manquait : une réponse du service client se rangeait sous
+    # « Compte ».
+    Vocabulaire(
+        "apps/fastfood/lib/presentation/genre_notification.dart",
+        "GenreNotification",
+        "apps.notifications.models.NotificationKind",
+    ),
 )
 
 #: Là où le back-office écrit des permissions.
