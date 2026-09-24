@@ -23,6 +23,7 @@ from __future__ import annotations
 from django.contrib import admin
 
 from apps.loyalty.models import (
+    LoyaltyTier,
     PointsAccount,
     PointsEntry,
     Reward,
@@ -34,6 +35,7 @@ from apps.loyalty.models import (
 from common.admin import ReadOnlyAdmin, money_display
 
 __all__ = [
+    "LoyaltyTierAdmin",
     "PointsAccountAdmin",
     "PointsEntryAdmin",
     "RewardAdmin",
@@ -84,6 +86,18 @@ class PointsEntryAdmin(ReadOnlyAdmin):
     search_fields = ("account__user__email", "description", "order__reference")
     list_select_related = ("account__user", "order")
     date_hierarchy = "created_at"
+
+
+@admin.register(LoyaltyTier)
+class LoyaltyTierAdmin(admin.ModelAdmin):
+    """Les paliers — de la politique commerciale, comme le catalogue.
+
+    Le seuil porte sur les points **cumulés gagnés** : le changer reclasse
+    immédiatement tous les comptes, sans rien écrire dans leur journal.
+    """
+
+    list_display = ("name", "threshold")
+    ordering = ("threshold",)
 
 
 @admin.register(Reward)

@@ -35,6 +35,7 @@ from common.state_machine import StateMachine
 __all__ = [
     "SUBSCRIPTION_MACHINE",
     "EntryKind",
+    "LoyaltyTier",
     "PointsAccount",
     "PointsEntry",
     "Reward",
@@ -76,6 +77,38 @@ class PointsAccount(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.user.email} — {self.balance} points"
+
+
+class LoyaltyTier(UUIDModel, TimeStampedModel):
+    """Palier de fidélité — « Standard », « Fidèle », « VIP ».
+
+    Les paliers vivaient dans l'application cliente, écrits en dur (200 et 500
+    points), à côté d'une seconde échelle de « niveaux » sans rapport (100,
+    300, 600…) : deux versions de l'application en circulation annonçaient
+    deux statuts différents pour un même compte, et aucune ne faisait foi
+    (BR-006). Ils sont désormais une donnée, éditée ici et lue par le client.
+
+    **Le seuil porte sur les points cumulés gagnés** (`lifetime_earned`), pas
+    sur le solde : échanger ses points contre une récompense ne doit pas faire
+    redescendre de palier — ce serait punir l'usage même du programme.
+
+    Un palier ne confère encore aucun avantage côté serveur : c'est un statut
+    affiché. Le jour où il en conférera un, c'est ici qu'il se lira.
+    """
+
+    name = models.CharField(max_length=40, unique=True)
+    threshold = models.PositiveIntegerField(
+        unique=True,
+        help_text="Points cumulés gagnés à partir desquels le palier est atteint.",
+    )
+
+    class Meta:
+        verbose_name = "palier de fidélité"
+        verbose_name_plural = "paliers de fidélité"
+        ordering = ["threshold"]
+
+    def __str__(self) -> str:
+        return f"{self.name} (dès {self.threshold} points)"
 
 
 class EntryKind(models.TextChoices):

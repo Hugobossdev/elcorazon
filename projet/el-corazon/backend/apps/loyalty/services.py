@@ -34,6 +34,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.loyalty.models import (
     EntryKind,
+    LoyaltyTier,
     PointsAccount,
     PointsEntry,
     Reward,
@@ -45,7 +46,7 @@ from apps.promotions.models import DiscountKind, Promotion
 from common.exceptions import BusinessRuleViolation, InsufficientBalance
 from common.money import Money
 
-__all__ = ["LoyaltyService", "RewardResult", "points_for"]
+__all__ = ["LoyaltyService", "RewardResult", "TierProgress", "points_for", "tier_progress"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +54,40 @@ class RewardResult:
     redemption: RewardRedemption
     promotion: Promotion
     balance: int
+
+
+@dataclass(frozen=True, slots=True)
+class TierProgress:
+    """Où en est un compte dans l'échelle des paliers.
+
+    `tier` est nul si aucun palier n'a de seuil à 0 et que le compte n'a pas
+    encore atteint le premier ; `next_tier` l'est au sommet de l'échelle.
+    """
+
+    tier: LoyaltyTier | None
+    next_tier: LoyaltyTier | None
+    points_to_next: int | None
+
+
+def tier_progress(lifetime_earned: int) -> TierProgress:
+    """Le palier atteint par `lifetime_earned`, et le suivant.
+
+    Une seule lecture, triée : l'échelle compte quelques lignes, et la lire en
+    entier coûte moins qu'une requête par borne.
+    """
+    atteint: LoyaltyTier | None = None
+    suivant: LoyaltyTier | None = None
+    for palier in LoyaltyTier.objects.order_by("threshold"):
+        if palier.threshold <= lifetime_earned:
+            atteint = palier
+        else:
+            suivant = palier
+            break
+    return TierProgress(
+        tier=atteint,
+        next_tier=suivant,
+        points_to_next=None if suivant is None else suivant.threshold - lifetime_earned,
+    )
 
 
 def points_for(amount: Money) -> int:

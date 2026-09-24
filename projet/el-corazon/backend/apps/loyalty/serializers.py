@@ -17,9 +17,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.loyalty.models import (
+    LoyaltyTier,
     PointsAccount,
     PointsEntry,
     Reward,
@@ -28,10 +30,12 @@ from apps.loyalty.models import (
     Subscription,
     SubscriptionPlan,
 )
+from apps.loyalty.services import tier_progress
 from apps.promotions.serializers import PromotionSerializer
 from common.serializers import MoneyField
 
 __all__ = [
+    "LoyaltyTierSerializer",
     "ManagedRewardSerializer",
     "PointsAccountSerializer",
     "PointsEntrySerializer",
@@ -43,6 +47,15 @@ __all__ = [
     "SubscriptionResultSerializer",
     "SubscriptionSerializer",
 ]
+
+
+class LoyaltyTierSerializer(serializers.ModelSerializer[LoyaltyTier]):
+    """Un palier : son nom et le cumul de points qui l'ouvre."""
+
+    class Meta:
+        model = LoyaltyTier
+        fields = ["name", "threshold"]
+        read_only_fields = fields
 
 
 class PointsAccountSerializer(serializers.ModelSerializer[PointsAccount]):
@@ -58,10 +71,48 @@ class PointsAccountSerializer(serializers.ModelSerializer[PointsAccount]):
     aucun moyen de vérifier que rien n'a disparu.
     """
 
+    # Le palier est calculé ici, par le serveur, sur `lifetime_earned` : le
+    # client l'affiche sans rien recompter. Il le calculait lui-même, sur des
+    # seuils écrits dans son code (BR-006).
+    tier = serializers.SerializerMethodField()
+    next_tier = serializers.SerializerMethodField()
+    points_to_next_tier = serializers.SerializerMethodField()
+
     class Meta:
         model = PointsAccount
-        fields = ["balance", "lifetime_earned", "lifetime_spent", "last_activity_at"]
+        fields = [
+            "balance",
+            "lifetime_earned",
+            "lifetime_spent",
+            "last_activity_at",
+            "tier",
+            "next_tier",
+            "points_to_next_tier",
+        ]
         read_only_fields = fields
+
+    def _avancement(self, obj: PointsAccount) -> Any:
+        # Mémorisé par instance : trois champs le lisent, une seule requête.
+        cache: dict[int, Any] = self.context.setdefault("_paliers", {})
+        cle = id(obj)
+        if cle not in cache:
+            cache[cle] = tier_progress(obj.lifetime_earned)
+        return cache[cle]
+
+    @extend_schema_field(LoyaltyTierSerializer(allow_null=True))
+    def get_tier(self, obj: PointsAccount) -> dict[str, Any] | None:
+        palier = self._avancement(obj).tier
+        return None if palier is None else LoyaltyTierSerializer(palier).data
+
+    @extend_schema_field(LoyaltyTierSerializer(allow_null=True))
+    def get_next_tier(self, obj: PointsAccount) -> dict[str, Any] | None:
+        palier = self._avancement(obj).next_tier
+        return None if palier is None else LoyaltyTierSerializer(palier).data
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_points_to_next_tier(self, obj: PointsAccount) -> int | None:
+        points: int | None = self._avancement(obj).points_to_next
+        return points
 
 
 class PointsEntrySerializer(serializers.ModelSerializer[PointsEntry]):

@@ -29,13 +29,14 @@ from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.loyalty.models import (
     EntryKind,
+    LoyaltyTier,
     PointsAccount,
     PointsEntry,
     Reward,
     RewardKind,
     RewardRedemption,
 )
-from apps.loyalty.services import LoyaltyService, points_for
+from apps.loyalty.services import LoyaltyService, points_for, tier_progress
 from apps.loyalty.tasks import expire_points
 from apps.orders.models import Order
 from apps.orders.states import OrderStatus
@@ -661,3 +662,68 @@ class TestCloisonnement:
             status.HTTP_401_UNAUTHORIZED,
             status.HTTP_403_FORBIDDEN,
         )
+
+
+@pytest.fixture
+def paliers() -> None:
+    """Une échelle connue, indépendante de celle que pose la migration."""
+    LoyaltyTier.objects.all().delete()
+    for nom, seuil in (("Standard", 0), ("Fidèle", 200), ("VIP", 500)):
+        LoyaltyTier.objects.create(name=nom, threshold=seuil)
+
+
+@pytest.mark.usefixtures("paliers")
+class TestPaliers:
+    """BR-006 — le palier est une donnée du serveur, plus un calcul du client."""
+
+    def test_le_palier_suit_le_cumul_gagne(self) -> None:
+        avancement = tier_progress(250)
+
+        assert avancement.tier is not None and avancement.tier.name == "Fidèle"
+        assert avancement.next_tier is not None and avancement.next_tier.name == "VIP"
+        assert avancement.points_to_next == 250
+
+    def test_le_seuil_est_atteint_a_egalite(self) -> None:
+        avancement = tier_progress(200)
+
+        assert avancement.tier is not None and avancement.tier.name == "Fidèle"
+
+    def test_au_sommet_il_n_y_a_plus_de_suivant(self) -> None:
+        avancement = tier_progress(10_000)
+
+        assert avancement.tier is not None and avancement.tier.name == "VIP"
+        assert avancement.next_tier is None
+        assert avancement.points_to_next is None
+
+    def test_sans_palier_a_zero_un_compte_neuf_n_en_a_aucun(self) -> None:
+        LoyaltyTier.objects.filter(threshold=0).delete()
+
+        avancement = tier_progress(0)
+
+        assert avancement.tier is None
+        assert avancement.next_tier is not None and avancement.next_tier.name == "Fidèle"
+
+    def test_depenser_ses_points_ne_fait_pas_redescendre(
+        self, as_customer: APIClient, customer: User
+    ) -> None:
+        """Le seuil porte sur le cumul gagné : un échange baisse le solde, pas le
+        palier."""
+        account = crediter(customer, 600)
+        PointsAccount.objects.filter(pk=account.pk).update(balance=50, lifetime_spent=550)
+
+        response = as_customer.get(reverse("v1:loyalty:account"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["balance"] == 50
+        assert response.data["tier"] == {"name": "VIP", "threshold": 500}
+        assert response.data["next_tier"] is None
+        assert response.data["points_to_next_tier"] is None
+
+    def test_un_compte_neuf_lit_le_premier_palier_et_le_suivant(
+        self, as_customer: APIClient
+    ) -> None:
+        response = as_customer.get(reverse("v1:loyalty:account"))
+
+        assert response.data["tier"] == {"name": "Standard", "threshold": 0}
+        assert response.data["next_tier"] == {"name": "Fidèle", "threshold": 200}
+        assert response.data["points_to_next_tier"] == 200
