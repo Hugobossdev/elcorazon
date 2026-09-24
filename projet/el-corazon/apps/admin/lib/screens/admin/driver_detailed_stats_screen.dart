@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/presentation/statut_commande.dart'; // Import StatutCommande
 import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
@@ -23,7 +24,12 @@ class DriverDetailedStatsScreen extends StatefulWidget {
 
 class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
   bool _isLoading = false;
-  Map<String, dynamic> _detailedStats = {};
+
+  /// Le dossier relu au serveur : celui reçu en paramètre vient d'une liste
+  /// qui peut dater. Nul tant que la lecture n'a pas abouti — l'écran affiche
+  /// alors celui qu'on lui a passé plutôt que rien.
+  eccore.CourierProfile? _dossier;
+  Echec? _echec;
 
   /// Les commandes que ce livreur a portées.
   ///
@@ -47,24 +53,33 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
   }
 
   Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _echec = null;
+    });
     try {
       final service = context.read<DriverManagementService>();
-      final courses =
-          await context.read<AssignmentService>().historyOf(widget.driver!.id);
-      final stats = await service.getDriverDetailedStats(widget.driver!.id);
+      final courses = await context.read<AssignmentService>().historyOf(widget.driver!.id);
+      final dossier = await service.relireDossier(widget.driver!.id);
 
       if (!mounted) return;
       setState(() {
-        _detailedStats = stats;
+        _dossier = dossier;
         _commandesPortees = {for (final course in courses) course.orderId};
       });
-    } catch (e) {
-      Journal.trace('Erreur chargement détails: $e');
+    } on eccore.ApiException catch (e) {
+      // Le refus était avalé par un `catch (e)` muet : l'écran affichait alors
+      // les compteurs du dossier passé en paramètre comme s'ils venaient
+      // d'être relus.
+      Journal.trace('Statistiques livreur : lecture impossible — ${e.code}');
+      if (mounted) setState(() => _echec = Echec.de(e));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+
+  /// Le dossier à afficher : celui relu, sinon celui reçu.
+  eccore.CourierProfile get _livreur => _dossier ?? widget.driver!;
 
   @override
   Widget build(BuildContext context) {
@@ -136,6 +151,14 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      if (_echec != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: BandeauEchec(
+                            echec: _echec!,
+                            onReessayer: () => unawaited(_loadData()),
+                          ),
+                        ),
                       _buildProfileHeader(context),
                       const SizedBox(height: 24),
 
@@ -189,14 +212,12 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
 
                       const SizedBox(height: 24),
 
-                      const SizedBox(height: 24),
-
                       Text(
-                        'Performance Qualité',
+                        'Satisfaction',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 16),
-                      _buildDetailedRatings(),
+                      _buildSatisfaction(),
                     ],
                   ),
                 );
@@ -234,7 +255,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
             child: CircleAvatar(
               radius: 34,
               child: Text(
-                widget.driver!.fullName[0],
+                _livreur.fullName[0],
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
@@ -249,7 +270,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.driver!.fullName,
+                  _livreur.fullName,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
@@ -273,7 +294,9 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                           const Icon(Icons.star, color: Colors.amber, size: 16),
                           const SizedBox(width: 4),
                           Text(
-                            widget.driver!.ratingAverage.toStringAsFixed(1),
+                            _livreur.ratingCount == 0
+                                ? '—'
+                                : _livreur.ratingAverage.toStringAsFixed(1),
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -284,7 +307,7 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      '${widget.driver!.deliveriesCompleted} livraisons',
+                      '${_livreur.deliveriesCompleted} livraisons',
                       style: const TextStyle(color: Colors.white70),
                     ),
                   ],
@@ -297,53 +320,63 @@ class _DriverDetailedStatsScreenState extends State<DriverDetailedStatsScreen> {
     );
   }
 
-  Widget _buildDetailedRatings() {
-    // Utiliser les vraies stats si disponibles, sinon utiliser le rating global ou 0
-    final timeRating = (_detailedStats['avg_time_rating'] as num?)?.toDouble() ??
-        widget.driver!.ratingAverage;
-    final serviceRating = (_detailedStats['avg_service_rating'] as num?)?.toDouble() ??
-        widget.driver!.ratingAverage;
-    final conditionRating =
-        (_detailedStats['avg_condition_rating'] as num?)?.toDouble() ??
-            widget.driver!.ratingAverage;
+  /// La note du livreur — **celle que le serveur tient**, et rien de plus.
+  ///
+  /// Trois barres s'affichaient ici : « Rapidité », « Relation client »,
+  /// « Soin du colis ». Aucune n'existe au contrat : le serveur ne tient qu'un
+  /// agrégat (`rating_average`, `rating_count`) alimenté par la note que le
+  /// client laisse à la livraison. Faute de données, les trois barres se
+  /// repliaient **sur la note globale** : elles affichaient donc trois fois le
+  /// même chiffre, sous trois libellés différents, au-dessus de la mention
+  /// « Basé sur 0 avis détaillés ».
+  ///
+  /// Un superviseur pouvait y lire qu'un livreur était noté 4,8 en relation
+  /// client alors que personne n'a jamais noté sa relation client — et le dire
+  /// en entretien.
+  Widget _buildSatisfaction() {
+    final livreur = _livreur;
+    final scheme = Theme.of(context).colorScheme;
 
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey.withValues(alpha: 0.2)),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            _buildRatingRow('Rapidité', timeRating),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Divider(),
-            ),
-            _buildRatingRow(
-              'Relation Client',
-              serviceRating,
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Divider(),
-            ),
-            _buildRatingRow(
-              'Soin du colis',
-              conditionRating,
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Divider(),
-            ),
-            Text(
-              'Basé sur ${_detailedStats['total_reviews'] ?? 0} avis détaillés',
-              style: TextStyle(color: Colors.grey[600], fontStyle: FontStyle.italic),
-            ),
-          ],
-        ),
+        child: livreur.ratingCount == 0
+            ? Row(
+                children: [
+                  Icon(Icons.star_border, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Aucun client n’a encore noté ce livreur.',
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  _buildRatingRow('Note moyenne', livreur.ratingAverage),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Divider(),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Sur ${livreur.ratingCount} avis client'
+                      '${livreur.ratingCount > 1 ? 's' : ''}. '
+                      'Le détail par critère n’est pas collecté : le client '
+                      'laisse une note unique à la livraison.',
+                      style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }

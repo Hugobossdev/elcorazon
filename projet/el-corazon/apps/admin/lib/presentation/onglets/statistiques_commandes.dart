@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
@@ -7,6 +9,7 @@ import 'package:admin/presentation/couleur_statut.dart';
 import 'package:admin/presentation/evolution_commandes.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/ui/ui.dart';
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/utils/price_formatter.dart';
 
 /// L'onglet « Statistiques » de la gestion avancée des commandes.
@@ -23,24 +26,58 @@ class OngletStatistiques extends StatelessWidget {
 
   final OrderManagementService orderService;
 
+  /// Tout vient de `GET /orders/manage/statistics/`, sur la sélection de la
+  /// supervision (période, établissement, géographie, client, recherche).
+  ///
+  /// L'onglet lisait la fenêtre d'**un an** de commandes téléchargée et en
+  /// recalculait les chiffres ; le chiffre d'affaires y additionnait les
+  /// devises. Un seul relevé sert les quatre blocs : deux lectures pourraient
+  /// rendre des chiffres qui ne s'accordent pas.
   @override
   Widget build(BuildContext context) {
-    // Un seul relevé pour les deux blocs qui le lisent : deux appels
-    // pourraient rendre des chiffres qui ne s'accordent pas.
-    final stats = orderService.getOrderStats();
+    final stats = orderService.statistiques;
+    final echec = orderService.echecStatistiques;
+
+    if (stats == null && echec != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: BandeauEchec(
+            echec: echec,
+            onReessayer: () => unawaited(orderService.chargerLesStatistiques()),
+          ),
+        ),
+      );
+    }
+    if (stats == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (echec != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: BandeauEchec(
+                echec: echec,
+                onReessayer: () => unawaited(orderService.chargerLesStatistiques()),
+              ),
+            ),
+          Text(
+            'Sur la période : ${orderService.filtres.libellePeriode.toLowerCase()}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
           _StatistiquesDetaillees(stats: stats),
           const SizedBox(height: 20),
-          _CartesDePerformance(stats: orderService.getPerformanceStats()),
+          _CartesDePerformance(stats: stats),
           const SizedBox(height: 20),
           _RepartitionParStatut(stats: stats),
           const SizedBox(height: 20),
-          _EvolutionDesCommandes(commandes: orderService.allOrders),
+          _EvolutionDesCommandes(stats: stats),
         ],
       ),
     );
@@ -50,10 +87,7 @@ class OngletStatistiques extends StatelessWidget {
 class _StatistiquesDetaillees extends StatelessWidget {
   const _StatistiquesDetaillees({required this.stats});
 
-  final Map<String, dynamic> stats;
-
-  String _montant(String cle) =>
-      PriceFormatter.format((stats[cle] as num?)?.toDouble() ?? 0.0);
+  final eccore.OrderStatistics stats;
 
   @override
   Widget build(BuildContext context) {
@@ -71,16 +105,26 @@ class _StatistiquesDetaillees extends StatelessWidget {
                   ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            _LigneDeStat('Commandes totales', '${stats['total_orders'] ?? 0}'),
-            _LigneDeStat('En attente', '${stats['pending_orders'] ?? 0}'),
-            _LigneDeStat('Confirmées', '${stats['confirmed_orders'] ?? 0}'),
-            _LigneDeStat('En préparation', '${stats['preparing_orders'] ?? 0}'),
-            _LigneDeStat('Prêtes', '${stats['ready_orders'] ?? 0}'),
-            _LigneDeStat('Livrées', '${stats['delivered_orders'] ?? 0}'),
-            _LigneDeStat('Annulées', '${stats['cancelled_orders'] ?? 0}'),
+            _LigneDeStat('Commandes totales', '${stats.ordersCount}'),
+            for (final statut in StatutCommande.values)
+              _LigneDeStat(statut.libelle, '${stats.compteDe(statut.versServeur)}'),
             const Divider(),
-            _LigneDeStat('Revenus totaux', _montant('total_revenue')),
-            _LigneDeStat('Panier moyen', _montant('average_order_value')),
+            // Une ligne par devise : Lomé (XOF) et Douala (XAF) ne
+            // s'additionnent pas.
+            if (stats.revenues.isEmpty)
+              const _LigneDeStat('Revenus livrés', 'Aucune livraison'),
+            for (final ligne in stats.revenues) ...[
+              _LigneDeStat(
+                'Revenus livrés (${ligne.currency})',
+                formatMontant(eccore.Money(amountMinor: ligne.revenueMinor, currency: ligne.currency)),
+              ),
+              _LigneDeStat(
+                'Panier moyen (${ligne.currency})',
+                formatMontant(
+                  eccore.Money(amountMinor: ligne.averageBasketMinor, currency: ligne.currency),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -109,8 +153,7 @@ class _LigneDeStat extends StatelessWidget {
   }
 }
 
-/// Les trois chiffres de [OrderManagementService.getPerformanceStats], lus
-/// comme les lit la section « Performance » de l'écran principal.
+/// Durée, ponctualité, annulations — tels que le serveur les mesure.
 ///
 /// Deux cartes sur trois affichaient zéro en toutes circonstances :
 ///
@@ -119,7 +162,7 @@ class _LigneDeStat extends StatelessWidget {
 ///   que la carte multipliait en plus par cent ;
 /// * « Satisfaction » lisait `customer_satisfaction`, que rien ne produit
 ///   depuis que la formule qui l'inventait a été retirée (voir
-///   `statistiques_livraison_test.dart`). Aucun client ne note une commande :
+///   `test_statistiques_backoffice.py`). Aucun client ne note une commande :
 ///   la carte laisse la place au taux d'annulation, qui se lit dans les
 ///   données.
 ///
@@ -128,17 +171,15 @@ class _LigneDeStat extends StatelessWidget {
 class _CartesDePerformance extends StatelessWidget {
   const _CartesDePerformance({required this.stats});
 
-  final Map<String, dynamic> stats;
-
-  double _nombre(String cle) => (stats[cle] as num?)?.toDouble() ?? 0.0;
-
-  int _entier(String cle) => (stats[cle] as num?)?.toInt() ?? 0;
+  final eccore.OrderStatistics stats;
 
   @override
   Widget build(BuildContext context) {
     final sem = AdminColorTokens.semantic(Theme.of(context).colorScheme);
-    final mesurees = _entier('measured_orders');
-    final annoncees = _entier('on_time_measured');
+    final mesurees = stats.measuredOrders;
+    final annoncees = stats.onTimeMeasured;
+    final moyenne = stats.averageMinutes;
+    final ponctualite = stats.onTimeRate;
 
     return GridView.count(
       shrinkWrap: true,
@@ -150,19 +191,19 @@ class _CartesDePerformance extends StatelessWidget {
       children: [
         _CartePerformance(
           titre: mesurees == 0 ? 'Temps moyen' : 'Temps moyen · $mesurees livraison(s)',
-          valeur: mesurees == 0 ? '—' : '${_nombre('average_delivery_time').round()} min',
+          valeur: moyenne == null ? '—' : '${moyenne.round()} min',
           icone: Icons.timer,
           couleur: sem.info,
         ),
         _CartePerformance(
           titre: annoncees == 0 ? 'Livraison à temps' : 'À temps · $annoncees annoncée(s)',
-          valeur: annoncees == 0 ? '—' : '${_nombre('on_time_rate').toStringAsFixed(0)} %',
+          valeur: ponctualite == null ? '—' : '${ponctualite.toStringAsFixed(0)} %',
           icone: Icons.schedule,
           couleur: sem.success,
         ),
         _CartePerformance(
           titre: 'Annulations',
-          valeur: '${_nombre('cancellation_rate').toStringAsFixed(1)} %',
+          valeur: '${stats.cancellationRate.toStringAsFixed(1)} %',
           icone: Icons.cancel_outlined,
           couleur: sem.warning,
         ),
@@ -232,20 +273,13 @@ class _CartePerformance extends StatelessWidget {
 class _RepartitionParStatut extends StatelessWidget {
   const _RepartitionParStatut({required this.stats});
 
-  final Map<String, dynamic> stats;
-
-  static const _lignes = <(String, String, StatutCommande)>[
-    ('En attente', 'pending_orders', StatutCommande.enAttente),
-    ('Confirmées', 'confirmed_orders', StatutCommande.confirmee),
-    ('En préparation', 'preparing_orders', StatutCommande.enPreparation),
-    ('Prêtes', 'ready_orders', StatutCommande.prete),
-    ('Livrées', 'delivered_orders', StatutCommande.livree),
-    ('Annulées', 'cancelled_orders', StatutCommande.annulee),
-  ];
+  final eccore.OrderStatistics stats;
 
   @override
   Widget build(BuildContext context) {
-    final total = stats['total_orders'] as int? ?? 0;
+    // Tous les statuts, « récupérée » et « en route » compris : la répartition
+    // en omettait deux, et ses barres ne totalisaient pas 100 %.
+    final total = stats.ordersCount;
     if (total == 0) return const SizedBox.shrink();
 
     final scheme = Theme.of(context).colorScheme;
@@ -264,10 +298,10 @@ class _RepartitionParStatut extends StatelessWidget {
                   ?.copyWith(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            for (final (label, cle, statut) in _lignes)
+            for (final statut in StatutCommande.values)
               _BarreDeStatut(
-                label: label,
-                nombre: stats[cle] as int? ?? 0,
+                label: statut.libelle,
+                nombre: stats.compteDe(statut.versServeur),
                 total: total,
                 couleur: couleurDeStatut(statut, scheme),
               ),
@@ -318,13 +352,13 @@ class _BarreDeStatut extends StatelessWidget {
 }
 
 class _EvolutionDesCommandes extends StatelessWidget {
-  const _EvolutionDesCommandes({required this.commandes});
+  const _EvolutionDesCommandes({required this.stats});
 
-  final List<eccore.Order> commandes;
+  final eccore.OrderStatistics stats;
 
   @override
   Widget build(BuildContext context) {
-    final parJour = commandesParJour(commandes);
+    final parJour = serieQuotidienne(stats);
     final jours = parJour.keys.toList();
     final maximum = parJour.values.isEmpty
         ? 1.0
@@ -339,7 +373,7 @@ class _EvolutionDesCommandes extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Évolution des commandes (7 derniers jours)',
+              'Évolution des commandes (7 derniers jours, ${stats.timezoneName})',
               style: Theme.of(context)
                   .textTheme
                   .titleLarge

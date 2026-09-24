@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
@@ -166,11 +167,14 @@ class _FermeturesExceptionnellesState extends State<FermeturesExceptionnelles> {
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                 ),
-                TextButton.icon(
-                  onPressed: _chargement ? null : _ajouter,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Fermer'),
-                ),
+                // Même droit que les horaires : `restaurants.operate` pour le
+                // gérant de la cuisine, `restaurants.write` pour le siège.
+                if (context.peutUne(const ['restaurants.operate', 'restaurants.write']))
+                  TextButton.icon(
+                    onPressed: _chargement ? null : _ajouter,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Fermer'),
+                  ),
               ],
             ),
             Text(
@@ -208,11 +212,14 @@ class _FermeturesExceptionnellesState extends State<FermeturesExceptionnelles> {
                       if (fermeture.reason.isNotEmpty) fermeture.reason,
                     ].join(' · '),
                   ),
-                  trailing: IconButton(
-                    tooltip: 'Annuler cette fermeture',
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: () => _annuler(fermeture),
-                  ),
+                  trailing: context
+                          .peutUne(const ['restaurants.operate', 'restaurants.write'])
+                      ? IconButton(
+                          tooltip: 'Annuler cette fermeture',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _annuler(fermeture),
+                        )
+                      : null,
                 ),
           ],
         ),
@@ -303,7 +310,7 @@ class _DialogueFermetureState extends State<_DialogueFermeture> {
             subtitle: Text(libelleInstant(_debut)),
             onTap: () async {
               final choisi = await _choisir(_debut);
-              if (choisi != null) setState(() => _debut = choisi);
+              if (choisi != null && mounted) setState(() => _debut = choisi);
             },
           ),
           ListTile(
@@ -313,7 +320,7 @@ class _DialogueFermetureState extends State<_DialogueFermeture> {
             subtitle: Text(libelleInstant(_fin)),
             onTap: () async {
               final choisi = await _choisir(_fin);
-              if (choisi != null) setState(() => _fin = choisi);
+              if (choisi != null && mounted) setState(() => _fin = choisi);
             },
           ),
           TextField(

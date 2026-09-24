@@ -1,11 +1,18 @@
+import 'dart:async';
+
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/global_search_service.dart';
 import 'package:admin/presentation/dialogues/details_commande.dart';
+import 'package:admin/presentation/echec.dart';
+import 'package:admin/presentation/retours.dart';
+import 'package:admin/services/client_management_service.dart';
+import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
-import 'package:admin/screens/admin/menu_management_screen.dart';
 import 'package:admin/screens/admin/client_management_screen.dart';
-import 'package:admin/screens/admin/driver_management_screen.dart';
+import 'package:admin/screens/admin/driver_detailed_stats_screen.dart';
+import 'package:admin/screens/admin/menu_management_screen.dart';
 
 /// Catégories disponibles pour filtrer les résultats de recherche
 enum SearchCategory {
@@ -15,6 +22,20 @@ enum SearchCategory {
   drivers,
 }
 
+/// Recherche transverse du back-office.
+///
+/// ## Ce qu'un résultat ouvre
+///
+/// Chaque ligne ouvre **ce qu'on a trouvé** : la commande, la fiche du client,
+/// les statistiques du livreur, la carte filtrée sur le produit. Seule la
+/// commande le faisait ; les trois autres ouvraient la liste entière de leur
+/// famille, où il fallait retrouver à la main la ligne qu'on venait de
+/// chercher.
+///
+/// Le serveur ne rend une famille qu'au compte qui porte sa permission de
+/// lecture (`apps/search/services.py`) — la même que celle de l'écran de la
+/// famille dans la barre latérale. Un résultat affiché est donc un résultat
+/// que ce compte a le droit d'ouvrir.
 class GlobalSearchScreen extends StatefulWidget {
   const GlobalSearchScreen({super.key});
 
@@ -23,11 +44,26 @@ class GlobalSearchScreen extends StatefulWidget {
 }
 
 class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
+  /// En deçà, le serveur refuse la requête — voir [GlobalSearchService].
+  static const _longueurMinimale = 3;
+
   final TextEditingController _searchController = TextEditingController();
   final GlobalSearchService _searchService = GlobalSearchService();
   GlobalSearchResults? _results;
+  String? _erreur;
   bool _isSearching = false;
-  final List<SearchCategory> _selectedCategories = SearchCategory.values;
+
+  /// Un ensemble modifiable. C'était `SearchCategory.values` elle-même — une
+  /// liste constante : décocher un filtre levait `Unsupported operation`.
+  final Set<SearchCategory> _selectedCategories = {...SearchCategory.values};
+
+  /// Numéro de la dernière recherche lancée. Une recherche part à chaque
+  /// frappe : sans ce numéro, la réponse à « pou » arrivée après celle à
+  /// « poulet » remplaçait les bons résultats par les anciens.
+  int _derniere = 0;
+
+  /// Un résultat est en cours d'ouverture : un second clic attend.
+  bool _ouverture = false;
 
   @override
   void dispose() {
@@ -36,9 +72,11 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
   }
 
   Future<void> _performSearch(String query) async {
-    if (query.trim().isEmpty) {
+    final numero = ++_derniere;
+    if (query.trim().length < _longueurMinimale) {
       setState(() {
         _results = null;
+        _erreur = null;
         _isSearching = false;
       });
       return;
@@ -48,8 +86,12 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
 
     final results = await _searchService.searchAll(query);
 
+    if (!mounted || numero != _derniere) return;
     setState(() {
       _results = results;
+      // Le service rend une liste vide sur refus ou coupure : sans son motif,
+      // l'écran annonçait « Aucun résultat trouvé » devant une panne.
+      _erreur = _searchService.error;
       _isSearching = false;
     });
   }
@@ -59,12 +101,16 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Recherche Globale'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(60),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
+      appBar: AppBar(title: const Text('Recherche Globale')),
+      // Le champ et les filtres sont en tête du contenu, et non dans le
+      // `bottom` de la barre : celui-ci était déclaré à 60 px pour un champ et
+      // une rangée de filtres qui en occupent le double. Les filtres
+      // débordaient sur la liste, et sur un téléphone, où ils passent sur
+      // deux lignes, davantage encore.
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Column(
               children: [
                 TextField(
@@ -77,7 +123,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                             icon: const Icon(Icons.clear),
                             onPressed: () {
                               _searchController.clear();
-                              _performSearch('');
+                              unawaited(_performSearch(''));
                             },
                           )
                         : null,
@@ -87,40 +133,40 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
                     filled: true,
                     fillColor: theme.colorScheme.surfaceContainerHighest,
                   ),
-                  onChanged: (value) {
-                    _performSearch(value);
-                  },
+                  onChanged: (value) => unawaited(_performSearch(value)),
                   autofocus: true,
                 ),
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: SearchCategory.values.map((category) {
-                    final isSelected = _selectedCategories.contains(category);
-                    return FilterChip(
-                      label: Text(_getCategoryLabel(category)),
-                      selected: isSelected,
-                      onSelected: (selected) {
-                        setState(() {
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: SearchCategory.values.map((category) {
+                      final isSelected = _selectedCategories.contains(category);
+                      return FilterChip(
+                        label: Text(_getCategoryLabel(category)),
+                        selected: isSelected,
+                        // Un filtre trie des résultats déjà reçus : il ne
+                        // relance pas la recherche, qui rendait les quatre
+                        // familles.
+                        onSelected: (selected) => setState(() {
                           if (selected) {
                             _selectedCategories.add(category);
                           } else {
                             _selectedCategories.remove(category);
                           }
-                          if (_searchController.text.isNotEmpty) {
-                            _performSearch(_searchController.text);
-                          }
-                        });
-                      },
-                    );
-                  }).toList(),
+                        }),
+                      );
+                    }).toList(),
+                  ),
                 ),
               ],
             ),
           ),
-        ),
+          Expanded(child: _buildBody(theme)),
+        ],
       ),
-      body: _buildBody(theme),
     );
   }
 
@@ -129,56 +175,48 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
+    final saisie = _searchController.text.trim();
     if (_results == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.search,
-              size: 64,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Recherchez dans toute l\'application',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Commandes, produits, clients, livreurs...',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
-              ),
-            ),
-          ],
+      final manquants = _longueurMinimale - saisie.length;
+      return _buildMessage(
+        theme,
+        Icons.search,
+        saisie.isEmpty
+            ? 'Recherchez dans toute l\'application'
+            : 'Encore $manquants caractère${manquants > 1 ? 's' : ''}…',
+        saisie.isEmpty
+            ? 'Commandes, produits, clients, livreurs...'
+            : 'La recherche commence à $_longueurMinimale caractères.',
+      );
+    }
+
+    if (_erreur != null) {
+      return _buildMessage(
+        theme,
+        Icons.cloud_off_outlined,
+        'Recherche impossible',
+        _erreur!,
+        action: TextButton(
+          onPressed: () => unawaited(_performSearch(_searchController.text)),
+          child: const Text('Réessayer'),
         ),
       );
     }
 
-    if (_results!.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.search_off,
-              size: 64,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
-            ),
-            const SizedBox(height: 16),
-            Text('Aucun résultat trouvé', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text(
-              'Essayez avec d\'autres mots-clés',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-              ),
-            ),
-          ],
-        ),
+    final visibles = [
+      if (_selectedCategories.contains(SearchCategory.orders)) ..._results!.orders,
+      if (_selectedCategories.contains(SearchCategory.menuItems)) ..._results!.menuItems,
+      if (_selectedCategories.contains(SearchCategory.users)) ..._results!.users,
+      if (_selectedCategories.contains(SearchCategory.drivers)) ..._results!.drivers,
+    ];
+    if (visibles.isEmpty) {
+      return _buildMessage(
+        theme,
+        Icons.search_off,
+        'Aucun résultat trouvé',
+        _results!.isEmpty
+            ? 'Essayez avec d\'autres mots-clés'
+            : 'Des résultats existent dans les catégories décochées.',
       );
     }
 
@@ -193,7 +231,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
             Icons.shopping_cart,
             Colors.blue,
           ),
-          ..._results!.orders.map((res) => _buildOrderCard(res, theme)),
+          ..._results!.orders.map(_buildOrderCard),
         ],
         if (_results!.menuItems.isNotEmpty &&
             _selectedCategories.contains(SearchCategory.menuItems)) ...[
@@ -203,7 +241,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
             Icons.restaurant,
             Colors.orange,
           ),
-          ..._results!.menuItems.map((res) => _buildMenuItemCard(res, theme)),
+          ..._results!.menuItems.map(_buildMenuItemCard),
         ],
         if (_results!.users.isNotEmpty &&
             _selectedCategories.contains(SearchCategory.users)) ...[
@@ -213,7 +251,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
             Icons.person,
             Colors.green,
           ),
-          ..._results!.users.map((res) => _buildUserCard(res, theme)),
+          ..._results!.users.map(_buildUserCard),
         ],
         if (_results!.drivers.isNotEmpty &&
             _selectedCategories.contains(SearchCategory.drivers)) ...[
@@ -223,9 +261,44 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
             Icons.delivery_dining,
             Colors.purple,
           ),
-          ..._results!.drivers.map((res) => _buildDriverCard(res, theme)),
+          ..._results!.drivers.map(_buildDriverCard),
         ],
       ],
+    );
+  }
+
+  Widget _buildMessage(
+    ThemeData theme,
+    IconData icone,
+    String titre,
+    String detail, {
+    Widget? action,
+  }) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icone,
+              size: 64,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+            ),
+            const SizedBox(height: 16),
+            Text(titre, style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(
+              detail,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+            ),
+            if (action != null) ...[const SizedBox(height: 8), action],
+          ],
+        ),
+      ),
     );
   }
 
@@ -250,28 +323,49 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     );
   }
 
-  Widget _buildOrderCard(GlobalSearchResult result, ThemeData theme) {
+  Widget _carte(
+    GlobalSearchResult result, {
+    required IconData icone,
+    required Color couleur,
+    required Future<void> Function() ouvrir,
+  }) {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: Colors.blue.withValues(alpha: 0.1),
-          child: const Icon(Icons.shopping_cart, color: Colors.blue),
+          backgroundColor: couleur.withValues(alpha: 0.1),
+          child: Icon(icone, color: couleur),
         ),
         title: Text(result.title),
-        // La date de la commande n'est plus accolée ici : le sous-titre que
-        // rend le serveur porte déjà ce qui identifie la ligne (destinataire et
-        // statut), et la fiche complète s'ouvre d'un clic.
         subtitle: Text(result.subtitle),
         trailing: const Icon(Icons.chevron_right),
-        // Ouvre **cette** commande, et non la liste de toutes les commandes.
-        // Le résultat cliqué renvoyait vers l'écran de supervision complet :
-        // il fallait y retrouver à la main la ligne qu'on venait de chercher,
-        // ce qui annule l'intérêt d'avoir cherché.
-        onTap: () => _ouvrirLaCommande(result.id),
+        onTap: () => unawaited(_ouvrir(ouvrir)),
       ),
     );
   }
+
+  /// Ouvre un résultat, un seul à la fois, et **dit** un refus : un dossier
+  /// qui a changé de périmètre depuis la recherche, ou une coupure.
+  Future<void> _ouvrir(Future<void> Function() ouvrir) async {
+    if (_ouverture) return;
+    _ouverture = true;
+    try {
+      await ouvrir();
+    } on eccore.ApiException catch (e) {
+      if (mounted) annoncerEchec(context, Echec.de(e));
+    } finally {
+      _ouverture = false;
+    }
+  }
+
+  // La date de la commande n'est plus accolée ici : le sous-titre que rend le
+  // serveur porte déjà ce qui identifie la ligne (destinataire et statut).
+  Widget _buildOrderCard(GlobalSearchResult result) => _carte(
+        result,
+        icone: Icons.shopping_cart,
+        couleur: Colors.blue,
+        ouvrir: () => _ouvrirLaCommande(result.id),
+      );
 
   /// Charge la fiche détaillée puis l'affiche.
   ///
@@ -293,72 +387,53 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
     afficherDetailsCommande(context, commande);
   }
 
-  Widget _buildMenuItemCard(GlobalSearchResult result, ThemeData theme) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.orange.withValues(alpha: 0.1),
-          child: const Icon(Icons.restaurant, color: Colors.orange),
-        ),
-        title: Text(result.title),
-        subtitle: Text(result.subtitle),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const MenuManagementScreen(),
+  /// La carte de l'établissement courant, filtrée sur le produit. La carte
+  /// n'offre que les gestes que le compte peut faire — un formulaire
+  /// d'édition ouvert directement ne le saurait pas.
+  Widget _buildMenuItemCard(GlobalSearchResult result) => _carte(
+        result,
+        icone: Icons.restaurant,
+        couleur: Colors.orange,
+        ouvrir: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute(
+            // L'écran de la carte n'a pas de barre d'application : poussé tel
+            // quel, il n'offrait aucun retour vers la recherche.
+            builder: (context) => Scaffold(
+              appBar: AppBar(title: const Text('Menu')),
+              body: MenuManagementScreen(rechercheInitiale: result.title),
             ),
-          );
-        },
-      ),
-    );
-  }
+          ),
+        ),
+      );
 
-  Widget _buildUserCard(GlobalSearchResult result, ThemeData theme) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.green.withValues(alpha: 0.1),
-          child: const Icon(Icons.person, color: Colors.green),
-        ),
-        title: Text(result.title),
-        subtitle: Text(result.subtitle),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const ClientManagementScreen(),
-            ),
-          );
+  /// La fiche du client : ses chiffres et les notes de l'équipe.
+  Widget _buildUserCard(GlobalSearchResult result) => _carte(
+        result,
+        icone: Icons.person,
+        couleur: Colors.green,
+        ouvrir: () async {
+          final client = await context.read<ClientManagementService>().client(result.id);
+          if (!mounted) return;
+          await ouvrirFicheClient(context, client);
         },
-      ),
-    );
-  }
+      );
 
-  Widget _buildDriverCard(GlobalSearchResult result, ThemeData theme) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.purple.withValues(alpha: 0.1),
-          child: const Icon(Icons.delivery_dining, color: Colors.purple),
-        ),
-        title: Text(result.title),
-        subtitle: Text(result.subtitle),
-        onTap: () {
-          Navigator.push(
+  /// Les statistiques du livreur, sur son dossier relu.
+  Widget _buildDriverCard(GlobalSearchResult result) => _carte(
+        result,
+        icone: Icons.delivery_dining,
+        couleur: Colors.purple,
+        ouvrir: () async {
+          final dossier =
+              await context.read<DriverManagementService>().relireDossier(result.id);
+          if (!mounted) return;
+          await Navigator.push<void>(
             context,
-            MaterialPageRoute(
-              builder: (context) => const DriverManagementScreen(),
-            ),
+            MaterialPageRoute(builder: (_) => DriverDetailedStatsScreen(driver: dossier)),
           );
         },
-      ),
-    );
-  }
+      );
 
   String _getCategoryLabel(SearchCategory category) {
     switch (category) {

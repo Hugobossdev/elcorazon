@@ -1,39 +1,36 @@
 import 'dart:async';
 
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/barre_pagination.dart';
 import 'package:admin/presentation/dialogues/details_commande.dart';
+import 'package:admin/presentation/echec.dart';
+import 'package:admin/presentation/retours.dart';
 import 'package:admin/services/order_management_service.dart';
 import 'package:admin/services/payments_service.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/ui/ui.dart';
 import 'package:admin/utils/price_formatter.dart';
 
-/// Les encaissements — `/payments/transactions/` (Phase 6).
+/// Les encaissements — `/payments/transactions/`.
 ///
-/// Pourquoi cet écran existe
-/// -------------------------
+/// **Consultation seule, et par construction** : le statut d'une transaction
+/// n'avance que sur webhook signé du prestataire (`apps/payments/services.py`).
+/// Le seul geste offert est le remboursement, depuis la fiche de la commande,
+/// qui exige `orders.refund` et laisse l'encaissement d'origine intact.
 ///
-/// `PaymentsService` était écrit, câblé, cloisonné par le serveur… et
-/// **injoignable**. Un seul fichier le lisait — l'écran des commandes qu'aucune
-/// entrée de navigation n'ouvre — et pour un seul geste, le remboursement. Il
-/// n'existait aucun endroit où consulter ce qui avait été encaissé : ni la
-/// liste, ni un montant, ni une référence de transaction, ni une date.
-/// L'exploitation devait ouvrir le tableau de bord du prestataire pour savoir
-/// si une commande avait été payée.
+/// ## Ce qui a changé (22 septembre 2026)
 ///
-/// **Consultation seule, et pas par prudence : par construction.** Le statut
-/// d'une transaction n'avance que sur webhook signé du prestataire
-/// (`apps/payments/services.py`) ; aucune route ne permet à un client de
-/// l'écrire, et il n'y a donc rien à interdire ici. Le seul geste offert est le
-/// remboursement, qui crée un objet distinct, exige `orders.refund`, et laisse
-/// l'encaissement d'origine intact — un paiement a eu lieu, l'écraser ferait
-/// disparaître ce fait.
-///
-/// Le périmètre est celui du serveur : un opérateur ne voit que les
-/// encaissements des établissements auxquels son compte est rattaché.
+/// * la liste est **paginée par le serveur** : elle téléchargeait tout
+///   l'historique des encaissements du périmètre, sans borne de date ;
+/// * la recherche part au serveur (référence du prestataire **et** de la
+///   commande) : elle ne portait que sur ce qui avait été chargé ;
+/// * période, établissement, devise et statut « Annulé » s'y filtrent ;
+/// * les totaux viennent du serveur, **une ligne par devise** : l'écran
+///   additionnait des XOF et des XAF sous un même « FCFA ».
 class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({super.key});
 
@@ -43,11 +40,7 @@ class PaymentsScreen extends StatefulWidget {
 
 class _PaymentsScreenState extends State<PaymentsScreen> {
   final _recherche = TextEditingController();
-
-  /// Statut filtré **côté serveur** : `TransactionViewSet` accepte `status` en
-  /// `exact`. Le faire ici obligerait à charger toutes les pages pour n'en
-  /// garder qu'une part.
-  String? _statut;
+  Timer? _frappe;
 
   @override
   void initState() {
@@ -59,167 +52,217 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
 
   @override
   void dispose() {
+    _frappe?.cancel();
     _recherche.dispose();
     super.dispose();
   }
 
-  Future<void> _recharger() => context.read<PaymentsService>().refresh(status: _statut);
+  void _appliquer(FiltresEncaissements filtres) =>
+      unawaited(context.read<PaymentsService>().appliquer(filtres));
 
-  /// Filtre d'affichage sur la référence du prestataire.
-  ///
-  /// Volontairement local, contrairement au statut : le serveur n'expose pas de
-  /// recherche sur `provider_reference`, et prétendre chercher dans tout
-  /// l'historique alors qu'on ne parcourt que la page chargée serait pire que
-  /// de ne rien proposer. Le champ dit donc ce qu'il fait.
-  List<eccore.Transaction> _filtrees(List<eccore.Transaction> toutes) {
-    final terme = _recherche.text.trim().toLowerCase();
-    if (terme.isEmpty) return toutes;
-    return toutes
-        .where(
-          (t) =>
-              t.providerReference.toLowerCase().contains(terme) ||
-              t.provider.toLowerCase().contains(terme),
-        )
-        .toList();
+  void _surFrappe(String valeur) {
+    _frappe?.cancel();
+    _frappe = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      final service = context.read<PaymentsService>();
+      _appliquer(service.filtres.copyWith(recherche: valeur));
+    });
+  }
+
+  Future<void> _choisirPeriode(FiltresEncaissements filtres) async {
+    final maintenant = DateTime.now();
+    final choisie = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: maintenant,
+      initialDateRange: filtres.depuis == null || filtres.jusqua == null
+          ? null
+          : DateTimeRange(start: filtres.depuis!, end: filtres.jusqua!),
+    );
+    if (choisie == null) return;
+    _appliquer(
+      filtres.copyWith(
+        depuis: DateTime(choisie.start.year, choisie.start.month, choisie.start.day),
+        // La borne haute inclut la journée entière : sans cela, les
+        // encaissements du dernier jour choisi tombaient hors sélection.
+        jusqua: DateTime(choisie.end.year, choisie.end.month, choisie.end.day, 23, 59, 59),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final service = context.watch<PaymentsService>();
+    final perimetre = context.watch<RestaurantScopeService>();
+    final filtres = service.filtres;
     final scheme = Theme.of(context).colorScheme;
 
     return Material(
       color: scheme.surface,
-      child: Consumer<PaymentsService>(
-        builder: (context, paiements, child) {
-          final transactions = _filtrees(paiements.transactions);
-
-          return Column(
-            children: [
-              _barre(context, paiements),
-              if (paiements.error != null) _bandeauErreur(paiements),
-              _totaux(context, transactions),
-              Expanded(
-                child: paiements.isLoading && paiements.transactions.isEmpty
-                    ? const Center(child: CircularProgressIndicator())
-                    : transactions.isEmpty
-                        ? _vide(context)
-                        : RefreshIndicator(
-                            onRefresh: _recharger,
-                            child: ListView.builder(
-                              padding: const EdgeInsets.all(16),
-                              itemCount: transactions.length,
-                              itemBuilder: (context, index) => _LigneTransaction(
-                                transaction: transactions[index],
-                              ),
-                            ),
-                          ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _barre(BuildContext context, PaymentsService paiements) {
-    final scheme = Theme.of(context).colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: scheme.surface,
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            child: TextField(
-              controller: _recherche,
-              decoration: InputDecoration(
-                hintText: 'Filtrer par référence ou prestataire…',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(
+                  width: 280,
+                  child: TextField(
+                    controller: _recherche,
+                    onChanged: _surFrappe,
+                    decoration: const InputDecoration(
+                      labelText: 'Référence',
+                      helperText: 'Prestataire ou commande — cherchée par le serveur.',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
                 ),
-                filled: true,
-                fillColor: scheme.surfaceContainerHighest,
-                isDense: true,
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 200,
-            child: DropdownButtonFormField<String?>(
-              initialValue: _statut,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Statut',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              items: const [
-                DropdownMenuItem<String?>(child: Text('Tous')),
-                DropdownMenuItem(value: 'completed', child: Text('Encaissés')),
-                DropdownMenuItem(value: 'pending', child: Text('En attente')),
-                DropdownMenuItem(value: 'processing', child: Text('En cours')),
-                DropdownMenuItem(value: 'failed', child: Text('Échoués')),
-                DropdownMenuItem(value: 'refunded', child: Text('Remboursés')),
+                SizedBox(
+                  width: 200,
+                  child: DropdownButtonFormField<String?>(
+                    isExpanded: true,
+                    initialValue: filtres.statut,
+                    decoration: const InputDecoration(
+                      labelText: 'Statut',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(child: Text('Tous')),
+                      // La liste vient du serveur (`PaymentStatus`) : « Annulé »
+                      // y manquait, et ces transactions n'apparaissaient sous
+                      // aucun filtre.
+                      for (final statut in eccore.PaymentStatus.values)
+                        DropdownMenuItem(
+                          value: statut,
+                          child: Text(eccore.PaymentStatus.libelle(statut)),
+                        ),
+                    ],
+                    onChanged: (valeur) => _appliquer(
+                      filtres.copyWith(statut: valeur, effacerStatut: valeur == null),
+                    ),
+                  ),
+                ),
+                if (perimetre.hasChoice)
+                  SizedBox(
+                    width: 240,
+                    child: DropdownButtonFormField<String?>(
+                      isExpanded: true,
+                      initialValue: filtres.restaurantSlug,
+                      decoration: const InputDecoration(
+                        labelText: 'Établissement',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(child: Text('Tout mon périmètre')),
+                        for (final etablissement in perimetre.restaurants)
+                          DropdownMenuItem(
+                            value: etablissement.slug,
+                            child: Text(etablissement.name),
+                          ),
+                      ],
+                      onChanged: (valeur) => _appliquer(
+                        filtres.copyWith(
+                          restaurantSlug: valeur,
+                          effacerRestaurant: valeur == null,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (perimetre.devises.length > 1)
+                  SizedBox(
+                    width: 160,
+                    child: DropdownButtonFormField<String?>(
+                      isExpanded: true,
+                      initialValue: filtres.devise,
+                      decoration: const InputDecoration(
+                        labelText: 'Devise',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: [
+                        const DropdownMenuItem<String?>(child: Text('Toutes')),
+                        for (final devise in perimetre.devises)
+                          DropdownMenuItem(value: devise, child: Text(devise)),
+                      ],
+                      onChanged: (valeur) => _appliquer(
+                        filtres.copyWith(devise: valeur, effacerDevise: valeur == null),
+                      ),
+                    ),
+                  ),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.date_range_rounded),
+                  onPressed: () => unawaited(_choisirPeriode(filtres)),
+                  label: Text(
+                    filtres.depuis == null
+                        ? 'Toute la période'
+                        : 'Du ${dateCourte(filtres.depuis!)} au ${dateCourte(filtres.jusqua!)}',
+                  ),
+                ),
+                if (filtres.depuis != null)
+                  TextButton(
+                    onPressed: () => _appliquer(filtres.copyWith(effacerPeriode: true)),
+                    child: const Text('Toute la période'),
+                  ),
+                IconButton.filledTonal(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Recharger',
+                  onPressed: service.isLoading ? null : () => unawaited(service.refresh()),
+                ),
               ],
-              onChanged: (valeur) {
-                setState(() => _statut = valeur);
-                unawaited(_recharger());
-              },
             ),
           ),
-          const SizedBox(width: 12),
-          IconButton.filledTonal(
-            tooltip: 'Recharger',
-            icon: const Icon(Icons.refresh),
-            onPressed: paiements.isLoading ? null : _recharger,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _bandeauErreur(PaymentsService paiements) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      color: scheme.errorContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline, color: scheme.onErrorContainer, size: 18),
-          const SizedBox(width: 8),
+          if (service.echec != null)
+            BandeauEchec(echec: service.echec!, onReessayer: () => unawaited(service.refresh())),
+          _Totaux(totaux: service.totaux, total: service.total),
           Expanded(
-            child: Text(
-              paiements.error!,
-              style: TextStyle(color: scheme.onErrorContainer, fontSize: 12),
-            ),
+            child: service.isLoading && service.transactions.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : service.transactions.isEmpty
+                    ? const Center(child: Text('Aucun encaissement pour cette sélection.'))
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: service.transactions.length,
+                        itemBuilder: (context, index) =>
+                            _LigneTransaction(transaction: service.transactions[index]),
+                      ),
           ),
-          TextButton(onPressed: _recharger, child: const Text('Réessayer')),
+          BarrePagination(
+            numeroDePage: service.numeroDePage,
+            nombreDePages: service.nombreDePages,
+            total: service.total,
+            enCours: service.isLoading,
+            onPrecedente: service.aPagePrecedente ? () => unawaited(service.pagePrecedente()) : null,
+            onSuivante: service.aPageSuivante ? () => unawaited(service.pageSuivante()) : null,
+          ),
         ],
       ),
     );
   }
+}
 
-  /// Ce que porte la sélection affichée.
-  ///
-  /// Seuls les encaissements **aboutis** sont additionnés : mêler à ce total
-  /// des transactions en attente ou échouées annoncerait de l'argent qui n'est
-  /// pas rentré.
-  Widget _totaux(BuildContext context, List<eccore.Transaction> transactions) {
+/// Ce que porte la sélection — **une ligne par devise**, comptée par le
+/// serveur sur toute la sélection et non sur la page affichée.
+class _Totaux extends StatelessWidget {
+  const _Totaux({required this.totaux, required this.total});
+
+  final eccore.TransactionSummary? totaux;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
-
-    final encaisses = transactions.where((t) => t.status == 'completed').toList();
-    final total = encaisses.fold<int>(
-      0,
-      (somme, t) => somme + t.amount.amountMinor,
-    );
+    final resume = totaux;
 
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
@@ -232,70 +275,29 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
         spacing: 24,
         runSpacing: 8,
         children: [
-          _Compteur(
-            libelle: 'Transactions affichées',
-            valeur: '${transactions.length}',
-            couleur: scheme.primary,
-          ),
-          _Compteur(
-            libelle: 'Encaissées',
-            valeur: '${encaisses.length}',
-            couleur: sem.success,
-          ),
-          _Compteur(
-            libelle: 'Total encaissé',
-            valeur: PriceFormatter.format(total.toDouble()),
-            couleur: sem.success,
-          ),
+          _Compteur(libelle: 'Transactions', valeur: '$total', couleur: scheme.primary),
+          if (resume != null)
+            _Compteur(
+              libelle: 'Encaissées',
+              valeur: '${resume.compteDe(eccore.PaymentStatus.completed)}',
+              couleur: sem.success,
+            ),
+          if (resume != null && resume.collected.isEmpty)
+            _Compteur(libelle: 'Encaissé', valeur: 'Aucun', couleur: sem.success),
+          for (final ligne in resume?.collected ?? const <({eccore.Money amount, int transactions})>[])
+            _Compteur(
+              libelle: 'Encaissé (${ligne.amount.currency})',
+              valeur: formatMontant(ligne.amount),
+              couleur: sem.success,
+            ),
         ],
-      ),
-    );
-  }
-
-  Widget _vide(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.receipt_long_outlined,
-              size: 64,
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _recherche.text.isNotEmpty
-                  ? 'Aucune transaction ne correspond à ce filtre.'
-                  : 'Aucune transaction sur ce périmètre.',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(color: scheme.onSurfaceVariant),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Les commandes réglées en espèces n’en produisent pas : rien '
-              'n’est encaissé avant la remise au livreur.',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
       ),
     );
   }
 }
 
 class _Compteur extends StatelessWidget {
-  const _Compteur({
-    required this.libelle,
-    required this.valeur,
-    required this.couleur,
-  });
+  const _Compteur({required this.libelle, required this.valeur, required this.couleur});
 
   final String libelle;
   final String valeur;
@@ -303,49 +305,45 @@ class _Compteur extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           valeur,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: couleur,
-          ),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: couleur),
         ),
         Text(
           libelle,
-          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
       ],
     );
   }
 }
 
-/// Une transaction : ce que le cahier des charges demande d'afficher —
-/// transaction, commande, montant, statut, référence, date — et rien de plus.
 class _LigneTransaction extends StatelessWidget {
   const _LigneTransaction({required this.transaction});
 
   final eccore.Transaction transaction;
 
+  Color _couleur(ColorScheme scheme) {
+    final sem = AdminColorTokens.semantic(scheme);
+    return switch (transaction.status) {
+      eccore.PaymentStatus.completed => sem.success,
+      eccore.PaymentStatus.failed => sem.danger,
+      eccore.PaymentStatus.cancelled => scheme.outline,
+      eccore.PaymentStatus.refunded => scheme.tertiary,
+      _ => sem.warning,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final sem = AdminColorTokens.semantic(scheme);
-
-    final couleur = switch (transaction.status) {
-      'completed' => sem.success,
-      'failed' || 'cancelled' => sem.danger,
-      'refunded' => scheme.tertiary,
-      _ => sem.warning,
-    };
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -353,52 +351,24 @@ class _LigneTransaction extends StatelessWidget {
           children: [
             Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: couleur.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                Expanded(
                   child: Text(
-                    libelleStatutPaiement(transaction.status),
-                    style: TextStyle(
-                      color: couleur,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
+                    formatMontant(transaction.amount),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  transaction.provider,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  PriceFormatter.format(transaction.amount.toMajorUnits()),
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: couleur,
-                      ),
+                Chip(
+                  label: Text(eccore.PaymentStatus.libelle(transaction.status)),
+                  backgroundColor: _couleur(scheme).withValues(alpha: 0.12),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            _Champ(
-              label: 'Référence',
-              // Copiable : c'est la valeur qu'on recolle dans le tableau de
-              // bord du prestataire pour instruire un litige.
-              valeur: transaction.providerReference.isEmpty
-                  ? '—'
-                  : transaction.providerReference,
-              copiable: transaction.providerReference.isNotEmpty,
-            ),
+            const SizedBox(height: 8),
+            _Champ(label: 'Prestataire', valeur: transaction.provider),
+            _Champ(label: 'Référence', valeur: transaction.providerReference, copiable: true),
             _Champ(
               label: 'Date',
-              valeur: _horodatage(transaction.completedAt ?? transaction.createdAt),
+              valeur: dateCourte(transaction.completedAt ?? transaction.createdAt),
             ),
             if (transaction.failureReason.isNotEmpty)
               _Champ(label: 'Motif d’échec', valeur: transaction.failureReason),
@@ -408,7 +378,7 @@ class _LigneTransaction extends StatelessWidget {
               child: TextButton.icon(
                 icon: const Icon(Icons.receipt_long, size: 18),
                 label: const Text('Voir la commande'),
-                onPressed: () => _ouvrirLaCommande(context),
+                onPressed: () => unawaited(_ouvrirLaCommande(context)),
               ),
             ),
           ],
@@ -428,12 +398,9 @@ class _LigneTransaction extends StatelessWidget {
 
     if (!context.mounted) return;
     if (commande == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Commande introuvable : elle est hors du périmètre de ce compte.',
-          ),
-        ),
+      annoncer(
+        context,
+        'Commande introuvable : elle est hors du périmètre de ce compte.',
       );
       return;
     }
@@ -442,11 +409,7 @@ class _LigneTransaction extends StatelessWidget {
 }
 
 class _Champ extends StatelessWidget {
-  const _Champ({
-    required this.label,
-    required this.valeur,
-    this.copiable = false,
-  });
+  const _Champ({required this.label, required this.valeur, this.copiable = false});
 
   final String label;
   final String valeur;
@@ -481,23 +444,11 @@ class _Champ extends StatelessWidget {
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: valeur));
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Référence copiée.'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
+                annoncer(context, 'Référence copiée.');
               },
             ),
         ],
       ),
     );
   }
-}
-
-String _horodatage(DateTime moment) {
-  final local = moment.toLocal();
-  String deuxChiffres(int valeur) => valeur.toString().padLeft(2, '0');
-  return '${deuxChiffres(local.day)}/${deuxChiffres(local.month)}/${local.year}'
-      ' à ${deuxChiffres(local.hour)}:${deuxChiffres(local.minute)}';
 }

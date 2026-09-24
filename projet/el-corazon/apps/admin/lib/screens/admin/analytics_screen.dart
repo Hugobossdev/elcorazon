@@ -2,9 +2,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/analytics_service.dart';
 import 'package:admin/widgets/loading_widget.dart';
-import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/ui/ui.dart';
 
 class AnalyticsScreen extends StatefulWidget {
@@ -23,47 +24,76 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Map<String, dynamic>? _categoryData;
   Map<String, dynamic>? _driverData;
 
+  /// Devise des séries monétaires affichées — `null` : la dominante.
+  ///
+  /// Un périmètre qui couvre le Togo et le Cameroun encaisse des XOF et des
+  /// XAF ; l'écran en montre une à la fois, et dit laquelle.
+  String? _devise;
+
+  bool _chargement = false;
+  Echec? _echec;
+
   @override
   void initState() {
     super.initState();
     _loadAnalytics();
   }
 
+  /// Charge les cinq rapports **en parallèle**, sur la période choisie.
+  ///
+  /// Deux défauts corrigés ici : l'aperçu était demandé **sans** la période
+  /// (toujours les 30 derniers jours, quoi qu'affiche le sélecteur), et les
+  /// cinq lectures s'enchaînaient, sans indicateur de chargement ni moyen de
+  /// savoir laquelle avait échoué — une série vide tenait lieu d'erreur.
   Future<void> _loadAnalytics() async {
-    final analyticsService =
-        Provider.of<AnalyticsService>(context, listen: false);
+    final analyticsService = Provider.of<AnalyticsService>(context, listen: false);
+    setState(() {
+      _chargement = true;
+      _echec = null;
+    });
 
-    // Charger les statistiques générales
-    _generalStats = await analyticsService.getGeneralStats();
-
-    // Charger les données de revenus
-    _revenueData = await analyticsService.getRevenueAnalytics(
-      startDate: _startDate,
-      endDate: _endDate,
-    );
-
-    // Charger les données des commandes
-    _orderData = await analyticsService.getOrderAnalytics(
-      startDate: _startDate,
-      endDate: _endDate,
-    );
-
-    // Charger les données des catégories
-    _categoryData = await analyticsService.getCategoryAnalytics(
-      startDate: _startDate,
-      endDate: _endDate,
-    );
-
-    // Charger les données des livreurs
-    _driverData = await analyticsService.getDriverAnalytics(
-      startDate: _startDate,
-      endDate: _endDate,
-    );
-
-    if (mounted) {
-      setState(() {});
+    try {
+      final resultats = await Future.wait([
+        analyticsService.getGeneralStats(startDate: _startDate, endDate: _endDate),
+        analyticsService.getRevenueAnalytics(
+          startDate: _startDate,
+          endDate: _endDate,
+          devise: _devise,
+        ),
+        analyticsService.getOrderAnalytics(startDate: _startDate, endDate: _endDate),
+        analyticsService.getCategoryAnalytics(
+          startDate: _startDate,
+          endDate: _endDate,
+          devise: _devise,
+        ),
+        analyticsService.getDriverAnalytics(startDate: _startDate, endDate: _endDate),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _generalStats = resultats[0];
+        _revenueData = resultats[1];
+        _orderData = resultats[2];
+        _categoryData = resultats[3];
+        _driverData = resultats[4];
+        _devise = _revenueData!['currency'] as String? ?? _categoryData!['currency'] as String?;
+      });
+    } on eccore.ApiException catch (e) {
+      if (mounted) setState(() => _echec = Echec.de(e));
+    } finally {
+      if (mounted) setState(() => _chargement = false);
     }
   }
+
+  /// Les devises présentes dans les séries, dans l'ordre du serveur.
+  List<String> get _devises => <String>{
+        ...?(_revenueData?['currencies'] as List<String>?),
+        ...?(_categoryData?['currencies'] as List<String>?),
+      }.toList(growable: false);
+
+  /// Un montant dans la devise affichée — un tiret tant qu'aucune n'est connue,
+  /// plutôt qu'un « FCFA » inventé.
+  String _prix(double montant) =>
+      _devise == null ? '—' : eccore.formatPrice(montant, currency: _devise!);
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +156,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         Expanded(
           child: Consumer<AnalyticsService>(
         builder: (context, analyticsService, child) {
-          if (analyticsService.isLoading) {
+          if (_chargement && _generalStats == null) {
             return const LoadingWidget(message: 'Chargement des analytics...');
           }
 
@@ -139,11 +169,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           // tous la même chose : une page vide sous le sélecteur de période,
           // sans message ni moyen de réessayer. Le tableau de bord et l'écran
           // des rôles traitaient déjà le cas — celui-ci était l'exception.
-          if (analyticsService.error != null && _generalStats == null) {
-            return _EchecDeLecture(
-              motif: analyticsService.error!,
-              reessayer: _loadAnalytics,
-            );
+          if (_echec != null && _generalStats == null) {
+            return _EchecDeLecture(echec: _echec!, reessayer: _loadAnalytics);
           }
 
           return SingleChildScrollView(
@@ -151,7 +178,23 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (_echec != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: BandeauEchec(echec: _echec!, onReessayer: _loadAnalytics),
+                  ),
                 _buildDateRangeSelector(),
+                if (_devises.length > 1) ...[
+                  const SizedBox(height: 12),
+                  _SelecteurDeDevise(
+                    devises: _devises,
+                    devise: _devise,
+                    onChoisie: (devise) {
+                      setState(() => _devise = devise);
+                      unawaited(_loadAnalytics());
+                    },
+                  ),
+                ],
                 const SizedBox(height: 20),
                 _buildGeneralStatsCard(),
                 const SizedBox(height: 20),
@@ -205,7 +248,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                               firstDate: DateTime(2020),
                               lastDate: DateTime.now(),
                             );
-                            if (date != null) {
+                            if (date != null && mounted) {
                               setState(() {
                                 _startDate = date;
                               });
@@ -261,7 +304,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                               firstDate: _startDate,
                               lastDate: DateTime.now(),
                             );
-                            if (date != null) {
+                            if (date != null && mounted) {
                               setState(() {
                                 _endDate = date;
                               });
@@ -350,18 +393,36 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   Icons.check_circle,
                   AdminColorTokens.semantic(Theme.of(context).colorScheme).success,
                 ),
-                _buildStatCard(
-                  'Revenus Total',
-                  formatPrice(revenue['total']),
-                  Icons.attach_money,
-                  AdminColorTokens.semantic(Theme.of(context).colorScheme).warning,
-                ),
-                _buildStatCard(
-                  'Valeur Moyenne',
-                  formatPrice(revenue['averageOrderValue']),
-                  Icons.trending_up,
-                  Theme.of(context).colorScheme.tertiary,
-                ),
+                // Une tuile par devise : un périmètre à deux devises n'a pas
+                // de « revenu total » — il en a deux.
+                for (final ligne in (revenue['byCurrency'] as List<dynamic>)
+                    .cast<Map<String, dynamic>>()) ...[
+                  _buildStatCard(
+                    'Revenus livrés (${ligne['currency']})',
+                    eccore.formatPrice(
+                      ligne['total'] as double,
+                      currency: ligne['currency'] as String,
+                    ),
+                    Icons.attach_money,
+                    AdminColorTokens.semantic(Theme.of(context).colorScheme).warning,
+                  ),
+                  _buildStatCard(
+                    'Panier moyen (${ligne['currency']})',
+                    eccore.formatPrice(
+                      ligne['averageOrderValue'] as double,
+                      currency: ligne['currency'] as String,
+                    ),
+                    Icons.trending_up,
+                    Theme.of(context).colorScheme.tertiary,
+                  ),
+                ],
+                if ((revenue['byCurrency'] as List<dynamic>).isEmpty)
+                  _buildStatCard(
+                    'Revenus livrés',
+                    'Aucune livraison',
+                    Icons.attach_money,
+                    AdminColorTokens.semantic(Theme.of(context).colorScheme).warning,
+                  ),
                 _buildStatCard(
                   'Utilisateurs',
                   users['total'].toString(),
@@ -445,7 +506,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Analyses des Revenus',
+              _devise == null ? 'Analyses des Revenus' : 'Analyses des Revenus — $_devise',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -455,8 +516,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
               children: [
                 Expanded(
                   child: _buildStatCard(
-                    'Revenus Total',
-                    formatPrice(totalRevenue),
+                    'Revenus livrés',
+                    _prix(totalRevenue),
                     Icons.attach_money,
                     AdminColorTokens.semantic(Theme.of(context).colorScheme).success,
                   ),
@@ -660,7 +721,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   return const SizedBox.shrink();
                 }
                 return Text(
-                  formatPrice(value),
+                  _prix(value),
                   style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
                 );
               },
@@ -1062,9 +1123,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 /// permission analytics.read » se corrige, « Le serveur ne répond pas
 /// correctement » s'attend. Une page vide ne disait ni l'un ni l'autre.
 class _EchecDeLecture extends StatelessWidget {
-  const _EchecDeLecture({required this.motif, required this.reessayer});
+  const _EchecDeLecture({required this.echec, required this.reessayer});
 
-  final String motif;
+  final Echec echec;
   final VoidCallback reessayer;
 
   @override
@@ -1077,23 +1138,58 @@ class _EchecDeLecture extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.query_stats_rounded, size: 48, color: scheme.outline),
+            Icon(echec.nature.icone, size: 48, color: scheme.outline),
             const SizedBox(height: 12),
             Text(
-              'Rapports indisponibles',
+              'Rapports indisponibles — ${echec.nature.titre.toLowerCase()}',
               style: Theme.of(context).textTheme.titleMedium,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            Text(motif, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: reessayer,
-              child: const Text('Réessayer'),
-            ),
+            Text(echec.message, textAlign: TextAlign.center),
+            // « Réessayer » seulement quand réessayer peut aboutir : un refus
+            // d'autorisation ne changera pas au second clic.
+            if (echec.nature.reessayable) ...[
+              const SizedBox(height: 16),
+              OutlinedButton(
+                onPressed: reessayer,
+                child: const Text('Réessayer'),
+              ),
+            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Choix de la devise des séries monétaires — n'apparaît que si le périmètre
+/// en encaisse plusieurs.
+class _SelecteurDeDevise extends StatelessWidget {
+  const _SelecteurDeDevise({
+    required this.devises,
+    required this.devise,
+    required this.onChoisie,
+  });
+
+  final List<String> devises;
+  final String? devise;
+  final ValueChanged<String> onChoisie;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        const Text('Devise des montants :'),
+        for (final code in devises)
+          ChoiceChip(
+            label: Text(code),
+            selected: code == devise,
+            onSelected: (_) => onChoisie(code),
+          ),
+      ],
     );
   }
 }

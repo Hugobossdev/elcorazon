@@ -1,9 +1,34 @@
+import 'dart:async';
+
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
+import 'package:admin/presentation/autorisations.dart';
+import 'package:admin/presentation/dialogue_formulaire.dart';
+import 'package:admin/presentation/echec.dart';
+import 'package:admin/presentation/retours.dart';
+import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/promotion_service.dart';
-import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/utils/price_formatter.dart';
 
+/// Codes promotionnels.
+///
+/// ## Ce qui a changé (22 septembre 2026)
+///
+/// * **Établissement.** Le formulaire n'en proposait pas : tout code naissait
+///   national, que le serveur refuse à un compte rattaché (« renseignez un
+///   établissement »). Un gérant ne pouvait créer aucun code. Le champ existe,
+///   et l'option « national » n'est offerte qu'au siège.
+/// * **Devise.** Les montants partaient dans la devise de l'établissement
+///   *sélectionné dans le back-office*, et s'affichaient tous « FCFA ». Ils
+///   partent dans la devise de l'établissement du code (ou celle que le siège
+///   choisit pour un code national), et s'affichent avec leur code ISO.
+/// * **Effacer une limite.** Vider « Remise maximale » ou « Quota » ne retirait
+///   rien : la valeur nulle n'était pas envoyée. Elle l'est.
+/// * **Quota par client**, que le serveur gère, est saisissable.
+/// * Les gestes d'écriture suivent `promotions.write`.
 class PromotionsScreen extends StatefulWidget {
   const PromotionsScreen({super.key});
 
@@ -11,772 +36,458 @@ class PromotionsScreen extends StatefulWidget {
   State<PromotionsScreen> createState() => _PromotionsScreenState();
 }
 
-class _PromotionsScreenState extends State<PromotionsScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
+class _PromotionsScreenState extends State<PromotionsScreen> {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<PromotionService>().initialize();
+      if (mounted) unawaited(context.read<PromotionService>().initialize());
     });
   }
 
   @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    final service = context.watch<PromotionService>();
+    final peutEcrire = context.peut('promotions.write');
+
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Promotions'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Toutes', icon: Icon(Icons.list)),
+              Tab(text: 'Utilisables', icon: Icon(Icons.check_circle)),
+              Tab(text: 'Hors service', icon: Icon(Icons.history)),
+            ],
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Recharger',
+              onPressed: service.isLoading ? null : () => unawaited(service.refresh()),
+            ),
+          ],
+        ),
+        floatingActionButton: peutEcrire
+            ? FloatingActionButton.extended(
+                onPressed: () => ouvrirFormulairePromotion(context),
+                icon: const Icon(Icons.add),
+                label: const Text('Nouveau code'),
+              )
+            : null,
+        body: Column(
+          children: [
+            if (service.echec != null)
+              BandeauEchec(echec: service.echec!, onReessayer: () => unawaited(service.refresh())),
+            Expanded(
+              child: service.isLoading && service.promotions.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : TabBarView(
+                      children: [
+                        _Liste(codes: service.promotions, peutEcrire: peutEcrire),
+                        _Liste(codes: service.activePromotions, peutEcrire: peutEcrire),
+                        _Liste(codes: service.expiredPromotions, peutEcrire: peutEcrire),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
+}
+
+class _Liste extends StatelessWidget {
+  const _Liste({required this.codes, required this.peutEcrire});
+
+  final List<eccore.Promotion> codes;
+  final bool peutEcrire;
+
+  @override
+  Widget build(BuildContext context) {
+    if (codes.isEmpty) return const Center(child: Text('Aucun code'));
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: codes.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) => _CarteDeCode(code: codes[index], peutEcrire: peutEcrire),
+    );
+  }
+}
+
+/// La valeur de la remise, telle qu'un client la lira.
+String valeurDeRemise(eccore.Promotion code) => switch (code.kind) {
+      eccore.DiscountKind.percentage => '−${code.percentage?.toStringAsFixed(code.percentage! % 1 == 0 ? 0 : 2)} %',
+      eccore.DiscountKind.fixed => code.amount == null ? '—' : '−${formatMontant(code.amount!)}',
+      _ => 'Livraison offerte',
+    };
+
+class _CarteDeCode extends StatelessWidget {
+  const _CarteDeCode({required this.code, required this.peutEcrire});
+
+  final eccore.Promotion code;
+  final bool peutEcrire;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gestion des Promotions'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Toutes', icon: Icon(Icons.list)),
-            Tab(text: 'Actives', icon: Icon(Icons.check_circle)),
-            Tab(text: 'Expirées', icon: Icon(Icons.history)),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => context.read<PromotionService>().refresh(),
-            tooltip: 'Rafraîchir',
-          ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => _showPromotionForm(context),
-            tooltip: 'Créer une promotion',
-          ),
-        ],
-      ),
-      body: Consumer<PromotionService>(
-        builder: (context, promoService, _) {
-          if (promoService.isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (promoService.error != null) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: scheme.error.withValues(alpha: 0.75),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Erreur: ${promoService.error}',
-                    style: TextStyle(color: scheme.error),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () => promoService.refresh(),
-                    child: const Text('Réessayer'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              _buildPromotionsList(promoService.promotions),
-              _buildPromotionsList(promoService.activePromotions),
-              _buildPromotionsList(promoService.expiredPromotions),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildPromotionsList(List<Promotion> promotions) {
-    if (promotions.isEmpty) {
-      final scheme = Theme.of(context).colorScheme;
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.local_offer,
-              size: 64,
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Aucune promotion',
-              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 16),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: promotions.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final promotion = promotions[index];
-        return _buildPromotionCard(context, promotion);
-      },
-    );
-  }
-
-  Widget _buildPromotionCard(BuildContext context, Promotion promotion) {
-    final scheme = Theme.of(context).colorScheme;
-    final isExpired = promotion.isExpired;
-    final isAvailable = promotion.isAvailable;
+    final perimetre = context.watch<RestaurantScopeService>();
+    // Un code national ne se modifie qu'au siège ; un code nominatif (né d'un
+    // échange de points) se consulte seulement.
+    final modifiable = peutEcrire && !code.isPersonal && (!code.isNational || context.estSiege);
+    final portee = code.isNational
+        ? 'National — tous les établissements'
+        : (perimetre.parSlug(code.restaurantSlug)?.name ?? code.restaurantSlug!);
 
     return Card(
-      elevation: 2,
-      child: Material(
-        color: scheme.surface,
-        child: InkWell(
-          onTap: () => _showPromotionDetails(context, promotion),
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            constraints: const BoxConstraints(minHeight: 100),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: code.isAvailable ? scheme.primaryContainer : scheme.surfaceContainerHighest,
+          child: Icon(Icons.local_offer, color: code.isAvailable ? scheme.primary : scheme.outline),
+        ),
+        title: Text(code.code, style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (code.description.isNotEmpty) Text(code.description),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            promotion.code,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            promotion.description,
-                            style: TextStyle(
-                              color: scheme.onSurfaceVariant,
-                              fontSize: 14,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isAvailable
-                            ? scheme.secondaryContainer
-                            : isExpired
-                                ? scheme.errorContainer
-                                : scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        isAvailable
-                            ? 'Active'
-                            : isExpired
-                                ? 'Expirée'
-                                : 'Inactive',
-                        style: TextStyle(
-                          color: isAvailable
-                              ? scheme.onSecondaryContainer
-                              : isExpired
-                                  ? scheme.onErrorContainer
-                                  : scheme.onSurfaceVariant,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
+                Chip(label: Text(valeurDeRemise(code))),
+                Chip(label: Text(portee)),
+                Chip(label: Text('Du ${dateCourte(code.startsAt)} au ${dateCourte(code.endsAt)}')),
+                if (code.minOrderAmount != null)
+                  Chip(label: Text('Dès ${formatMontant(code.minOrderAmount!)}')),
+                if (code.maxDiscount != null)
+                  Chip(label: Text('Plafond ${formatMontant(code.maxDiscount!)}')),
+                Chip(
+                  label: Text(
+                    code.usageLimit == null
+                        ? '${code.usedCount} utilisation(s)'
+                        : '${code.usedCount} / ${code.usageLimit} utilisation(s)',
+                  ),
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    _buildInfoChip(
-                      Icons.local_offer,
-                      promotion.code,
-                      scheme.tertiary,
-                    ),
-                    const SizedBox(width: 8),
-                    _buildInfoChip(
-                      Icons.percent,
-                      _getDiscountText(promotion),
-                      scheme.primary,
-                    ),
-                    if (promotion.usageLimit != null) ...[
-                      const SizedBox(width: 8),
-                      _buildInfoChip(
-                        Icons.people,
-                        '${promotion.usedCount}/${promotion.usageLimit}',
-                        scheme.secondary,
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.calendar_today,
-                      size: 14,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${_formatDate(promotion.startDate)} - ${_formatDate(promotion.endDate)}',
-                      style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
+                if (code.usageLimitPerUser != null)
+                  Chip(label: Text('${code.usageLimitPerUser} par client')),
+                if (code.isPersonal) Chip(label: Text('Nominatif — ${code.ownerEmail}')),
+                Chip(
+                  label: Text(code.isAvailable ? 'Utilisable' : (code.isActive ? 'Hors période ou épuisé' : 'Suspendu')),
                 ),
               ],
             ),
-          ),
+          ],
         ),
+        trailing: modifiable
+            ? PopupMenuButton<String>(
+                onSelected: (choix) {
+                  if (choix == 'modifier') unawaited(ouvrirFormulairePromotion(context, code: code));
+                  if (choix == 'basculer') {
+                    unawaited(basculerAvecRetour(context, () => context.read<PromotionService>().basculer(code)));
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'modifier', child: Text('Modifier')),
+                  PopupMenuItem(value: 'basculer', child: Text(code.isActive ? 'Suspendre' : 'Réactiver')),
+                ],
+              )
+            : null,
       ),
     );
   }
+}
 
-  Widget _buildInfoChip(IconData icon, String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+const String _national = '__national__';
+
+/// Formulaire de création ou de modification d'un code.
+Future<void> ouvrirFormulairePromotion(BuildContext context, {eccore.Promotion? code}) async {
+  final service = context.read<PromotionService>();
+  final perimetre = context.read<RestaurantScopeService>();
+  final siege = context.read<AdminAuthService>().estSiege;
+
+  String? saisieDe(eccore.Money? m) => m == null ? '' : montantEnSaisie(m.toMajorUnits());
+
+  final codeSaisi = TextEditingController(text: code?.code);
+  final description = TextEditingController(text: code?.description);
+  final pourcentage = TextEditingController(
+    text: code?.percentage == null || code!.percentage == 0 ? '' : montantEnSaisie(code.percentage!),
+  );
+  final montant = TextEditingController(text: saisieDe(code?.amount));
+  final minimum = TextEditingController(text: saisieDe(code?.minOrderAmount));
+  final plafond = TextEditingController(text: saisieDe(code?.maxDiscount));
+  final quota = TextEditingController(text: code?.usageLimit?.toString() ?? '');
+  final quotaClient = TextEditingController(text: code?.usageLimitPerUser?.toString() ?? '');
+  var nature = code?.kind ?? eccore.DiscountKind.percentage;
+  var actif = code?.isActive ?? true;
+  final maintenant = DateTime.now();
+  var debut = code?.startsAt.toLocal() ?? maintenant;
+  var fin = code?.endsAt.toLocal() ?? maintenant.add(const Duration(days: 7));
+  var porteur = code == null
+      ? (perimetre.current?.slug ?? (siege ? _national : null))
+      : (code.restaurantSlug ?? _national);
+  var deviseNationale = code?.amount?.currency ??
+      code?.minOrderAmount?.currency ??
+      code?.maxDiscount?.currency ??
+      (perimetre.devises.isEmpty ? 'XOF' : perimetre.devises.first);
+
+  String devise() =>
+      porteur == _national ? deviseNationale : (perimetre.parSlug(porteur)?.currency ?? deviseNationale);
+  eccore.Money? versMoney(TextEditingController champ) {
+    final valeur = lireMontant(champ.text);
+    return valeur == null ? null : eccore.Money.fromMajorUnits(valeur, devise());
+  }
+
+  int? entierFacultatif(TextEditingController champ) => int.tryParse(champ.text.trim());
+
+  Future<DateTime?> choisir(BuildContext context, DateTime initial) async {
+    final jour = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(maintenant.year + 3),
+    );
+    if (jour == null || !context.mounted) return null;
+    final heure = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(initial));
+    if (heure == null) return null;
+    return DateTime(jour.year, jour.month, jour.day, heure.hour, heure.minute);
+  }
+
+  final enregistre = await DialogueDeFormulaire.ouvrir(
+    context,
+    titre: code == null ? 'Nouveau code' : 'Modifier ${code.code}',
+    libelleAction: code == null ? 'Créer' : 'Enregistrer',
+    enregistrer: () async {
+      final pct = nature == eccore.DiscountKind.percentage ? lireMontant(pourcentage.text) : null;
+      final fixe = nature == eccore.DiscountKind.fixed ? versMoney(montant) : null;
+      final plafondEnvoye = nature == eccore.DiscountKind.percentage ? versMoney(plafond) : null;
+      if (code == null) {
+        await service.creer(
+          code: codeSaisi.text.trim().toUpperCase(),
+          description: description.text.trim(),
+          kind: nature,
+          percentage: pct,
+          amount: fixe,
+          minOrderAmount: versMoney(minimum),
+          maxDiscount: plafondEnvoye,
+          startsAt: debut,
+          endsAt: fin,
+          usageLimit: entierFacultatif(quota),
+          usageLimitPerUser: entierFacultatif(quotaClient),
+          restaurantSlug: porteur == _national ? null : porteur,
+        );
+      } else {
+        await service.remplacer(
+          id: code.id,
+          description: description.text.trim(),
+          kind: nature,
+          percentage: pct,
+          amount: fixe,
+          minOrderAmount: versMoney(minimum),
+          maxDiscount: plafondEnvoye,
+          startsAt: debut,
+          endsAt: fin,
+          usageLimit: entierFacultatif(quota),
+          usageLimitPerUser: entierFacultatif(quotaClient),
+          isActive: actif,
+        );
+      }
+    },
+    corps: (context, echec) => StatefulBuilder(
+      builder: (context, majEtat) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
+          TextFormField(
+            controller: codeSaisi,
+            enabled: code == null,
+            textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              labelText: 'Code *',
+              helperText: code == null ? 'Ce que le client saisit.' : 'Le code ne change pas après sa création.',
+              errorText: echec?.pourLeChamp('code'),
             ),
+            validator: Valider.requis,
           ),
-        ],
-      ),
-    );
-  }
-
-  String _getDiscountText(Promotion promotion) {
-    switch (promotion.discountType) {
-      case 'percentage':
-        return '${promotion.discountValue}%';
-      case 'fixed':
-        return formatPrice(promotion.discountValue);
-      case 'free_delivery':
-        return 'Livraison gratuite';
-      default:
-        return 'Réduction';
-    }
-  }
-
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
-
-  void _showPromotionForm(BuildContext context, {Promotion? promotion}) {
-    DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => _PromotionFormDialog(promotion: promotion),
-    );
-  }
-
-  void _showPromotionDetails(BuildContext context, Promotion promotion) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(promotion.code),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildDetailRow('Description', promotion.description),
-              _buildDetailRow('Type', promotion.discountType),
-              _buildDetailRow(
-                'Portée',
-                promotion.isNational
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: description,
+            decoration: const InputDecoration(labelText: 'Description'),
+            maxLines: 2,
+          ),
+          const SizedBox(height: 12),
+          if (code == null)
+            DropdownButtonFormField<String>(
+              isExpanded: true,
+              initialValue: porteur,
+              decoration: InputDecoration(
+                labelText: 'Établissement *',
+                helperText: siege ? null : 'Un code national relève du siège.',
+                errorText: echec?.pourLeChamp('restaurant'),
+              ),
+              items: [
+                if (siege) const DropdownMenuItem(value: _national, child: Text('National — tous les établissements')),
+                for (final etablissement in perimetre.restaurants)
+                  DropdownMenuItem(
+                    value: etablissement.slug,
+                    child: Text('${etablissement.name} (${etablissement.currency})'),
+                  ),
+              ],
+              validator: (valeur) => valeur == null ? 'Choisissez un établissement' : null,
+              onChanged: (valeur) => majEtat(() => porteur = valeur),
+            )
+          else
+            InputDecorator(
+              decoration: const InputDecoration(labelText: 'Établissement'),
+              child: Text(
+                porteur == _national
                     ? 'National — tous les établissements'
-                    : promotion.restaurantSlug!,
+                    : (perimetre.parSlug(porteur)?.name ?? porteur ?? ''),
               ),
-              if (promotion.isPersonal)
-                _buildDetailRow('Nominatif', promotion.ownerEmail!),
-              _buildDetailRow('Valeur', _getDiscountText(promotion)),
-              _buildDetailRow(
-                'Montant minimum',
-                formatPrice(promotion.minOrderAmount),
+            ),
+          if (porteur == _national && perimetre.devises.length > 1 && code == null)
+            DropdownButtonFormField<String>(
+              isExpanded: true,
+              initialValue: deviseNationale,
+              decoration: const InputDecoration(
+                labelText: 'Devise des montants *',
+                helperText: 'Un code national libellé en XOF est refusé sur une commande en XAF.',
+                helperMaxLines: 2,
               ),
-              if (promotion.maxDiscount != null)
-                _buildDetailRow(
-                  'Réduction max',
-                  formatPrice(promotion.maxDiscount!),
+              items: [for (final d in perimetre.devises) DropdownMenuItem(value: d, child: Text(d))],
+              onChanged: (valeur) => majEtat(() => deviseNationale = valeur ?? deviseNationale),
+            ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            isExpanded: true,
+            initialValue: nature,
+            decoration: InputDecoration(labelText: 'Nature de la remise *', errorText: echec?.pourLeChamp('kind')),
+            items: const [
+              DropdownMenuItem(value: eccore.DiscountKind.percentage, child: Text('Pourcentage du sous-total')),
+              DropdownMenuItem(value: eccore.DiscountKind.fixed, child: Text('Montant fixe')),
+              DropdownMenuItem(value: eccore.DiscountKind.freeDelivery, child: Text('Livraison offerte')),
+            ],
+            onChanged: (valeur) => majEtat(() => nature = valeur ?? nature),
+          ),
+          const SizedBox(height: 12),
+          if (nature == eccore.DiscountKind.percentage) ...[
+            TextFormField(
+              controller: pourcentage,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(labelText: 'Pourcentage *', suffixText: '%', errorText: echec?.pourLeChamp('percentage')),
+              validator: (v) {
+                final valeur = lireMontant(v ?? '');
+                if (valeur == null || valeur <= 0) return 'Un pourcentage strictement positif';
+                if (valeur > 100) return 'Au plus 100 %';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: plafond,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Remise maximale (${devise()})',
+                helperText: 'Vide : sans plafond.',
+                errorText: echec?.pourLeChamp('max_discount'),
+              ),
+              validator: Valider.montantFacultatif,
+            ),
+          ],
+          if (nature == eccore.DiscountKind.fixed)
+            TextFormField(
+              controller: montant,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(labelText: 'Montant de la remise (${devise()}) *', errorText: echec?.pourLeChamp('amount')),
+              validator: Valider.montant,
+            ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: minimum,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Minimum de commande (${devise()})',
+              helperText: 'Vide : sans minimum.',
+              errorText: echec?.pourLeChamp('min_order_amount'),
+            ),
+            validator: Valider.montantFacultatif,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  controller: quota,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Quota total',
+                    helperText: 'Vide : illimité.',
+                    errorText: echec?.pourLeChamp('usage_limit'),
+                  ),
+                  validator: Valider.entierFacultatif,
                 ),
-              if (promotion.usageLimit != null)
-                _buildDetailRow(
-                  'Limite d\'utilisation',
-                  '${promotion.usageLimit}',
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextFormField(
+                  controller: quotaClient,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Quota par client',
+                    helperText: 'Vide : illimité.',
+                    errorText: echec?.pourLeChamp('usage_limit_per_user'),
+                  ),
+                  validator: Valider.entierFacultatif,
                 ),
-              _buildDetailRow('Utilisations', '${promotion.usedCount}'),
-              _buildDetailRow('Début', _formatDate(promotion.startDate)),
-              _buildDetailRow('Fin', _formatDate(promotion.endDate)),
-              _buildDetailRow(
-                'Statut',
-                promotion.isAvailable ? 'Active' : 'Inactive',
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-          if (promotion.isActive)
-            TextButton(
-              onPressed: () {
-                context.read<PromotionService>().togglePromotionStatus(
-                      promotion.id,
-                      false,
-                    );
-                Navigator.pop(context);
-              },
-              child: const Text('Désactiver'),
-            )
-          else
-            TextButton(
-              onPressed: () {
-                context.read<PromotionService>().togglePromotionStatus(
-                      promotion.id,
-                      true,
-                    );
-                Navigator.pop(context);
-              },
-              child: const Text('Activer'),
-            ),
-          TextButton(
-            onPressed: () {
-              _showPromotionForm(context, promotion: promotion);
-              Navigator.pop(context);
-            },
-            child: const Text('Modifier'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          Expanded(child: Text(value)),
-        ],
-      ),
-    );
-  }
-}
-
-class _PromotionFormDialog extends StatefulWidget {
-  final Promotion? promotion;
-  const _PromotionFormDialog({this.promotion});
-
-  @override
-  State<_PromotionFormDialog> createState() => _PromotionFormDialogState();
-}
-
-class _PromotionFormDialogState extends State<_PromotionFormDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _descController = TextEditingController();
-  final _codeController = TextEditingController();
-  final _valueController = TextEditingController();
-  final _minOrderController = TextEditingController();
-  final _maxDiscountController = TextEditingController();
-  final _usageLimitController = TextEditingController();
-
-  String _type = 'percentage';
-  DateTime _startDate = DateTime.now();
-  DateTime _endDate = DateTime.now().add(const Duration(days: 30));
-  bool _isActive = true;
-
-  @override
-  void initState() {
-    super.initState();
-    final p = widget.promotion;
-    if (p != null) {
-      _descController.text = p.description;
-      _codeController.text = p.code;
-      _valueController.text = p.discountValue.toString();
-      _minOrderController.text = p.minOrderAmount.toString();
-      _maxDiscountController.text = p.maxDiscount?.toString() ?? '';
-      _usageLimitController.text = p.usageLimit?.toString() ?? '';
-      _type = p.discountType;
-      _startDate = p.startDate;
-      _endDate = p.endDate;
-      _isActive = p.isActive;
-    }
-  }
-
-  @override
-  void dispose() {
-    _descController.dispose();
-    _codeController.dispose();
-    _valueController.dispose();
-    _minOrderController.dispose();
-    _maxDiscountController.dispose();
-    _usageLimitController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    final dialogWidth = (screenSize.width * 0.9).clamp(500.0, 700.0);
-    final dialogHeight = (screenSize.height * 0.85).clamp(600.0, 900.0);
-
-    return Dialog(
-      child: SizedBox(
-        width: dialogWidth,
-        height: dialogHeight,
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.promotion == null
-                          ? 'Créer une promotion'
-                          : 'Modifier la promotion',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Le champ « Nom » a disparu : un code promotionnel n'en
-                      // a pas côté serveur. Son identité est le **code** — ce
-                      // que le client saisit — et sa description l'explique. Un
-                      // troisième libellé n'aurait été montré à personne.
-                      TextFormField(
-                        controller: _descController,
-                        decoration: const InputDecoration(
-                          labelText: 'Description *',
-                          border: OutlineInputBorder(),
-                        ),
-                        maxLines: 3,
-                        validator: (v) => v == null || v.isEmpty
-                            ? 'Description requise'
-                            : null,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _type,
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'percentage',
-                                  child: Text('Pourcentage'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'fixed',
-                                  child: Text('Montant fixe'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'free_delivery',
-                                  child: Text('Livraison gratuite'),
-                                ),
-                              ],
-                              onChanged: (v) => setState(() => _type = v!),
-                              decoration: const InputDecoration(
-                                labelText: 'Type de réduction *',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _valueController,
-                              decoration: const InputDecoration(
-                                labelText: 'Valeur *',
-                                border: OutlineInputBorder(),
-                              ),
-                              keyboardType: TextInputType.number,
-                              validator: (v) =>
-                                  v == null || double.tryParse(v) == null
-                                      ? 'Valeur invalide'
-                                      : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _codeController,
-                        decoration: const InputDecoration(
-                          labelText: 'Code promo *',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (v) =>
-                            v == null || v.isEmpty ? 'Code requis' : null,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _minOrderController,
-                              decoration: const InputDecoration(
-                                labelText: 'Montant minimum',
-                                border: OutlineInputBorder(),
-                              ),
-                              keyboardType: TextInputType.number,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _maxDiscountController,
-                              decoration: const InputDecoration(
-                                labelText: 'Réduction max',
-                                border: OutlineInputBorder(),
-                              ),
-                              keyboardType: TextInputType.number,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _usageLimitController,
-                        decoration: const InputDecoration(
-                          labelText: 'Limite d\'utilisation (optionnel)',
-                          border: OutlineInputBorder(),
-                          helperText: 'Laisser vide pour illimité',
-                        ),
-                        keyboardType: TextInputType.number,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ListTile(
-                              title: const Text('Date de début'),
-                              subtitle: Text(_formatDate(_startDate)),
-                              trailing: const Icon(Icons.calendar_today),
-                              onTap: () async {
-                                final date = await showDatePicker(
-                                  context: context,
-                                  initialDate: _startDate,
-                                  firstDate: DateTime.now(),
-                                  lastDate: DateTime.now().add(
-                                    const Duration(days: 365),
-                                  ),
-                                );
-                                if (date != null) {
-                                  setState(() => _startDate = date);
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ListTile(
-                              title: const Text('Date de fin'),
-                              subtitle: Text(_formatDate(_endDate)),
-                              trailing: const Icon(Icons.calendar_today),
-                              onTap: () async {
-                                final date = await showDatePicker(
-                                  context: context,
-                                  initialDate: _endDate,
-                                  firstDate: _startDate,
-                                  lastDate: DateTime.now().add(
-                                    const Duration(days: 730),
-                                  ),
-                                );
-                                if (date != null) {
-                                  setState(() => _endDate = date);
-                                }
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SwitchListTile(
-                        title: const Text('Activer la promotion'),
-                        value: _isActive,
-                        onChanged: (value) => setState(() => _isActive = value),
-                      ),
-                    ],
-                  ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () async {
+                    final choisie = await choisir(context, debut);
+                    if (choisie != null) majEtat(() => debut = choisie);
+                  },
+                  child: Text('Début : ${dateCourte(debut)}'),
                 ),
               ),
-            ),
-            const Divider(height: 1),
-            Container(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Annuler'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _save,
-                    child: Text(
-                      widget.promotion == null ? 'Créer' : 'Modifier',
-                    ),
-                  ),
-                ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () async {
+                    final choisie = await choisir(context, fin);
+                    if (choisie != null) majEtat(() => fin = choisie);
+                  },
+                  child: Text('Fin : ${dateCourte(fin)}'),
+                ),
               ),
+            ],
+          ),
+          FormField<void>(
+            validator: (_) => fin.isAfter(debut) ? null : 'La fin doit suivre le début.',
+            builder: (etat) => Text(
+              etat.errorText ?? echec?.pourLeChamp('ends_at') ?? '',
+              style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
             ),
-          ],
-        ),
+          ),
+          if (code != null)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Actif'),
+              value: actif,
+              onChanged: (valeur) => majEtat(() => actif = valeur),
+            ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 
-  String _formatDate(DateTime date) {
-    return '${date.day}/${date.month}/${date.year}';
-  }
-
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final promoService = context.read<PromotionService>();
-    // Capturer les valeurs nécessaires avant le gap async
-    final inverseSurfaceColor = Theme.of(context).colorScheme.inverseSurface;
-    final value = double.tryParse(_valueController.text) ?? 0.0;
-    final minOrder = double.tryParse(_minOrderController.text) ?? 0.0;
-    final maxDiscount = _maxDiscountController.text.isNotEmpty
-        ? double.tryParse(_maxDiscountController.text)
-        : null;
-    final usageLimit = _usageLimitController.text.isNotEmpty
-        ? int.tryParse(_usageLimitController.text)
-        : null;
-
-    if (widget.promotion == null) {
-      // Créer une nouvelle promotion
-      final promotion = await promoService.createPromotion(
-        code: _codeController.text.toUpperCase(),
-        description: _descController.text,
-        discountType: _type,
-        discountValue: value,
-        minOrderAmount: minOrder,
-        maxDiscount: maxDiscount,
-        usageLimit: usageLimit,
-        startDate: _startDate,
-        endDate: _endDate,
-      );
-
-      if (promotion != null && mounted && context.mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Promotion créée avec succès'),
-            backgroundColor: inverseSurfaceColor,
-          ),
-        );
-      } else if (mounted && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: ${promoService.error ?? "Erreur inconnue"}'),
-            backgroundColor: inverseSurfaceColor,
-          ),
-        );
-      }
-    } else {
-      // Mettre à jour la promotion existante
-      final success = await promoService.updatePromotion(
-        id: widget.promotion!.id,
-        description: _descController.text,
-        discountType: _type,
-        discountValue: value,
-        minOrderAmount: minOrder,
-        maxDiscount: maxDiscount,
-        usageLimit: usageLimit,
-        startDate: _startDate,
-        endDate: _endDate,
-        isActive: _isActive,
-      );
-
-      if (success && mounted && context.mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Promotion mise à jour avec succès'),
-            backgroundColor: inverseSurfaceColor,
-          ),
-        );
-      } else if (mounted && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erreur: ${promoService.error ?? "Erreur inconnue"}'),
-            backgroundColor: inverseSurfaceColor,
-          ),
-        );
-      }
-    }
+  if (enregistre && context.mounted) {
+    annoncer(context, code == null ? 'Code créé.' : 'Code enregistré.');
   }
 }
+

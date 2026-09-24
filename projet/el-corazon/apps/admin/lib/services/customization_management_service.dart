@@ -20,6 +20,13 @@ class CustomizationOptionModel {
   /// Groupe suggéré à l'application — « Cuisson », « Suppléments ».
   final String category;
   final double priceModifier;
+
+  /// Devise du modèle — celle de l'établissement qui le possède. Le prix
+  /// s'affichait en francs CFA d'Afrique de l'Ouest quel que soit
+  /// l'établissement, et se réécrivait à la modification dans la devise de
+  /// l'établissement *sélectionné* : un modèle de Douala (XAF) modifié avec
+  /// Lomé sélectionné était refusé par le serveur.
+  final String devise;
   final bool isDefault;
   final bool isActive;
   final int sortOrder;
@@ -29,6 +36,7 @@ class CustomizationOptionModel {
     required this.name,
     required this.category,
     this.priceModifier = 0.0,
+    this.devise = 'XOF',
     this.isDefault = false,
     this.isActive = true,
     this.sortOrder = 0,
@@ -48,6 +56,7 @@ class CustomizationOptionModel {
       name: name ?? this.name,
       category: category ?? this.category,
       priceModifier: priceModifier ?? this.priceModifier,
+      devise: devise,
       isDefault: isDefault ?? this.isDefault,
       isActive: isActive ?? this.isActive,
       sortOrder: sortOrder ?? this.sortOrder,
@@ -123,11 +132,23 @@ class CustomizationManagementService extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  CustomizationManagementService() {
-    _loadData();
+  /// Les données ont-elles été demandées au moins une fois ?
+  bool _demandee = false;
+
+  /// Charge options et articles si personne ne les a encore demandés.
+  ///
+  /// Le constructeur appelait `_loadData()`, qui lit **la bibliothèque
+  /// d'options et toute la carte, groupes d'options compris** : ouvrir le
+  /// tableau de bord, les promotions ou les paiements payait ce chargement,
+  /// puisque le fournisseur est monté une fois pour toute l'application. C'est
+  /// l'écran des personnalisations qui le demande désormais.
+  Future<void> ensureLoaded() async {
+    if (_demandee) return;
+    await _loadData();
   }
 
   Future<void> _loadData() async {
+    _demandee = true;
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -212,7 +233,8 @@ class CustomizationManagementService extends ChangeNotifier {
         templateId: option.id,
         name: option.name,
         groupName: option.category,
-        priceDelta: _versMoney(option.priceModifier),
+        // La devise **du modèle**, pas celle de l'établissement sélectionné.
+        priceDelta: eccore.Money.fromMajorUnits(option.priceModifier, option.devise),
         isDefault: option.isDefault,
         isActive: option.isActive,
         sortOrder: option.sortOrder,
@@ -334,6 +356,7 @@ class CustomizationManagementService extends ChangeNotifier {
       name: modele.name,
       category: modele.groupName.isEmpty ? 'extra' : modele.groupName,
       priceModifier: modele.priceDelta.toMajorUnits(),
+      devise: modele.priceDelta.currency,
       isDefault: modele.isDefault,
       isActive: modele.isActive,
       sortOrder: modele.sortOrder,
@@ -348,4 +371,8 @@ class CustomizationManagementService extends ChangeNotifier {
   /// sienne, et le back-office ne pouvait donc rien écrire pour un restaurant
   /// hors zone franc CFA.
   eccore.Money _versMoney(double montant) => _scope.versMoney(montant);
+
+  /// La devise dans laquelle une **création** sera libellée — celle de
+  /// l'établissement où le modèle naîtra.
+  String get deviseDeCreation => _scope.devise;
 }

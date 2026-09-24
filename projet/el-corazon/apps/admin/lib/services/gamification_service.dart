@@ -1,387 +1,319 @@
+import 'dart:async';
+
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/admin_auth_service.dart';
-import 'package:admin/services/restaurant_scope_service.dart';
+
+/// Les quatre catalogues de fidélisation que l'écran édite.
+enum CatalogueDeFidelisation {
+  succes('gamification.read', 'gamification.write'),
+  defis('gamification.read', 'gamification.write'),
+  badges('gamification.read', 'gamification.write'),
+  // Les récompenses sont un autre domaine serveur (`apps.loyalty`), avec leurs
+  // propres permissions : un compte peut composer les défis sans pouvoir
+  // engager l'enseigne sur une remise.
+  recompenses('loyalty.read', 'loyalty.write');
+
+  const CatalogueDeFidelisation(this.lecture, this.ecriture);
+
+  final String lecture;
+  final String ecriture;
+}
 
 /// Catalogues de fidélisation — `/gamification/manage/*` et
-/// `/loyalty/manage/rewards/` (Phase 6).
+/// `/loyalty/manage/rewards/`.
 ///
-/// Ce sont de la **donnée d'exploitation** : créer « 10 commandes ce mois-ci,
-/// 500 points » ne demande pas de déploiement, comme les bornes d'un groupe
-/// d'options vivent en base plutôt qu'en dur (ADR-003).
+/// ## Ce qui a changé, et pourquoi
 ///
-/// Ce qui a disparu, et pourquoi :
+/// Relevé le 21 septembre 2026, vérifié en réel :
 ///
-/// * **la suppression.** Effacer un succès emportait par cascade les lignes de
-///   progression qui le référencent, c'est-à-dire ce que des clients avaient
-///   réellement débloqué ; effacer une récompense rendait illisible un échange
-///   passé — « 500 points contre quoi ? » est une question qu'on repose des
-///   mois plus tard. Le serveur ne l'expose pas : [deactivate] la remplace, et
-///   retire de la circulation sans réécrire le passé ;
-/// * **les compteurs de participation.** « Utilisateurs avec badges »
-///   demandait de télécharger toutes les lignes de progression de tous les
-///   clients pour en compter les identifiants distincts. Les compteurs de
-///   [catalogueStats] portent désormais sur le catalogue seul — ce que ce
-///   service a en main, et rien de plus ;
-/// * **les champs sans contrepartie** — `badge_reward` sur un succès,
-///   `criteria` sur un badge, `reward_discount` sur un défi. Ils étaient saisis
-///   dans les formulaires et n'étaient lus par rien.
+/// * **les listes étaient des `Map` à clés libres**, et l'écran lisait des
+///   clés que ce service ne produisait pas (`title`, `cost`, `reward_type`
+///   pour une récompense dont les champs sont `name`, `points_cost`, `kind`) :
+///   les trois récompenses en base s'affichaient sans titre, à « 0 pts », et
+///   leur modification envoyait un coût nul que le serveur refusait. Les
+///   écrans reçoivent désormais les **modèles du socle** — une clé mal
+///   orthographiée ne compile plus ;
+/// * **les écritures rendaient un booléen** et rangeaient la raison dans un
+///   `_error` que l'écran n'affichait pas ; les dialogues se fermaient avant
+///   la réponse. Elles laissent maintenant remonter l'`ApiException`, que
+///   `DialogueDeFormulaire` affiche sans se fermer ;
+/// * **un échec bloquait tout** : les quatre catalogues se lisaient à la
+///   suite dans un seul `try`, et le refus du premier vidait les trois
+///   autres. Chacun se lit seul, avec son propre [echecDe] — et seulement si
+///   le compte a la permission de le lire.
 ///
-/// Les listes restent des `Map` parce que c'est ce que consomment les écrans ;
-/// les clés sont **celles du serveur**, pour qu'un champ renommé côté API se
-/// voie ici plutôt que de se traduire en silence.
+/// Aucune suppression : un succès supprimé emporterait ce que des clients ont
+/// débloqué, une récompense retirée rendrait illisible un échange passé.
+/// Désactiver retire de la circulation sans réécrire le passé.
 class GamificationService extends ChangeNotifier {
-  /// D'où viennent le slug et la devise d'une écriture.
-  final RestaurantScopeService _scope = RestaurantScopeService();
+  GamificationService({eccore.ManagedGamificationRepository? depot, bool Function(String)? peut})
+      : _depot = depot,
+        _peut = peut;
+
+  final eccore.ManagedGamificationRepository? _depot;
+  final bool Function(String)? _peut;
 
   eccore.ManagedGamificationRepository get _catalogues =>
-      eccore.ManagedGamificationRepository(
-        apiClient: AdminAuthService().apiClient,
-      );
+      _depot ?? eccore.ManagedGamificationRepository(apiClient: AdminAuthService().apiClient);
 
-  List<Map<String, dynamic>> _achievements = [];
-  List<Map<String, dynamic>> _challenges = [];
-  List<Map<String, dynamic>> _badges = [];
-  List<Map<String, dynamic>> _loyaltyRewards = [];
-  bool _isLoading = false;
-  String? _error;
-  bool _isInitialized = false;
+  bool _autorise(String permission) => (_peut ?? AdminAuthService().can)(permission);
 
-  List<Map<String, dynamic>> get achievements => _achievements;
-  List<Map<String, dynamic>> get challenges => _challenges;
-  List<Map<String, dynamic>> get badges => _badges;
-  List<Map<String, dynamic>> get loyaltyRewards => _loyaltyRewards;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
+  List<eccore.ManagedAchievement> _succes = const [];
+  List<eccore.ManagedChallenge> _defis = const [];
+  List<eccore.ManagedBadge> _badges = const [];
+  List<eccore.ManagedReward> _recompenses = const [];
+  final Map<CatalogueDeFidelisation, Echec> _echecs = {};
+  bool _enCours = false;
+  bool _initialise = false;
+
+  List<eccore.ManagedAchievement> get succes => _succes;
+  List<eccore.ManagedChallenge> get defis => _defis;
+  List<eccore.ManagedBadge> get badges => _badges;
+  List<eccore.ManagedReward> get recompenses => _recompenses;
+  bool get enCours => _enCours;
+
+  /// Pourquoi ce catalogue n'a pas pu être lu — `null` s'il l'a été.
+  Echec? echecDe(CatalogueDeFidelisation catalogue) => _echecs[catalogue];
+
+  /// Le compte peut-il lire ce catalogue ? Un catalogue interdit n'est pas
+  /// demandé : son 403 n'apprendrait rien que la permission ne dise déjà.
+  bool peutLire(CatalogueDeFidelisation catalogue) => _autorise(catalogue.lecture);
+  bool peutEcrire(CatalogueDeFidelisation catalogue) => _autorise(catalogue.ecriture);
 
   Future<void> initialize() async {
-    if (_isInitialized) return;
-    _isInitialized = true;
+    if (_initialise) return;
+    _initialise = true;
     await refresh();
   }
 
   Future<void> refresh() async {
-    _isLoading = true;
-    _error = null;
+    _enCours = true;
     notifyListeners();
+    await Future.wait([
+      _lire(CatalogueDeFidelisation.succes, () async => _succes = await _catalogues.achievements()),
+      _lire(CatalogueDeFidelisation.defis, () async => _defis = await _catalogues.challenges()),
+      _lire(CatalogueDeFidelisation.badges, () async => _badges = await _catalogues.badges()),
+      _lire(
+        CatalogueDeFidelisation.recompenses,
+        () async => _recompenses = await _catalogues.rewards(),
+      ),
+    ]);
+    _enCours = false;
+    notifyListeners();
+  }
 
+  Future<void> _lire(CatalogueDeFidelisation catalogue, Future<void> Function() lecture) async {
+    _echecs.remove(catalogue);
+    if (!peutLire(catalogue)) return;
     try {
-      _achievements = (await _catalogues.achievements()).map(_succes).toList();
-      _challenges = (await _catalogues.challenges()).map(_defi).toList();
-      _badges = (await _catalogues.badges()).map(_badge).toList();
-      _loyaltyRewards = (await _catalogues.rewards()).map(_recompense).toList();
+      await lecture();
     } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Fidélisation : catalogues indisponibles — ${e.code}');
-    } finally {
-      _isLoading = false;
-      notifyListeners();
+      _echecs[catalogue] = Echec.de(e);
+      eccore.Journal.trace('Fidélisation : ${catalogue.name} illisible — ${e.code}');
     }
   }
 
   // ------------------------------------------------------------- succès
 
-  Future<bool> createAchievement({
+  /// Crée ([id] nul) ou modifie un succès. Lève `ApiException`.
+  Future<eccore.ManagedAchievement> enregistrerSucces({
     required String name,
+    required String description,
+    required String icon,
     required String conditionType,
     required int conditionValue,
-    String description = '',
-    String icon = '🏆',
-    int pointsReward = 0,
+    required int pointsReward,
+    required bool isActive,
+    String? id,
   }) async {
-    return _ecrire(() async {
-      final cree = await _catalogues.createAchievement(
-        name: name,
-        description: description,
-        icon: icon,
-        conditionType: conditionType,
-        conditionValue: conditionValue,
-        pointsReward: pointsReward,
-      );
-      _achievements = [..._achievements, _succes(cree)];
-    });
+    final enregistre = id == null
+        ? await _catalogues.createAchievement(
+            name: name,
+            description: description,
+            icon: icon,
+            conditionType: conditionType,
+            conditionValue: conditionValue,
+            pointsReward: pointsReward,
+            isActive: isActive,
+          )
+        : await _catalogues.updateAchievement(
+            achievementId: id,
+            name: name,
+            description: description,
+            icon: icon,
+            conditionType: conditionType,
+            conditionValue: conditionValue,
+            pointsReward: pointsReward,
+            isActive: isActive,
+          );
+    _succes = _remplacer(_succes, enregistre, (e) => e.id);
+    notifyListeners();
+    return enregistre;
   }
 
-  Future<bool> updateAchievement(
-    String id, {
-    String? name,
-    String? description,
-    String? icon,
-    String? conditionType,
-    int? conditionValue,
-    int? pointsReward,
-    bool? isActive,
-  }) async {
-    return _ecrire(() async {
-      final maj = await _catalogues.updateAchievement(
-        achievementId: id,
-        name: name,
-        description: description,
-        icon: icon,
-        conditionType: conditionType,
-        conditionValue: conditionValue,
-        pointsReward: pointsReward,
-        isActive: isActive,
-      );
-      _remplacer(_achievements, _succes(maj));
-    });
+  Future<void> basculerSucces(eccore.ManagedAchievement succes) async {
+    final maj = await _catalogues.updateAchievement(
+      achievementId: succes.id,
+      isActive: !succes.isActive,
+    );
+    _succes = _remplacer(_succes, maj, (e) => e.id);
+    notifyListeners();
   }
 
-  /// Retire un succès de la circulation sans effacer ce qui a été débloqué.
-  Future<bool> deactivateAchievement(String id) =>
-      updateAchievement(id, isActive: false);
+  // --------------------------------------------------------------- défis
 
-  // -------------------------------------------------------------- défis
-
-  Future<bool> createChallenge({
+  /// Crée ou modifie un défi. Les dates partent **telles que saisies** : la
+  /// modification remettait autrefois « aujourd'hui → +7 jours », faute de lire
+  /// les bonnes clés. Lève `ApiException`.
+  Future<eccore.ManagedChallenge> enregistrerDefi({
     required String title,
+    required String description,
     required String challengeType,
     required String conditionType,
     required int targetValue,
-    required DateTime startDate,
-    required DateTime endDate,
-    String description = '',
-    int rewardPoints = 0,
+    required int rewardPoints,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    required bool isActive,
+    String? id,
   }) async {
-    return _ecrire(() async {
-      final cree = await _catalogues.createChallenge(
-        title: title,
-        description: description,
-        challengeType: challengeType,
-        conditionType: conditionType,
-        targetValue: targetValue,
-        rewardPoints: rewardPoints,
-        startsAt: startDate,
-        endsAt: endDate,
-      );
-      _challenges = [_defi(cree), ..._challenges];
-    });
+    final enregistre = id == null
+        ? await _catalogues.createChallenge(
+            title: title,
+            description: description,
+            challengeType: challengeType,
+            conditionType: conditionType,
+            targetValue: targetValue,
+            rewardPoints: rewardPoints,
+            startsAt: startsAt,
+            endsAt: endsAt,
+            isActive: isActive,
+          )
+        : await _catalogues.updateChallenge(
+            challengeId: id,
+            title: title,
+            description: description,
+            challengeType: challengeType,
+            conditionType: conditionType,
+            targetValue: targetValue,
+            rewardPoints: rewardPoints,
+            startsAt: startsAt,
+            endsAt: endsAt,
+            isActive: isActive,
+          );
+    _defis = _remplacer(_defis, enregistre, (e) => e.id);
+    notifyListeners();
+    return enregistre;
   }
 
-  Future<bool> updateChallenge(
-    String id, {
-    String? title,
-    String? description,
-    String? challengeType,
-    String? conditionType,
-    int? targetValue,
-    int? rewardPoints,
-    DateTime? startDate,
-    DateTime? endDate,
-    bool? isActive,
-  }) async {
-    return _ecrire(() async {
-      final maj = await _catalogues.updateChallenge(
-        challengeId: id,
-        title: title,
-        description: description,
-        challengeType: challengeType,
-        conditionType: conditionType,
-        targetValue: targetValue,
-        rewardPoints: rewardPoints,
-        startsAt: startDate,
-        endsAt: endDate,
-        isActive: isActive,
-      );
-      _remplacer(_challenges, _defi(maj));
-    });
+  Future<void> basculerDefi(eccore.ManagedChallenge defi) async {
+    final maj = await _catalogues.updateChallenge(challengeId: defi.id, isActive: !defi.isActive);
+    _defis = _remplacer(_defis, maj, (e) => e.id);
+    notifyListeners();
   }
 
-  Future<bool> deactivateChallenge(String id) =>
-      updateChallenge(id, isActive: false);
+  // -------------------------------------------------------------- badges
 
-  // ------------------------------------------------------------- badges
-
-  Future<bool> createBadge({
+  Future<eccore.ManagedBadge> enregistrerBadge({
     required String title,
+    required String description,
+    required String icon,
     required int pointsRequired,
-    String description = '',
-    String icon = '🏅',
+    required bool isActive,
+    String? id,
   }) async {
-    return _ecrire(() async {
-      final cree = await _catalogues.createBadge(
-        title: title,
-        description: description,
-        icon: icon,
-        pointsRequired: pointsRequired,
-      );
-      _badges = [..._badges, _badge(cree)];
-    });
+    final enregistre = id == null
+        ? await _catalogues.createBadge(
+            title: title,
+            description: description,
+            icon: icon,
+            pointsRequired: pointsRequired,
+            isActive: isActive,
+          )
+        : await _catalogues.updateBadge(
+            badgeId: id,
+            title: title,
+            description: description,
+            icon: icon,
+            pointsRequired: pointsRequired,
+            isActive: isActive,
+          );
+    _badges = _remplacer(_badges, enregistre, (e) => e.id);
+    notifyListeners();
+    return enregistre;
   }
 
-  Future<bool> updateBadge(
-    String id, {
-    String? title,
-    String? description,
-    String? icon,
-    int? pointsRequired,
-    bool? isActive,
-  }) async {
-    return _ecrire(() async {
-      final maj = await _catalogues.updateBadge(
-        badgeId: id,
-        title: title,
-        description: description,
-        icon: icon,
-        pointsRequired: pointsRequired,
-        isActive: isActive,
-      );
-      _remplacer(_badges, _badge(maj));
-    });
+  Future<void> basculerBadge(eccore.ManagedBadge badge) async {
+    final maj = await _catalogues.updateBadge(badgeId: badge.id, isActive: !badge.isActive);
+    _badges = _remplacer(_badges, maj, (e) => e.id);
+    notifyListeners();
   }
 
-  Future<bool> deactivateBadge(String id) => updateBadge(id, isActive: false);
+  // --------------------------------------------------------- récompenses
 
-  // -------------------------------------------------------- récompenses
-
-  /// Crée une récompense échangeable contre des points.
+  /// Crée ou modifie une récompense.
   ///
-  /// [restaurantSlug] vide en ferait une récompense **nationale**, que le
-  /// serveur réserve au siège : elle s'échangerait dans les établissements des
-  /// autres.
-  Future<bool> createLoyaltyReward({
+  /// [restaurantId] nul crée une récompense **nationale**, que le serveur
+  /// réserve au siège. La remise ([discount]) porte sa devise : celle de
+  /// l'établissement choisi, ou celle que le siège a choisie pour une
+  /// récompense nationale — jamais celle de l'établissement qui se trouve
+  /// sélectionné dans le back-office. L'établissement n'est fixé qu'à la
+  /// création. Lève `ApiException`.
+  Future<eccore.ManagedReward> enregistrerRecompense({
     required String name,
+    required String description,
     required String kind,
     required int pointsCost,
-    String description = '',
-    double? discount,
-    int validityDays = 30,
+    required int validityDays,
+    required bool isActive,
+    eccore.Money? discount,
     String? restaurantId,
+    String? id,
   }) async {
-    return _ecrire(() async {
-      final cree = await _catalogues.createReward(
-        name: name,
-        description: description,
-        kind: kind,
-        pointsCost: pointsCost,
-        discount: discount == null ? null : _versMoney(discount),
-        validityDays: validityDays,
-        restaurantId: restaurantId,
-      );
-      _loyaltyRewards = [..._loyaltyRewards, _recompense(cree)];
-    });
+    final enregistre = id == null
+        ? await _catalogues.createReward(
+            name: name,
+            description: description,
+            kind: kind,
+            pointsCost: pointsCost,
+            discount: discount,
+            validityDays: validityDays,
+            restaurantId: restaurantId,
+            isActive: isActive,
+          )
+        : await _catalogues.updateReward(
+            rewardId: id,
+            name: name,
+            description: description,
+            kind: kind,
+            pointsCost: pointsCost,
+            discount: discount,
+            validityDays: validityDays,
+            isActive: isActive,
+          );
+    _recompenses = _remplacer(_recompenses, enregistre, (e) => e.id);
+    notifyListeners();
+    return enregistre;
   }
 
-  Future<bool> updateLoyaltyReward(
-    String id, {
-    String? name,
-    String? description,
-    String? kind,
-    int? pointsCost,
-    double? discount,
-    int? validityDays,
-    bool? isActive,
-  }) async {
-    return _ecrire(() async {
-      final maj = await _catalogues.updateReward(
-        rewardId: id,
-        name: name,
-        description: description,
-        kind: kind,
-        pointsCost: pointsCost,
-        discount: discount == null ? null : _versMoney(discount),
-        validityDays: validityDays,
-        isActive: isActive,
-      );
-      _remplacer(_loyaltyRewards, _recompense(maj));
-    });
+  Future<void> basculerRecompense(eccore.ManagedReward recompense) async {
+    final maj = await _catalogues.updateReward(
+      rewardId: recompense.id,
+      isActive: !recompense.isActive,
+    );
+    _recompenses = _remplacer(_recompenses, maj, (e) => e.id);
+    notifyListeners();
   }
-
-  Future<bool> deactivateLoyaltyReward(String id) =>
-      updateLoyaltyReward(id, isActive: false);
-
-  // ----------------------------------------------------------- lectures
-
-  /// Compteurs du catalogue — ce que ce service a en main.
-  ///
-  /// Il n'y a plus de « nombre d'utilisateurs ayant débloqué » : l'obtenir
-  /// demandait de charger toutes les lignes de progression de tous les clients
-  /// sur un poste de travail. C'est un agrégat, et il appartient aux rapports.
-  Map<String, dynamic> get catalogueStats => {
-    'total_achievements': _achievements.length,
-    'active_achievements': _actifs(_achievements),
-    'total_challenges': _challenges.length,
-    'active_challenges': _actifs(_challenges),
-    'total_badges': _badges.length,
-    'active_badges': _actifs(_badges),
-    'total_loyalty_rewards': _loyaltyRewards.length,
-    'active_loyalty_rewards': _actifs(_loyaltyRewards),
-  };
-
-  int _actifs(List<Map<String, dynamic>> items) =>
-      items.where((item) => item['is_active'] == true).length;
 
   // ------------------------------------------------------------ interne
 
-  Future<bool> _ecrire(Future<void> Function() action) async {
-    try {
-      await action();
-      notifyListeners();
-      return true;
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Fidélisation : écriture refusée — ${e.code}');
-      notifyListeners();
-      return false;
-    }
+  static List<T> _remplacer<T>(List<T> liste, T element, String Function(T) cle) {
+    final index = liste.indexWhere((existant) => cle(existant) == cle(element));
+    return index == -1
+        ? [...liste, element]
+        : [...liste.sublist(0, index), element, ...liste.sublist(index + 1)];
   }
-
-  void _remplacer(List<Map<String, dynamic>> liste, Map<String, dynamic> item) {
-    final index = liste.indexWhere((existant) => existant['id'] == item['id']);
-    if (index != -1) liste[index] = item;
-  }
-
-  Map<String, dynamic> _succes(eccore.ManagedAchievement modele) => {
-    'id': modele.id,
-    'name': modele.name,
-    'description': modele.description,
-    'icon': modele.icon,
-    'condition_type': modele.conditionType,
-    'condition_value': modele.conditionValue,
-    'points_reward': modele.pointsReward,
-    'is_active': modele.isActive,
-  };
-
-  Map<String, dynamic> _defi(eccore.ManagedChallenge modele) => {
-    'id': modele.id,
-    'title': modele.title,
-    'description': modele.description,
-    'challenge_type': modele.challengeType,
-    'condition_type': modele.conditionType,
-    'target_value': modele.targetValue,
-    'reward_points': modele.rewardPoints,
-    'starts_at': modele.startsAt,
-    'ends_at': modele.endsAt,
-    'is_active': modele.isActive,
-  };
-
-  Map<String, dynamic> _badge(eccore.ManagedBadge modele) => {
-    'id': modele.id,
-    'title': modele.title,
-    'description': modele.description,
-    'icon': modele.icon,
-    'points_required': modele.pointsRequired,
-    'is_active': modele.isActive,
-  };
-
-  Map<String, dynamic> _recompense(eccore.ManagedReward modele) => {
-    'id': modele.id,
-    'name': modele.name,
-    'description': modele.description,
-    'kind': modele.kind,
-    'points_cost': modele.pointsCost,
-    'discount': modele.discount.toMajorUnits(),
-    'validity_days': modele.validityDays,
-    'restaurant': modele.restaurantId,
-    'is_active': modele.isActive,
-  };
-
-  /// Montant saisi dans un formulaire, converti pour l'API.
-  ///
-  /// La devise et l'exposant viennent de l'établissement supervisé, plus de
-  /// `'XOF'` écrit ici : le serveur refuse un prix dont la devise n'est pas la
-  /// sienne, et le back-office ne pouvait donc rien écrire pour un restaurant
-  /// hors zone franc CFA.
-  eccore.Money _versMoney(double montant) => _scope.versMoney(montant);
 }

@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/services/customization_management_service.dart';
 import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/screens/admin/customization_option_form_dialog.dart';
@@ -34,6 +37,18 @@ class _CustomizationManagementScreenState
     'icing',
     'dietary',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // C'est l'écran des personnalisations : c'est lui qui les demande. Elles se
+    // chargeaient à la construction du service, avec toute la carte.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(context.read<CustomizationManagementService>().ensureLoaded());
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -155,6 +170,9 @@ class _CustomizationManagementScreenState
                           ),
                         ),
                         const SizedBox(width: 16),
+                        // Les options font partie du catalogue : les créer
+                        // demande `catalog.write`, que l'opérateur n'a pas.
+                        if (context.peut('catalog.write'))
                         ElevatedButton.icon(
                           onPressed: () async {
                             final result = await showDialog(
@@ -568,8 +586,8 @@ class _OptionCardWidgetState extends State<_OptionCardWidget> {
                               ),
                               child: Text(
                                 widget.option.priceModifier > 0
-                                    ? '+${formatPrice(widget.option.priceModifier)}'
-                                    : formatPrice(widget.option.priceModifier),
+                                    ? '+${formatMajeur(widget.option.priceModifier, widget.option.devise)}'
+                                    : formatMajeur(widget.option.priceModifier, widget.option.devise),
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
@@ -603,6 +621,7 @@ class _OptionCardWidgetState extends State<_OptionCardWidget> {
                   ),
                 ),
                 // Actions
+                if (context.peut('catalog.write'))
                 PopupMenuButton<String>(
                   onSelected: (value) async {
                     switch (value) {

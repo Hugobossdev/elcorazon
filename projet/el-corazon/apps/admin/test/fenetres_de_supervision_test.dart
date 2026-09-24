@@ -82,7 +82,24 @@ class _FauxServeur implements HttpClientAdapter {
     if (options.path.contains('/orders/manage/counts/')) {
       return _json(<String, int>{});
     }
-    return _page(commandes);
+    return _page(_filtrees(options.queryParameters));
+  }
+
+  /// Le filtre de statut, **appliqué** — comme le serveur l'applique.
+  ///
+  /// La fenêtre agrégée est faite de deux lectures disjointes : ce qui est en
+  /// cours, et ce qui s'est terminé depuis vingt-quatre heures. Un faux serveur
+  /// qui rend les mêmes commandes aux deux les faisait compter double, ce qui
+  /// n'arrive pas en production et masquait ici la seule chose que ces cas
+  /// vérifient : le contenu de la fenêtre.
+  List<Map<String, dynamic>> _filtrees(Map<String, dynamic> parametres) {
+    final demandes = (parametres['status__in'] as String?)?.split(',') ??
+        (parametres['status'] as String?)?.split(',');
+    if (demandes == null || demandes.isEmpty) return commandes;
+    return [
+      for (final commande in commandes)
+        if (demandes.contains(commande['status'])) commande,
+    ];
   }
 
   ResponseBody _page(List<Map<String, dynamic>> lignes) =>

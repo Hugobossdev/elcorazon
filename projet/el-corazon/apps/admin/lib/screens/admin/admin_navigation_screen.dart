@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/dialogs/notifications_dialog.dart';
@@ -41,13 +42,14 @@ import 'package:admin/services/notification_center_service.dart';
 
 /// Ce que le poste de cuisine affiche quand aucun établissement n'est résolu.
 ///
-/// Trois causes distinctes, trois messages. Les confondre est le défaut que
-/// `6dddb74` a corrigé ailleurs dans ce back-office : un refus de permission et
-/// une panne réseau se lisaient pareil, et l'opérateur réessayait indéfiniment
-/// ce qui ne pouvait pas marcher.
+/// Les causes sont distinctes, et les confondre est le défaut constaté le
+/// 21 septembre 2026 : le 403 d'un « Opérateur » sur la liste de gestion se
+/// lisait « Aucun établissement rattaché », et il cherchait qui devait le
+/// rattacher alors qu'il l'était déjà.
 ///
 /// * **En cours de lecture** — le périmètre arrive, il n'y a rien à faire.
-/// * **En erreur** — le serveur n'a pas répondu ; réessayer a du sens.
+/// * **Échec** — sa nature ([NatureEchec]) choisit le titre et le geste :
+///   « Réessayer » seulement devant une panne, jamais devant un refus.
 /// * **Vide** — le compte ne supervise aucun établissement. Réessayer n'y
 ///   changera rien, et c'est au siège de rattacher la personne.
 class _CuisineSansEtablissement extends StatelessWidget {
@@ -66,13 +68,9 @@ class _CuisineSansEtablissement extends StatelessWidget {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final erreur = perimetre.error;
-    final (icone, titre, detail) = erreur != null
-        ? (
-            Icons.cloud_off_rounded,
-            'Périmètre illisible',
-            erreur,
-          )
+    final echec = perimetre.echec;
+    final (icone, titre, detail) = echec != null
+        ? (echec.nature.icone, echec.nature.titre, echec.message)
         : (
             Icons.soup_kitchen_outlined,
             'Aucun établissement rattaché',
@@ -97,10 +95,10 @@ class _CuisineSansEtablissement extends StatelessWidget {
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
                 textAlign: TextAlign.center,
               ),
-              // Le bouton n'apparaît que sur l'erreur : proposer « Réessayer »
-              // à qui n'est rattaché à rien ferait boucler sur une réponse qui
-              // ne changera pas.
-              if (erreur != null) ...[
+              // Le bouton n'apparaît que devant une panne : proposer
+              // « Réessayer » à qui n'est rattaché à rien, ou à qui n'en a pas
+              // le droit, ferait boucler sur une réponse qui ne changera pas.
+              if (echec != null && echec.nature.reessayable) ...[
                 const SizedBox(height: 16),
                 FilledButton.tonalIcon(
                   onPressed: () => unawaited(perimetre.resolve(force: true)),
@@ -501,11 +499,27 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
     ),
   ];
 
+  /// Ouvre un écran de la navigation — ce qu'appellent les raccourcis du
+  /// tableau de bord, qui ouvraient leur écran par `Navigator.push`, hors de
+  /// cette navigation et de son filtre de permissions.
+  ///
+  /// Un index que ce compte n'a pas le droit d'ouvrir est ignoré : le
+  /// raccourci ne doit pas être une porte dérobée vers un écran que la barre
+  /// latérale lui cache.
+  void _ouvrirEcran(int index) {
+    final auth = context.read<AdminAuthService>();
+    final autorise = _navigationGroups
+        .expand((groupe) => groupe.items)
+        .where((entree) => entree.index == index)
+        .any((entree) => entree.permission == null || auth.can(entree.permission!));
+    if (autorise) setState(() => _selectedIndex = index);
+  }
+
   Widget _getCurrentScreen() {
     Widget screen;
     switch (_selectedIndex) {
       case 0:
-        screen = const AdminDashboardScreen();
+        screen = AdminDashboardScreen(ouvrirEcran: _ouvrirEcran);
         break;
       case 1:
         screen = const MenuManagementScreen();
@@ -610,7 +624,7 @@ class _AdminNavigationScreenState extends State<AdminNavigationScreen> {
         screen = const AvisClientsScreen();
         break;
       default:
-        screen = const AdminDashboardScreen();
+        screen = AdminDashboardScreen(ouvrirEcran: _ouvrirEcran);
     }
 
     return KeyedSubtree(

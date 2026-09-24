@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:admin/theme/modern_theme.dart';
@@ -13,7 +14,6 @@ import 'package:admin/services/role_management_service.dart';
 import 'package:admin/services/category_management_service.dart';
 import 'package:admin/services/customization_management_service.dart';
 import 'package:admin/services/menu_service.dart';
-import 'package:admin/services/app_service.dart';
 import 'package:admin/services/promotion_service.dart';
 import 'package:admin/services/marketing_service.dart';
 import 'package:admin/services/payments_service.dart';
@@ -138,9 +138,12 @@ class AdminApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => CategoryManagementService()),
         ChangeNotifierProvider(create: (_) => CustomizationManagementService()),
         ChangeNotifierProvider(create: (_) => MenuService()),
-        ChangeNotifierProvider(create: (_) => PromotionService()..initialize()),
-        ChangeNotifierProvider(create: (_) => MarketingService()..initialize()),
-        ChangeNotifierProvider(create: (_) => AppService()),
+        ChangeNotifierProvider(create: (_) => PromotionService()),
+        // Sans `..initialize()` : l'écran marketing l'appelle à son ouverture
+        // (`marketing_screen.dart`), et le fournisseur est monté une fois pour
+        // toute l'application — les campagnes se chargeaient donc à l'ouverture
+        // de n'importe quel écran.
+        ChangeNotifierProvider(create: (_) => MarketingService()),
         ChangeNotifierProvider(create: (_) => PaymentsService()),
         // Les sorties d'argent : retraits livreurs et remboursements, à
         // constater une fois le virement fait chez le prestataire.
@@ -150,11 +153,11 @@ class AdminApp extends StatelessWidget {
         // Le journal des décisions — écrit depuis longtemps, lisible ici.
         ChangeNotifierProvider(create: (_) => JournalAuditService()),
         ChangeNotifierProvider(create: (_) => AvisClientsService()),
+        // Chargé à l'ouverture de son écran, pas au démarrage : l'annuaire
+        // des clients n'a pas à être lu par qui ouvre le poste de cuisine.
+        ChangeNotifierProvider(create: (_) => ClientManagementService()),
         ChangeNotifierProvider(
-          create: (_) => ClientManagementService()..initialize(),
-        ),
-        ChangeNotifierProvider(
-          create: (_) => GamificationService()..initialize(),
+          create: (_) => GamificationService(),
         ),
         ChangeNotifierProvider(create: (_) => DriverScheduleService()),
         ChangeNotifierProvider(create: (_) => DriverDocumentService()),
@@ -183,6 +186,14 @@ class AdminApp extends StatelessWidget {
         theme: ModernTheme.lightTheme,
         darkTheme: ModernTheme.darkTheme,
         themeMode: ThemeMode.light,
+        // Le back-office est écrit en français, et ses sélecteurs parlaient
+        // anglais : « Select date », « JULY », et surtout des heures en
+        // 9:00 AM / 6:00 PM dans un planning dont toutes les autres lignes
+        // sont en 24 h. Ce n'est pas qu'une question de langue — la lecture
+        // d'un horaire au format 12 h coûte une hésitation à chaque ligne.
+        locale: const Locale('fr'),
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        supportedLocales: const [Locale('fr'), Locale('en')],
         routes: {
           '/admin-dashboard': (context) => const AdminNavigationScreen(),
           '/admin-login': (context) => const AdminAuthScreen(),

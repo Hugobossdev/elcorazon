@@ -1,3 +1,4 @@
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter_test/flutter_test.dart';
@@ -146,24 +147,48 @@ void main() {
       );
     }
 
-    test('un 403 ne devient pas une erreur d’écran', () async {
-      // « Opérateur » n'a pas `restaurants.read` et n'écrit jamais : ses
-      // lectures marchent, le serveur les cloisonne. Lui annoncer une panne
-      // serait faux.
+    test('un 403 se dit comme un refus, pas comme une absence de rattachement', () async {
+      // Le 403 était avalé : « Opérateur », privé de `restaurants.read`,
+      // lisait « Aucun établissement rattaché » sur le poste de cuisine. Le
+      // périmètre se lit désormais sur une route ouverte au personnel ; si un
+      // refus survient quand même, il doit se lire comme tel.
       final scope = refus(403);
 
       await scope.resolve();
 
-      expect(scope.error, isNull);
+      expect(scope.echec?.nature, NatureEchec.autorisation);
+      expect(scope.echec!.nature.reessayable, isFalse);
       expect(scope.slug, isNull);
     });
 
-    test('une vraie panne se dit', () async {
+    test('une vraie panne se dit, et se réessaie', () async {
       final scope = refus(500);
 
       await scope.resolve();
 
-      expect(scope.error, isNotNull);
+      expect(scope.echec?.nature, NatureEchec.serveur);
+      expect(scope.echec!.nature.reessayable, isTrue);
+    });
+
+    test('une session expirée n’est ni un refus ni une panne', () async {
+      final scope = RestaurantScopeService.avecLecture(
+        () async => throw const eccore.SessionExpiredException(),
+      );
+
+      await scope.resolve();
+
+      expect(scope.echec?.nature, NatureEchec.session);
+    });
+
+    test('un périmètre vide n’est pas un échec', () async {
+      // Le compte n'est rattaché à rien : c'est `sansPerimetre` qui le dit, et
+      // proposer « Réessayer » n'y changerait rien.
+      final scope = RestaurantScopeService.avecLecture(() async => const []);
+
+      await scope.resolve();
+
+      expect(scope.echec, isNull);
+      expect(scope.current, isNull);
     });
 
     test('requireSlug rend null plutôt qu’un établissement inventé', () async {

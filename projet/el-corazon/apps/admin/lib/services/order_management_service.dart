@@ -4,6 +4,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
 import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/presentation/filtres_supervision.dart';
 import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/statut_commande.dart';
@@ -19,11 +20,24 @@ class OrderManagementService extends ChangeNotifier {
   eccore.ManagedOrderRepository get _orders =>
       eccore.ManagedOrderRepository(apiClient: AdminAuthService().apiClient);
 
-  /// La **fenêtre agrégée** : un an de commandes, chargée à la demande.
+  /// La **fenêtre du service en cours**, chargée à la demande.
   ///
-  /// Sert aux compteurs, aux alertes et aux écrans qui raisonnent sur
-  /// l'ensemble — carte, livraisons actives, historique d'un livreur. Ce n'est
-  /// **pas** ce qu'affiche la liste de supervision, qui est paginée.
+  /// Ce qui n'est ni livré ni annulé — quel que soit son âge : une commande
+  /// oubliée depuis trois jours doit apparaître en alerte, pas disparaître —
+  /// plus ce qui s'est terminé dans les dernières vingt-quatre heures (la
+  /// colonne « Livrées aujourd'hui » du tableau, les annulations récentes).
+  ///
+  /// ## Ce qu'elle était
+  ///
+  /// **Un an** de commandes, tous statuts, vingt par page, téléchargé à
+  /// l'ouverture de la supervision — et toutes les dix secondes par la carte
+  /// temps réel. Le coût croissait avec l'historique de la plateforme, pas
+  /// avec l'activité. Les chiffres qu'on en tirait (chiffre d'affaires,
+  /// durées, ponctualité) viennent désormais de l'agrégat serveur
+  /// ([chargerLesStatistiques]) ; la fenêtre ne sert plus qu'à ce qui se
+  /// **regarde** : carte, livraisons actives, tableau, alertes.
+  ///
+  /// Ce n'est **pas** ce qu'affiche la liste de supervision, qui est paginée.
   List<eccore.Order> _allOrders = [];
   bool _isLoading = false;
   bool _fenetreChargee = false;
@@ -103,7 +117,11 @@ class OrderManagementService extends ChangeNotifier {
   /// l'application et une dépendance réseau inutile dans un test qui vérifie
   /// une moyenne. Même procédé que `RestaurantScopeService.avecLecture`.
   @visibleForTesting
-  OrderManagementService.pourTests(List<eccore.Order> commandes) : _allOrders = commandes;
+  OrderManagementService.pourTests(
+    List<eccore.Order> commandes, {
+    eccore.OrderStatistics? statistiques,
+  })  : _allOrders = commandes,
+        _statistiques = statistiques;
 
   OrderManagementService() {
     // **Aucun chargement au démarrage.**
@@ -126,14 +144,20 @@ class OrderManagementService extends ChangeNotifier {
     Future.microtask(() => notifyListeners());
   }
 
-  /// Profondeur d'historique chargée par la supervision.
+  /// Les statuts du service en cours — tous ceux qui ne sont pas terminés.
+  static final List<String> _statutsEnCours = [
+    for (final statut in StatutCommande.values)
+      if (statut.estEnCours) statut.versServeur,
+  ];
+
+  /// Jusqu'où remonter pour les commandes **terminées** de la fenêtre.
+  static const Duration _profondeurDesTerminees = Duration(hours: 24);
+
+  /// La lecture de la fenêtre en vol, partagée par les appels concurrents.
   ///
-  /// Le dépôt suit `next` jusqu'au bout : sans borne, chaque ouverture de
-  /// l'écran télécharge **toutes** les commandes jamais passées, page après
-  /// page, pour en afficher la fin. Un an couvre le filtre le plus large de
-  /// l'interface (« 1 an », sur l'historique d'un livreur) ; au-delà, ce sont
-  /// les rapports qui répondent, et eux agrègent côté serveur.
-  static const Duration _profondeur = Duration(days: 365);
+  /// La carte relit la fenêtre toutes les dix secondes ; sans ce partage, une
+  /// lecture lente en empilait une seconde, puis une troisième.
+  Future<void>? _fenetreEnVol;
 
   /// Charge la fenêtre agrégée si elle ne l'est pas déjà.
   ///
@@ -142,7 +166,7 @@ class OrderManagementService extends ChangeNotifier {
   /// demande une page.
   Future<void> ensureWindowLoaded() async {
     _fenetreDemandee = true;
-    if (_fenetreChargee || _isLoading) return;
+    if (_fenetreChargee) return;
     await _loadAllOrders();
   }
 
@@ -157,14 +181,25 @@ class OrderManagementService extends ChangeNotifier {
     await _loadAllOrders();
   }
 
-  /// Charger les commandes de la fenêtre de supervision.
-  Future<void> _loadAllOrders() async {
+  /// Charge la fenêtre du service en cours — une seule lecture à la fois.
+  Future<void> _loadAllOrders() => _fenetreEnVol ??= _lireLaFenetre().whenComplete(
+        () => _fenetreEnVol = null,
+      );
+
+  Future<void> _lireLaFenetre() async {
     _setLoading(true);
     try {
-      final remote = await _orders.list(
-        placedFrom: DateTime.now().subtract(_profondeur),
-      );
-      _allOrders = remote;
+      // Deux lectures bornées par l'**activité**, pas par l'historique : ce
+      // qui est en cours, et ce qui s'est terminé depuis vingt-quatre heures.
+      final resultats = await Future.wait([
+        _orders.list(statuses: _statutsEnCours),
+        _orders.list(
+          statuses: [StatutCommande.livree.versServeur, StatutCommande.annulee.versServeur],
+          placedFrom: DateTime.now().subtract(_profondeurDesTerminees),
+        ),
+      ]);
+      _allOrders = [...resultats[0], ...resultats[1]]
+        ..sort((a, b) => b.placedAt.compareTo(a.placedAt));
       _fenetreChargee = true;
       _erreurFenetre = null;
       eccore.Journal.trace('OrderManagementService: ${_allOrders.length} commande(s)');
@@ -662,17 +697,28 @@ class OrderManagementService extends ChangeNotifier {
   Future<eccore.InternalNote> addNote(String orderId, String contenu) =>
       _orders.addNote(orderId: orderId, content: contenu);
 
-  /// Les [limit] commandes les plus récentes.
-  Future<List<eccore.Order>> loadRecentOrdersFromDB({int limit = 5}) async {
-    try {
-      final remote = await _orders.list();
-      return remote.take(limit).toList();
-    } on eccore.ApiException catch (e) {
-      eccore.Journal.trace(
-          'OrderManagementService: commandes récentes indisponibles — ${e.code}',
-          );
-      return [];
-    }
+  /// Les [limit] commandes les plus récentes — **une page** du serveur.
+  ///
+  /// La version précédente appelait `list()`, qui suit la pagination jusqu'au
+  /// bout : pour afficher cinq commandes, elle téléchargeait l'historique
+  /// entier. Lève `ApiException` : l'écran qui les montre dit la panne.
+  Future<List<eccore.Order>> recentes({int limit = 5}) async {
+    final page = await _orders.listPage(pageSize: limit);
+    return page.results;
+  }
+
+  /// Le nombre de commandes **en cours de service**, par statut — un
+  /// `COUNT … GROUP BY` côté serveur, sans rien télécharger.
+  ///
+  /// Les statuts terminés (livrée, annulée) sont écartés : leur compte porte
+  /// sur tout l'historique, et le tableau de bord n'a pas à l'annoncer comme
+  /// une activité du moment. Lève `ApiException`.
+  Future<Map<StatutCommande, int>> compterEnCours() async {
+    final comptes = await _orders.countsByStatus();
+    return {
+      for (final statut in StatutCommande.values)
+        if (statut.estEnCours) statut: comptes[statut.versServeur] ?? 0,
+    };
   }
 
   // `searchOrders` a été retiré : il rendait une liste filtrée que son seul
@@ -681,46 +727,48 @@ class OrderManagementService extends ChangeNotifier {
   // un état d'écran, appliqué là où la liste est construite — un service
   // partagé n'a pas à porter le champ de saisie d'un écran.
 
-  /// Obtenir les statistiques des commandes
-  Map<String, dynamic> getOrderStats() {
-    final totalOrders = _allOrders.length;
-    final pendingOrders =
-        _allOrders.where((o) => o.statut == StatutCommande.enAttente).length;
-    final confirmedOrders =
-        _allOrders.where((o) => o.statut == StatutCommande.confirmee).length;
-    final preparingOrders =
-        _allOrders.where((o) => o.statut == StatutCommande.enPreparation).length;
-    final readyOrders = _allOrders.where((o) => o.statut == StatutCommande.prete).length;
-    final pickedUpOrders =
-        _allOrders.where((o) => o.statut == StatutCommande.recuperee).length;
-    final onTheWayOrders =
-        _allOrders.where((o) => o.statut == StatutCommande.enRoute).length;
-    final deliveredOrders =
-        _allOrders.where((o) => o.statut == StatutCommande.livree).length;
-    final cancelledOrders =
-        _allOrders.where((o) => o.statut == StatutCommande.annulee).length;
+  // ------------------------------------------------------- statistiques
 
-    final totalRevenue = _allOrders
-        .where((o) => o.statut == StatutCommande.livree)
-        .fold(0.0, (sum, order) => sum + order.totalAffiche);
+  eccore.OrderStatistics? _statistiques;
+  bool _statistiquesEnCours = false;
+  Echec? _echecStatistiques;
 
-    final averageOrderValue = deliveredOrders > 0 ? totalRevenue / deliveredOrders : 0.0;
+  /// Les chiffres de la sélection courante (filtres de la supervision, hors
+  /// statut d'onglet), agrégés par le serveur. `null` avant la première
+  /// lecture.
+  eccore.OrderStatistics? get statistiques => _statistiques;
+  bool get statistiquesEnCours => _statistiquesEnCours;
+  Echec? get echecStatistiques => _echecStatistiques;
 
-    return {
-      'total_orders': totalOrders,
-      'pending_orders': pendingOrders,
-      'confirmed_orders': confirmedOrders,
-      'preparing_orders': preparingOrders,
-      'ready_orders': readyOrders,
-      'picked_up_orders': pickedUpOrders,
-      'on_the_way_orders': onTheWayOrders,
-      'delivered_orders': deliveredOrders,
-      'cancelled_orders': cancelledOrders,
-      'total_revenue': totalRevenue.isNaN || totalRevenue.isInfinite ? 0.0 : totalRevenue,
-      'average_order_value': averageOrderValue.isNaN || averageOrderValue.isInfinite
-          ? 0.0
-          : averageOrderValue,
-    };
+  /// Lit `GET /orders/manage/statistics/` pour les filtres de la supervision.
+  ///
+  /// Remplace `getOrderStats`, `getDeliveryStats` et `getPerformanceStats`,
+  /// qui calculaient ces chiffres sur la fenêtre d'un an téléchargée — et
+  /// additionnaient au passage les chiffres d'affaires de toutes les devises.
+  Future<void> chargerLesStatistiques() async {
+    if (_statistiquesEnCours) return;
+    _statistiquesEnCours = true;
+    _echecStatistiques = null;
+    notifyListeners();
+    final filtres = _filtres;
+    try {
+      _statistiques = await _orders.statistics(
+        search: filtres.recherche.trim().isEmpty ? null : filtres.recherche.trim(),
+        placedFrom: filtres.depuis,
+        placedTo: filtres.jusqua,
+        restaurantSlug: filtres.restaurantSlug,
+        customerId: filtres.clientId,
+        countryIsoCode: filtres.paysIso,
+        citySlug: filtres.villeSlug,
+        deliveryZoneId: filtres.zoneId,
+      );
+    } on eccore.ApiException catch (e) {
+      _echecStatistiques = Echec.de(e);
+      eccore.Journal.trace('OrderManagementService: statistiques indisponibles — ${e.code}');
+    } finally {
+      _statistiquesEnCours = false;
+      notifyListeners();
+    }
   }
 
   /// Recharger les données (méthode publique).
@@ -730,7 +778,8 @@ class OrderManagementService extends ChangeNotifier {
   /// l'écran entier cohérent — pas seulement la moitié qu'on regarde.
   ///
   /// La fenêtre n'est pas chargée si elle ne l'avait jamais été : « recharger »
-  /// ne doit pas déclencher un téléchargement d'un an que personne n'a demandé.
+  /// ne doit pas déclencher une lecture que personne n'a demandée. Même règle
+  /// pour les statistiques.
   Future<void> refresh() async {
     eccore.Journal.trace('🔄 Rafraîchissement manuel des commandes...');
     await Future.wait([
@@ -741,100 +790,7 @@ class OrderManagementService extends ChangeNotifier {
       // dont il n'affiche rien.
       if (_fenetreDemandee || _fenetreChargee) _loadAllOrders(),
       if (_page != null) reloadPage(),
+      if (_statistiques != null || _echecStatistiques != null) chargerLesStatistiques(),
     ]);
-  }
-
-  /// Statistiques de livraison, mesurées sur ce qui a **réellement** eu lieu.
-  ///
-  /// Ce bloc annonçait trois chiffres qu'il n'avait pas :
-  ///
-  /// * le « temps moyen de livraison » était `estimated_delivery_at − placed_at`,
-  ///   c'est-à-dire le délai **promis** au client au moment de la commande. Il
-  ///   ne bougeait pas d'un pouce quand les livraisons prenaient une heure de
-  ///   plus, puisque c'est la promesse qu'il moyennait, jamais la réalité ;
-  /// * le « taux de livraison à l'heure » comptait les commandes dont cette
-  ///   même promesse tenait dans les 60 minutes — une propriété du barème de
-  ///   zone, sans aucun rapport avec la ponctualité ;
-  /// * les commandes sans heure annoncée étaient purement écartées du calcul,
-  ///   ce qui flattait la moyenne au lieu de la laisser incomplète.
-  ///
-  /// Le serveur horodate la livraison (`delivered_at`, `apps/orders/models.py`)
-  /// et le socle le lit. Le temps de livraison est donc `delivered_at −
-  /// placed_at`, et la ponctualité se juge en comparant `delivered_at` à
-  /// l'heure annoncée — ce qui est la définition du mot.
-  Map<String, dynamic> getDeliveryStats() {
-    // Une commande livrée sans horodatage de livraison ne peut rien mesurer :
-    // on ne l'inclut ni au numérateur ni au dénominateur, plutôt que de lui
-    // prêter une durée.
-    final livrees = _allOrders
-        .where((o) => o.statut == StatutCommande.livree && o.deliveredAt != null)
-        .toList();
-
-    if (livrees.isEmpty) {
-      return const {
-        'measured_orders': 0,
-        'on_time_rate': 0.0,
-        'on_time_measured': 0,
-        'average_delivery_time': 0.0,
-        'fastest_delivery': 0.0,
-        'slowest_delivery': 0.0,
-      };
-    }
-
-    var total = 0.0;
-    var plusRapide = double.infinity;
-    var plusLente = 0.0;
-
-    for (final order in livrees) {
-      final minutes = order.deliveredAt!.difference(order.passeeLe).inMinutes.toDouble();
-      total += minutes;
-      if (minutes < plusRapide) plusRapide = minutes;
-      if (minutes > plusLente) plusLente = minutes;
-    }
-
-    // La ponctualité ne se juge que sur les commandes qui portaient une
-    // promesse. Sans heure annoncée, il n'y a rien à tenir — et rien à manquer.
-    final avecPromesse = livrees.where((o) => o.estimatedDeliveryAt != null).toList();
-    final aLHeure =
-        avecPromesse.where((o) => !o.deliveredAt!.isAfter(o.estimatedDeliveryAt!)).length;
-
-    return {
-      'measured_orders': livrees.length,
-      'on_time_measured': avecPromesse.length,
-      'on_time_rate': avecPromesse.isEmpty ? 0.0 : aLHeure * 100 / avecPromesse.length,
-      'average_delivery_time': total / livrees.length,
-      'fastest_delivery': plusRapide == double.infinity ? 0.0 : plusRapide,
-      'slowest_delivery': plusLente,
-    };
-  }
-
-  /// Chiffres de la section « Performance ».
-  ///
-  /// La « satisfaction client » qui s'y trouvait a disparu, et son remplacement
-  /// n'est pas un autre calcul : elle n'en avait pas. C'était
-  /// `(1 − taux d'annulation) × 0,7 + ponctualité × 0,3`, multiplié par cinq et
-  /// affiché sous une étoile, sur cinq — la forme exacte d'une note de clients.
-  /// Aucun client n'y avait rien noté. Les notes existent, sur le dossier des
-  /// livreurs (`rating_average`, alimenté par `/delivery/orders/{id}/rating/`),
-  /// et c'est l'écran de la flotte qui les affiche.
-  ///
-  /// À sa place, un chiffre que ces commandes portent vraiment : la part de ce
-  /// qui a été annulé.
-  Map<String, dynamic> getPerformanceStats() {
-    final livraison = getDeliveryStats();
-    final stats = getOrderStats();
-
-    final total = stats['total_orders'] as int? ?? 0;
-    final annulees = stats['cancelled_orders'] as int? ?? 0;
-
-    return {
-      'average_delivery_time': livraison['average_delivery_time'] ?? 0.0,
-      'measured_orders': livraison['measured_orders'] ?? 0,
-      'on_time_rate': livraison['on_time_rate'] ?? 0.0,
-      'on_time_measured': livraison['on_time_measured'] ?? 0,
-      'cancellation_rate': total == 0 ? 0.0 : annulees * 100 / total,
-      'fastest_delivery': livraison['fastest_delivery'] ?? 0.0,
-      'slowest_delivery': livraison['slowest_delivery'] ?? 0.0,
-    };
   }
 }

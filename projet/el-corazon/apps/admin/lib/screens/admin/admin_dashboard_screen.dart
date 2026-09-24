@@ -1,290 +1,206 @@
+import 'dart:async';
+
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcorazon_core/elcorazon_core.dart' show AppEmoji;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:admin/services/app_service.dart';
-import 'package:admin/services/analytics_service.dart';
-import 'package:admin/services/driver_management_service.dart';
-import 'package:admin/presentation/commande.dart';
-import 'package:admin/presentation/statut_commande.dart';
-import 'package:admin/presentation/statut_livreur.dart';
+
 import 'package:admin/core/utils/admin_helpers.dart';
-import 'package:admin/widgets/modern/enhanced_stat_card.dart';
+import 'package:admin/presentation/autorisations.dart';
+import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/couleur_statut.dart';
+import 'package:admin/presentation/echec.dart';
+import 'package:admin/presentation/statut_commande.dart';
+import 'package:admin/screens/admin/send_notification_dialog.dart';
+import 'package:admin/services/admin_auth_service.dart';
+import 'package:admin/services/analytics_service.dart';
+import 'package:admin/services/order_management_service.dart';
+import 'package:admin/ui/ui.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/utils/price_formatter.dart';
-import 'package:admin/theme/modern_theme.dart';
-import 'package:admin/screens/admin/advanced_order_management_screen.dart';
-import 'package:admin/screens/admin/analytics_screen.dart';
-import 'package:admin/screens/admin/client_management_screen.dart';
-import 'package:admin/screens/admin/driver_management_screen.dart';
-import 'package:admin/screens/admin/promotions_screen.dart';
-import 'package:admin/screens/admin/send_notification_dialog.dart';
-import 'package:admin/screens/admin/driver_documents_dashboard_screen.dart';
-import 'package:admin/screens/admin/active_deliveries_screen.dart';
-import 'package:admin/screens/admin/menu_management_screen.dart';
-import 'package:admin/ui/ui.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show AppEmoji;
+import 'package:admin/widgets/modern/enhanced_stat_card.dart';
 
+/// Les écrans qu'un raccourci du tableau de bord ouvre — les index de la
+/// navigation (`AdminNavigationScreen`), avec la **même** permission que
+/// l'entrée de la barre latérale.
+///
+/// Les raccourcis poussaient chacun un écran par `Navigator.push`, hors de
+/// la navigation et hors de son filtre : un Opérateur voyait « Promotions »
+/// et « Notifications » sur son tableau de bord alors que la barre latérale
+/// les lui cachait, et le serveur le refusait en 403 une fois le formulaire
+/// rempli. Ils passent maintenant par la navigation, sous la même règle.
+abstract final class EcranDuTableauDeBord {
+  static const commandes = (index: 2, permission: 'orders.read');
+  static const menu = (index: 1, permission: 'catalog.read');
+  static const analyses = (index: 4, permission: 'analytics.read');
+  static const promotions = (index: 9, permission: 'promotions.read');
+  static const documents = (index: 15, permission: 'couriers.read');
+  static const livraisons = (index: 14, permission: 'orders.read');
+  static const clients = (index: 5, permission: 'customers.read');
+  static const livreurs = (index: 3, permission: 'couriers.read');
+}
+
+/// Tableau de bord — ce qu'on regarde en ouvrant le back-office.
+///
+/// ## Ce qu'il ne fait plus
+///
+/// Il téléchargeait **toutes** les commandes jamais passées (`AppService`,
+/// sans borne de date, vingt par page) et tout le catalogue, à chaque
+/// ouverture, pour en afficher des compteurs et cinq lignes. Le temps
+/// d'ouverture croissait avec l'historique de la plateforme. Chaque chiffre
+/// vient désormais d'un agrégat serveur :
+///
+/// * la journée (`/analytics/reports/overview/`, `analytics.read`) —
+///   commandes, livraisons, chiffre d'affaires **par devise**, livreurs
+///   disponibles, clients, carte ;
+/// * le service en cours (`/orders/manage/counts/`, `orders.read`) — un
+///   `COUNT … GROUP BY` ;
+/// * les cinq commandes récentes — une page de cinq.
+///
+/// ## Ce que chaque rôle y voit
+///
+/// L'écran reste ouvert à tout le personnel (c'est la page d'accueil), mais
+/// chaque bloc n'apparaît qu'avec la permission que sa route exige. Un bloc
+/// absent n'est pas une panne : c'est un rôle qui n'y a pas accès, et l'écran
+/// le dit une fois plutôt que d'afficher des 403.
+///
+/// L'onglet « Analyses » qu'il portait dupliquait l'écran Analyses — mêmes
+/// graphiques, sans contrôle de permission — et en divergeait déjà. Un lien y
+/// mène désormais.
 class AdminDashboardScreen extends StatefulWidget {
-  const AdminDashboardScreen({super.key});
+  const AdminDashboardScreen({this.ouvrirEcran, super.key});
+
+  /// Ouvre un écran de la navigation par son index. Nul hors de la
+  /// navigation (tests) : les raccourcis sont alors inertes.
+  final ValueChanged<int>? ouvrirEcran;
 
   @override
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
-class _AdminDashboardScreenState extends State<AdminDashboardScreen>
-    with TickerProviderStateMixin {
-  late TabController _tabController;
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  Future<Map<StatutCommande, int>>? _enCours;
+  Future<List<eccore.Order>>? _recentes;
+  Future<List<Map<String, dynamic>>>? _meilleuresVentes;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _initializeData();
-      }
+      if (mounted) _charger();
     });
   }
 
-  Future<void> _initializeData() async {
-    if (!mounted) return;
-    final appService = context.read<AppService>();
-    if (!appService.isInitialized) {
-      await appService.initializeWithAdminUser();
+  /// Lance les lectures **permises** — et seulement elles : demander un
+  /// rapport sans `analytics.read` produirait un 403 que l'écran n'aurait
+  /// rien à faire d'autre qu'afficher.
+  void _charger() {
+    final auth = context.read<AdminAuthService>();
+    final commandes = context.read<OrderManagementService>();
+    setState(() {
+      if (auth.can('orders.read')) {
+        _enCours = commandes.compterEnCours();
+        _recentes = commandes.recentes();
+      }
+      if (auth.can('analytics.read')) {
+        _meilleuresVentes = context.read<AnalyticsService>().getTopSellingItems(
+              startDate: DateTime.now().subtract(const Duration(days: 30)),
+            );
+      }
+    });
+    if (auth.can('analytics.read')) {
+      unawaited(context.read<AnalyticsService>().chargerLaJournee());
     }
-    if (!mounted) return;
-    // Les chiffres de la journée sont une **lecture à déclarer**, comme les
-    // fenêtres de supervision du lot 1 : sans cet appel, la carte « Revenus du
-    // jour » resterait indéfiniment sur son tiret, et rien ne dirait pourquoi.
-    await context.read<AnalyticsService>().chargerLaJournee();
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
+  void _ouvrir(({int index, String permission}) ecran) => widget.ouvrirEcran?.call(ecran.index);
 
   @override
   Widget build(BuildContext context) {
-    return Consumer3<AppService, AnalyticsService, DriverManagementService>(
-      builder: (context, appService, analyticsService, driverService, child) {
-        if (!appService.isInitialized && appService.currentUser == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    final auth = context.watch<AdminAuthService>();
+    final voitAnalyses = context.peut('analytics.read');
+    final voitCommandes = context.peut('orders.read');
 
-        final currentUser = appService.currentUser;
-        final allOrders = appService.allOrders;
-        final menuItems = appService.menuItems;
-
-        final theme = Theme.of(context);
-        final scheme = theme.colorScheme;
-
-        return Scaffold(
-          backgroundColor: scheme.surface,
-          body: Column(
+    return Scaffold(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      body: RefreshIndicator(
+        onRefresh: () async => _charger(),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                color: scheme.surface,
-                child: TabBar(
-                  controller: _tabController,
-                  labelColor: scheme.primary,
-                  unselectedLabelColor: scheme.onSurfaceVariant,
-                  indicatorColor: scheme.primary,
-                  tabs: const [
-                    Tab(
-                      icon: Icon(Icons.dashboard_outlined),
-                      text: 'Vue d\'ensemble',
-                    ),
-                    Tab(icon: Icon(Icons.analytics_outlined), text: 'Analyses'),
-                  ],
+              _Accueil(nom: auth.currentAdmin?.fullName),
+              const SizedBox(height: 20),
+              if (voitAnalyses) ...[
+                _Journee(onOuvrir: _ouvrir),
+                const SizedBox(height: 20),
+              ],
+              if (voitCommandes) ...[
+                _ServiceEnCours(compteurs: _enCours, onOuvrir: _ouvrir),
+                const SizedBox(height: 20),
+              ],
+              if (!voitAnalyses && !voitCommandes)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 20),
+                  child: Text(
+                    'Votre rôle ne donne accès à aucun indicateur du tableau de bord. '
+                    'Les écrans auxquels il donne accès sont dans le menu.',
+                  ),
                 ),
-              ),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildOverviewTab(
-                      context,
-                      currentUser,
-                      allOrders,
-                      menuItems,
-                      driverService,
-                      analyticsService,
-                    ),
-                    _buildAnalyticsTab(context, analyticsService),
-                  ],
-                ),
+              _Raccourcis(onOuvrir: _ouvrir),
+              const SizedBox(height: 20),
+              LayoutBuilder(
+                builder: (context, contraintes) {
+                  final recentes = voitCommandes
+                      ? _CommandesRecentes(commandes: _recentes, onOuvrir: _ouvrir)
+                      : null;
+                  final ventes =
+                      voitAnalyses ? _MeilleuresVentes(lignes: _meilleuresVentes) : null;
+                  if (contraintes.maxWidth > 900 && recentes != null && ventes != null) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 3, child: recentes),
+                        const SizedBox(width: 20),
+                        Expanded(flex: 2, child: ventes),
+                      ],
+                    );
+                  }
+                  return Column(
+                    children: [
+                      if (recentes != null) recentes,
+                      if (recentes != null && ventes != null) const SizedBox(height: 20),
+                      if (ventes != null) ventes,
+                    ],
+                  );
+                },
               ),
             ],
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildOverviewTab(
-    BuildContext context,
-    eccore.User? user,
-    List<eccore.Order> orders,
-    List<eccore.ManagedMenuItem> menuItems,
-    DriverManagementService driverService,
-    AnalyticsService analytics,
-  ) {
-    final totalOrders = orders.length;
-    final activeDrivers =
-        driverService.drivers.where((d) => d.statut == StatutLivreur.disponible).length;
-
-    // La journée vient du serveur, qui seul sait quel jour il est là où
-    // l'activité a lieu — voir `AnalyticsService.chargerLaJournee`.
-    final journee = analytics.journee;
-
-    return RefreshIndicator(
-      onRefresh: () async {
-        await context.read<AppService>().initializeWithAdminUser();
-        await analytics.chargerLaJournee();
-        setState(() {});
-      },
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        physics: const AlwaysScrollableScrollPhysics(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildWelcomeCard(context, user),
-            const SizedBox(height: 20),
-            _buildKeyMetricsGrid(
-              context,
-              journee,
-              analytics.erreurJournee,
-              totalOrders,
-              activeDrivers,
-              orders,
-              menuItems,
-            ),
-            const SizedBox(height: 20),
-            _buildQuickActions(context),
-            const SizedBox(height: 20),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: _buildRecentOrders(context, orders.take(5).toList()),
-                ),
-                if (MediaQuery.of(context).size.width > 900) ...[
-                  const SizedBox(width: 20),
-                  Expanded(
-                    flex: 2,
-                    child: _buildTopSellingItems(context),
-                  ),
-                ],
-              ],
-            ),
-            if (MediaQuery.of(context).size.width <= 900) ...[
-              const SizedBox(height: 20),
-              _buildTopSellingItems(context),
-            ],
-            const SizedBox(height: 20),
-          ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildAnalyticsTab(
-    BuildContext context,
-    AnalyticsService analyticsService,
-  ) {
-    // Déclencher le chargement des données si elles sont vides et qu'on ne charge pas déjà
-    // Utiliser addPostFrameCallback pour éviter les updates pendant le build
-    if (analyticsService.analyticsData.isEmpty &&
-        !analyticsService.isLoading &&
-        analyticsService.error == null) {
-      final endDate = DateTime.now();
-      final startDate = endDate.subtract(const Duration(days: 7));
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        analyticsService.loadAnalyticsData(
-          startDate: startDate,
-          endDate: endDate,
-        );
-      });
-    }
+typedef _Ouvrir = void Function(({int index, String permission}) ecran);
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildDateRangeSelector(context),
-          const SizedBox(height: 20),
-          if (analyticsService.isLoading)
-            const SizedBox(
-              height: 400,
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (analyticsService.error != null)
-            Center(
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    color: Theme.of(context).colorScheme.error,
-                    size: 48,
-                  ),
-                  const SizedBox(height: 16),
-                  Text('Erreur: ${analyticsService.error}'),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () {
-                      final endDate = DateTime.now();
-                      final startDate = endDate.subtract(const Duration(days: 7));
-                      analyticsService.loadAnalyticsData(
-                        startDate: startDate,
-                        endDate: endDate,
-                      );
-                    },
-                    child: const Text('Réessayer'),
-                  ),
-                ],
-              ),
-            )
-          else
-            Column(
-              children: [
-                _buildRevenueChart(
-                  context,
-                  analyticsService.analyticsData['revenue'] ?? {},
-                ),
-                const SizedBox(height: 20),
-                _buildOrdersChart(
-                  context,
-                  analyticsService.analyticsData['orders'] ?? {},
-                ),
-                const SizedBox(height: 20),
-                _buildCategoryPerformance(
-                  context,
-                  analyticsService.analyticsData['categories'] ?? {},
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
-  }
+String _montant(int mineur, String devise) =>
+    formatMontant(eccore.Money(amountMinor: mineur, currency: devise));
 
-  // --- Widgets for Overview Tab ---
+class _Accueil extends StatelessWidget {
+  const _Accueil({required this.nom});
 
-  Widget _buildWelcomeCard(BuildContext context, eccore.User? user) {
-    final hour = DateTime.now().hour;
-    final greeting = hour < 12
-        ? 'Bonjour'
-        : hour < 18
-            ? 'Bon après-midi'
-            : 'Bonsoir';
+  final String? nom;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final heure = DateTime.now().hour;
+    final salut = heure < 12 ? 'Bonjour' : (heure < 18 ? 'Bon après-midi' : 'Bonsoir');
 
     return Container(
       width: double.infinity,
@@ -296,282 +212,244 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: scheme.primary.withValues(alpha: 0.25),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '$greeting, ${user?.fullName ?? 'Admin'}',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: scheme.onPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Voici ce qui se passe aujourd\'hui chez El Corazón',
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: scheme.onPrimary.withValues(alpha: 0.9),
-                      ),
-                    ),
-                  ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$salut, ${nom ?? 'Admin'}',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: scheme.onPrimary,
+                  ),
                 ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: scheme.onPrimary.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 8),
+                Text(
+                  'Voici ce qui se passe aujourd’hui chez El Corazón',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: scheme.onPrimary.withValues(alpha: 0.9),
+                  ),
                 ),
-                child: Icon(Icons.restaurant, color: scheme.onPrimary, size: 32),
-              ),
-            ],
+              ],
+            ),
           ),
+          Icon(Icons.restaurant, color: scheme.onPrimary, size: 32),
         ],
       ),
     );
   }
+}
 
-  /// Le nombre de comptes clients.
-  ///
-  /// Seul chiffre du tableau de bord qui ne se déduit pas des commandes et de
-  /// la carte déjà chargées : il vient de `/analytics/reports/overview/`, où le
-  /// serveur l'agrège. Le compter côté client demanderait de télécharger
-  /// l'annuaire des clients pour en connaître la taille.
-  ///
-  /// Mis en cache par `??=` : le futur n'est créé qu'une fois, et non à chaque
-  /// reconstruction du tableau de bord.
-  Future<Map<String, dynamic>>? _apercuFuture;
+/// La journée de l'établissement — `analytics.read`.
+///
+/// Le chiffre d'affaires et le panier moyen s'affichent **une tuile par
+/// devise** : un siège qui supervise Lomé (XOF) et Douala (XAF) n'a pas un
+/// chiffre d'affaires, il en a deux.
+class _Journee extends StatelessWidget {
+  const _Journee({required this.onOuvrir});
 
-  Future<Map<String, dynamic>> _apercu() {
-    _apercuFuture ??= context.read<AnalyticsService>().getGeneralStats();
-    return _apercuFuture!;
+  final _Ouvrir onOuvrir;
+
+  @override
+  Widget build(BuildContext context) {
+    final analyses = context.watch<AnalyticsService>();
+    final journee = analyses.journee;
+    final echec = analyses.echecJournee;
+    final scheme = Theme.of(context).colorScheme;
+    final sem = AdminColorTokens.semantic(scheme);
+
+    if (echec != null && journee == null) {
+      return BandeauEchec(
+        echec: echec,
+        onReessayer: () => unawaited(context.read<AnalyticsService>().chargerLaJournee()),
+      );
+    }
+
+    String valeur(String Function(JourneeDExploitation j) lire) =>
+        journee == null ? '—' : lire(journee);
+    void analysesOuvertes() => onOuvrir(EcranDuTableauDeBord.analyses);
+
+    final tuiles = <Widget>[
+      EnhancedStatCard(
+        title: journee?.libelle ?? 'Journée',
+        value: valeur((j) => '${j.commandesDuJour}'),
+        icon: Icons.receipt_long,
+        color: sem.info,
+        subtitle: journee == null
+            ? 'Chargement…'
+            : '${journee.livraisonsDuJour} livrée(s), ${journee.annulationsDuJour} annulée(s)',
+        onTap: analysesOuvertes,
+      ),
+      if (journee != null && journee.revenusDuJour.isEmpty)
+        EnhancedStatCard(
+          title: 'Chiffre d’affaires du jour',
+          value: 'Aucune livraison',
+          icon: Icons.payments_outlined,
+          color: sem.success,
+          subtitle: 'Seules les commandes livrées comptent',
+          onTap: analysesOuvertes,
+        ),
+      for (final ligne in journee?.revenusDuJour ?? const <eccore.CurrencyRevenue>[]) ...[
+        EnhancedStatCard(
+          title: 'Chiffre d’affaires du jour (${ligne.currency})',
+          value: _montant(ligne.revenueMinor, ligne.currency),
+          icon: Icons.payments_outlined,
+          color: sem.success,
+          subtitle: 'Semaine : ${_montant(journee!.revenusDeLaSemaine[ligne.currency] ?? 0, ligne.currency)}',
+          onTap: analysesOuvertes,
+        ),
+        EnhancedStatCard(
+          title: 'Panier moyen (${ligne.currency})',
+          value: _montant(ligne.averageBasketMinor, ligne.currency),
+          icon: Icons.shopping_basket,
+          color: scheme.tertiary,
+          subtitle: 'Par commande livrée, sur ${ligne.ordersDelivered} livraison(s)',
+          onTap: analysesOuvertes,
+        ),
+      ],
+      EnhancedStatCard(
+        title: 'Livreurs disponibles',
+        value: valeur((j) => '${j.apercu.couriersOnline}'),
+        icon: Icons.delivery_dining,
+        color: sem.warning,
+        subtitle: 'En ligne, dossier validé, compte actif',
+        onTap: () => onOuvrir(EcranDuTableauDeBord.livreurs),
+      ),
+      EnhancedStatCard(
+        title: 'Carte',
+        value: valeur((j) => '${j.apercu.menuItemsAvailable} / ${j.apercu.menuItemsTotal}'),
+        icon: Icons.restaurant_menu,
+        color: scheme.primary,
+        subtitle: 'Articles disponibles',
+        onTap: () => onOuvrir(EcranDuTableauDeBord.menu),
+      ),
+      EnhancedStatCard(
+        title: 'Clients',
+        value: valeur((j) => '${j.apercu.customersCount}'),
+        icon: Icons.people_outline,
+        color: scheme.secondary,
+        subtitle: 'Comptes du périmètre',
+        onTap: () => onOuvrir(EcranDuTableauDeBord.clients),
+      ),
+    ];
+
+    return _Grille(tuiles: tuiles);
   }
+}
 
-  Widget _buildKeyMetricsGrid(
-    BuildContext context,
-    JourneeDExploitation? journee,
-    String? erreurJournee,
-    int totalOrders,
-    int activeDrivers,
-    List<eccore.Order> orders,
-    List<eccore.ManagedMenuItem> menuItems,
-  ) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final theme = Theme.of(context);
-        final scheme = theme.colorScheme;
-        final sem = AdminColorTokens.semantic(scheme);
+/// Le service en cours — `orders.read`, un compte par statut.
+class _ServiceEnCours extends StatelessWidget {
+  const _ServiceEnCours({required this.compteurs, required this.onOuvrir});
 
-        final enCours = orders.where((o) => o.statut.estEnCours).length;
-        final livrees = orders.where((o) => o.statut == StatutCommande.livree).length;
-        final annulees = orders.where((o) => o.statut == StatutCommande.annulee).length;
-        final disponibles = menuItems.where((item) => item.isAvailable).length;
+  final Future<Map<StatutCommande, int>>? compteurs;
+  final _Ouvrir onOuvrir;
 
-        final crossAxisCount = constraints.maxWidth > 1100
-            ? 4
-            : constraints.maxWidth > 700
-                ? 2
-                : 1;
-        const spacing = 16.0;
-        final width =
-            (constraints.maxWidth - (crossAxisCount - 1) * spacing) / crossAxisCount;
-
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: [
-            SizedBox(
-              width: width,
-              child: EnhancedStatCard(
-                // Trois états distincts, là où il n'y en avait qu'un : un
-                // chiffre absent ne doit pas s'afficher comme un chiffre nul,
-                // et une panne de rapport ne doit pas passer pour un jour creux.
-                title: journee?.libelle ?? 'Revenus du jour',
-                value: journee == null
-                    ? (erreurJournee == null ? '—' : 'Indisponible')
-                    : formatPrice(journee.revenusDuJourMineur.toDouble()),
-                icon: Icons.euro,
-                color: erreurJournee == null ? sem.success : sem.danger,
-                subtitle: journee == null
-                    ? (erreurJournee ?? 'Chargement…')
-                    : '${formatPrice(journee.revenusDeLaSemaineMineur.toDouble())} '
-                        'cette semaine',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
-                  );
-                },
-              ),
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return FutureBuilder<Map<StatutCommande, int>>(
+      future: compteurs,
+      builder: (context, instantane) {
+        if (instantane.hasError) {
+          return BandeauEchec(echec: Echec.de(instantane.error!));
+        }
+        final comptes = instantane.data;
+        final total = comptes?.values.fold<int>(0, (a, b) => a + b);
+        return _Grille(
+          tuiles: [
+            EnhancedStatCard(
+              title: 'Commandes en cours',
+              value: total?.toString() ?? '—',
+              icon: Icons.pending_actions,
+              color: AdminColorTokens.semantic(scheme).warning,
+              subtitle: 'Ni livrées ni annulées',
+              onTap: () => onOuvrir(EcranDuTableauDeBord.commandes),
             ),
-            SizedBox(
-              width: width,
-              child: EnhancedStatCard(
-                title: 'Commandes',
-                value: totalOrders.toString(),
-                icon: Icons.receipt_long,
-                color: sem.info,
-                subtitle: 'Total cumulé',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdvancedOrderManagementScreen(),
-                    ),
-                  );
-                },
+            for (final statut in [
+              StatutCommande.enAttente,
+              StatutCommande.enPreparation,
+              StatutCommande.prete,
+              StatutCommande.enRoute,
+            ])
+              EnhancedStatCard(
+                title: statut.libelle,
+                value: comptes?[statut]?.toString() ?? '—',
+                icon: Icons.circle,
+                color: couleurDeStatut(statut, scheme),
+                onTap: () => onOuvrir(EcranDuTableauDeBord.commandes),
               ),
-            ),
-            SizedBox(
-              width: width,
-              child: EnhancedStatCard(
-                title: 'Livreurs Actifs',
-                value: activeDrivers.toString(),
-                icon: Icons.delivery_dining,
-                color: sem.warning,
-                subtitle: 'En ligne maintenant',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const DriverManagementScreen(),
-                    ),
-                  );
-                },
-              ),
-            ),
-            SizedBox(
-              width: width,
-              child: EnhancedStatCard(
-                title: 'Panier Moyen',
-                // Le panier moyen du serveur, sur la journée : il était calculé
-                // sur les commandes chargées en mémoire, c'est-à-dire sur la
-                // page que la pagination avait rendue.
-                value: journee == null
-                    ? '—'
-                    : formatPrice(journee.panierMoyenMineur.toDouble()),
-                icon: Icons.shopping_basket,
-                color: scheme.tertiary,
-                subtitle: 'Par commande livrée, sur la journée',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const AnalyticsScreen()),
-                  );
-                },
-              ),
-            ),
-            // Les quatre tuiles qui suivent manquaient. Le tableau de bord
-            // annonçait le chiffre d'affaires, le nombre de commandes, les
-            // livreurs et le panier moyen — mais ni ce qui est en cours de
-            // service, ni ce qui est terminé, ni l'état de la carte, ni le
-            // nombre de clients. C'est-à-dire précisément ce qu'on regarde en
-            // ouvrant l'écran un soir de service.
-            SizedBox(
-              width: width,
-              child: EnhancedStatCard(
-                title: 'Commandes en cours',
-                value: '$enCours',
-                icon: Icons.pending_actions,
-                color: sem.warning,
-                subtitle: 'Ni livrées ni annulées',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdvancedOrderManagementScreen(),
-                    ),
-                  );
-                },
-              ),
-            ),
-            SizedBox(
-              width: width,
-              child: EnhancedStatCard(
-                title: 'Commandes livrées',
-                value: '$livrees',
-                icon: Icons.check_circle_outline,
-                color: sem.success,
-                subtitle: annulees == 0 ? 'Aucune annulation' : '$annulees annulée(s)',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdvancedOrderManagementScreen(),
-                    ),
-                  );
-                },
-              ),
-            ),
-            SizedBox(
-              width: width,
-              child: EnhancedStatCard(
-                title: 'Produits',
-                value: '${menuItems.length}',
-                icon: Icons.restaurant_menu,
-                color: scheme.primary,
-                subtitle: '$disponibles disponible(s)',
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const MenuManagementScreen(),
-                    ),
-                  );
-                },
-              ),
-            ),
-            SizedBox(
-              width: width,
-              child: FutureBuilder<Map<String, dynamic>>(
-                future: _apercu(),
-                builder: (context, snapshot) {
-                  final clients = (snapshot.data?['users'] as Map?)?['total'] as int?;
-                  return EnhancedStatCard(
-                    title: 'Clients',
-                    // Un tiret tant que le chiffre n'est pas lu : « 0 clients »
-                    // pendant le chargement est une information fausse, et
-                    // celle-là inquiète.
-                    value: clients?.toString() ?? '—',
-                    icon: Icons.people_outline,
-                    color: scheme.secondary,
-                    subtitle: 'Comptes enregistrés',
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const ClientManagementScreen(),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
           ],
         );
       },
     );
   }
+}
 
-  Widget _buildQuickActions(BuildContext context) {
+class _Grille extends StatelessWidget {
+  const _Grille({required this.tuiles});
+
+  final List<Widget> tuiles;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, contraintes) {
+        final colonnes = contraintes.maxWidth > 1100 ? 4 : (contraintes.maxWidth > 700 ? 2 : 1);
+        const espace = 16.0;
+        final largeur = (contraintes.maxWidth - (colonnes - 1) * espace) / colonnes;
+        return Wrap(
+          spacing: espace,
+          runSpacing: espace,
+          children: [for (final tuile in tuiles) SizedBox(width: largeur, child: tuile)],
+        );
+      },
+    );
+  }
+}
+
+/// Raccourcis — **les mêmes permissions que la barre latérale**.
+class _Raccourcis extends StatelessWidget {
+  const _Raccourcis({required this.onOuvrir});
+
+  final _Ouvrir onOuvrir;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
+
+    Widget vers(String libelle, IconData icone, Color couleur, ({int index, String permission}) e) =>
+        _Raccourci(libelle, icone, couleur, () => onOuvrir(e));
+
+    final boutons = <Widget>[
+      if (context.peut(EcranDuTableauDeBord.commandes.permission))
+        vers('Commandes', Icons.shopping_cart, sem.info, EcranDuTableauDeBord.commandes),
+      if (context.peut(EcranDuTableauDeBord.menu.permission))
+        vers('Menu', Icons.restaurant_menu, sem.success, EcranDuTableauDeBord.menu),
+      if (context.peut(EcranDuTableauDeBord.promotions.permission))
+        vers('Promotions', Icons.local_offer, sem.warning, EcranDuTableauDeBord.promotions),
+      if (context.peut(EcranDuTableauDeBord.documents.permission))
+        vers('Documents', Icons.verified_user, scheme.secondary, EcranDuTableauDeBord.documents),
+      if (context.peut(EcranDuTableauDeBord.livraisons.permission))
+        vers('Livraisons', Icons.local_shipping, sem.danger, EcranDuTableauDeBord.livraisons),
+      if (context.peut(EcranDuTableauDeBord.analyses.permission))
+        vers('Analyses', Icons.analytics_outlined, scheme.primary, EcranDuTableauDeBord.analyses),
+      // Une campagne part vers toute la clientèle : `notifications.send` ne
+      // suffit pas, le serveur la réserve au siège (`assert_unscoped`).
+      if (context.peut('notifications.send') && context.estSiege)
+        _Raccourci('Notification', Icons.send, scheme.tertiary, () {
+          DialogHelper.showSafeDialog(
+            context: context,
+            builder: (_) => const SendNotificationDialog(),
+          );
+        }),
+    ];
+
+    if (boutons.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -582,90 +460,34 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         ),
         const SizedBox(height: 12),
         LayoutBuilder(
-          builder: (context, constraints) {
-            final crossAxisCount = constraints.maxWidth > 900
-                ? 6
-                : constraints.maxWidth > 600
-                    ? 3
-                    : 2;
+          builder: (context, contraintes) {
+            final colonnes = contraintes.maxWidth > 900 ? 7 : (contraintes.maxWidth > 600 ? 4 : 2);
             return GridView.count(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: crossAxisCount,
+              crossAxisCount: colonnes,
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
               childAspectRatio: 1.2,
-              children: [
-                _buildActionButton(context, 'Promotions', Icons.local_offer, sem.warning,
-                    () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const PromotionsScreen(),
-                    ),
-                  );
-                }),
-                _buildActionButton(context, 'Menu', Icons.restaurant_menu, sem.success,
-                    () {
-                  // Normally handled by navigation, but direct push for quick action
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const MenuManagementScreen(),
-                    ),
-                  );
-                }),
-                _buildActionButton(context, 'Commandes', Icons.shopping_cart, sem.info,
-                    () {
-                  // Assuming AdvancedOrderManagementScreen is the main one now
-                  // But usually handled by main navigation. We can push or switch tab.
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const AdvancedOrderManagementScreen(),
-                    ),
-                  );
-                }),
-                _buildActionButton(context, 'Notifications', Icons.send, scheme.tertiary,
-                    () {
-                  DialogHelper.showSafeDialog(
-                    context: context,
-                    builder: (_) => const SendNotificationDialog(),
-                  );
-                }),
-                _buildActionButton(
-                    context, 'Documents', Icons.verified_user, scheme.secondary, () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const DriverDocumentsDashboardScreen(),
-                    ),
-                  );
-                }),
-                _buildActionButton(
-                    context, 'Livraisons', Icons.local_shipping, sem.danger, () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const ActiveDeliveriesScreen(),
-                    ),
-                  );
-                }),
-              ],
+              children: boutons,
             );
           },
         ),
       ],
     );
   }
+}
 
-  Widget _buildActionButton(
-    BuildContext context,
-    String label,
-    IconData icon,
-    Color color,
-    VoidCallback onTap,
-  ) {
+class _Raccourci extends StatelessWidget {
+  const _Raccourci(this.libelle, this.icone, this.couleur, this.onTap);
+
+  final String libelle;
+  final IconData icone;
+  final Color couleur;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -675,10 +497,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 28),
+            Icon(icone, color: couleur, size: 28),
             const SizedBox(height: 8),
             Text(
-              label,
+              libelle,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
               textAlign: TextAlign.center,
             ),
@@ -687,8 +509,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
       ),
     );
   }
+}
 
-  Widget _buildRecentOrders(BuildContext context, List<eccore.Order> recentOrders) {
+class _CommandesRecentes extends StatelessWidget {
+  const _CommandesRecentes({required this.commandes, required this.onOuvrir});
+
+  final Future<List<eccore.Order>>? commandes;
+  final _Ouvrir onOuvrir;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -702,547 +533,175 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
               children: [
                 Text(
                   'Commandes récentes',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 TextButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AdvancedOrderManagementScreen(),
-                      ),
-                    );
-                  }, // Navigate to full list
+                  onPressed: () => onOuvrir(EcranDuTableauDeBord.commandes),
                   child: const Text('Voir tout'),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            if (recentOrders.isEmpty)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('Aucune commande récente'),
-                ),
-              )
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: recentOrders.length,
-                separatorBuilder: (context, index) => const Divider(),
-                itemBuilder: (context, index) {
-                  final order = recentOrders[index];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(
-                      backgroundColor:
-                          _getStatusColor(order.statut).withValues(alpha: 0.1),
-                      child: AppEmoji(
-                        order.statut.illustration,
-                        size: AppEmoji.tailleXS,
-                        decoratif: true,
-                      ),
-                    ),
-                    title: Text('CMD #${order.id.substring(0, 8).toUpperCase()}'),
-                    subtitle: Text(
-                      '${AdminHelpers.formatRelativeTime(order.passeeLe)} • ${order.lines.length} articles',
-                    ),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          formatPrice(order.totalAffiche),
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          order.statut.libelle,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _getStatusColor(order.statut),
-                          ),
-                        ),
-                      ],
-                    ),
+            FutureBuilder<List<eccore.Order>>(
+              future: commandes,
+              builder: (context, instantane) {
+                if (instantane.hasError) {
+                  return BandeauEchec(echec: Echec.de(instantane.error!));
+                }
+                if (!instantane.hasData) {
+                  return const Center(
+                    child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()),
                   );
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTopSellingItems(BuildContext context) {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _getTopSellingItems(),
-      builder: (context, snapshot) {
-        final theme = Theme.of(context);
-        final scheme = theme.colorScheme;
-        final sem = AdminColorTokens.semantic(scheme);
-
-        // ... rest of the code is same but handling states better
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Card(
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          );
-        }
-        final topProducts = snapshot.data ?? [];
-
-        return Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Top ventes (30 jours)',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-                if (snapshot.hasError)
-                  Center(child: Text('Erreur: ${snapshot.error}'))
-                else if (topProducts.isEmpty)
-                  const Center(child: Text('Aucune donnée'))
-                else
-                  ...topProducts.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final product = entry.value;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: _getRankColor(index),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Center(
-                              child: Text(
-                                '${index + 1}',
-                                style: TextStyle(
-                                  color: scheme.onPrimary,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  product['menu_item_name'] ?? 'Produit',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                Text(
-                                  '${product['total_quantity']} vendus',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Text(
-                            formatPrice(
-                              (product['total_revenue'] as num).toDouble(),
-                            ),
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: sem.success,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // Cache/Store for top selling items to avoid reload on every build
-  Future<List<Map<String, dynamic>>>? _topSellingItemsFuture;
-
-  Future<List<Map<String, dynamic>>> _getTopSellingItems() {
-    _topSellingItemsFuture ??= context.read<AnalyticsService>().getTopSellingItems(
-          startDate: DateTime.now().subtract(const Duration(days: 30)),
-        );
-    return _topSellingItemsFuture!;
-  }
-
-  // --- Widgets for Analytics Tab ---
-
-  Widget _buildDateRangeSelector(BuildContext context) {
-    return Row(
-      children: [
-        const Icon(Icons.calendar_today, size: 20),
-        const SizedBox(width: 8),
-        Text(
-          '7 derniers jours',
-          style: Theme.of(context)
-              .textTheme
-              .titleMedium
-              ?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        // Could add a dropdown here later
-      ],
-    );
-  }
-
-  Widget _buildRevenueChart(BuildContext context, Map<String, dynamic> data) {
-    final dailyRevenue = data['dailyRevenue'] as Map<String, double>? ?? {};
-    if (dailyRevenue.isEmpty) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Center(child: Text('Pas de données de revenus')),
-        ),
-      );
-    }
-
-    final sortedKeys = dailyRevenue.keys.toList()..sort();
-    final spots = sortedKeys.asMap().entries.map((entry) {
-      return FlSpot(entry.key.toDouble(), dailyRevenue[entry.value] ?? 0.0);
-    }).toList();
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Revenus',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              height: 300,
-              child: LineChart(
-                LineChartData(
-                  gridData: const FlGridData(drawVerticalLine: false),
-                  titlesData: FlTitlesData(
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          if (value.toInt() >= 0 && value.toInt() < sortedKeys.length) {
-                            final date = DateTime.parse(sortedKeys[value.toInt()]);
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 8.0),
-                              child: Text(
-                                '${date.day}/${date.month}',
-                                style: const TextStyle(fontSize: 10),
-                              ),
-                            );
-                          }
-                          return const SizedBox.shrink();
-                        },
-                        interval: 1,
-                      ),
-                    ),
-                    leftTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: true, reservedSize: 40),
-                    ),
-                    topTitles: const AxisTitles(),
-                    rightTitles: const AxisTitles(),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: spots,
-                      isCurved: true,
-                      color: Theme.of(context).primaryColor,
-                      barWidth: 3,
-                      isStrokeCapRound: true,
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrdersChart(BuildContext context, Map<String, dynamic> data) {
-    final dailyOrders = data['dailyOrders'] as Map<String, int>? ?? {};
-    if (dailyOrders.isEmpty) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Center(child: Text('Pas de données de commandes')),
-        ),
-      );
-    }
-    final sortedKeys = dailyOrders.keys.toList()..sort();
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Commandes par jour',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              height: 300,
-              child: BarChart(
-                BarChartData(
-                  gridData: const FlGridData(show: false),
-                  titlesData: FlTitlesData(
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          if (value.toInt() >= 0 && value.toInt() < sortedKeys.length) {
-                            final date = DateTime.parse(sortedKeys[value.toInt()]);
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 8.0),
-                              child: Text(
-                                '${date.day}/${date.month}',
-                                style: const TextStyle(fontSize: 10),
-                              ),
-                            );
-                          }
-                          return const SizedBox.shrink();
-                        },
-                      ),
-                    ),
-                    leftTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: true, reservedSize: 30),
-                    ),
-                    topTitles: const AxisTitles(),
-                    rightTitles: const AxisTitles(),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  barGroups: sortedKeys.asMap().entries.map((entry) {
-                    return BarChartGroupData(
-                      x: entry.key,
-                      barRods: [
-                        BarChartRodData(
-                          toY: (dailyOrders[entry.value] ?? 0).toDouble(),
-                          color: Theme.of(context).colorScheme.primary,
-                          width: 16,
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(4),
+                }
+                final liste = instantane.data!;
+                if (liste.isEmpty) {
+                  return const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(child: Text('Aucune commande dans votre périmètre.')),
+                  );
+                }
+                return Column(
+                  children: [
+                    for (final order in liste)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: CircleAvatar(
+                          backgroundColor:
+                              couleurDeStatut(order.statut, scheme).withValues(alpha: 0.12),
+                          child: AppEmoji(
+                            order.statut.illustration,
+                            size: AppEmoji.tailleXS,
+                            decoratif: true,
                           ),
                         ),
-                      ],
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCategoryPerformance(
-    BuildContext context,
-    Map<String, dynamic> data,
-  ) {
-    final categoryCounts = data['categoryCounts'] as Map<String, int>? ?? {};
-    if (categoryCounts.isEmpty) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Center(child: Text('Pas de données de catégories')),
-        ),
-      );
-    }
-
-    final scheme = Theme.of(context).colorScheme;
-    final total = categoryCounts.values.fold(0, (sum, val) => sum + val);
-    final sections = categoryCounts.entries.map((entry) {
-      final percentage = total > 0 ? (entry.value / total * 100) : 0.0;
-      final color = _colorFromKey(scheme, entry.key);
-
-      return PieChartSectionData(
-        color: color,
-        value: entry.value.toDouble(),
-        title: '${percentage.toStringAsFixed(0)}%',
-        radius: 60,
-        titleStyle: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.onPrimary,
-        ),
-      );
-    }).toList();
-
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Répartition par catégorie',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 200,
-                    child: PieChart(
-                      PieChartData(
-                        sections: sections,
-                        centerSpaceRadius: 40,
-                        sectionsSpace: 2,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: categoryCounts.entries.map((entry) {
-                      final color = _colorFromKey(scheme, entry.key);
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
+                        title: Text(order.reference),
+                        subtitle: Text(
+                          // La forme de liste porte `items_count` ; elle ne
+                          // porte pas `lines`, qui valait donc toujours zéro.
+                          '${AdminHelpers.formatRelativeTime(order.placedAt)} • '
+                          '${order.itemsCount} article(s) • ${order.restaurantName}',
+                        ),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Container(width: 12, height: 12, color: color),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                entry.key,
-                                style: const TextStyle(fontSize: 12),
-                              ),
+                            Text(
+                              formatMontant(order.total),
+                              style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             Text(
-                              '${entry.value}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                              order.statut.libelle,
+                              style: TextStyle(
                                 fontSize: 12,
+                                color: couleurDeStatut(order.statut, scheme),
                               ),
                             ),
                           ],
                         ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ],
+                      ),
+                  ],
+                );
+              },
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  // --- Helpers ---
+class _MeilleuresVentes extends StatelessWidget {
+  const _MeilleuresVentes({required this.lignes});
 
-  // `_calculateTodayRevenue` et `_calculateAverageOrderValue` ont été retirés
-  // d'ici. Tous deux additionnaient les commandes **déjà chargées en mémoire**
-  // par la fenêtre de supervision, et le premier comparait en plus un jour
-  // **UTC** (`passeeLe`, lu d'un horodatage ISO) à un jour **local**
-  // (`DateTime.now()`) : à Lomé les deux coïncident, ailleurs non. Il filtrait
-  // par-dessus sur la date de *commande* en ne sommant que les livrées, si
-  // bien qu'une commande passée la veille et livrée le matin comptait la
-  // veille.
-  //
-  // Les deux chiffres viennent maintenant de `/analytics/reports/overview/`,
-  // agrégés en SQL et bornés à la journée de l'établissement — voir
-  // `AnalyticsService.chargerLaJournee`.
+  final Future<List<Map<String, dynamic>>>? lignes;
 
-  Color _getStatusColor(StatutCommande status) {
-    // Mapping sémantique basé sur le ColorScheme (compatible light/dark)
-    // Note: méthode non-contextuelle, on retourne une "intention" via palette statique.
-    // Les widgets qui l'appellent appliquent généralement .withOpacity(...) etc.
-    // Ici on conserve un mapping stable (à refactorer si besoin vers un helper contextuel).
-    switch (status) {
-      case StatutCommande.enAttente:
-        return ModernTheme.warning;
-      case StatutCommande.confirmee:
-        return ModernTheme.info;
-      case StatutCommande.enPreparation:
-        return ModernTheme.primaryLight;
-      case StatutCommande.prete:
-        return ModernTheme.success;
-      case StatutCommande.recuperee:
-        return ModernTheme.secondary;
-      case StatutCommande.enRoute:
-        return ModernTheme.primaryDark;
-      case StatutCommande.livree:
-        return ModernTheme.success;
-      case StatutCommande.annulee:
-        return ModernTheme.error;
-    }
-  }
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final sem = AdminColorTokens.semantic(scheme);
 
-  Color _getRankColor(int index) {
-    // Couleurs de podium issues du thème (light/dark) sans hardcode.
-    switch (index) {
-      case 0:
-        return ModernTheme.warning;
-      case 1:
-        return ModernTheme.info;
-      case 2:
-        return ModernTheme.success;
-      default:
-        return ModernTheme.textSecondary;
-    }
-  }
-
-  Color _colorFromKey(ColorScheme scheme, String key) {
-    // Génère une couleur stable à partir d'une clé, en dérivant du primary.
-    final hash = key.hashCode;
-    final base = HSLColor.fromColor(scheme.primary);
-    final hue = (base.hue + (hash % 360)).toDouble();
-    final sat = (0.55 + ((hash % 20) / 100)).clamp(0.45, 0.75);
-    final light = (0.50 + ((hash % 15) / 100)).clamp(0.40, 0.65);
-    return base.withHue(hue).withSaturation(sat).withLightness(light).toColor();
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Meilleures ventes (30 jours)',
+              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: lignes,
+              builder: (context, instantane) {
+                if (instantane.hasError) {
+                  return BandeauEchec(echec: Echec.de(instantane.error!));
+                }
+                if (!instantane.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final produits = instantane.data!;
+                if (produits.isEmpty) {
+                  return const Text('Aucune vente livrée sur la période.');
+                }
+                return Column(
+                  children: [
+                    for (final (rang, produit) in produits.indexed)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 16,
+                              backgroundColor: scheme.primaryContainer,
+                              child: Text(
+                                '${rang + 1}',
+                                style: TextStyle(
+                                  color: scheme.onPrimaryContainer,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    produit['menu_item_name'] as String? ?? 'Produit',
+                                    style: const TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  Text(
+                                    '${produit['total_quantity']} vendu(s)',
+                                    style: theme.textTheme.bodySmall
+                                        ?.copyWith(color: scheme.onSurfaceVariant),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              formatMajeur(
+                                (produit['total_revenue'] as num).toDouble(),
+                                produit['currency'] as String,
+                              ),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: sem.success,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

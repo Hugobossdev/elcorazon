@@ -5,6 +5,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/anciennete_commande.dart';
 import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/dialogues/annulation_commande.dart';
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/presentation/dialogues/remboursement_commande.dart';
 import 'package:admin/presentation/notes_internes.dart';
 import 'package:admin/services/assignment_service.dart';
@@ -335,22 +336,22 @@ class _Informations extends StatelessWidget {
         LigneDeDetail(label: 'Statut', valeur: order.statut.libelle),
         LigneDeDetail(
           label: 'Sous-total',
-          valeur: PriceFormatter.format(order.sousTotalAffiche),
+          valeur: formatMontant(order.subtotal),
         ),
         LigneDeDetail(
           label: 'Livraison',
-          valeur: PriceFormatter.format(order.fraisLivraisonAffiches),
+          valeur: formatMontant(order.deliveryFee),
         ),
         // La remise n'apparaît que s'il y en a une : une ligne « Remise :
         // 0 CFA » sur chaque commande fait chercher un code promo inexistant.
         if (order.remiseAffichee != 0)
           LigneDeDetail(
             label: 'Remise',
-            valeur: '− ${PriceFormatter.format(order.remiseAffichee)}',
+            valeur: '− ${formatMontant(order.discount)}',
           ),
         LigneDeDetail(
           label: 'Total',
-          valeur: PriceFormatter.format(order.totalAffiche),
+          valeur: formatMontant(order.total),
         ),
         if (nombre > 0)
           LigneDeDetail(
@@ -520,7 +521,7 @@ class _Encaissements extends StatelessWidget {
         for (final transaction in transactions) ...[
           LigneDeDetail(
             label: libelleStatutPaiement(transaction.status),
-            valeur: '${PriceFormatter.format(transaction.amount.toMajorUnits())}'
+            valeur: '${formatMontant(transaction.amount)}'
                 ' · ${transaction.provider}',
           ),
           if (transaction.providerReference.isNotEmpty)
@@ -607,8 +608,8 @@ class _LigneArticle extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${item.quantity}x ${PriceFormatter.format(item.prixUnitaireAffiche)} '
-                  '= ${PriceFormatter.format(item.prixTotalAffiche)}',
+                  '${item.quantity}x ${formatMontant(item.unitPrice)} '
+                  '= ${formatMontant(item.lineTotal)}',
                   style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 ),
                 if (personnalisations.isNotEmpty) ...[
@@ -641,7 +642,7 @@ class _LigneArticle extends StatelessWidget {
             ),
           ),
           Text(
-            PriceFormatter.format(item.prixTotalAffiche),
+            formatMontant(item.lineTotal),
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 13,
@@ -793,8 +794,15 @@ class _BarreDActions extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final danger = AdminColorTokens.semantic(scheme).danger;
 
-    final annulable = order.allowedTransitions.contains('cancelled');
-    final remboursable = encaissements.any((t) => t.status == statutEncaisse);
+    // Deux conditions, et non une : ce que la **commande** permet — le serveur
+    // le dit dans `allowed_transitions`, rejouer la machine à états ici la
+    // ferait diverger — et ce que le **compte** permet. Les deux gestes
+    // s'offraient à tout le personnel : un opérateur ouvrait le dialogue de
+    // remboursement, saisissait un montant, et le serveur refusait à l'envoi.
+    final annulable =
+        order.allowedTransitions.contains('cancelled') && context.peut('orders.cancel');
+    final remboursable =
+        encaissements.any((t) => t.status == statutEncaisse) && context.peut('orders.refund');
 
     return Padding(
       padding: const EdgeInsets.all(16),

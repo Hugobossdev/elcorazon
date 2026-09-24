@@ -1,41 +1,31 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:admin/presentation/commande.dart';
 
-/// Le nombre de commandes par jour sur une fenêtre glissante.
+/// Le nombre de commandes par jour, sur les [jours] derniers jours de la série
+/// du serveur — jours sans commande compris, à zéro.
 ///
-/// Pourquoi ce fichier existe
-/// --------------------------
+/// La série venait d'un comptage **local** sur la fenêtre d'un an
+/// téléchargée, jour découpé à l'horloge du poste. Elle vient désormais de
+/// `GET /orders/manage/statistics/` (`per_day`), découpée dans le fuseau des
+/// cuisines ; il reste ici à combler les jours vides, que le serveur n'émet
+/// pas, pour que le graphe montre sept colonnes et non les seuls jours actifs.
 ///
-/// Ce comptage était enfermé dans le corps du widget qui dessine le graphe de
-/// `advanced_order_management_screen.dart`. Rien ne pouvait en dire quoi que
-/// ce soit — ni qu'il couvre bien sept jours, ni ce qu'il fait d'une commande
-/// plus ancienne.
-///
-/// Les clés sont des dates `AAAA-MM-JJ` complétées par des zéros, pour que
-/// l'ordre alphabétique soit l'ordre chronologique — c'est ce dont le graphe
-/// se sert pour ranger ses barres.
-Map<String, int> commandesParJour(
-  List<eccore.Order> commandes, {
+/// Les clés sont des dates `AAAA-MM-JJ` complétées par des zéros : l'ordre
+/// alphabétique est l'ordre chronologique.
+Map<String, int> serieQuotidienne(
+  eccore.OrderStatistics stats, {
   int jours = 7,
-  DateTime? maintenant,
+  DateTime? aujourdhui,
 }) {
-  final fin = maintenant ?? DateTime.now();
-  final parJour = <String, int>{};
-
-  for (var i = jours - 1; i >= 0; i--) {
-    parJour[_cle(fin.subtract(Duration(days: i)))] = 0;
-  }
-
-  for (final commande in commandes) {
-    final jour = _cle(commande.passeeLe);
-    // Une commande hors fenêtre n'ouvre pas de colonne : le graphe en montre
-    // sept, pas une de plus.
-    if (parJour.containsKey(jour)) {
-      parJour[jour] = parJour[jour]! + 1;
-    }
-  }
-
-  return parJour;
+  final parJourServeur = {
+    for (final ligne in stats.perDay) _cle(ligne.day): ligne.ordersCount,
+  };
+  final dernier = aujourdhui ?? DateTime.now();
+  final fin = DateTime(dernier.year, dernier.month, dernier.day);
+  return {
+    for (var i = jours - 1; i >= 0; i--)
+      _cle(fin.subtract(Duration(days: i))):
+          parJourServeur[_cle(fin.subtract(Duration(days: i)))] ?? 0,
+  };
 }
 
 String _cle(DateTime date) {

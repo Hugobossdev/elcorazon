@@ -1,6 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Créneau planifié d'un livreur, tel que l'affiche l'écran de planning.
@@ -85,123 +86,122 @@ class DriverSchedule {
 ///
 /// L'ancienne version fabriquait aussi des horaires par défaut « 7 j/7, 9 h –
 /// 21 h » **quand la table n'existait pas**, puis les enregistrait comme s'ils
-/// venaient de l'exploitation. Ici, [templateWeek] rend la même semaine type,
-/// mais explicitement non enregistrée : elle ne s'écrit que si quelqu'un la
-/// valide.
+/// venaient de l'exploitation.
+///
+/// ## Ce qui a changé le 23 septembre 2026
+///
+/// * **Les écritures lèvent.** Elles rendaient `false` en gardant le motif dans
+///   `_error`, que l'écran n'affichait nulle part : un créneau refusé — parce
+///   qu'il en recouvre un autre, ou qu'il manque un droit — se soldait par une
+///   carte qui revenait silencieusement à sa valeur d'avant.
+/// * **Un jour porte autant de créneaux qu'il en faut.** Le service n'en
+///   rendait qu'un par jour à l'écran, alors que le serveur en accepte
+///   plusieurs (service du midi, service du soir) : le second était invisible,
+///   et le modifier écrasait le premier.
+/// * `templateWeek` a disparu avec l'écran qui l'affichait : une semaine
+///   inventée ressemblait trop à un planning pour qu'on la distingue.
 class DriverScheduleService extends ChangeNotifier {
   eccore.ManagedCourierRepository get _fleet =>
       eccore.ManagedCourierRepository(apiClient: AdminAuthService().apiClient);
 
   final Map<String, List<DriverSchedule>> _schedules = {};
-  final Set<String> _chargements = {};
   bool _isLoading = false;
-  String? _error;
+  Echec? _echec;
 
-  Map<String, List<DriverSchedule>> get schedules => _schedules;
   bool get isLoading => _isLoading;
-  String? get error => _error;
 
+  /// Pourquoi le planning affiché est vide, quand il l'est **parce que la
+  /// lecture a échoué**. Nul quand elle a abouti — fût-ce sur zéro créneau.
+  Echec? get echec => _echec;
+
+  /// Lit le planning d'un livreur. Sans effet de bord : l'écran l'appelle à
+  /// l'ouverture et après chaque écriture, jamais depuis un `build`.
   Future<void> loadDriverSchedules(String driverId) async {
-    if (_chargements.contains(driverId)) return;
-    _chargements.add(driverId);
-
     _isLoading = true;
-    _error = null;
+    _echec = null;
     notifyListeners();
 
     try {
       final creneaux = await _fleet.shifts(courierId: driverId);
-      _schedules[driverId] = creneaux.map(DriverSchedule.fromRemote).toList();
+      _schedules[driverId] = creneaux.map(DriverSchedule.fromRemote).toList()..sort(_parJourEtHeure);
     } on eccore.ApiException catch (e) {
-      _error = e.detail;
+      _echec = Echec.de(e);
       eccore.Journal.trace('Planning : chargement impossible — ${e.code}');
       // Pas de semaine inventée en cas d'échec : afficher « 9 h – 21 h » sur
       // une erreur réseau ferait croire à un planning qui n'existe pas.
-      _schedules[driverId] = [];
+      _schedules.remove(driverId);
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  Future<void> refresh(String driverId) async {
-    _chargements.remove(driverId);
-    await loadDriverSchedules(driverId);
-  }
+  Future<void> refresh(String driverId) => loadDriverSchedules(driverId);
 
-  /// Semaine type, **non enregistrée** : sept lignes que l'écran propose et que
-  /// l'exploitation valide, jour par jour, si elle le souhaite.
-  List<DriverSchedule> templateWeek(String driverId) {
-    return List.generate(
-      7,
-      (index) => DriverSchedule(
-        driverId: driverId,
-        dayOfWeek: index + 1,
-        startTime: const TimeOfDay(hour: 9, minute: 0),
-        endTime: const TimeOfDay(hour: 21, minute: 0),
-      ),
-    );
+  static int _parJourEtHeure(DriverSchedule a, DriverSchedule b) {
+    final jours = a.dayOfWeek.compareTo(b.dayOfWeek);
+    return jours != 0 ? jours : a.startMinutes.compareTo(b.startMinutes);
   }
 
   /// Enregistre un créneau — création s'il n'existe pas encore, sinon mise à
   /// jour. C'est [DriverSchedule.isPersisted] qui tranche, pas une convention
   /// sur la forme de l'identifiant.
-  Future<bool> saveSchedule(DriverSchedule schedule) async {
-    try {
-      final enregistre = schedule.isPersisted
-          ? await _fleet.updateShift(
-              shiftId: schedule.id!,
-              dayOfWeek: schedule.dayOfWeek,
-              startMinutes: schedule.startMinutes,
-              endMinutes: schedule.endMinutes,
-              isAvailable: schedule.isAvailable,
-            )
-          : await _fleet.createShift(
-              courierId: schedule.driverId,
-              dayOfWeek: schedule.dayOfWeek,
-              startMinutes: schedule.startMinutes,
-              endMinutes: schedule.endMinutes,
-              isAvailable: schedule.isAvailable,
-            );
+  ///
+  /// **Lève `ApiException`.** Le serveur refuse un créneau qui passe minuit, un
+  /// créneau qui en recouvre un autre le même jour, et un livreur hors
+  /// périmètre : chacun de ces refus dit quoi corriger, et l'écran l'affiche.
+  Future<DriverSchedule> saveSchedule(DriverSchedule schedule) async {
+    final enregistre = schedule.isPersisted
+        ? await _fleet.updateShift(
+            shiftId: schedule.id!,
+            dayOfWeek: schedule.dayOfWeek,
+            startMinutes: schedule.startMinutes,
+            endMinutes: schedule.endMinutes,
+            isAvailable: schedule.isAvailable,
+          )
+        : await _fleet.createShift(
+            courierId: schedule.driverId,
+            dayOfWeek: schedule.dayOfWeek,
+            startMinutes: schedule.startMinutes,
+            endMinutes: schedule.endMinutes,
+            isAvailable: schedule.isAvailable,
+          );
 
-      final locale = DriverSchedule.fromRemote(enregistre);
-      final lignes = _schedules.putIfAbsent(schedule.driverId, () => []);
-      final index = lignes.indexWhere((s) => s.id == locale.id);
-      if (index != -1) {
-        lignes[index] = locale;
-      } else {
-        lignes.add(locale);
-      }
-      lignes.sort((a, b) => a.dayOfWeek.compareTo(b.dayOfWeek));
-
-      notifyListeners();
-      return true;
-    } on eccore.ApiException catch (e) {
-      // Le serveur refuse un créneau qui passe minuit : il s'écrit en deux
-      // lignes, sur deux jours.
-      _error = e.detail;
-      eccore.Journal.trace('Planning : enregistrement refusé — ${e.code}');
-      notifyListeners();
-      return false;
+    final locale = DriverSchedule.fromRemote(enregistre);
+    final lignes = _schedules.putIfAbsent(schedule.driverId, () => []);
+    final index = lignes.indexWhere((s) => s.id == locale.id);
+    if (index != -1) {
+      lignes[index] = locale;
+    } else {
+      lignes.add(locale);
     }
+    lignes.sort(_parJourEtHeure);
+
+    notifyListeners();
+    return locale;
   }
 
-  Future<bool> deleteSchedule(String scheduleId, String driverId) async {
-    try {
-      await _fleet.deleteShift(scheduleId);
-      _schedules[driverId]?.removeWhere((s) => s.id == scheduleId);
-      notifyListeners();
-      return true;
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Planning : suppression refusée — ${e.code}');
-      notifyListeners();
-      return false;
-    }
+  /// Retire une ligne du planning. **Lève `ApiException`.**
+  Future<void> deleteSchedule(String scheduleId, String driverId) async {
+    await _fleet.deleteShift(scheduleId);
+    _schedules[driverId]?.removeWhere((s) => s.id == scheduleId);
+    notifyListeners();
   }
 
+  /// Le planning d'un livreur, trié. Vide tant qu'il n'a pas été lu — ce que
+  /// [echec] et [isLoading] permettent de distinguer d'un planning vide.
   List<DriverSchedule> getDriverSchedules(String driverId) =>
       _schedules[driverId] ?? const [];
+
+  /// Les créneaux d'un jour donné, dans l'ordre des heures.
+  ///
+  /// Un jour en porte autant qu'il en faut : un service du midi et un service
+  /// du soir sont deux lignes, et le serveur les accepte tant qu'elles ne se
+  /// recouvrent pas.
+  List<DriverSchedule> creneauxDuJour(String driverId, int jour) => [
+        for (final ligne in getDriverSchedules(driverId))
+          if (ligne.dayOfWeek == jour) ligne,
+      ];
 
   String getDayName(int dayOfWeek) {
     const jours = [

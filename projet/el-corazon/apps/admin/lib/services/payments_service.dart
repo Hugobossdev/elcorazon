@@ -1,121 +1,196 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/admin_auth_service.dart';
-import 'package:admin/services/restaurant_scope_service.dart';
+
+/// Les filtres de l'écran des encaissements, tels qu'ils partent au serveur.
+@immutable
+class FiltresEncaissements {
+  const FiltresEncaissements({
+    this.statut,
+    this.restaurantSlug,
+    this.devise,
+    this.recherche = '',
+    this.depuis,
+    this.jusqua,
+  });
+
+  final String? statut;
+  final String? restaurantSlug;
+  final String? devise;
+  final String recherche;
+  final DateTime? depuis;
+  final DateTime? jusqua;
+
+  FiltresEncaissements copyWith({
+    String? statut,
+    String? restaurantSlug,
+    String? devise,
+    String? recherche,
+    DateTime? depuis,
+    DateTime? jusqua,
+    bool effacerStatut = false,
+    bool effacerRestaurant = false,
+    bool effacerDevise = false,
+    bool effacerPeriode = false,
+  }) {
+    return FiltresEncaissements(
+      statut: effacerStatut ? null : (statut ?? this.statut),
+      restaurantSlug: effacerRestaurant ? null : (restaurantSlug ?? this.restaurantSlug),
+      devise: effacerDevise ? null : (devise ?? this.devise),
+      recherche: recherche ?? this.recherche,
+      depuis: effacerPeriode ? null : (depuis ?? this.depuis),
+      jusqua: effacerPeriode ? null : (jusqua ?? this.jusqua),
+    );
+  }
+}
 
 /// Encaissements et remboursements — `/payments/*` (Phase 6).
 ///
-/// Ce service remplace `PayDunyaService`, et le remplacement est d'abord une
-/// correction de sécurité.
+/// ## Ce qui a changé (22 septembre 2026)
 ///
-/// L'ancien appelait PayDunya **depuis le navigateur**, avec les quatre clés
-/// marchandes (`master_key`, `public_key`, `private_key`, `token`) saisies dans
-/// l'écran des réglages et rangées dans `SharedPreferences`. Autrement dit :
-/// les clés qui autorisent un remboursement voyageaient dans l'application,
-/// lisibles par quiconque ouvrait le bundle ou le stockage local du poste. Un
-/// remboursement pouvait être déclenché sans passer par le serveur, donc sans
-/// permission, sans rattachement, sans trace, et sans plafond.
+/// * **La liste est paginée par le serveur.** Elle suivait `next` jusqu'au
+///   bout — tout l'historique des encaissements du périmètre, sans borne de
+///   date — pour en afficher vingt.
+/// * **La recherche et les filtres sont ceux du serveur** (référence, période,
+///   établissement, devise, statut). La recherche ne portait que sur la page
+///   chargée, et l'écran ne proposait pas le statut « Annulé ».
+/// * **Le total est rendu par devise** par le serveur. L'écran additionnait les
+///   montants affichés, XOF et XAF confondus.
 ///
-/// Ici, les clés ne quittent pas le serveur. Le remboursement est une requête
-/// authentifiée qui exige `orders.refund`, vérifie que la commande appartient
-/// au périmètre du compte — un opérateur de Kara ne rembourse pas une commande
-/// de Lomé, avec l'argent de Lomé — et applique l'invariant P3 : la somme des
-/// remboursements d'une transaction ne dépasse jamais ce qui a été encaissé.
-///
-/// Trois fonctions ont disparu avec le service :
-///
-/// * **la configuration des clés** : elles sont côté serveur ;
-/// * **la vérification d'un statut auprès de PayDunya** : le statut d'une
-///   transaction est celui que le webhook signé a écrit. Interroger le
-///   prestataire depuis l'écran donnait une seconde réponse, parfois en avance
-///   sur la première, et l'écran affichait alors « payé » sur une commande que
-///   le serveur tenait pour en attente ;
-/// * **la « réconciliation »** : elle comparait deux listes chargées côté
-///   client et n'écrivait rien. Un rapprochement comptable se fait là où sont
-///   les écritures.
+/// Consultation seule, et par construction : le statut d'une transaction
+/// n'avance que sur webhook signé du prestataire. Le seul geste d'écriture est
+/// le remboursement (`orders.refund`), qui crée un objet distinct.
 class PaymentsService extends ChangeNotifier {
-  /// D'où vient la devise d'un montant écrit.
-  final RestaurantScopeService _scope = RestaurantScopeService();
+  PaymentsService({eccore.PaymentRepository? depot}) : _depot = depot;
+
+  final eccore.PaymentRepository? _depot;
 
   eccore.PaymentRepository get _payments =>
-      eccore.PaymentRepository(apiClient: AdminAuthService().apiClient);
+      _depot ?? eccore.PaymentRepository(apiClient: AdminAuthService().apiClient);
 
-  List<eccore.Transaction> _transactions = [];
-  bool _isLoading = false;
-  String? _error;
-  bool _isInitialized = false;
+  eccore.Page<eccore.Transaction>? _page;
+  eccore.TransactionSummary? _totaux;
+  FiltresEncaissements _filtres = const FiltresEncaissements();
+  int _numeroDePage = 1;
+  bool _enCours = false;
+  Echec? _echec;
+  bool _initialise = false;
 
-  List<eccore.Transaction> get transactions => _transactions;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
+  List<eccore.Transaction> get transactions => _page?.results ?? const [];
+  eccore.TransactionSummary? get totaux => _totaux;
+  FiltresEncaissements get filtres => _filtres;
+  int get numeroDePage => _numeroDePage;
+  int get total => _page?.count ?? 0;
+  bool get aPageSuivante => _page?.hasNext ?? false;
+  bool get aPagePrecedente => _page?.hasPrevious ?? false;
+  bool get isLoading => _enCours;
+  Echec? get echec => _echec;
+
+  static const int tailleDePage = 20;
+
+  int get nombreDePages => total == 0 ? 1 : (total + tailleDePage - 1) ~/ tailleDePage;
 
   Future<void> initialize() async {
-    if (_isInitialized) return;
-    _isInitialized = true;
-    await refresh();
+    if (_initialise) return;
+    _initialise = true;
+    await appliquer(_filtres);
   }
 
-  /// Encaissements du périmètre — le filtre est celui du serveur.
-  Future<void> refresh({String? status}) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  /// Applique une sélection : première page **et** totaux, sur les mêmes
+  /// filtres — deux lectures qui ne s'accorderaient pas seraient pires que pas
+  /// de totaux du tout.
+  Future<void> appliquer(FiltresEncaissements filtres) async {
+    _filtres = filtres;
+    _numeroDePage = 1;
+    await _lire(
+      () => _payments.transactionsPage(
+        status: filtres.statut,
+        restaurantSlug: filtres.restaurantSlug,
+        currency: filtres.devise,
+        search: filtres.recherche,
+        from: filtres.depuis,
+        to: filtres.jusqua,
+        pageSize: tailleDePage,
+      ),
+      avecTotaux: true,
+    );
+  }
 
+  Future<void> refresh() => appliquer(_filtres);
+
+  Future<void> pageSuivante() async {
+    final suivante = _page?.next;
+    if (suivante == null) return;
+    _numeroDePage += 1;
+    await _lire(() => _payments.transactionsAt(suivante));
+  }
+
+  Future<void> pagePrecedente() async {
+    final precedente = _page?.previous;
+    if (precedente == null) return;
+    _numeroDePage -= 1;
+    await _lire(() => _payments.transactionsAt(precedente));
+  }
+
+  Future<void> _lire(
+    Future<eccore.Page<eccore.Transaction>> Function() lecture, {
+    bool avecTotaux = false,
+  }) async {
+    _enCours = true;
+    _echec = null;
+    notifyListeners();
     try {
-      _transactions = await _payments.listTransactions(status: status);
+      _page = await lecture();
+      if (avecTotaux) {
+        _totaux = await _payments.transactionsSummary(
+          status: _filtres.statut,
+          restaurantSlug: _filtres.restaurantSlug,
+          currency: _filtres.devise,
+          search: _filtres.recherche,
+          from: _filtres.depuis,
+          to: _filtres.jusqua,
+        );
+      }
     } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Paiements : chargement impossible — ${e.code}');
+      _echec = Echec.de(e);
+      eccore.Journal.trace('Paiements : lecture impossible — ${e.code}');
     } finally {
-      _isLoading = false;
+      _enCours = false;
       notifyListeners();
     }
   }
 
-  /// Transactions d'une commande, sans recharger la liste complète.
-  Future<List<eccore.Transaction>> transactionsOf(String orderId) async {
-    try {
-      return await _payments.getTransactions(orderId: orderId);
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Paiements : transactions indisponibles — ${e.code}');
-      return const [];
-    }
-  }
+  /// Transactions d'une commande, sans toucher à la liste. Lève `ApiException`.
+  Future<List<eccore.Transaction>> transactionsOf(String orderId) =>
+      _payments.getTransactions(orderId: orderId);
 
   /// Rembourse tout ou partie d'une commande (permission `orders.refund`).
   ///
-  /// [amountMajor] est en unité majeure — ce que saisit l'opérateur — et
-  /// converti ici, une fois. Le serveur refuse ce qui dépasse l'encaissement
-  /// (P3) ; le message remonte tel quel plutôt que d'être reformulé, parce
-  /// qu'il dit exactement combien reste remboursable.
-  Future<eccore.Refund?> refund({
+  /// [amount] porte **la devise de l'encaissement**. La version précédente
+  /// convertissait la saisie avec la devise de l'établissement sélectionné
+  /// dans le back-office — son commentaire disait l'inverse : un siège qui
+  /// remboursait une commande de Douala (XAF) envoyait des XOF.
+  ///
+  /// Lève `ApiException` : le dialogue affiche le refus du serveur — « il
+  /// reste 2 000 XOF remboursables » — sans se fermer, et sans que la saisie
+  /// soit perdue.
+  Future<eccore.Refund> refund({
     required String orderId,
     required String transactionId,
-    required double amountMajor,
+    required eccore.Money amount,
     required String reason,
   }) async {
-    try {
-      final rembourse = await _payments.refund(
-        orderId: orderId,
-        transactionId: transactionId,
-        // Devise et exposant de l'établissement, jamais `XOF` écrit ici : un
-        // remboursement se libelle dans la monnaie de l'encaissement, et
-        // `round()` sur une devise à décimales aurait remboursé douze
-        // centièmes là où on rendait douze unités.
-        amount: _scope.versMoney(amountMajor),
-        reason: reason,
-      );
-      // Le statut de la transaction d'origine ne change pas : un encaissement
-      // a bien eu lieu, et l'écraser ferait disparaître ce fait.
-      notifyListeners();
-      return rembourse;
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Paiements : remboursement refusé — ${e.code}');
-      notifyListeners();
-      return null;
-    }
+    final rembourse = await _payments.refund(
+      orderId: orderId,
+      transactionId: transactionId,
+      amount: amount,
+      reason: reason,
+    );
+    // Le statut de la transaction d'origine ne change pas : un encaissement a
+    // bien eu lieu, et l'écraser ferait disparaître ce fait.
+    notifyListeners();
+    return rembourse;
   }
 }

@@ -76,7 +76,24 @@ class AdminAuthService extends ChangeNotifier {
   eccore.ApiClient get apiClient => _container.read(eccore.apiClientProvider);
 
   /// Permissions accordées par le serveur — la seule source qui vaille.
-  List<String> get permissions => currentAdmin?.permissions ?? const [];
+  List<String> get permissions => _permissionsDeTest ?? currentAdmin?.permissions ?? const [];
+
+  List<String>? _permissionsDeTest;
+
+  /// Permissions **simulées**, pour les tests d'écran.
+  ///
+  /// Un écran de back-office masque ses gestes selon les droits du compte ; le
+  /// vérifier demande une session, que l'ouverture d'un vrai jeton apporterait
+  /// au prix d'un serveur. Poser la liste ici l'évite, sans rien changer au
+  /// produit : le serveur reste seul juge à chaque appel, et masquer un bouton
+  /// n'a jamais protégé une donnée.
+  ///
+  /// `null` rend la main à la session.
+  @visibleForTesting
+  set permissionsDeTest(List<String>? permissions) {
+    _permissionsDeTest = permissions;
+    notifyListeners();
+  }
 
   /// Libellé affiché sous le nom du compte.
   ///
@@ -167,6 +184,26 @@ class AdminAuthService extends ChangeNotifier {
   /// Sert à **présenter** l'interface, pas à la protéger : le serveur refuse
   /// l'appel de toute façon. C'est la nuance qui manquait à l'ancienne version.
   bool can(String permission) => permissions.contains(permission);
+
+  /// Le compte voit-il l'enseigne entière ?
+  ///
+  /// Ce qui ne relève d'aucun établissement — une campagne, un pays, une ville,
+  /// un code promotionnel national — n'est ouvert qu'au siège
+  /// (`common.permissions.assert_unscoped`). Une permission ne suffit donc pas
+  /// à présenter l'action : un gérant détient `notifications.send` et n'est pas
+  /// le siège. Sans cette distinction, son bouton partait et revenait en 403,
+  /// ce qui se lit comme une panne plutôt que comme une règle.
+  bool get estSiege => _siegeDeTest ?? currentAdmin?.isSuperuser ?? false;
+
+  bool? _siegeDeTest;
+
+  /// Siège **simulé**, pour les tests d'écran — même raison que
+  /// [permissionsDeTest]. `null` rend la main à la session.
+  @visibleForTesting
+  set siegeDeTest(bool? siege) {
+    _siegeDeTest = siege;
+    notifyListeners();
+  }
 
   /// Dernier e-mail saisi, pour préremplir l'écran de connexion.
   Future<Map<String, dynamic>> getSavedPreferences() async {

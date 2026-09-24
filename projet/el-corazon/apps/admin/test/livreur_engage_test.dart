@@ -106,24 +106,7 @@ void main() {
     });
   });
 
-  group('La liste des livreurs proposables', () {
-    /// Le filtre appliqué par `DriverManagementService.getAvailableDrivers`,
-    /// reproduit ici sur les mêmes prédicats : le service tient une liste
-    /// chargée depuis le réseau, que ce test n'a pas à monter pour vérifier la
-    /// règle qu'il applique.
-    List<String> proposables(
-      List<eccore.CourierProfile> livreurs,
-      Set<String> engages,
-    ) {
-      return [
-        for (final livreur in livreurs)
-          if (livreur.statut == StatutLivreur.disponible &&
-              livreur.estValide &&
-              !engages.contains(livreur.id))
-            livreur.id,
-      ];
-    }
-
+  group('Le dossier livreur ne dit rien de ses courses', () {
     eccore.CourierProfile livreur(String id) => eccore.CourierProfile.fromJson({
           'id': id,
           'full_name': 'Kofi $id',
@@ -151,23 +134,22 @@ void main() {
           'updated_at': '2026-09-07T10:00:00Z',
         });
 
-    test('écarte celui qui porte déjà une course', () {
-      final livreurs = [livreur('a'), livreur('b')];
-
-      expect(proposables(livreurs, {'a'}), ['b']);
-    });
-
-    test('sans course en cours, personne n’est écarté', () {
-      final livreurs = [livreur('a'), livreur('b')];
-
-      expect(proposables(livreurs, const {}), ['a', 'b']);
-    });
-
     test('un livreur engagé reste « Disponible » à ses propres yeux', () {
       // Le dossier ne sait rien des affectations, et ce n'est pas un défaut :
-      // c'est pourquoi l'ensemble des engagés doit venir d'ailleurs. Épinglé
-      // pour que personne ne « corrige » `StatutLivreur` en croyant le compléter.
+      // c'est pourquoi l'éligibilité se demande au serveur, pour une commande
+      // donnée (`GET /delivery/couriers/available/{id}/`). Épinglé pour que
+      // personne ne « corrige » `StatutLivreur` en croyant le compléter — et
+      // pour que personne ne refasse le filtre ici, comme le dialogue
+      // d'affectation le faisait : il y oubliait la cuisine de la commande et
+      // le périmètre de zone. Voir `assignation_livreur_test.dart`.
       expect(livreur('a').statut, StatutLivreur.disponible);
+    });
+
+    test('la distance à la cuisine n’est pas un champ du dossier', () {
+      // Elle n'existe que sur la route des éligibles, calculée par PostGIS
+      // depuis la position du restaurant. Nulle ailleurs : un zéro laisserait
+      // croire que le livreur est sur le pas de la porte.
+      expect(livreur('a').distanceM, isNull);
     });
   });
 }

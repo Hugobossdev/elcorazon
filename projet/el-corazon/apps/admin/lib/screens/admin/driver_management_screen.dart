@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/autorisations.dart';
+import 'package:admin/presentation/flotte.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -12,25 +16,11 @@ import 'package:admin/screens/admin/driver_detailed_stats_screen.dart';
 import 'package:admin/screens/admin/driver_map_screen.dart';
 import 'package:admin/ui/ui.dart';
 
-enum DriverSortOption { nameAsc, nameDesc, status, rating, deliveries }
-
-extension DriverSortOptionExtension on DriverSortOption {
-  String get displayName {
-    switch (this) {
-      case DriverSortOption.nameAsc:
-        return 'Nom (A-Z)';
-      case DriverSortOption.nameDesc:
-        return 'Nom (Z-A)';
-      case DriverSortOption.status:
-        return 'Statut';
-      case DriverSortOption.rating:
-        return 'Note';
-      case DriverSortOption.deliveries:
-        return 'Livraisons';
-    }
-  }
-}
-
+/// La flotte : un aperçu, puis une liste par onglet ([OngletFlotte]).
+///
+/// La recherche et le tri s'appliquent à chaque liste ; le classement garde
+/// son ordre. Les livreurs suspendus ou refusés ont leur onglet — sans lui, ils
+/// n'apparaissaient nulle part, et une suspension ne pouvait plus être levée.
 class DriverManagementScreen extends StatefulWidget {
   const DriverManagementScreen({super.key});
 
@@ -46,7 +36,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 1 + OngletFlotte.values.length, vsync: this);
     _tabController.addListener(() {
       if (!mounted) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -54,6 +44,12 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
           setState(() {});
         }
       });
+    });
+    // C'est l'écran de la flotte : c'est lui qui la demande. Elle se chargeait
+    // à la construction du service, donc à l'ouverture de n'importe quel écran
+    // du back-office.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(context.read<DriverManagementService>().ensureLoaded());
     });
   }
 
@@ -85,15 +81,10 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
               indicatorColor: scheme.primary,
               labelColor: scheme.primary,
               unselectedLabelColor: scheme.onSurfaceVariant,
-              tabs: const [
-                Tab(icon: Icon(Icons.dashboard_outlined), text: 'Aperçu'),
-                Tab(
-                    icon: Icon(Icons.check_circle_outline),
-                    text: 'Disponibles',),
-                Tab(
-                    icon: Icon(Icons.offline_bolt_outlined),
-                    text: 'Hors ligne',),
-                Tab(icon: Icon(Icons.analytics_outlined), text: 'Stats'),
+              tabs: [
+                const Tab(icon: Icon(Icons.dashboard_outlined), text: 'Aperçu'),
+                for (final onglet in OngletFlotte.values)
+                  Tab(icon: Icon(_iconeDOnglet(onglet)), text: onglet.libelle),
               ],
             ),
           ),
@@ -109,12 +100,8 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                   controller: _tabController,
                   children: [
                     _buildOverviewTab(context, driverService),
-                    _buildDriverListTab(
-                        context, driverService, StatutLivreur.disponible,),
-                    _buildDriverListTab(
-                        context, driverService, StatutLivreur.horsLigne,),
-                    const DriverDetailedStatsScreen(
-                        driver: null,), // Placeholder for global stats tab
+                    for (final onglet in OngletFlotte.values)
+                      _buildDriverListTab(context, driverService, onglet),
                   ],
                 );
               },
@@ -145,7 +132,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                hintText: 'Rechercher un livreur...',
+                hintText: 'Nom, courriel, téléphone ou plaque…',
                 prefixIcon: const Icon(Icons.search),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
@@ -156,22 +143,26 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                 contentPadding: const EdgeInsets.symmetric(horizontal: 20),
               ),
               onChanged: (value) {
-                context.read<DriverManagementService>().searchDrivers(value);
+                context.read<DriverManagementService>().rechercher(value);
               },
             ),
           ),
           const SizedBox(width: 12),
           IconButton.filledTonal(
-            onPressed: _showFilterDialog,
-            icon: const Icon(Icons.filter_list),
-            tooltip: 'Filtrer',
+            onPressed: _showSortDialog,
+            icon: const Icon(Icons.sort),
+            tooltip: 'Trier',
           ),
           const SizedBox(width: 8),
-          FloatingActionButton.small(
-            onPressed: _showAddDriverDialog,
-            elevation: 0,
-            child: const Icon(Icons.add),
-          ),
+          // Embaucher crée un compte : `couriers.write`. Le bouton s'offrait à
+          // tout le personnel, et le formulaire entier était rempli avant le
+          // 403.
+          if (context.peut('couriers.write'))
+            FloatingActionButton.small(
+              onPressed: _showAddDriverDialog,
+              elevation: 0,
+              child: const Icon(Icons.add),
+            ),
         ],
       ),
     );
@@ -179,7 +170,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
 
   Widget _buildOverviewTab(
       BuildContext context, DriverManagementService driverService,) {
-    final stats = driverService.getDriverStats();
+    final stats = driverService.statistiques;
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -207,48 +198,295 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                   ?.copyWith(fontWeight: FontWeight.bold),
             ),
             TextButton(
-              onPressed: () => _tabController.animateTo(4), // Go to Stats
+              // Le classement entier. L'onglet visé était un « Stats » qui
+              // n'affichait que « Sélectionnez un livreur », sans rien pour en
+              // sélectionner un.
+              onPressed: () =>
+                  _tabController.animateTo(1 + OngletFlotte.classement.index),
               child: const Text('Voir tout'),
             ),
           ],
         ),
         const SizedBox(height: 12),
-        ...driverService.getTopRatedDrivers(limit: 3).map(
+        ...driverService.tetesDeClassement().map(
             (driver) => _buildDriverListItem(context, driver, driverService),),
       ],
     );
   }
 
+  IconData _iconeDOnglet(OngletFlotte onglet) => switch (onglet) {
+        OngletFlotte.disponibles => Icons.check_circle_outline,
+        OngletFlotte.horsLigne => Icons.offline_bolt_outlined,
+        OngletFlotte.horsService => Icons.block_outlined,
+        OngletFlotte.classement => Icons.leaderboard_outlined,
+      };
+
   Widget _buildDriverListTab(BuildContext context,
-      DriverManagementService service, StatutLivreur status,) {
-    final drivers = service.getDriversByStatus(status);
+      DriverManagementService service, OngletFlotte onglet,) {
+    final drivers = service.livreursDe(onglet);
 
     if (drivers.isEmpty) {
       final scheme = Theme.of(context).colorScheme;
+      // Une recherche sans résultat n'est pas une flotte vide : le dire
+      // évite de chercher les livreurs ailleurs.
+      final message = service.recherche.trim().isNotEmpty
+          ? 'Aucun livreur ne correspond à « ${service.recherche.trim()} » '
+              'dans « ${onglet.libelle} ».'
+          : switch (onglet) {
+              OngletFlotte.disponibles => 'Aucun livreur disponible',
+              OngletFlotte.horsLigne => 'Aucun livreur hors ligne',
+              OngletFlotte.horsService => 'Aucun livreur hors service',
+              OngletFlotte.classement => 'Aucun dossier validé',
+            };
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.group_off_outlined,
-              size: 64,
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Aucun livreur ${status.libelle.toLowerCase()}',
-              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 16),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.group_off_outlined,
+                size: 64,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.6),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 16),
+              ),
+            ],
+          ),
         ),
+      );
+    }
+
+    if (onglet == OngletFlotte.classement) {
+      return ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: drivers.length,
+        separatorBuilder: (context, index) => const Divider(height: 1),
+        itemBuilder: (context, index) =>
+            _buildRangDuClassement(context, index + 1, drivers[index]),
       );
     }
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: drivers.length,
-      itemBuilder: (context, index) =>
-          _buildDriverCard(context, drivers[index], service),
+      itemBuilder: (context, index) => onglet == OngletFlotte.horsService
+          ? _buildHorsServiceCard(context, drivers[index], service)
+          : _buildDriverCard(context, drivers[index], service),
+    );
+  }
+
+  /// Une ligne du classement : le rang, la note **avec son nombre d'avis** —
+  /// 5,0 sur un avis ne pèse pas 4,8 sur deux cents — et les courses.
+  Widget _buildRangDuClassement(
+      BuildContext context, int rang, eccore.CourierProfile driver,) {
+    final scheme = Theme.of(context).colorScheme;
+    final note = driver.ratingCount == 0
+        ? 'Pas encore noté'
+        : '${driver.ratingAverage.toStringAsFixed(1)} '
+            '(${driver.ratingCount} avis)';
+    return ListTile(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => DriverDetailedStatsScreen(driver: driver)),
+      ),
+      leading: CircleAvatar(
+        backgroundColor: scheme.primaryContainer,
+        child: Text(
+          '$rang',
+          style: TextStyle(
+            color: scheme.onPrimaryContainer,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+      title: Text(driver.fullName, style: const TextStyle(fontWeight: FontWeight.bold)),
+      subtitle: Row(
+        children: [
+          Icon(Icons.star, size: 14, color: scheme.tertiary),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              '$note • ${driver.deliveriesCompleted} courses',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      trailing: Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+    );
+  }
+
+  /// Carte d'un livreur hors service : pourquoi, et le geste qui l'y ramène.
+  ///
+  /// Les gestes suivent la machine à états du serveur (`delivery/states.py`) :
+  /// un suspendu se **réactive** (`suspended → approved`) ; un dossier refusé
+  /// ne se valide pas d'ici — il **repasse en instruction**
+  /// (`rejected → pending`) et rejoint le centre de validation, où ses pièces
+  /// seront relues. Les deux demandent `couriers.approve`.
+  Widget _buildHorsServiceCard(
+      BuildContext context, eccore.CourierProfile driver, DriverManagementService service,) {
+    final scheme = Theme.of(context).colorScheme;
+    final sem = AdminColorTokens.semantic(scheme);
+    final peutInstruire = context.peut('couriers.approve');
+    final geste = switch (driver.verificationStatus) {
+      'suspended' => (libelle: 'Réactiver', icone: Icons.play_circle_outline, cible: 'approved'),
+      'rejected' => (libelle: 'Réinstruire', icone: Icons.restart_alt, cible: 'pending'),
+      _ => null,
+    };
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: scheme.outline.withValues(alpha: 0.18)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: CircleAvatar(
+                radius: 24,
+                backgroundColor: sem.danger.withValues(alpha: 0.1),
+                child: Text(
+                  driver.fullName.isEmpty ? '?' : driver.fullName[0].toUpperCase(),
+                  style: TextStyle(color: sem.danger, fontWeight: FontWeight.bold),
+                ),
+              ),
+              title: Text(
+                driver.fullName,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text(
+                '${driver.deliveriesCompleted} courses • ${driver.phone.isEmpty ? driver.email : driver.phone}',
+                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+              ),
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: sem.danger.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  driver.motifHorsService,
+                  style: TextStyle(
+                    color: sem.danger,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            // Le motif est celui que le livreur lit dans son profil : le
+            // superviseur doit voir le même avant de revenir sur la décision.
+            if (driver.verificationNotes.trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Motif : ${driver.verificationNotes.trim()}',
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ),
+            const Divider(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                if (geste != null && peutInstruire)
+                  _buildActionButton(
+                    context,
+                    geste.icone,
+                    geste.libelle,
+                    () => unawaited(
+                      _revenirSurLaDecision(driver, geste.libelle, geste.cible),
+                    ),
+                  ),
+                _buildActionButton(
+                  context,
+                  Icons.history,
+                  'Historique',
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => DriverHistoryScreen(driver: driver)),
+                  ),
+                ),
+                _buildActionButton(
+                  context,
+                  Icons.edit_outlined,
+                  'Éditer',
+                  () => _editDriver(driver),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Réactive un suspendu ou remet un dossier refusé en instruction, après
+  /// confirmation. Le succès ne s'annonce qu'une fois le serveur d'accord ; un
+  /// refus s'annonce avec sa phrase — une pièce expirée, par exemple, empêche
+  /// une réactivation.
+  Future<void> _revenirSurLaDecision(
+    eccore.CourierProfile driver,
+    String geste,
+    String cible,
+  ) async {
+    final explication = cible == 'approved'
+        ? '${driver.fullName} pourra de nouveau se mettre en ligne et recevoir '
+            'des courses.'
+        : 'Le dossier de ${driver.fullName} repassera en attente : il '
+            'apparaîtra dans le centre de validation, où ses pièces seront '
+            'relues avant toute reprise.';
+    final confirme = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('$geste ${driver.fullName} ?'),
+        content: Text(explication),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(geste),
+          ),
+        ],
+      ),
+    );
+    if (confirme != true || !mounted) return;
+
+    final service = context.read<DriverManagementService>();
+    final reussi = cible == 'approved'
+        ? await service.reactivateDriver(driver.id)
+        : await service.setVerification(driver.id, cible);
+    if (!mounted) return;
+
+    final scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          reussi
+              ? (cible == 'approved'
+                  ? '${driver.fullName} est de nouveau en service.'
+                  : 'Le dossier de ${driver.fullName} est repassé en instruction.')
+              : (service.error ?? 'Le serveur a refusé ce geste.'),
+        ),
+        backgroundColor: reussi ? null : scheme.error,
+      ),
     );
   }
 
@@ -341,7 +579,7 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
     );
   }
 
-  Widget _buildStatsGrid(BuildContext context, Map<String, dynamic> stats) {
+  Widget _buildStatsGrid(BuildContext context, StatistiquesDeFlotte stats) {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
     return GridView.count(
@@ -353,26 +591,37 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
       childAspectRatio: 1.5,
       children: [
         _buildStatCard(
-          'Total Livreurs',
-          stats['total_drivers'].toString(),
+          'Effectif',
+          stats.effectif.toString(),
           Icons.people,
           sem.info,
         ),
+        // « En ligne » comptait les dossiers **validés** : un livreur validé
+        // mais téléphone éteint y figurait, et le siège croyait avoir dix
+        // personnes en ville.
         _buildStatCard(
-          'En Ligne',
-          stats['online_drivers'].toString(),
+          'En ligne',
+          stats.enLigne.toString(),
           Icons.wifi,
           sem.success,
         ),
+        // « Courses actives » s'affichait « null » : le compteur n'était pas
+        // produit, et le dossier d'un livreur ne dit rien de ses affectations.
+        // Les dossiers à instruire, eux, appellent un geste.
         _buildStatCard(
-          'Courses actives',
-          stats['busy_drivers'].toString(),
-          Icons.local_shipping,
+          'Dossiers à instruire',
+          stats.dossiersAInstruire.toString(),
+          Icons.fact_check_outlined,
           sem.warning,
         ),
         _buildStatCard(
-          'Note Moyenne',
-          (stats['average_rating'] as num).toStringAsFixed(1),
+          stats.noteMoyenne == null
+              ? 'Note moyenne'
+              : 'Note moyenne (${stats.livreursNotes} noté'
+                  '${stats.livreursNotes > 1 ? 's' : ''})',
+          // Une moyenne sur zéro note vaut 0,0 : l'afficher ferait passer une
+          // flotte neuve pour une flotte mal notée.
+          stats.noteMoyenne?.toStringAsFixed(1) ?? '—',
           Icons.star,
           scheme.tertiary,
         ),
@@ -583,68 +832,41 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
     }
   }
 
-  void _showFilterDialog() {
+  /// Le tri des listes. Le filtre par statut qui l'accompagnait a disparu :
+  /// les onglets **sont** ce filtre, et filtrer « Disponible » dans l'onglet
+  /// « Hors ligne » ne pouvait rendre qu'une liste vide.
+  void _showSortDialog() {
+    final service = context.read<DriverManagementService>();
     DialogHelper.showSafeDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Filtrer les livreurs'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Filtrer par statut
-            DropdownButtonFormField<StatutLivreur>(
-              decoration: const InputDecoration(
-                labelText: 'Statut',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.filter_alt),
-              ),
-              items: StatutLivreur.values.map((status) {
-                return DropdownMenuItem(
-                  value: status,
-                  child: Text(status.libelle),
-                );
-              }).toList(),
-              onChanged: (status) {
-                context.read<DriverManagementService>().filterByStatus(status);
-                Navigator.pop(context);
-              },
-            ),
-            const SizedBox(height: 16),
-            // Filtrer par tri
-            DropdownButtonFormField<String>(
-              decoration: const InputDecoration(
-                labelText: 'Trier par',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.sort),
-              ),
-              items: const [
-                DropdownMenuItem(value: 'name', child: Text('Nom (A-Z)')),
-                DropdownMenuItem(value: 'nameDesc', child: Text('Nom (Z-A)')),
-                DropdownMenuItem(
-                    value: 'rating', child: Text('Meilleure Note'),),
-                DropdownMenuItem(
-                    value: 'deliveries', child: Text('Plus de livraisons'),),
-              ],
-              onChanged: (value) {
-                if (value != null) {
-                  context.read<DriverManagementService>().setSortOption(value);
-                  Navigator.pop(context);
-                }
-              },
-            ),
-            const SizedBox(height: 16),
-            TextButton(
+      builder: (context) => SimpleDialog(
+        title: const Text('Trier les livreurs'),
+        children: [
+          for (final tri in TriFlotte.values)
+            SimpleDialogOption(
               onPressed: () {
-                context.read<DriverManagementService>().filterByStatus(null);
-                context
-                    .read<DriverManagementService>()
-                    .setSortOption('name'); // Reset sort
+                service.trierPar(tri);
                 Navigator.pop(context);
               },
-              child: const Text('Réinitialiser les filtres'),
+              child: Row(
+                children: [
+                  Icon(
+                    tri == service.tri ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(tri.libelle),
+                ],
+              ),
             ),
-          ],
-        ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 8, 24, 0),
+            child: Text(
+              'Le classement garde son ordre : de la meilleure note à la moins bonne.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ],
       ),
     );
   }

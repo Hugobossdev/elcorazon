@@ -58,6 +58,8 @@ class _DriverDocumentsDashboardScreenState
           .where((doc) => doc.url == null)
           .toList();
 
+      // L'écran a pu être quitté pendant la lecture de la flotte.
+      if (!mounted) return;
       setState(() {
         _pendingDocuments = pending;
         _attentionDocuments = attention;
@@ -228,7 +230,11 @@ class _DriverDocumentsDashboardScreenState
 
   Future<void> _navigateToValidation(PieceLivreur doc) async {
     final driverService = context.read<DriverManagementService>();
-    
+    // La flotte ne se charge plus à la construction du service : cet écran vit
+    // sur `DocumentService`, et n'a besoin du dossier complet qu'ici, au moment
+    // d'ouvrir la validation.
+    await driverService.ensureLoaded();
+
     // Un dossier fictif était fabriqué quand la liste ne contenait pas le
     // livreur : l'écran de validation s'ouvrait alors sur un dossier inexistant,
     // dont aucune action n'aurait abouti.
@@ -239,6 +245,8 @@ class _DriverDocumentsDashboardScreenState
         break;
       }
     }
+
+    if (!mounted) return;
 
     if (driver != null) {
       await Navigator.push(

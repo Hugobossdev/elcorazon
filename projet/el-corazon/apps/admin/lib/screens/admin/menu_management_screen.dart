@@ -8,13 +8,19 @@ import 'package:admin/widgets/modern/modern_button.dart';
 import 'package:admin/widgets/modern/modern_card.dart';
 import 'package:admin/widgets/loading_widget.dart';
 import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/utils/price_formatter.dart';
 import 'package:admin/screens/admin/menu_item_form_dialog.dart';
 import 'package:admin/screens/admin/category_management_screen.dart';
 
 class MenuManagementScreen extends StatefulWidget {
-  const MenuManagementScreen({super.key});
+  const MenuManagementScreen({this.rechercheInitiale = '', super.key});
+
+  /// La carte s'ouvre déjà filtrée sur ce texte — ce que fait la recherche
+  /// globale quand on clique un produit, plutôt que d'ouvrir la carte entière
+  /// et d'y faire rechercher à la main l'article qu'on vient de trouver.
+  final String rechercheInitiale;
 
   @override
   State<MenuManagementScreen> createState() => _MenuManagementScreenState();
@@ -34,6 +40,8 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(_onTabChanged);
+    _searchController.text = widget.rechercheInitiale;
+    _searchQuery = widget.rechercheInitiale.toLowerCase();
     _searchController.addListener(_onSearchChanged);
 
     // Initialiser les catégories au démarrage
@@ -262,11 +270,15 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                         ),
                       ),
                       const SizedBox(width: 16),
-                      ModernButton(
-                        label: 'Nouveau Produit',
-                        icon: Icons.add,
-                        onPressed: () => _showMenuItemForm(context, null),
-                      ),
+                      // Tenir la carte demande `catalog.write` : un opérateur
+                      // remplissait le formulaire entier avant de récolter un
+                      // 403 à l'envoi.
+                      if (context.peut('catalog.write'))
+                        ModernButton(
+                          label: 'Nouveau Produit',
+                          icon: Icons.add,
+                          onPressed: () => _showMenuItemForm(context, null),
+                        ),
                     ],
                   ),
                 ),
@@ -552,12 +564,13 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          formatPrice(item.price.toMajorUnits()),
+                          formatMontant(item.price),
                           style: theme.textTheme.titleMedium?.copyWith(
                             color: theme.colorScheme.primary,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
+                        if (context.peut('catalog.write'))
                         PopupMenuButton<String>(
                           icon: const Icon(Icons.more_vert, size: 20),
                           onSelected: (value) {
@@ -637,7 +650,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
                   color: scheme.onSurfaceVariant,
                 ),
           ),
-          if (!archive) ...[
+          if (!archive && context.peut('catalog.write')) ...[
             const SizedBox(height: 24),
             ModernButton(
               label: 'Ajouter un produit',
@@ -768,7 +781,8 @@ class _MenuManagementScreenState extends State<MenuManagementScreen>
   Future<void> _refreshMenu() async {
     final categoryService = context.read<CategoryManagementService>();
     await categoryService.refreshCategories();
-    // Force reload of future
+    // L'écran a pu être quitté pendant la relecture des catégories.
+    if (!mounted) return;
     setState(() {
       _menuItemsFuture = null;
     });

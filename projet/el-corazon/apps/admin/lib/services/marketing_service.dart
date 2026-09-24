@@ -42,6 +42,7 @@ class MarketingService extends ChangeNotifier {
   List<eccore.Campaign> get drafts =>
       _campaigns.where((c) => c.isDraft).toList();
   List<eccore.Campaign> get sent => _campaigns.where((c) => c.isSent).toList();
+  List<eccore.Campaign> get scheduled => _campaigns.where((c) => c.isScheduled).toList();
   bool get isLoading => _isLoading;
   String? get error => _error;
 
@@ -171,6 +172,46 @@ class MarketingService extends ChangeNotifier {
     } on eccore.ApiException catch (e) {
       _error = e.detail;
       eccore.Journal.trace('Marketing : envoi refusé — ${e.code}');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Date l'envoi — la campagne partira seule, à [quand].
+  ///
+  /// Une campagne se prépare la veille et part quand les gens ont leur
+  /// téléphone en main. C'est le battement du serveur qui l'envoie, toutes les
+  /// cinq minutes : l'heure est tenue à cinq minutes près.
+  Future<bool> scheduleCampaign(String id, DateTime quand) =>
+      _gesteDeProgrammation(id, 'programmation', () => _campaignsApi.schedule(id, at: quand));
+
+  /// Annule la programmation : la campagne redevient un brouillon, modifiable.
+  Future<bool> unscheduleCampaign(String id) =>
+      _gesteDeProgrammation(id, 'déprogrammation', () => _campaignsApi.unschedule(id));
+
+  Future<bool> _gesteDeProgrammation(
+    String id,
+    String geste,
+    Future<eccore.Campaign> Function() appel,
+  ) async {
+    try {
+      _error = null;
+      _remplacer(await appel());
+      return true;
+    } on eccore.ApiException catch (e) {
+      _error = e.detail;
+      eccore.Journal.trace('Marketing : $geste refusée — ${e.code}');
+      // Un 409 dit presque toujours que la campagne est partie entre-temps —
+      // le battement l'a envoyée pendant qu'on cliquait. On la relit, pour que
+      // l'écran montre « Envoyée » au lieu d'inviter à réessayer un geste
+      // devenu impossible.
+      if (e.status == 409) {
+        try {
+          _remplacer(await _campaignsApi.getById(id));
+        } on eccore.ApiException {
+          // La relecture n'est qu'un confort : le refus, lui, est déjà dit.
+        }
+      }
       notifyListeners();
       return false;
     }

@@ -199,7 +199,7 @@ class _AnnulationCommandeState extends State<_AnnulationCommande> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Montant : ${PriceFormatter.format(widget.order.totalAffiche)}'
+                    'Montant : ${formatMontant(widget.order.total)}'
                     ' · ${widget.order.statut.libelle}',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),

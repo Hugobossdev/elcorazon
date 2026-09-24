@@ -99,9 +99,13 @@ class _NotesInternesState extends State<NotesInternes> {
             const SizedBox(width: 8),
             const Text('Notes internes', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(width: 8),
-            Text(
-              'jamais vues du client',
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+            // Souple : dans une fiche ouverte sur un téléphone, la ligne
+            // débordait de la boîte de dialogue.
+            Flexible(
+              child: Text(
+                'jamais vues du client',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+              ),
             ),
           ],
         ),

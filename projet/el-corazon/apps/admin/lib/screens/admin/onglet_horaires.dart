@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/screens/admin/fermetures_exceptionnelles.dart';
 import 'package:admin/services/opening_hours_service.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
@@ -183,11 +184,16 @@ class _CarteDuJour extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                TextButton.icon(
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Plage'),
-                  onPressed: () => _ajouter(context),
-                ),
+                // Régler les horaires de sa cuisine est un geste
+                // d'exploitation : `restaurants.operate` (le gérant), ou
+                // `restaurants.write` (le siège). Un compte qui n'a ni l'un ni
+                // l'autre lisait l'écran et récoltait un 403 à l'envoi.
+                if (context.peutUne(const ['restaurants.operate', 'restaurants.write']))
+                  TextButton.icon(
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Plage'),
+                    onPressed: () => _ajouter(context),
+                  ),
               ],
             ),
             if (plages.isEmpty)
@@ -257,16 +263,18 @@ class _LignePlage extends StatelessWidget {
             ),
           ],
           const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.edit_outlined, size: 18),
-            tooltip: 'Modifier cette plage',
-            onPressed: () => _modifier(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline, size: 18),
-            tooltip: 'Retirer cette plage',
-            onPressed: () => _supprimer(context),
-          ),
+          if (context.peutUne(const ['restaurants.operate', 'restaurants.write'])) ...[
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              tooltip: 'Modifier cette plage',
+              onPressed: () => _modifier(context),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 18),
+              tooltip: 'Retirer cette plage',
+              onPressed: () => _supprimer(context),
+            ),
+          ],
         ],
       ),
     );

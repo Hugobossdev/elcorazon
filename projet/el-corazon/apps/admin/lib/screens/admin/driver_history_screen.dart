@@ -1,78 +1,103 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
-import 'package:admin/services/assignment_service.dart';
-import 'package:admin/services/driver_management_service.dart';
-import 'package:admin/services/order_management_service.dart';
-import 'package:admin/widgets/loading_widget.dart' as etats;
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:admin/presentation/commande.dart';
-import 'package:admin/presentation/statut_commande.dart';
-import 'package:admin/widgets/custom_bar_chart.dart';
+import 'package:flutter/material.dart';
+
+import 'package:admin/presentation/barre_pagination.dart';
+import 'package:admin/presentation/echec.dart';
+import 'package:admin/presentation/retours.dart';
+import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/utils/price_formatter.dart';
 
+/// L'historique d'un livreur : ses **courses**, et ce qu'il a gagné.
+///
+/// ## Ce qui a changé (22 septembre 2026)
+///
+/// * **Le « Revenu » n'était pas le sien.** L'écran additionnait le total des
+///   commandes qu'il avait portées — ce que les clients ont payé — et non sa
+///   rémunération (`courier_fee`). Il mêlait de surcroît les devises.
+/// * **Les données venaient d'un croisement en mémoire** : toutes les courses
+///   du livreur, croisées avec un an de commandes téléchargées par la
+///   supervision, puis filtrées par période dans l'écran. Un livreur dont les
+///   commandes sortaient de cette fenêtre paraissait n'avoir rien fait. Le
+///   serveur borne, pagine et totalise.
+/// * Les chiffres sont ceux de la **période choisie**, et la période part au
+///   serveur.
 class DriverHistoryScreen extends StatefulWidget {
-  final eccore.CourierProfile driver;
-
   const DriverHistoryScreen({required this.driver, super.key});
+
+  final eccore.CourierProfile driver;
 
   @override
   State<DriverHistoryScreen> createState() => _DriverHistoryScreenState();
 }
 
-class _DriverHistoryScreenState extends State<DriverHistoryScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  String _selectedPeriod = 'week';
-  DateTime _startDate = DateTime.now().subtract(const Duration(days: 7));
-  DateTime _endDate = DateTime.now();
+/// Les périodes que l'écran propose — bornes envoyées au serveur.
+enum PeriodeHistorique {
+  semaine('7 jours', Duration(days: 7)),
+  mois('30 jours', Duration(days: 30)),
+  an('1 an', Duration(days: 365));
 
-  /// Les commandes que ce livreur a portées.
-  ///
-  /// Cet écran filtrait jusqu'ici `allOrders` sur un identifiant de livreur
-  /// posé sur la commande — un champ que le serveur ne rend pas et ne rendra
-  /// pas. La condition était donc toujours fausse : l'historique, les
-  /// graphiques et les trois onglets étaient vides pour **tous** les livreurs,
-  /// et l'écran affichait « aucune course » sur des semaines de travail.
-  ///
-  /// Le rattachement se lit sur les courses (`/delivery/manage/assignments/`),
-  /// chargées une fois à l'ouverture ; les commandes elles-mêmes viennent de la
-  /// supervision, comme avant.
-  Set<String> _commandesPortees = const {};
-  bool _coursesChargees = false;
+  const PeriodeHistorique(this.libelle, this.duree);
+
+  final String libelle;
+  final Duration duree;
+}
+
+class _DriverHistoryScreenState extends State<DriverHistoryScreen> {
+  eccore.ManagedAssignmentRepository get _courses =>
+      eccore.ManagedAssignmentRepository(apiClient: AdminAuthService().apiClient);
+
+  PeriodeHistorique _periode = PeriodeHistorique.mois;
+  eccore.Page<eccore.Assignment>? _page;
+  eccore.CourierEarnings? _totaux;
+  int _numeroDePage = 1;
+  bool _enCours = false;
+  Echec? _echec;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_chargerLesCourses());
-      // L'historique croise les courses du livreur avec les commandes de la
-      // fenêtre agrégée : sans cette demande, il affichait un historique vide
-      // pour un livreur qui avait roulé toute la semaine.
-      if (mounted) unawaited(context.read<OrderManagementService>().ensureWindowLoaded());
+      if (mounted) unawaited(_charger());
     });
   }
 
-  Future<void> _chargerLesCourses() async {
-    final courses = await context.read<AssignmentService>().historyOf(widget.driver.id);
-    if (!mounted) return;
+  DateTime get _depuis => DateTime.now().subtract(_periode.duree);
+
+  Future<void> _charger({int page = 1}) async {
     setState(() {
-      _commandesPortees = {for (final course in courses) course.orderId};
-      _coursesChargees = true;
+      _enCours = true;
+      _echec = null;
+      _numeroDePage = page;
     });
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+    try {
+      final courses = await _courses.page(
+        courierId: widget.driver.id,
+        deliveredFrom: _depuis,
+        page: page,
+      );
+      final totaux = await _courses.summary(
+        courierId: widget.driver.id,
+        deliveredFrom: _depuis,
+      );
+      if (!mounted) return;
+      setState(() {
+        _page = courses;
+        _totaux = totaux;
+      });
+    } on eccore.ApiException catch (e) {
+      if (mounted) setState(() => _echec = Echec.de(e));
+    } finally {
+      if (mounted) setState(() => _enCours = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final courses = _page?.results ?? const <eccore.Assignment>[];
+    final totaux = _totaux;
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -81,370 +106,161 @@ class _DriverHistoryScreenState extends State<DriverHistoryScreen>
             const Text('Historique', style: TextStyle(fontSize: 16)),
             Text(
               widget.driver.fullName,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.normal,
-              ),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
             ),
           ],
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Vue globale'),
-            Tab(text: 'Liste courses'),
-            Tab(text: 'Performance'),
-          ],
-        ),
       ),
-      body: Consumer2<OrderManagementService, DriverManagementService>(
-        builder: (context, orderService, driverService, child) {
-          // Tant que les courses ne sont pas lues, une liste vide voudrait dire
-          // « ce livreur n'a rien fait » — ce qui est faux, et indiscernable de
-          // la vérité une fois affiché.
-          if (!_coursesChargees) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          // Même règle un cran plus loin : les commandes viennent de la fenêtre
-          // agrégée, et si sa lecture a échoué, un historique vide affirmerait
-          // quelque chose de faux sur le travail de quelqu'un.
-          if (orderService.erreurFenetre != null && orderService.allOrders.isEmpty) {
-            return etats.ErrorWidget(
-              message: '${orderService.erreurFenetre!} '
-                  'L’historique de ce livreur n’a pas pu être lu.',
-              icon: Icons.cloud_off_rounded,
-              onRetry: () => unawaited(orderService.rechargerLaFenetre()),
-            );
-          }
-
-          final driverOrders = _getDriverOrders(orderService.allOrders);
-          final stats = _calculateStats(driverOrders);
-
-          return Column(
-            children: [
-              _buildFilters(context),
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildStatsTab(stats, driverOrders),
-                    _buildHistoryTab(driverOrders),
-                    _buildPerformanceTab(stats, driverOrders),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildFilters(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: Theme.of(context).cardColor,
-      child: Row(
+      body: Column(
         children: [
-          Expanded(
-            child: SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'week', label: Text('7j')),
-                ButtonSegment(value: 'month', label: Text('30j')),
-                ButtonSegment(value: 'year', label: Text('1 an')),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: SegmentedButton<PeriodeHistorique>(
+              segments: [
+                for (final periode in PeriodeHistorique.values)
+                  ButtonSegment(value: periode, label: Text(periode.libelle)),
               ],
-              selected: {_selectedPeriod},
-              onSelectionChanged: (Set<String> newSelection) {
-                setState(() {
-                  _selectedPeriod = newSelection.first;
-                  _updateDateRange();
-                });
+              selected: {_periode},
+              onSelectionChanged: (choix) {
+                setState(() => _periode = choix.first);
+                unawaited(_charger());
               },
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
             ),
+          ),
+          if (_echec != null)
+            BandeauEchec(echec: _echec!, onReessayer: () => unawaited(_charger())),
+          if (totaux != null) _Totaux(totaux: totaux, periode: _periode),
+          Expanded(
+            child: _enCours && _page == null
+                ? const Center(child: CircularProgressIndicator())
+                : courses.isEmpty
+                    ? Center(
+                        child: Text(
+                          'Aucune course livrée sur ${_periode.libelle.toLowerCase()}.',
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: courses.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) => _LigneCourse(course: courses[index]),
+                      ),
+          ),
+          BarrePagination(
+            numeroDePage: _numeroDePage,
+            nombreDePages:
+                _page == null || _page!.count == 0 ? 1 : ((_page!.count + 24) ~/ 25),
+            total: _page?.count ?? 0,
+            enCours: _enCours,
+            onPrecedente: (_page?.hasPrevious ?? false)
+                ? () => unawaited(_charger(page: _numeroDePage - 1))
+                : null,
+            onSuivante: (_page?.hasNext ?? false)
+                ? () => unawaited(_charger(page: _numeroDePage + 1))
+                : null,
           ),
         ],
       ),
     );
   }
+}
 
-  void _updateDateRange() {
-    final now = DateTime.now();
-    switch (_selectedPeriod) {
-      case 'week':
-        _startDate = now.subtract(const Duration(days: 7));
-        break;
-      case 'month':
-        _startDate = now.subtract(const Duration(days: 30));
-        break;
-      case 'year':
-        _startDate = now.subtract(const Duration(days: 365));
-        break;
-    }
-    _endDate = now;
-  }
+class _Totaux extends StatelessWidget {
+  const _Totaux({required this.totaux, required this.periode});
 
-  List<eccore.Order> _getDriverOrders(List<eccore.Order> allOrders) {
-    return allOrders.where((order) {
-      if (!_commandesPortees.contains(order.id)) return false;
-      final orderDate = order.createdAt;
-      return orderDate.isAfter(_startDate) &&
-          orderDate.isBefore(_endDate.add(const Duration(days: 1)));
-    }).toList();
-  }
+  final eccore.CourierEarnings totaux;
+  final PeriodeHistorique periode;
 
-  Map<String, dynamic> _calculateStats(List<eccore.Order> orders) {
-    final completedOrders =
-        orders.where((o) => o.statut == StatutCommande.livree).toList();
-    final totalRevenue =
-        completedOrders.fold(0.0, (sum, order) => sum + order.totalAffiche);
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
 
-    return {
-      'total_orders': orders.length,
-      'completed_orders': completedOrders.length,
-      'total_revenue': totalRevenue,
-      'average_order_value':
-          completedOrders.isNotEmpty ? totalRevenue / completedOrders.length : 0.0,
-      'completion_rate':
-          orders.isNotEmpty ? (completedOrders.length / orders.length) * 100 : 0.0,
-    };
-  }
-
-  Widget _buildStatsTab(Map<String, dynamic> stats, List<eccore.Order> orders) {
-    // Calculer les commandes par jour pour les 7 derniers jours
-    final dailyCounts = List<double>.filled(7, 0);
-    final days = <String>[];
-    final now = DateTime.now();
-
-    const dayNames = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-
-    for (int i = 6; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
-      days.add(dayNames[date.weekday - 1]);
-
-      final count = orders.where((o) {
-        return o.createdAt.year == date.year &&
-            o.createdAt.month == date.month &&
-            o.createdAt.day == date.day;
-      }).length;
-      dailyCounts[6 - i] = count.toDouble();
-    }
-
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        _buildSummaryCard(stats),
-        const SizedBox(height: 24),
-        const Text(
-          'Commandes des 7 derniers jours',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: CustomBarChart(
-            data: dailyCounts,
-            labels: days,
-            height: 150,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSummaryCard(Map<String, dynamic> stats) {
     return Card(
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: Colors.grey.withValues(alpha: 0.2)),
-      ),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
       child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+        padding: const EdgeInsets.all(16),
+        child: Wrap(
+          spacing: 24,
+          runSpacing: 12,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _buildSummaryItem(
-                  'Revenu',
-                  PriceFormatter.format(
-                    stats['total_revenue'] is num
-                        ? (stats['total_revenue'] as num).toDouble()
-                        : 0.0,
-                  ),
-                  Icons.monetization_on,
-                  Colors.green,
-                ),
-                _buildSummaryItem(
-                  'Commandes',
-                  '${stats['total_orders']}',
-                  Icons.shopping_bag,
-                  Colors.blue,
-                ),
-                _buildSummaryItem(
-                  'Taux Succès',
-                  '${(stats['completion_rate'] as double).toInt()}%',
-                  Icons.check_circle,
-                  Colors.orange,
-                ),
-              ],
-            ),
+            _Chiffre(libelle: 'Courses (${periode.libelle})', valeur: '${totaux.assignments}'),
+            _Chiffre(libelle: 'Livrées', valeur: '${totaux.compteDe('delivered')}'),
+            _Chiffre(libelle: 'Refusées', valeur: '${totaux.compteDe('declined')}'),
+            _Chiffre(libelle: 'Annulées', valeur: '${totaux.compteDe('cancelled')}'),
+            if (totaux.earnings.isEmpty)
+              const _Chiffre(libelle: 'Gains du livreur', valeur: 'Aucun'),
+            // Les gains **du livreur**, par devise — jamais le chiffre
+            // d'affaires des commandes qu'il a portées.
+            for (final ligne in totaux.earnings)
+              _Chiffre(
+                libelle: 'Gains (${ligne.amount.currency})',
+                valeur: formatMontant(ligne.amount),
+                couleur: scheme.primary,
+              ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildSummaryItem(
-    String label,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
+class _Chiffre extends StatelessWidget {
+  const _Chiffre({required this.libelle, required this.valeur, this.couleur});
+
+  final String libelle;
+  final String valeur;
+  final Color? couleur;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: color, size: 20),
-        ),
-        const SizedBox(height: 8),
         Text(
-          value,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          valeur,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: couleur ?? scheme.onSurface,
+          ),
         ),
-        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        Text(libelle, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
       ],
     );
   }
+}
 
-  Widget _buildHistoryTab(List<eccore.Order> orders) {
-    if (orders.isEmpty) {
-      return const Center(child: Text('Aucune commande sur cette période'));
-    }
+class _LigneCourse extends StatelessWidget {
+  const _LigneCourse({required this.course});
 
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: orders.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) {
-        final order = orders[index];
-        return Card(
-          margin: EdgeInsets.zero,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.grey[200]!),
-          ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(Icons.local_shipping_outlined, color: Colors.blue[700]),
-            ),
-            title: Text(
-              '#${order.id.substring(0, 6).toUpperCase()}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            subtitle: Text(DateFormat('dd MMM HH:mm').format(order.createdAt)),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  PriceFormatter.format(order.totalAffiche),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                Text(
-                  order.statut.libelle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: order.statut == StatutCommande.livree
-                        ? Colors.green
-                        : Colors.orange,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
+  final eccore.Assignment course;
 
-  Widget _buildPerformanceTab(Map<String, dynamic> stats, List<eccore.Order> orders) {
-    // Calculer la performance mensuelle (par semaine)
-    // Pour simplifier, on va juste montrer les 4 dernières semaines
-    final weeklyData = List<double>.filled(4, 0);
-    final weeklyLabels = ['Sem -3', 'Sem -2', 'Sem -1', 'Cette sem'];
-    final now = DateTime.now();
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final livree = course.deliveredAt != null;
 
-    for (int i = 0; i < 4; i++) {
-      final start = now.subtract(Duration(days: (3 - i) * 7 + now.weekday - 1));
-      final end = start.add(const Duration(days: 6));
-
-      final count = orders.where((o) {
-        return o.createdAt.isAfter(start.subtract(const Duration(seconds: 1))) &&
-            o.createdAt.isBefore(end.add(const Duration(seconds: 1)));
-      }).length;
-      weeklyData[i] = count.toDouble();
-    }
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Performance Mensuelle (Courses / Semaine)',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 20),
-                  CustomBarChart(
-                    data: weeklyData.every((v) => v == 0) ? [0, 0, 0, 0] : weeklyData,
-                    labels: weeklyLabels,
-                    color: Colors.purple,
-                  ),
-                  if (weeklyData.every((v) => v == 0))
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8.0),
-                      child: Center(
-                        child: Text(
-                          'Pas assez de données',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
+    return Card(
+      margin: EdgeInsets.zero,
+      child: ListTile(
+        leading: Icon(
+          livree ? Icons.check_circle : Icons.local_shipping_outlined,
+          color: livree ? scheme.primary : scheme.outline,
+        ),
+        title: Text(course.orderReference),
+        subtitle: Text(
+          [
+            course.restaurantName,
+            if (course.courierFee != null) 'Gain : ${formatMontant(course.courierFee!)}',
+            if (course.declineReason.isNotEmpty) 'Refus : ${course.declineReason}',
+          ].join(' • '),
+        ),
+        trailing: Text(
+          dateCourte(course.deliveredAt ?? course.offeredAt),
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+        ),
       ),
     );
   }

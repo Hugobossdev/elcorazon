@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:admin/presentation/messages_erreur.dart';
+import 'package:admin/presentation/programmation_campagne.dart';
+import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/marketing_service.dart';
 import 'package:admin/ui/ui.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -51,11 +53,16 @@ class _MarketingScreenState extends State<MarketingScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _ouvrirFormulaire(null),
-        icon: const Icon(Icons.add),
-        label: const Text('Rédiger'),
-      ),
+      // Rédiger et envoyer relèvent du siège : une campagne vise « les clients
+      // actifs », segment qui ne s'arrête à aucune ville. Le bouton est retiré
+      // plutôt que laissé à échouer en 403, et le bandeau dit pourquoi.
+      floatingActionButton: context.watch<AdminAuthService>().estSiege
+          ? FloatingActionButton.extended(
+              onPressed: () => _ouvrirFormulaire(null),
+              icon: const Icon(Icons.add),
+              label: const Text('Rédiger'),
+            )
+          : null,
       body: Consumer<MarketingService>(
         builder: (context, service, child) {
           if (service.isLoading && service.campaigns.isEmpty) {
@@ -80,6 +87,7 @@ class _MarketingScreenState extends State<MarketingScreen> {
 
           return Column(
             children: [
+              if (!context.watch<AdminAuthService>().estSiege) const _BandeauSiege(),
               _bandeauCompteurs(service),
               Expanded(
                 child: ListView.separated(
@@ -112,6 +120,7 @@ class _MarketingScreenState extends State<MarketingScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _compteur('Brouillons', '${service.drafts.length}', scheme.primary),
+          _compteur('Programmées', '${service.scheduled.length}', scheme.secondary),
           _compteur('Envoyées', '${service.sent.length}', sem.success),
           // Notifications réellement écrites, hors comptes ayant refusé le
           // marketing : compter la taille des segments donnerait un chiffre
@@ -162,11 +171,13 @@ class _MarketingScreenState extends State<MarketingScreen> {
                   ),
                 ),
                 Chip(
-                  label: Text(campagne.isSent ? 'Envoyée' : 'Brouillon'),
+                  label: Text(libelleStatutCampagne(campagne)),
                   visualDensity: VisualDensity.compact,
                   backgroundColor: campagne.isSent
                       ? sem.success.withValues(alpha: 0.15)
-                      : scheme.surfaceContainerHighest,
+                      : campagne.isScheduled
+                          ? scheme.secondaryContainer
+                          : scheme.surfaceContainerHighest,
                 ),
               ],
             ),
@@ -186,6 +197,13 @@ class _MarketingScreenState extends State<MarketingScreen> {
                     '${_date(campagne.sentAt)}',
                     style: Theme.of(context).textTheme.bodySmall,
                   )
+                else if (campagne.isScheduled && campagne.scheduledAt != null)
+                  Text(
+                    '· partira ${dateHeureDEnvoi(campagne.scheduledAt!)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  )
                 else if (estimation != null)
                   Text(
                     '· environ $estimation personnes',
@@ -204,7 +222,7 @@ class _MarketingScreenState extends State<MarketingScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
-            if (campagne.isDraft) ...[
+            if (campagne.isDraft && context.watch<AdminAuthService>().estSiege) ...[
               const Divider(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -221,10 +239,38 @@ class _MarketingScreenState extends State<MarketingScreen> {
                     label: const Text('Modifier'),
                   ),
                   const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => _programmer(service, campagne),
+                    icon: const Icon(Icons.schedule),
+                    label: const Text('Programmer'),
+                  ),
+                  const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: () => _envoyer(service, campagne),
                     icon: const Icon(Icons.send),
                     label: const Text('Envoyer'),
+                  ),
+                ],
+              ),
+            ],
+            if (campagne.isScheduled && context.watch<AdminAuthService>().estSiege) ...[
+              const Divider(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  // Programmée, elle ne se modifie plus : le texte relu au
+                  // moment de dater est celui qui partira. On annule pour la
+                  // reprendre — un geste visible, pas une retouche discrète.
+                  TextButton.icon(
+                    onPressed: () => _deprogrammer(service, campagne),
+                    icon: const Icon(Icons.event_busy),
+                    label: const Text('Annuler la programmation'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: () => _envoyer(service, campagne),
+                    icon: const Icon(Icons.send),
+                    label: const Text('Envoyer maintenant'),
                   ),
                 ],
               ),
@@ -308,6 +354,103 @@ class _MarketingScreenState extends State<MarketingScreen> {
     messager.showSnackBar(
       SnackBar(
         content: Text(ok ? 'Campagne envoyée' : service.error ?? 'Envoi refusé'),
+      ),
+    );
+  }
+
+  /// Date l'envoi : jour, puis heure, puis confirmation.
+  ///
+  /// La confirmation redit l'heure et qu'elle est tenue à cinq minutes près :
+  /// c'est le battement du serveur qui envoie, pas l'écran — le fermer ne
+  /// change rien, et il n'y a pas besoin de le laisser ouvert.
+  Future<void> _programmer(MarketingService service, eccore.Campaign campagne) async {
+    final maintenant = DateTime.now();
+    final propose = instantPropose(maintenant: maintenant);
+    final jour = await showDatePicker(
+      context: context,
+      initialDate: propose,
+      firstDate: DateTime(maintenant.year, maintenant.month, maintenant.day),
+      lastDate: maintenant.add(const Duration(days: 365)),
+      helpText: 'Jour d’envoi',
+    );
+    if (jour == null || !mounted) return;
+
+    final heure = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(propose),
+      helpText: 'Heure d’envoi',
+    );
+    if (heure == null || !mounted) return;
+
+    final messager = ScaffoldMessenger.of(context);
+    final instant = instantDeProgrammation(jour, heure);
+    if (instant == null) {
+      messager.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cette heure est déjà passée. Choisissez-en une à venir, ou utilisez « Envoyer ».',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final confirme = await DialogHelper.showSafeDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Programmer la campagne'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(campagne.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('Elle partira ${dateHeureDEnvoi(instant)}, à cinq minutes près.'),
+            const SizedBox(height: 12),
+            const Text(
+              'D’ici là, elle ne se modifie plus : annulez la programmation pour '
+              'la reprendre. Vous pouvez fermer cet écran, l’envoi se fait sans lui.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Programmer'),
+          ),
+        ],
+      ),
+    );
+    if (confirme != true || !mounted) return;
+
+    final ok = await service.scheduleCampaign(campagne.id, instant);
+    if (!mounted) return;
+    messager.showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Campagne programmée : elle partira ${dateHeureDEnvoi(instant)}.'
+              : service.error ?? 'Programmation refusée',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deprogrammer(MarketingService service, eccore.Campaign campagne) async {
+    final messager = ScaffoldMessenger.of(context);
+    final ok = await service.unscheduleCampaign(campagne.id);
+    if (!mounted) return;
+    messager.showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Programmation annulée : la campagne est redevenue un brouillon.'
+              : service.error ?? 'Annulation refusée',
+        ),
       ),
     );
   }
@@ -467,6 +610,40 @@ class _MarketingScreenState extends State<MarketingScreen> {
   }
 }
 
+/// Dit pourquoi les actions manquent, à un compte rattaché à un périmètre.
+///
+/// Une campagne vise la clientèle de l'enseigne — « les clients actifs », « ceux
+/// qui ne commandent plus » : des segments qui ne s'arrêtent à aucune ville.
+/// Son envoi relève donc du siège. Le dire ici évite la lecture naturelle d'un
+/// écran sans bouton : « c'est cassé ».
+class _BandeauSiege extends StatelessWidget {
+  const _BandeauSiege();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      color: scheme.secondaryContainer,
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, size: 18, color: scheme.onSecondaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Lecture seule : une campagne s’adresse à la clientèle de toute '
+              'l’enseigne, dans tous les pays. Sa rédaction et son envoi relèvent '
+              'du siège. Le bilan ci-dessous, lui, porte sur votre périmètre.',
+              style: TextStyle(color: scheme.onSecondaryContainer),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Vide extends StatelessWidget {
   const _Vide({
     required this.icone,
@@ -531,18 +708,29 @@ class _BilanDeCampagne extends StatelessWidget {
         final chiffre = bilan.revenue.isEmpty
             ? ''
             : ' · ${bilan.revenue.map((m) => m.format()).join(' + ')}';
+        // Le taux de conversion est absent pour un compte cloisonné : son
+        // numérateur serait ses commandes, son dénominateur les destinataires
+        // de toute l'enseigne. Afficher « (—) » entre parenthèses se lirait
+        // comme une donnée manquante ; la phrase dit qu'elle n'existe pas.
+        final taux = bilan.conversionRate == null
+            ? ''
+            : ' (${pourcent(bilan.conversionRate)})';
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Ouvertures : ${bilan.read} (${pourcent(bilan.openRate)}) · '
-              'ont commandé sous ${bilan.windowDays} j : ${bilan.customersWhoOrdered} '
-              '(${pourcent(bilan.conversionRate)})$chiffre',
+              'ont commandé sous ${bilan.windowDays} j : '
+              '${bilan.customersWhoOrdered}$taux$chiffre',
               style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             Text(
-              'Commandes passées après l’envoi, par des destinataires — une corrélation, '
-              'pas une preuve d’effet.',
+              bilan.conversionRate == null
+                  ? 'Vos commandes, après l’envoi — une corrélation, pas une preuve d’effet. '
+                        'Le taux n’est pas calculé : la campagne a été envoyée au-delà de '
+                        'votre périmètre.'
+                  : 'Commandes passées après l’envoi, par des destinataires — une '
+                        'corrélation, pas une preuve d’effet.',
               style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
             ),
           ],

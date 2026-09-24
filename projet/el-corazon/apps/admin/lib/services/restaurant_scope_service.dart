@@ -3,13 +3,20 @@ import 'dart:async';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Lecture du périmètre. Séparée du service pour que les tests n'aient pas à
 /// monter une pile HTTP là où ils vérifient une décision.
 typedef LectureDuPerimetre = Future<List<eccore.ManagedRestaurant>> Function();
 
-/// Établissement supervisé — `GET /restaurants/manage/`.
+/// Établissement supervisé — `GET /restaurants/manage/perimeter/`.
+///
+/// La lecture passait par `/restaurants/manage/`, qui exige `restaurants.read`.
+/// Le rôle « Opérateur » ne l'a pas : son 403 était avalé, et le poste de
+/// cuisine lui affichait « Aucun établissement rattaché ». La route du
+/// périmètre répond à tout le personnel, dans son seul périmètre, et un refus
+/// y est désormais dit comme un refus ([Echec]).
 ///
 /// Cinq fichiers du back-office portaient `el-corazon-lome` en constante, avec
 /// chacun le même commentaire : « le jour où il y en aura plusieurs, ce champ
@@ -51,13 +58,13 @@ class RestaurantScopeService extends ChangeNotifier {
 
   LectureDuPerimetre get _lireLePerimetre =>
       _lecture ??
-      eccore.ManagedRestaurantRepository(apiClient: AdminAuthService().apiClient).list;
+      eccore.ManagedRestaurantRepository(apiClient: AdminAuthService().apiClient).perimeter;
 
   List<eccore.ManagedRestaurant> _etablissements = const [];
   String? _slugChoisi;
   bool _isLoading = false;
   bool _resolu = false;
-  String? _error;
+  Echec? _echec;
 
   /// Établissements que le compte supervise, dans l'ordre rendu par le serveur.
   List<eccore.ManagedRestaurant> get restaurants => List.unmodifiable(_etablissements);
@@ -113,17 +120,52 @@ class RestaurantScopeService extends ChangeNotifier {
   bool get hasChoice => _etablissements.length > 1;
 
   bool get isLoading => _isLoading;
-  String? get error => _error;
+
+  /// Pourquoi le périmètre n'a pas pu être lu — `null` s'il l'a été, **même
+  /// vide**. Un périmètre vide n'est pas un échec : c'est un compte que
+  /// personne n'a rattaché, et c'est [sansPerimetre] qui le dit.
+  Echec? get echec => _echec;
+
+  /// La phrase de [echec], pour les écrans qui n'affichent qu'un texte.
+  String? get error => _echec?.message;
+
+  /// L'établissement du périmètre qui porte ce slug, ou `null`.
+  eccore.ManagedRestaurant? parSlug(String? slug) {
+    if (slug == null) return null;
+    for (final etablissement in _etablissements) {
+      if (etablissement.slug == slug) return etablissement;
+    }
+    return null;
+  }
+
+  /// L'établissement du périmètre qui porte cet identifiant, ou `null`.
+  eccore.ManagedRestaurant? parId(String? id) {
+    if (id == null) return null;
+    for (final etablissement in _etablissements) {
+      if (etablissement.id == id) return etablissement;
+    }
+    return null;
+  }
+
+  /// Les devises du périmètre, dans l'ordre de première apparition.
+  ///
+  /// Sert aux écritures **nationales** (code promotionnel, récompense sans
+  /// établissement) : un montant national doit être libellé dans une devise
+  /// choisie explicitement, pas dans celle de l'établissement qui se trouve
+  /// sélectionné — XOF et XAF ne sont pas la même monnaie.
+  List<String> get devises => <String>{
+        for (final etablissement in _etablissements) etablissement.currency,
+      }.toList(growable: false);
 
   /// Ce qu'affiche un écran qui voulait écrire sans périmètre connu.
   ///
-  /// Il dit ce qui manque plutôt que « une erreur est survenue » : le cas
-  /// n'arrive qu'à un compte du personnel rattaché à aucun établissement, ou
-  /// privé de `restaurants.read`, et c'est un réglage de rôle — pas une panne
-  /// que réessayer corrigerait.
+  /// Il dit ce qui manque plutôt que « une erreur est survenue » : depuis que
+  /// le périmètre se lit sans `restaurants.read`, le cas n'arrive qu'à un
+  /// compte que personne n'a rattaché — un réglage, pas une panne que
+  /// réessayer corrigerait. Un refus ou une panne ont leur propre [echec].
   static const String sansPerimetre =
       "Aucun établissement supervisé : ce compte n'est rattaché à aucun "
-      'établissement, ou ne peut pas les lire. Voyez ses rôles.';
+      "établissement. Un responsable du siège doit l'y rattacher.";
 
   /// Charge le périmètre une fois. Un second appel ne refait rien, sauf
   /// [force] — la composition d'un périmètre change côté serveur, pas ici.
@@ -132,7 +174,7 @@ class RestaurantScopeService extends ChangeNotifier {
     if (_resolu && !force) return;
 
     _isLoading = true;
-    _error = null;
+    _echec = null;
     notifyListeners();
 
     try {
@@ -142,13 +184,16 @@ class RestaurantScopeService extends ChangeNotifier {
         'RestaurantScopeService: ${_etablissements.length} établissement(s) supervisé(s)',
       );
     } on eccore.ApiException catch (e) {
+      // Le 403 était avalé ici : l'écran concluait à un compte sans
+      // établissement. Un refus se dit comme un refus, une panne comme une
+      // panne — l'écran choisit son message sur la nature.
       _etablissements = const [];
-      // 403 sans `restaurants.read` : un rôle qui lit sans jamais écrire, tel
-      // « Opérateur », n'a aucune raison de connaître la fiche de son
-      // établissement. Ce n'est pas une panne, et l'écran n'a pas à l'annoncer
-      // comme telle — ses lectures marchent, le serveur les cloisonne.
-      _error = e.status == 403 ? null : e.detail;
+      _echec = Echec.de(e);
       eccore.Journal.trace('RestaurantScopeService: périmètre illisible — ${e.code}');
+    } on eccore.SessionExpiredException catch (e) {
+      _etablissements = const [];
+      _echec = Echec.de(e);
+      eccore.Journal.trace('RestaurantScopeService: session expirée');
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -191,7 +236,7 @@ class RestaurantScopeService extends ChangeNotifier {
     _etablissements = const [];
     _slugChoisi = null;
     _resolu = false;
-    _error = null;
+    _echec = null;
     notifyListeners();
   }
 }

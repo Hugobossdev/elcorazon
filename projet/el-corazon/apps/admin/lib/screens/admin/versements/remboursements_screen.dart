@@ -103,6 +103,28 @@ class _CarteRemboursement extends StatelessWidget {
     messager.showSnackBar(SnackBar(content: Text(refus ?? 'Remboursement constaté.')));
   }
 
+  /// Abandonne une demande qui ne sera pas versée.
+  ///
+  /// Sans ce geste, une demande saisie par erreur restait en attente pour
+  /// toujours **et** consommait le plafond du remboursable : la commande ne
+  /// pouvait plus être remboursée du bon montant.
+  Future<void> _abandonner(BuildContext context) async {
+    final service = context.read<VersementsService>();
+    final messager = ScaffoldMessenger.of(context);
+    final motif = await demanderTexte(
+      context,
+      titre: 'Abandonner ce remboursement',
+      explication: 'Rien ne sera versé à ${remboursement.customerName} '
+          '(commande ${remboursement.orderReference}). Le montant redevient remboursable, '
+          'et le motif reste au dossier : c’est lui qu’on cherchera si le client réclame.',
+      libelle: 'Motif de l’abandon',
+      action: 'Abandonner',
+    );
+    if (motif == null) return;
+    final refus = await service.abandonnerRemboursement(remboursement.id, motif: motif);
+    messager.showSnackBar(SnackBar(content: Text(refus ?? 'Remboursement abandonné.')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -156,10 +178,21 @@ class _CarteRemboursement extends StatelessWidget {
               ),
             if (remboursement.aVerser && peutRembourser) ...[
               const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: enCours ? null : () => unawaited(_constater(context)),
-                icon: const Icon(Icons.check_circle_outline_rounded),
-                label: const Text('Constater le remboursement'),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: enCours ? null : () => unawaited(_constater(context)),
+                    icon: const Icon(Icons.check_circle_outline_rounded),
+                    label: const Text('Constater le remboursement'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: enCours ? null : () => unawaited(_abandonner(context)),
+                    icon: const Icon(Icons.block_rounded),
+                    label: const Text('Abandonner'),
+                  ),
+                ],
               ),
             ],
           ],

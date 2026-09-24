@@ -10,7 +10,9 @@ import 'package:admin/screens/kitchen/kitchen_screen.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/presentation/commande.dart';
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/anciennete_commande.dart';
 import 'package:admin/presentation/couleur_statut.dart';
@@ -27,6 +29,7 @@ import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/presentation/export_commandes.dart';
 import 'package:admin/presentation/onglets/statistiques_commandes.dart';
+import 'package:admin/presentation/tableau_commandes.dart';
 import 'package:admin/presentation/tri_commandes.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/widgets/loading_widget.dart';
@@ -108,7 +111,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabController = TabController(length: 7, vsync: this);
+    _tabController = TabController(length: _onglets.length, vsync: this);
     _tabController.addListener(_onOngletChange);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -206,6 +209,29 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
     );
   }
 
+  /// Cherche — sur **toutes les étapes**, quel que soit l'onglet ouvert.
+  ///
+  /// La recherche partait au serveur avec le statut de l'onglet courant. Un
+  /// opérateur qui tapait une référence depuis « En attente » lisait « aucune
+  /// commande » pour une commande qui existe, était partie en livraison, et
+  /// dont il tenait le client au téléphone. Le filtre le plus précis — une
+  /// référence — était celui que l'onglet contredisait.
+  ///
+  /// Chercher bascule donc sur « Toutes » ; l'opérateur revient à l'étape qu'il
+  /// veut, la recherche continuant alors de s'y appliquer, et vider le champ
+  /// le laisse où il est.
+  void _chercher(String valeur) {
+    final cherche = valeur.trim().isNotEmpty;
+    if (cherche && _statutDeLOnglet(_tabController.index) != null) {
+      // `animateTo` déclenche `_onOngletChange`, qui efface le statut ; la
+      // recherche est posée d'abord pour qu'une seule requête parte.
+      setState(() => _filtres = _filtres.copyWith(recherche: valeur));
+      _tabController.animateTo(_indexToutes);
+      return;
+    }
+    _appliquer(_filtres.copyWith(recherche: valeur));
+  }
+
   /// Applique une nouvelle sélection.
   ///
   /// Ne relance une requête que si la **requête** change : modifier le tri,
@@ -223,7 +249,13 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
       _changementsHorsSelection = 0;
       _arriveesDepuisLeChargement = 0;
     });
-    await context.read<OrderManagementService>().loadPage(_filtres);
+    final service = context.read<OrderManagementService>();
+    await service.loadPage(_filtres);
+    // Les statistiques portent sur la même sélection que la liste : un
+    // changement de période ou d'établissement les rend caduques.
+    if (service.statistiques != null || service.echecStatistiques != null) {
+      await service.chargerLesStatistiques();
+    }
   }
 
   /// Recharge tout : la page **et** la fenêtre agrégée si elle est chargée.
@@ -301,7 +333,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                       _rebond?.cancel();
                       _rebond = Timer(
                         const Duration(milliseconds: 300),
-                        () => _appliquer(_filtres.copyWith(recherche: valeur)),
+                        () => _chercher(valeur),
                       );
                     },
                   ),
@@ -450,20 +482,28 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                 // l'ensemble : compteurs, alertes, chiffre d'affaires. Ils
                 // lisent la fenêtre agrégée, chargée à la demande.
                 //
-                // Les cinq onglets de statut affichent une **liste qu'on
-                // parcourt** : ils lisent une page, filtrée par le serveur.
-                // Les faire lire la fenêtre agrégée obligeait à télécharger un
-                // an de commandes pour en montrer vingt.
-                final agregats = _tabController.index == 0 || _tabController.index == 6;
-                if (agregats) {
-                  return _OngletAgrege(
-                    orderService: orderService,
-                    statistiques: _tabController.index == 6,
-                    construireVue: () => _buildOverviewTab(context, orderService),
-                  );
-                }
+                // Les onglets d'étape — et « Toutes » — affichent une **liste
+                // qu'on parcourt** : ils lisent une page, filtrée par le
+                // serveur. Les faire lire la fenêtre agrégée obligeait à
+                // télécharger un an de commandes pour en montrer vingt.
+                //
+                // Le tableau (Kanban) est du premier régime : il montre toutes
+                // les étapes à la fois, ce qu'aucune page filtrée par statut ne
+                // peut faire.
+                final vue = _onglets[_tabController.index].vue;
+                if (vue == _Vue.liste) return _buildListeCommandes(context, orderService);
 
-                return _buildListeCommandes(context, orderService);
+                return _OngletAgrege(
+                  orderService: orderService,
+                  statistiques: vue == _Vue.statistiques,
+                  avecStatistiques: vue != _Vue.tableau,
+                  construireVue: () => vue == _Vue.tableau
+                      ? _TableauCommandes(
+                          orderService: orderService,
+                          restaurantSlug: _filtres.restaurantSlug,
+                        )
+                      : _buildOverviewTab(context, orderService),
+                );
               },
             ),
           ),
@@ -571,7 +611,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
     BuildContext context,
     OrderManagementService orderService,
   ) {
-    final stats = orderService.getOrderStats();
+    final stats = orderService.statistiques;
     final urgentOrders = orderService.urgentOrders;
     final overdueOrders = orderService.overdueOrders;
 
@@ -580,7 +620,20 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Statistiques principales
+          if (orderService.echecStatistiques != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: BandeauEchec(
+                echec: orderService.echecStatistiques!,
+                onReessayer: () => unawaited(orderService.chargerLesStatistiques()),
+              ),
+            ),
+          Text(
+            'Sur la période : ${_filtres.libellePeriode.toLowerCase()}',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          // Statistiques principales — agrégées par le serveur.
           _buildStatsGrid(context, stats),
           const SizedBox(height: 20),
 
@@ -601,7 +654,16 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
     );
   }
 
-  Widget _buildStatsGrid(BuildContext context, Map<String, dynamic> stats) {
+  /// Les chiffres de tête de la période, **par le serveur**.
+  ///
+  /// Ils étaient comptés sur la fenêtre d'un an téléchargée, et le chiffre
+  /// d'affaires additionnait les devises. Une tuile de chiffre d'affaires et de
+  /// panier moyen par devise ; un tiret tant que rien n'est lu.
+  Widget _buildStatsGrid(BuildContext context, eccore.OrderStatistics? stats) {
+    final scheme = Theme.of(context).colorScheme;
+    final sem = AdminColorTokens.semantic(scheme);
+    String compte(String statut) => stats == null ? '—' : '${stats.compteDe(statut)}';
+
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -613,49 +675,57 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
         _buildStatCard(
           context,
           'Total commandes',
-          '${stats['total_orders'] ?? 0}',
+          stats == null ? '—' : '${stats.ordersCount}',
           Icons.receipt_long,
-          Theme.of(context).colorScheme.primary,
+          scheme.primary,
         ),
         _buildStatCard(
           context,
           'En attente',
-          '${stats['pending_orders'] ?? 0}',
+          compte(StatutCommande.enAttente.versServeur),
           Icons.pending,
-          AdminColorTokens.semantic(Theme.of(context).colorScheme).warning,
+          sem.warning,
         ),
         _buildStatCard(
           context,
           'En préparation',
-          '${stats['preparing_orders'] ?? 0}',
+          compte(StatutCommande.enPreparation.versServeur),
           Icons.restaurant,
-          Theme.of(context).colorScheme.tertiary,
+          scheme.tertiary,
         ),
         _buildStatCard(
           context,
           'Livrées',
-          '${stats['delivered_orders'] ?? 0}',
+          compte(StatutCommande.livree.versServeur),
           Icons.check_circle,
-          AdminColorTokens.semantic(Theme.of(context).colorScheme).success,
+          sem.success,
         ),
-        _buildStatCard(
-          context,
-          'Revenus totaux',
-          PriceFormatter.format(
-            (stats['total_revenue'] as num?)?.toDouble() ?? 0.0,
+        if (stats != null && stats.revenues.isEmpty)
+          _buildStatCard(
+            context,
+            'Revenus livrés',
+            'Aucune livraison',
+            Icons.monetization_on,
+            scheme.secondary,
           ),
-          Icons.monetization_on,
-          Theme.of(context).colorScheme.secondary,
-        ),
-        _buildStatCard(
-          context,
-          'Panier moyen',
-          PriceFormatter.format(
-            (stats['average_order_value'] as num?)?.toDouble() ?? 0.0,
+        for (final ligne in stats?.revenues ?? const <eccore.CurrencyRevenue>[]) ...[
+          _buildStatCard(
+            context,
+            'Revenus livrés (${ligne.currency})',
+            formatMontant(eccore.Money(amountMinor: ligne.revenueMinor, currency: ligne.currency)),
+            Icons.monetization_on,
+            scheme.secondary,
           ),
-          Icons.shopping_cart,
-          Theme.of(context).colorScheme.primary,
-        ),
+          _buildStatCard(
+            context,
+            'Panier moyen (${ligne.currency})',
+            formatMontant(
+              eccore.Money(amountMinor: ligne.averageBasketMinor, currency: ligne.currency),
+            ),
+            Icons.shopping_cart,
+            scheme.primary,
+          ),
+        ],
       ],
     );
   }
@@ -812,15 +882,15 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
     BuildContext context,
     OrderManagementService orderService,
   ) {
-    final stats = orderService.getPerformanceStats();
+    final stats = orderService.statistiques;
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
 
-    final mesurees = stats['measured_orders'] as int? ?? 0;
-    final ponctualite = stats['on_time_measured'] as int? ?? 0;
-    final moyenne = (stats['average_delivery_time'] as num?)?.toDouble() ?? 0.0;
-    final tauxALHeure = (stats['on_time_rate'] as num?)?.toDouble() ?? 0.0;
-    final tauxAnnulation = (stats['cancellation_rate'] as num?)?.toDouble() ?? 0.0;
+    final mesurees = stats?.measuredOrders ?? 0;
+    final ponctualite = stats?.onTimeMeasured ?? 0;
+    final moyenne = stats?.averageMinutes;
+    final tauxALHeure = stats?.onTimeRate;
+    final tauxAnnulation = stats?.cancellationRate;
 
     return Card(
       child: Padding(
@@ -844,7 +914,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                     mesurees == 0
                         ? 'Temps de livraison'
                         : 'Temps moyen · $mesurees livraison(s)',
-                    mesurees == 0 ? '—' : '${moyenne.round()} min',
+                    moyenne == null ? '—' : '${moyenne.round()} min',
                     Icons.timer,
                     scheme.primary,
                   ),
@@ -855,7 +925,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                     ponctualite == 0
                         ? 'Livraison à temps'
                         : 'À temps · $ponctualite annoncée(s)',
-                    ponctualite == 0 ? '—' : '${tauxALHeure.toStringAsFixed(0)} %',
+                    tauxALHeure == null ? '—' : '${tauxALHeure.toStringAsFixed(0)} %',
                     Icons.schedule,
                     sem.success,
                   ),
@@ -864,7 +934,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                   child: _buildPerformanceItem(
                     context,
                     'Annulations',
-                    '${tauxAnnulation.toStringAsFixed(1)} %',
+                    tauxAnnulation == null ? '—' : '${tauxAnnulation.toStringAsFixed(1)} %',
                     Icons.cancel_outlined,
                     sem.warning,
                   ),
@@ -958,7 +1028,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
                 ),
                 const Spacer(),
                 Text(
-                  PriceFormatter.format(order.totalAffiche),
+                  formatMontant(order.total),
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: Theme.of(context).colorScheme.primary,
@@ -1030,7 +1100,7 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
       ),
       title: Text('Commande #${order.id.substring(0, 8).toUpperCase()}'),
       subtitle: Text(
-        '${order.statut.libelle} • ${PriceFormatter.format(order.totalAffiche)}',
+        '${order.statut.libelle} • ${formatMontant(order.total)}',
       ),
       trailing: Text(ancienneteCommande(order.passeeLe)),
       onTap: () => afficherDetailsCommande(context, order),
@@ -1343,30 +1413,52 @@ class _AdvancedOrderManagementScreenState extends State<AdvancedOrderManagementS
     );
   }
 
-  /// Les sept onglets, dans l'ordre du service.
+  /// Les onglets, dans l'ordre du service.
   ///
-  /// Une table plutôt que sept `Tab` littéraux et un `switch` séparé : les
+  /// Une table plutôt que des `Tab` littéraux et un `switch` séparé : les
   /// deux devaient rester d'accord sur l'ordre, et rien ne l'imposait — un
-  /// onglet inséré au milieu aurait filtré sur le statut du voisin.
+  /// onglet inséré au milieu aurait filtré sur le statut du voisin. Le
+  /// `switch` était pourtant resté, doublé de deux index écrits en dur
+  /// (`_indexStatistiques`, `_indexTableau`) : c'est la table, et elle seule,
+  /// qui décide désormais.
+  ///
+  /// ## Les trois étapes qui manquaient (23 septembre 2026)
+  ///
+  /// Le suivi s'arrêtait à « En livraison ». **Récupérées**, **Livrées** et
+  /// **Annulées** n'avaient aucun onglet, alors que la machine à états les
+  /// produit et que `countsByStatus` les compte : une commande enlevée par le
+  /// livreur disparaissait de la supervision jusqu'à ce qu'elle passe « en
+  /// route », et une annulation ne se relisait nulle part. « Toutes » manquait
+  /// aussi — la seule liste non filtrée était la vue d'ensemble, qui ne se
+  /// parcourt pas.
   static const List<_Onglet> _onglets = [
-    _Onglet('Vue d’ensemble', Icons.dashboard, null),
-    _Onglet('En attente', Icons.pending, StatutCommande.enAttente),
-    _Onglet('Confirmées', Icons.verified, StatutCommande.confirmee),
-    _Onglet('En préparation', Icons.restaurant, StatutCommande.enPreparation),
-    _Onglet('Prêtes', Icons.check_circle, StatutCommande.prete),
-    _Onglet('En livraison', Icons.delivery_dining, StatutCommande.enRoute),
-    _Onglet('Statistiques', Icons.analytics, null),
+    _Onglet('Vue d’ensemble', Icons.dashboard, null, _Vue.apercu),
+    _Onglet('Toutes', Icons.list_alt, null, _Vue.liste),
+    _Onglet('En attente', Icons.pending, StatutCommande.enAttente, _Vue.liste),
+    _Onglet('Confirmées', Icons.verified, StatutCommande.confirmee, _Vue.liste),
+    _Onglet('En préparation', Icons.restaurant, StatutCommande.enPreparation, _Vue.liste),
+    _Onglet('Prêtes', Icons.check_circle, StatutCommande.prete, _Vue.liste),
+    _Onglet('Récupérées', Icons.shopping_bag, StatutCommande.recuperee, _Vue.liste),
+    _Onglet('En livraison', Icons.delivery_dining, StatutCommande.enRoute, _Vue.liste),
+    _Onglet('Livrées', Icons.done_all, StatutCommande.livree, _Vue.liste),
+    _Onglet('Annulées', Icons.cancel_outlined, StatutCommande.annulee, _Vue.liste),
+    _Onglet('Statistiques', Icons.analytics, null, _Vue.statistiques),
+    _Onglet('Tableau', Icons.view_kanban_outlined, null, _Vue.tableau),
   ];
 
-  static StatutCommande? _statutDeLOnglet(int index) => switch (index) {
-        1 => StatutCommande.enAttente,
-        2 => StatutCommande.confirmee,
-        3 => StatutCommande.enPreparation,
-        4 => StatutCommande.prete,
-        5 => StatutCommande.enRoute,
-        _ => null,
-      };
+  /// L'onglet « Toutes » : celui vers lequel une recherche bascule.
+  static final int _indexToutes =
+      _onglets.indexWhere((onglet) => onglet.vue == _Vue.liste && onglet.statut == null);
+
+  static StatutCommande? _statutDeLOnglet(int index) => _onglets[index].statut;
 }
+
+/// Ce qu'un onglet affiche — et donc sur quoi il raisonne.
+///
+/// [liste] lit **une page** filtrée par le serveur ; les trois autres lisent
+/// la fenêtre agrégée, chargée à la demande. Confondre les deux régimes
+/// obligeait à télécharger un an de commandes pour en montrer vingt.
+enum _Vue { apercu, liste, statistiques, tableau }
 
 /// Les gestes possibles sur une commande, **tels que le serveur les déclare**.
 ///
@@ -1463,12 +1555,22 @@ class _ActionsCommandeState extends State<_ActionsCommande> {
     final scheme = Theme.of(context).colorScheme;
     final sem = AdminColorTokens.semantic(scheme);
 
-    final etapes = [
-      for (final cible in order.allowedTransitions)
-        if (_avancement[cible] case final statut?) statut,
-    ];
-    final annulable = order.allowedTransitions.contains('cancelled');
-    final aAffecter = order.statut == StatutCommande.prete;
+    // Ce que la **commande** permet vient du serveur (`allowed_transitions`) ;
+    // ce que le **compte** permet vient du registre de permissions. Les
+    // boutons ne lisaient que le premier : un compte sans
+    // `orders.update_status` voyait « Confirmer », « Marquer prête », et
+    // récoltait un 403 par clic.
+    final peutAvancer = context.peut('orders.update_status');
+    final etapes = peutAvancer
+        ? [
+            for (final cible in order.allowedTransitions)
+              if (_avancement[cible] case final statut?) statut,
+          ]
+        : const <StatutCommande>[];
+    final annulable = order.allowedTransitions.contains('cancelled') &&
+        context.peut('orders.cancel');
+    final aAffecter =
+        order.statut == StatutCommande.prete && context.peut('orders.assign_courier');
 
     return Wrap(
       spacing: 8,
@@ -1554,7 +1656,6 @@ class _ActionsCommandeState extends State<_ActionsCommande> {
                       order: order,
                       orderService: orderService,
                       driverService: driverService,
-                      assignmentService: assignments,
                     ).then((_) {
                       if (context.mounted) {
                         unawaited(context.read<AssignmentService>().refresh());
@@ -1640,6 +1741,7 @@ class _OngletAgrege extends StatefulWidget {
   const _OngletAgrege({
     required this.orderService,
     required this.statistiques,
+    required this.avecStatistiques,
     required this.construireVue,
   });
 
@@ -1647,6 +1749,10 @@ class _OngletAgrege extends StatefulWidget {
 
   /// `true` pour l'onglet « Statistiques », `false` pour « Vue d'ensemble ».
   final bool statistiques;
+
+  /// L'onglet affiche-t-il des chiffres de l'agrégat serveur ? Vrai pour
+  /// « Statistiques » et « Vue d'ensemble », faux pour le tableau.
+  final bool avecStatistiques;
 
   final Widget Function() construireVue;
 
@@ -1659,13 +1765,23 @@ class _OngletAgregeState extends State<_OngletAgrege> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(widget.orderService.ensureWindowLoaded());
+      if (!mounted) return;
+      final service = widget.orderService;
+      // L'onglet « Statistiques » ne lit que l'agrégat serveur ; la vue
+      // d'ensemble lit l'agrégat (chiffres) **et** la fenêtre du service
+      // (alertes, commandes récentes) ; le tableau, la fenêtre seule.
+      if (widget.avecStatistiques) unawaited(service.chargerLesStatistiques());
+      if (!widget.statistiques) unawaited(service.ensureWindowLoaded());
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final service = widget.orderService;
+
+    if (widget.statistiques) {
+      return SizedBox.expand(child: OngletStatistiques(orderService: service));
+    }
 
     if (!service.fenetreChargee) {
       return LoadingWidget(
@@ -1675,10 +1791,179 @@ class _OngletAgregeState extends State<_OngletAgrege> {
       );
     }
 
-    return SizedBox.expand(
-      child: widget.statistiques
-          ? OngletStatistiques(orderService: service)
-          : widget.construireVue(),
+    return SizedBox.expand(child: widget.construireVue());
+  }
+}
+
+/// La vue Kanban — une colonne par étape du service (cahier des charges §4.2.4).
+///
+/// Elle ne change aucune règle : les colonnes sont celles des onglets, les
+/// gestes sont ceux de la carte de la liste ([_ActionsCommande]), donc ceux que
+/// le serveur déclare jouables sur chaque commande. Un glisser-déposer aurait
+/// laissé croire qu'on peut poser une commande à n'importe quelle étape ; ici,
+/// seul ce que la machine à états accepte est proposé.
+class _TableauCommandes extends StatelessWidget {
+  const _TableauCommandes({required this.orderService, this.restaurantSlug});
+
+  final OrderManagementService orderService;
+
+  /// Le filtre d'établissement de la supervision, s'il est posé : le tableau
+  /// d'un siège qui regarde Lomé ne doit pas mêler Abidjan.
+  final String? restaurantSlug;
+
+  @override
+  Widget build(BuildContext context) {
+    final commandes = restaurantSlug == null
+        ? orderService.allOrders
+        : orderService.allOrders.where((c) => c.restaurantSlug == restaurantSlug);
+    final colonnes = repartirSurLeTableau(commandes);
+
+    return Scrollbar(
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final colonne in ColonneTableau.values)
+              _ColonneDuTableau(
+                colonne: colonne,
+                commandes: colonnes[colonne]!,
+                orderService: orderService,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ColonneDuTableau extends StatelessWidget {
+  const _ColonneDuTableau({
+    required this.colonne,
+    required this.commandes,
+    required this.orderService,
+  });
+
+  final ColonneTableau colonne;
+  final List<eccore.Order> commandes;
+  final OrderManagementService orderService;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final affichees = commandes.take(plafondParColonne).toList();
+    final masquees = commandes.length - affichees.length;
+
+    return Container(
+      width: 300,
+      margin: const EdgeInsets.only(right: 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: Text(
+              '${colonne.libelle} (${commandes.length})',
+              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: affichees.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      colonne == ColonneTableau.livreesDuJour
+                          ? 'Aucune livraison aujourd’hui.'
+                          : 'Aucune commande à cette étape.',
+                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    itemCount: affichees.length + (masquees > 0 ? 1 : 0),
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      if (index == affichees.length) {
+                        // Dit ce qui n'est pas montré plutôt que de le taire :
+                        // une colonne qui s'arrête à cinquante se lirait comme
+                        // un service à cinquante commandes.
+                        return Text(
+                          '+ $masquees autres : ouvrez l’onglet de cette étape.',
+                          style: theme.textTheme.bodySmall,
+                        );
+                      }
+                      return _CarteDuTableau(
+                        commande: affichees[index],
+                        livree: colonne == ColonneTableau.livreesDuJour,
+                        orderService: orderService,
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CarteDuTableau extends StatelessWidget {
+  const _CarteDuTableau({
+    required this.commande,
+    required this.livree,
+    required this.orderService,
+  });
+
+  final eccore.Order commande;
+  final bool livree;
+  final OrderManagementService orderService;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final livreeLe = commande.deliveredAt;
+    final quand = livree && livreeLe != null
+        ? 'livrée à ${heureCommande(livreeLe)}'
+        : ancienneteCommande(commande.placedAt);
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    commande.reference,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Text(quand, style: theme.textTheme.bodySmall),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(commande.recipientName, maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(
+              '${commande.total.format()} · ${commande.restaurantName}',
+              style: theme.textTheme.bodySmall,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (!livree) ...[
+              const SizedBox(height: 8),
+              _ActionsCommande(order: commande, orderService: orderService),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1826,17 +2111,19 @@ class _Info extends StatelessWidget {
   }
 }
 
-/// Un onglet de la supervision : son libellé, son icône, son statut.
+/// Un onglet de la supervision : son libellé, son icône, son statut, sa vue.
 ///
-/// [statut] vaut `null` pour les deux onglets qui ne filtrent pas — « Vue
-/// d'ensemble » et « Statistiques » — ce qui est exactement la condition qui
-/// décide s'ils affichent un compteur.
+/// [statut] vaut `null` pour les onglets qui ne filtrent pas — « Vue
+/// d'ensemble », « Toutes », « Statistiques », « Tableau ». Il décide à la
+/// fois du filtre envoyé au serveur et de la présence d'un compteur : compter
+/// « Toutes » reviendrait à réafficher le total déjà porté par la pagination.
 class _Onglet {
-  const _Onglet(this.libelle, this.icone, this.statut);
+  const _Onglet(this.libelle, this.icone, this.statut, this.vue);
 
   final String libelle;
   final IconData icone;
   final StatutCommande? statut;
+  final _Vue vue;
 }
 
 

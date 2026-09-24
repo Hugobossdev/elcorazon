@@ -489,7 +489,6 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
       order: order,
       orderService: context.read<OrderManagementService>(),
       driverService: context.read<DriverManagementService>(),
-      assignmentService: context.read<AssignmentService>(),
     );
   }
 

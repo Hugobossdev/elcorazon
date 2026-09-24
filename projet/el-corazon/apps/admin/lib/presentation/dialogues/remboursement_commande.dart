@@ -1,9 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/payments_service.dart';
-import 'package:admin/ui/ui.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/utils/price_formatter.dart';
 
@@ -51,7 +53,7 @@ Future<bool> rembourserCommande({
     return false;
   }
 
-  final demande = await DialogHelper.showSafeDialog<_Demande>(
+  final demande = await DialogHelper.showSafeDialog<eccore.Refund>(
     context: context,
     builder: (context) => _RemboursementCommande(
       order: order,
@@ -60,51 +62,19 @@ Future<bool> rembourserCommande({
   );
 
   if (demande == null) return false;
-  if (!context.mounted) return false;
+  if (!context.mounted) return true;
 
-  final paiements = context.read<PaymentsService>();
-  final rembourse = await paiements.refund(
-    orderId: order.id,
-    transactionId: demande.transactionId,
-    amountMajor: demande.montant,
-    reason: demande.motif,
-  );
-
-  if (!context.mounted) return rembourse != null;
-
-  final scheme = Theme.of(context).colorScheme;
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(
-        rembourse != null
-            ? 'Remboursement de ${PriceFormatter.format(demande.montant)} '
-                'enregistré.'
-            : paiements.error ?? 'Remboursement refusé.',
-      ),
-      backgroundColor: rembourse != null
-          ? scheme.inverseSurface
-          : AdminColorTokens.semantic(scheme).danger,
+      content: Text('Remboursement de ${formatMontant(demande.amount)} enregistré.'),
+      backgroundColor: Theme.of(context).colorScheme.inverseSurface,
     ),
   );
-
-  return rembourse != null;
+  return true;
 }
 
 /// La valeur que le serveur donne à un encaissement abouti — `PaymentStatus`.
 const String statutEncaisse = 'completed';
-
-/// Ce que l'opérateur a saisi.
-class _Demande {
-  const _Demande({
-    required this.transactionId,
-    required this.montant,
-    required this.motif,
-  });
-
-  final String transactionId;
-  final double montant;
-  final String motif;
-}
 
 class _RemboursementCommande extends StatefulWidget {
   const _RemboursementCommande({
@@ -122,8 +92,10 @@ class _RemboursementCommande extends StatefulWidget {
 class _RemboursementCommandeState extends State<_RemboursementCommande> {
   late eccore.Transaction _transaction = widget.encaissements.first;
   late final TextEditingController _montant = TextEditingController(
-    text: _transaction.amount.toMajorUnits().toStringAsFixed(0),
+    text: _enSaisie(_transaction.amount.toMajorUnits()),
   );
+  bool _enCours = false;
+  Echec? _echec;
   final _motif = TextEditingController();
 
   @override
@@ -134,6 +106,33 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
   }
 
   double get _plafond => _transaction.amount.toMajorUnits();
+
+  /// Un montant majeur tel qu'on le saisit : sans décimale inutile.
+  static String _enSaisie(double montant) =>
+      montant == montant.roundToDouble() ? montant.toStringAsFixed(0) : montant.toStringAsFixed(2);
+
+  /// Exécute le remboursement **avant** de fermer : un refus du serveur
+  /// s'affiche dans le dialogue, la saisie intacte.
+  Future<void> _rembourser() async {
+    final montant = eccore.Money.fromMajorUnits(_saisi!, _transaction.amount.currency);
+    setState(() {
+      _enCours = true;
+      _echec = null;
+    });
+    try {
+      final rembourse = await context.read<PaymentsService>().refund(
+            orderId: widget.order.id,
+            transactionId: _transaction.id,
+            amount: montant,
+            reason: _motif.text.trim(),
+          );
+      if (mounted) Navigator.of(context).pop(rembourse);
+    } on eccore.ApiException catch (e) {
+      if (mounted) setState(() => _echec = Echec.de(e));
+    } finally {
+      if (mounted) setState(() => _enCours = false);
+    }
+  }
 
   double? get _saisi {
     final valeur = double.tryParse(_montant.text.replaceAll(',', '.'));
@@ -206,7 +205,7 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
                             DropdownMenuItem(
                               value: transaction.id,
                               child: Text(
-                                '${PriceFormatter.format(transaction.amount.toMajorUnits())}'
+                                '${formatMontant(transaction.amount)}'
                                 ' · ${transaction.provider}',
                               ),
                             ),
@@ -224,7 +223,7 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
                       const SizedBox(height: 16),
                     ],
                     Text(
-                      'Encaissé : ${PriceFormatter.format(_plafond)}'
+                      'Encaissé : ${formatMontant(_transaction.amount)}'
                       '${_transaction.providerReference.isEmpty ? '' : ' · réf. ${_transaction.providerReference}'}',
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
@@ -239,7 +238,7 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
                         errorText: _montant.text.isEmpty || _saisi != null
                             ? (_saisi != null && _saisi! > _plafond
                                 ? 'Au-delà de l’encaissement '
-                                    '(${PriceFormatter.format(_plafond)}).'
+                                    '(${formatMontant(_transaction.amount)}).'
                                 : null)
                             : 'Montant illisible.',
                       ),
@@ -252,13 +251,13 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
                         ActionChip(
                           label: const Text('Total'),
                           onPressed: () => setState(() {
-                            _montant.text = _plafond.toStringAsFixed(0);
+                            _montant.text = _enSaisie(_plafond);
                           }),
                         ),
                         ActionChip(
                           label: const Text('Moitié'),
                           onPressed: () => setState(() {
-                            _montant.text = (_plafond / 2).toStringAsFixed(0);
+                            _montant.text = _enSaisie(eccore.Money.fromMajorUnits(_plafond / 2, _transaction.amount.currency).toMajorUnits());
                           }),
                         ),
                       ],
@@ -279,6 +278,7 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
                   ],
                 ),
               ),
+              if (_echec != null) BandeauEchec(echec: _echec!),
               const Divider(height: 1),
               Padding(
                 padding: const EdgeInsets.all(16),
@@ -286,21 +286,18 @@ class _RemboursementCommandeState extends State<_RemboursementCommande> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: _enCours ? null : () => Navigator.of(context).pop(),
                       child: const Text('Annuler'),
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton(
-                      onPressed: _valide
-                          ? () => Navigator.of(context).pop(
-                                _Demande(
-                                  transactionId: _transaction.id,
-                                  montant: _saisi!,
-                                  motif: _motif.text.trim(),
-                                ),
-                              )
-                          : null,
-                      child: const Text('Rembourser'),
+                      onPressed: _valide && !_enCours ? () => unawaited(_rembourser()) : null,
+                      child: _enCours
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Rembourser'),
                     ),
                   ],
                 ),

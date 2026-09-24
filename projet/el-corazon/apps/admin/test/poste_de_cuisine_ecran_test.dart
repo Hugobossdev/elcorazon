@@ -51,6 +51,13 @@ class _FauxServeur implements HttpClientAdapter {
         headers: _entetesJson,
       );
     }
+    // Le périmètre n'est **pas** paginé côté serveur (`pagination_class =
+    // None`) : il rend une liste nue, et le socle la lit comme telle. Lui
+    // répondre une page faisait échouer la résolution de l'établissement, donc
+    // la connexion temps réel, donc le montage de l'écran.
+    if (options.path.contains('/restaurants/manage/perimeter/')) {
+      return ResponseBody.fromString(jsonEncode(const <dynamic>[]), 200, headers: _entetesJson);
+    }
     final lignes = options.path.contains('/orders/manage/kitchen/') ? file : const [];
     return ResponseBody.fromString(
       jsonEncode({'count': lignes.length, 'next': null, 'previous': null, 'results': lignes}),
@@ -93,13 +100,16 @@ void main() {
       ),
     ],
   );
-  AdminAuthService(conteneur);
+  final auth = AdminAuthService(conteneur);
 
   setUp(() {
     serveur
       ..file = const []
       ..enPanne = false;
+    // Le cuisinier type : il lit le poste et fait avancer les commandes.
+    auth.permissionsDeTest = const ['orders.read', 'orders.update_status'];
   });
+  tearDown(() => auth.permissionsDeTest = null);
   tearDownAll(conteneur.dispose);
 
   Future<void> ouvrirLePoste(WidgetTester tester) async {
@@ -109,6 +119,7 @@ void main() {
     await tester.pumpWidget(
       MultiProvider(
         providers: [
+          ChangeNotifierProvider<AdminAuthService>.value(value: auth),
           ChangeNotifierProvider(create: (_) => OrderManagementService()),
           ChangeNotifierProvider<DashboardRealtimeService>.value(value: temsReel),
         ],
@@ -181,5 +192,38 @@ void main() {
     // coupure de trois secondes est pire qu'un poste périmé qui le dit.
     expect(find.text('EC000200'), findsOneWidget);
     expect(find.textContaining('Liste non rafraîchie'), findsOneWidget);
+  });
+
+  // Le poste s'ouvre avec `orders.read` ; faire avancer une commande exige
+  // `orders.update_status`. Sans ce droit, le bouton partait et revenait en
+  // 403 au milieu du service.
+  group('le geste suit orders.update_status', () {
+    List<Map<String, dynamic>> uneCommandeEnPreparation() => [
+          commandeCuisineJson(
+            reference: 'EC000300',
+            lignes: [ligneCuisineJson(nom: 'Burger Corazón')],
+            transitionsAutorisees: const ['ready', 'cancelled'],
+          ),
+        ];
+
+    testWidgets('avec le droit, la commande s’avance', (tester) async {
+      serveur.file = uneCommandeEnPreparation();
+
+      await ouvrirLePoste(tester);
+
+      expect(find.text('EC000300'), findsOneWidget);
+      expect(find.byType(FilledButton), findsOneWidget);
+    });
+
+    testWidgets('sans le droit, la carte se lit sans bouton', (tester) async {
+      auth.permissionsDeTest = const ['orders.read'];
+      serveur.file = uneCommandeEnPreparation();
+
+      await ouvrirLePoste(tester);
+
+      expect(find.text('EC000300'), findsOneWidget);
+      expect(find.text('Burger Corazón'), findsOneWidget);
+      expect(find.byType(FilledButton), findsNothing);
+    });
   });
 }

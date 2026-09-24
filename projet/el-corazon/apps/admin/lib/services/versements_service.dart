@@ -148,14 +148,30 @@ class VersementsService extends ChangeNotifier {
 
   Future<String?> constaterRemboursement(String id, {String reference = ''}) =>
       _geste(id, () async {
-        final maj = await _depot.settleRefund(refundId: id, providerReference: reference);
-        if (_filtreRemboursements == FiltreVersements.aTraiter && !maj.aVerser) {
-          _remboursements = [for (final r in _remboursements) if (r.id != maj.id) r];
-          _totalRemboursements = (_totalRemboursements - 1).clamp(0, _totalRemboursements);
-        } else {
-          _remboursements = [for (final r in _remboursements) r.id == maj.id ? maj : r];
-        }
+        _remplacerRemboursement(
+          await _depot.settleRefund(refundId: id, providerReference: reference),
+        );
       });
+
+  /// Abandonne une demande qui ne sera pas versée — motif exigé.
+  ///
+  /// Sans elle, une demande saisie par erreur restait en attente pour toujours
+  /// et consommait le plafond du remboursable : la commande ne pouvait plus
+  /// être remboursée du bon montant, et le seul recours était l'administration
+  /// Django.
+  Future<String?> abandonnerRemboursement(String id, {required String motif}) =>
+      _geste(id, () async {
+        _remplacerRemboursement(await _depot.cancelRefund(refundId: id, reason: motif));
+      });
+
+  void _remplacerRemboursement(eccore.ManagedRefund maj) {
+    if (_filtreRemboursements == FiltreVersements.aTraiter && !maj.aVerser) {
+      _remboursements = [for (final r in _remboursements) if (r.id != maj.id) r];
+      _totalRemboursements = (_totalRemboursements - 1).clamp(0, _totalRemboursements);
+    } else {
+      _remboursements = [for (final r in _remboursements) r.id == maj.id ? maj : r];
+    }
+  }
 
   // -------------------------------------------------------------- interne
 

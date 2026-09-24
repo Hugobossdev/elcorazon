@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:admin/presentation/anciennete_commande.dart';
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/presentation/poste_de_cuisine.dart';
 import 'package:admin/presentation/statut_commande.dart';
@@ -386,7 +387,11 @@ class _CarteCommande extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final suivante = commande.etapeSuivante;
+    // Le poste s'ouvre avec `orders.read` ; faire avancer une commande exige
+    // `orders.update_status`, comme dans l'écran des commandes. Sans ce droit,
+    // le bouton partait et revenait en 403 au milieu du coup de feu : la carte
+    // se lit, elle ne s'avance pas.
+    final suivante = context.peut('orders.update_status') ? commande.etapeSuivante : null;
     final commandeSocle = commande.commande;
 
     return Card(

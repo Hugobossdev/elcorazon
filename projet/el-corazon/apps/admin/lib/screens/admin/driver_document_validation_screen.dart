@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/presentation/documents_livreur.dart';
 import 'package:admin/presentation/expiration_piece.dart';
 import 'package:admin/services/driver_document_service.dart' as svc;
@@ -167,7 +168,7 @@ class _DriverDocumentValidationScreenState
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -609,6 +610,20 @@ class _DriverDocumentValidationScreenState
             ),
             const SizedBox(height: 16),
             // Actions
+            //
+            // Instruire un dossier demande `couriers.approve` : sans lui,
+            // l'écran offrait « Approuver » et « Rejeter » à qui ne peut que
+            // consulter, et le refus n'arrivait qu'après le clic.
+            if (!context.peut('couriers.approve'))
+              Text(
+                'Instruire un dossier demande le droit « Valider les livreurs » '
+                '(couriers.approve).',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              )
+            else
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [

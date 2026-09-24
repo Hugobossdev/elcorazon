@@ -1,7 +1,6 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 import 'package:admin/presentation/commande.dart';
-import 'package:admin/utils/price_formatter.dart';
 
 /// Mise en CSV d'une liste de commandes.
 ///
@@ -27,6 +26,7 @@ String commandesEnCsv(List<eccore.Order> commandes) {
     ..writeln(
       [
         'Référence',
+        'Établissement',
         'Date',
         'Destinataire',
         'Téléphone',
@@ -34,6 +34,7 @@ String commandesEnCsv(List<eccore.Order> commandes) {
         'Statut',
         'Paiement',
         'Total',
+        'Devise',
         'Articles',
         'Livrée le',
       ].map(champCsv).join(','),
@@ -45,14 +46,21 @@ String commandesEnCsv(List<eccore.Order> commandes) {
         // La référence plutôt que l'UUID : c'est elle que le client donne au
         // téléphone, et celle qui figure sur le ticket.
         commande.reference,
+        commande.restaurantName,
         commande.passeeLe.toIso8601String(),
         commande.recipientName.isEmpty ? 'Inconnu' : commande.recipientName,
         commande.recipientPhone,
         commande.adresseComplete,
         commande.statut.libelle,
         commande.moyenPaiement.libelle,
-        montantCsv(commande.totalAffiche),
-        commande.lines.length,
+        // Le montant et sa devise en deux colonnes : un export du siège mêle
+        // Lomé (XOF) et Douala (XAF), et un total sans devise s'additionnerait
+        // dans le tableur comme une seule monnaie.
+        montantCsv(commande.total),
+        commande.total.currency,
+        // `items_count` et non `lines.length` : la forme de liste ne porte pas
+        // les lignes, et la colonne valait zéro sur toutes les commandes.
+        commande.itemsCount,
         commande.deliveredAt?.toIso8601String() ?? '',
       ].map(champCsv).join(','),
     );
@@ -75,11 +83,13 @@ String champCsv(Object? valeur) {
   return '"${texte.replaceAll('"', '""')}"';
 }
 
-/// Un montant sans son séparateur de milliers, pour qu'un tableur y voie un
-/// nombre.
+/// Un montant **nombre**, en unité majeure, avec un point décimal quand la
+/// devise en a — ce qu'un tableur lit comme un nombre.
 ///
-/// `\s` et non l'espace ordinaire : le socle sépare les milliers par une espace
-/// insécable étroite (U+202F), qu'un `replaceAll(' ')` laisserait filer jusque
-/// dans la cellule.
-String montantCsv(double montant) =>
-    PriceFormatter.format(montant).replaceAll(RegExp(r'\s'), '');
+/// La version précédente passait par le formateur d'affichage et retirait les
+/// espaces : elle écrivait « 12500CFA », qu'aucun tableur ne lit comme un
+/// nombre. La devise a désormais sa propre colonne.
+String montantCsv(eccore.Money montant) {
+  final majeur = montant.toMajorUnits();
+  return majeur == majeur.roundToDouble() ? majeur.toStringAsFixed(0) : majeur.toStringAsFixed(2);
+}

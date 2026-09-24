@@ -1,18 +1,37 @@
 import 'dart:async';
+
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:admin/presentation/export_commandes.dart';
-import 'package:admin/presentation/notes_internes.dart';
-import 'package:admin/services/client_management_service.dart';
-import 'package:admin/services/app_service.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'package:admin/presentation/autorisations.dart';
+import 'package:admin/presentation/barre_pagination.dart';
 import 'package:admin/presentation/commande.dart';
-import 'package:admin/presentation/statut_commande.dart';
-import 'package:admin/widgets/custom_text_field.dart';
+import 'package:admin/presentation/couleur_statut.dart';
+import 'package:admin/presentation/dialogue_formulaire.dart';
+import 'package:admin/presentation/echec.dart';
+import 'package:admin/presentation/notes_internes.dart';
+import 'package:admin/presentation/retours.dart';
+import 'package:admin/services/client_management_service.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/utils/price_formatter.dart';
-import 'package:admin/ui/ui.dart';
 
+/// Comptes clients.
+///
+/// ## Ce qui a changé (22 septembre 2026)
+///
+/// * **Réactiver un compte.** Le service savait le faire depuis toujours et
+///   aucun bouton ne l'appelait : un client suspendu le restait, et le menu
+///   proposait « Suspendre » sur un compte déjà suspendu. Le geste dépend
+///   désormais de l'état du compte.
+/// * **La recherche est celle du serveur.** L'écran téléchargeait tous les
+///   comptes puis filtrait en mémoire ; « aucun résultat » voulait dire
+///   « pas dans ce que j'ai chargé ».
+/// * **Les compteurs de la ligne étaient faux.** « 3 commande(s) » et le total
+///   dépensé venaient d'un rapprochement entre l'identifiant du *client* et
+///   celui d'une *commande* (`o.id == client.id`) : la liste affichait donc
+///   zéro partout. Ces chiffres sont ceux de la fiche, que le serveur agrège.
+/// * Suspendre et réactiver suivent `customers.block`.
 class ClientManagementScreen extends StatefulWidget {
   const ClientManagementScreen({super.key});
 
@@ -21,707 +40,404 @@ class ClientManagementScreen extends StatefulWidget {
 }
 
 class _ClientManagementScreenState extends State<ClientManagementScreen> {
-  final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
-  // « VIP » a disparu des filtres : il se calculait à l'écran, à partir de
-  // badges et d'un niveau que la liste ne porte pas, croisés avec des commandes
-  // chargées ailleurs — deux sources jamais du même moment. Ce que le serveur
-  // ne dit pas, l'écran ne le devine pas.
-  String _selectedFilter = 'all'; // all, active, suspended
-  List<eccore.Customer> _filteredClients = [];
-  bool _hasInitialized = false;
+  final _recherche = TextEditingController();
+  Timer? _frappe;
 
   @override
   void initState() {
     super.initState();
-    _searchController.addListener(_onSearchChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(context.read<ClientManagementService>().initialize());
+    });
   }
 
   @override
   void dispose() {
-    _searchController.removeListener(_onSearchChanged);
-    _searchController.dispose();
+    _frappe?.cancel();
+    _recherche.dispose();
     super.dispose();
   }
 
-  void _onSearchChanged() {
-    if (!mounted) return;
-    // Reporter setState après le build
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      setState(() {
-        _searchQuery = _searchController.text.toLowerCase();
-        _filterClients();
-      });
+  /// La recherche part au serveur après une pause de frappe : une requête par
+  /// caractère saisi n'apprendrait rien de plus et ferait attendre.
+  void _surFrappe(String valeur) {
+    _frappe?.cancel();
+    _frappe = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) unawaited(context.read<ClientManagementService>().chercher(recherche: valeur));
     });
-  }
-
-  void _filterClients() {
-    final clientService = Provider.of<ClientManagementService>(
-      context,
-      listen: false,
-    );
-    final allClients = clientService.clients;
-
-    _filteredClients = allClients.where((client) {
-      // Filtre de recherche
-      final matchesSearch = _searchQuery.isEmpty ||
-          client.fullName.toLowerCase().contains(_searchQuery) ||
-          client.email.toLowerCase().contains(_searchQuery) ||
-          ((client.phone ?? '').toLowerCase().contains(_searchQuery));
-
-      // Filtre par statut
-      final matchesFilter = _selectedFilter == 'all' ||
-          (_selectedFilter == 'active' && !_isSuspended(client)) ||
-          (_selectedFilter == 'suspended' && _isSuspended(client));
-
-      return matchesSearch && matchesFilter;
-    }).toList();
-  }
-
-  bool _isSuspended(eccore.Customer client) {
-    // Vérifier si le client est suspendu (is_active = false dans la DB)
-    return !client.isActive;
   }
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Consumer2<ClientManagementService, AppService>(
-      builder: (context, clientService, appService, child) {
-        // Initialiser le service au premier build (une seule fois)
-        if (!_hasInitialized &&
-            !clientService.isLoading &&
-            clientService.clients.isEmpty) {
-          _hasInitialized = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            clientService.initialize();
-          });
-        }
+    final service = context.watch<ClientManagementService>();
+    final peutBloquer = context.peut('customers.block');
 
-        _filterClients();
-
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('Gestion des Clients'),
-            actions: [
-              Container(
-                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                child: IconButton(
-                  icon: const Icon(Icons.download),
-                  onPressed: () => _exportClients(),
-                  tooltip: 'Exporter en CSV',
-                ),
-              ),
-            ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Clients'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Recharger',
+            onPressed: service.isLoading ? null : () => unawaited(service.refresh()),
           ),
-          body: Column(
-            children: [
-              // Barre de recherche et filtres
-              Container(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    CustomTextField(
-                      label: 'Rechercher un client',
-                      controller: _searchController,
-                      prefixIcon: Icons.search,
-                      onChanged: (_) => _onSearchChanged(),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: SegmentedButton<String>(
-                            segments: const [
-                              ButtonSegment(
-                                value: 'all',
-                                label: Text('Tous'),
-                                icon: Icon(Icons.people),
-                              ),
-                              ButtonSegment(
-                                value: 'active',
-                                label: Text('Actifs'),
-                                icon: Icon(Icons.check_circle),
-                              ),
-                              ButtonSegment(
-                                value: 'suspended',
-                                label: Text('Suspendus'),
-                                icon: Icon(Icons.block),
-                              ),
-                            ],
-                            selected: {_selectedFilter},
-                            onSelectionChanged: (Set<String> newSelection) {
-                              setState(() {
-                                _selectedFilter = newSelection.first;
-                                _filterClients();
-                              });
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              // Liste des clients
-              Expanded(
-                child: clientService.isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _filteredClients.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.people_outline,
-                                  size: 64,
-                                  color: scheme.onSurfaceVariant.withValues(
-                                    alpha: 0.6,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Aucun client trouvé',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(16),
-                            itemCount: _filteredClients.length,
-                            itemBuilder: (context, index) {
-                              final client = _filteredClients[index];
-                              final orders = appService.allOrders
-                                  .where((o) => o.id == client.id)
-                                  .toList();
-                              final totalSpent = orders
-                                  .where(
-                                    (o) => o.statut == StatutCommande.livree,
-                                  )
-                                  .fold(0.0, (sum, o) => sum + o.totalAffiche);
-
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                    child: Text(
-                                      client.fullName.substring(0, 1).toUpperCase(),
-                                      style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onPrimary,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    client.fullName,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  subtitle: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(client.email),
-                                      Text(client.phone ?? '—'),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          Icon(
-                                            Icons.receipt,
-                                            size: 14,
-                                            color: scheme.onSurfaceVariant,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            '${orders.length} commande(s)',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: scheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 16),
-                                          Icon(
-                                            Icons.monetization_on,
-                                            size: 14,
-                                            color: scheme.onSurfaceVariant,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            PriceFormatter.format(totalSpent),
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: scheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  trailing: SizedBox(
-                                    width: 40,
-                                    height: 40,
-                                    child: PopupMenuButton(
-                                      icon: const Icon(Icons.more_vert),
-                                      itemBuilder: (context) => [
-                                        const PopupMenuItem(
-                                          value: 'view',
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.visibility),
-                                              SizedBox(width: 8),
-                                              Text('Voir détails'),
-                                            ],
-                                          ),
-                                        ),
-                                        const PopupMenuItem(
-                                          value: 'orders',
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.receipt_long),
-                                              SizedBox(width: 8),
-                                              Text('Historique commandes'),
-                                            ],
-                                          ),
-                                        ),
-                                        const PopupMenuItem(
-                                          value: 'suspend',
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.block),
-                                              SizedBox(width: 8),
-                                              Text('Suspendre'),
-                                            ],
-                                          ),
-                                        ),
-                                        const PopupMenuItem(
-                                          value: 'points',
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.stars),
-                                              SizedBox(width: 8),
-                                              Text('Points fidélité'),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                      onSelected: (value) {
-                                        _handleClientAction(value, client);
-                                      },
-                                    ),
-                                  ),
-                                  onTap: () => _showClientDetails(client, appService),
-                                ),
-                              );
-                            },
-                          ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  void _handleClientAction(String action, eccore.Customer client) {
-    switch (action) {
-      case 'view':
-        _showClientDetails(client, context.read<AppService>());
-        break;
-      case 'orders':
-        _showClientOrders(client);
-        break;
-      case 'suspend':
-        _suspendClient(client);
-        break;
-      case 'points':
-        _showLoyaltyPoints(client);
-        break;
-    }
-  }
-
-  Future<void> _showClientDetails(eccore.Customer client, AppService appService) async {
-    final clientService = context.read<ClientManagementService>();
-
-    // Agrégat calculé par le serveur : le panier moyen porte sur toutes les
-    // commandes du client, pas sur la page que l'écran avait chargée.
-    final stats = await clientService.getClientStats(client.id);
-
-    if (!mounted) return;
-
-    if (stats == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(clientService.error ?? 'Fiche client indisponible'),
-        ),
-      );
-      return;
-    }
-
-    unawaited(
-      DialogHelper.showSafeDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Détails du client: ${client.fullName}'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
               children: [
-                _buildDetailRow('Email', client.email),
-                _buildDetailRow('Téléphone', client.phone ?? '—'),
-                _buildDetailRow('Total commandes', '${stats.ordersCount}'),
-                _buildDetailRow('Commandes livrées', '${stats.ordersDelivered}'),
-                _buildDetailRow('Commandes annulées', '${stats.ordersCancelled}'),
-                _buildDetailRow(
-                  'Total dépensé',
-                  PriceFormatter.format(stats.totalSpent.toMajorUnits()),
+                Expanded(
+                  child: TextField(
+                    controller: _recherche,
+                    onChanged: _surFrappe,
+                    decoration: const InputDecoration(
+                      labelText: 'Rechercher',
+                      helperText: 'Nom, adresse électronique ou téléphone — cherché par le serveur.',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
                 ),
-                _buildDetailRow(
-                  'Panier moyen',
-                  PriceFormatter.format(stats.averageBasket.toMajorUnits()),
-                ),
-                _buildDetailRow('Points de fidélité', '${stats.loyaltyBalance}'),
-                _buildDetailRow('Adresses enregistrées', '${stats.addressesCount}'),
-                _buildDetailRow(
-                  'Membre depuis',
-                  '${client.createdAt.day}/${client.createdAt.month}/${client.createdAt.year}',
-                ),
-                const Divider(height: 24),
-                // Ce que l'équipe sait du client et qu'il ne lit pas : un
-                // litige en cours, une adresse difficile, un geste consenti.
-                // Le cahier des charges les demande (§4.2.6) ; aucune fiche
-                // ne les portait.
+                const SizedBox(width: 12),
                 SizedBox(
-                  width: 480,
-                  child: NotesInternes(
-                    lire: () => clientService.notesOf(client.id),
-                    ajouter: (contenu) => clientService.addNote(client.id, contenu),
+                  width: 180,
+                  child: DropdownButtonFormField<EtatDuClient>(
+                    isExpanded: true,
+                    initialValue: service.etat,
+                    decoration: const InputDecoration(
+                      labelText: 'État',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final etat in EtatDuClient.values)
+                        DropdownMenuItem(value: etat, child: Text(etat.libelle)),
+                    ],
+                    onChanged: (etat) =>
+                        etat == null ? null : unawaited(service.chercher(etat: etat)),
                   ),
                 ),
               ],
             ),
           ),
-          actions: [
-            Container(
-              constraints: const BoxConstraints(minHeight: 48),
-              child: TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Fermer'),
-              ),
+          if (service.echec != null)
+            BandeauEchec(echec: service.echec!, onReessayer: () => unawaited(service.refresh())),
+          Expanded(
+            child: service.isLoading && service.clients.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : service.clients.isEmpty
+                    ? Center(
+                        child: Text(
+                          service.recherche.trim().isEmpty
+                              ? 'Aucun compte client.'
+                              : 'Aucun compte ne correspond à « ${service.recherche.trim()} ».',
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: service.clients.length,
+                        itemBuilder: (context, index) => _LigneClient(
+                          client: service.clients[index],
+                          peutBloquer: peutBloquer,
+                        ),
+                      ),
+          ),
+          BarrePagination(
+            numeroDePage: service.numeroDePage,
+            nombreDePages: service.nombreDePages,
+            total: service.total,
+            enCours: service.isLoading,
+            onPrecedente: service.aPagePrecedente ? () => unawaited(service.pagePrecedente()) : null,
+            onSuivante: service.aPageSuivante ? () => unawaited(service.pageSuivante()) : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LigneClient extends StatelessWidget {
+  const _LigneClient({required this.client, required this.peutBloquer});
+
+  final eccore.Customer client;
+  final bool peutBloquer;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final suspendu = !client.isActive;
+    final initiale = client.fullName.trim().isEmpty ? '?' : client.fullName.trim()[0].toUpperCase();
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        onTap: () => unawaited(ouvrirFicheClient(context, client)),
+        leading: CircleAvatar(
+          backgroundColor: suspendu ? scheme.surfaceContainerHighest : scheme.primary,
+          child: Text(
+            initiale,
+            style: TextStyle(
+              color: suspendu ? scheme.onSurfaceVariant : scheme.onPrimary,
+              fontWeight: FontWeight.bold,
             ),
-            Container(
-              constraints: const BoxConstraints(minHeight: 48),
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  _showClientOrders(client);
-                },
-                child: const Text('Voir commandes'),
-              ),
+          ),
+        ),
+        title: Text(client.fullName, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(client.email),
+            if ((client.phone ?? '').isNotEmpty) Text(client.phone!),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              children: [
+                Chip(label: Text(suspendu ? 'Suspendu' : 'Actif')),
+                if (client.emailVerifiedAt == null) const Chip(label: Text('Courriel non vérifié')),
+              ],
             ),
+          ],
+        ),
+        trailing: PopupMenuButton<String>(
+          onSelected: (choix) {
+            switch (choix) {
+              case 'fiche':
+                unawaited(ouvrirFicheClient(context, client));
+              case 'commandes':
+                unawaited(ouvrirCommandesDuClient(context, client));
+              case 'suspendre':
+                unawaited(suspendreClient(context, client));
+              case 'reactiver':
+                unawaited(reactiverClient(context, client));
+            }
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'fiche', child: Text('Fiche du client')),
+            const PopupMenuItem(value: 'commandes', child: Text('Historique des commandes')),
+            // Le geste dépend de l'état : proposer « Suspendre » sur un compte
+            // déjà suspendu est ce que faisait l'écran, sans offrir l'inverse.
+            if (peutBloquer && !suspendu)
+              const PopupMenuItem(value: 'suspendre', child: Text('Suspendre le compte')),
+            if (peutBloquer && suspendu)
+              const PopupMenuItem(value: 'reactiver', child: Text('Réactiver le compte')),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildDetailRow(String label, String value) {
+/// La fiche d'un client : les chiffres que le serveur agrège, et les notes
+/// internes de l'équipe.
+Future<void> ouvrirFicheClient(BuildContext context, eccore.Customer client) async {
+  final service = context.read<ClientManagementService>();
+  eccore.CustomerStats fiche;
+  try {
+    fiche = await service.fiche(client.id);
+  } on eccore.ApiException catch (e) {
+    if (context.mounted) annoncerEchec(context, Echec.de(e));
+    return;
+  }
+  if (!context.mounted) return;
+
+  await DialogHelper.showSafeDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(client.fullName),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _Ligne('Adresse électronique', client.email),
+              _Ligne('Téléphone', client.phone ?? '—'),
+              _Ligne('Commandes', '${fiche.ordersCount}'),
+              _Ligne('Livrées', '${fiche.ordersDelivered}'),
+              _Ligne('Annulées', '${fiche.ordersCancelled}'),
+              _Ligne('Total dépensé', formatMontant(fiche.totalSpent)),
+              _Ligne('Panier moyen', formatMontant(fiche.averageBasket)),
+              _Ligne('Points de fidélité', '${fiche.loyaltyBalance}'),
+              _Ligne('Points gagnés à vie', '${fiche.loyaltyLifetimeEarned}'),
+              _Ligne('Adresses enregistrées', '${fiche.addressesCount}'),
+              _Ligne('Compte créé le', dateCourte(client.createdAt)),
+              if (fiche.lastOrderAt != null)
+                _Ligne('Dernière commande', dateCourte(fiche.lastOrderAt!)),
+              const Divider(height: 24),
+              SizedBox(
+                width: 480,
+                child: NotesInternes(
+                  lire: () => service.notesOf(client.id),
+                  ajouter: (contenu) => service.addNote(client.id, contenu),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Fermer')),
+      ],
+    ),
+  );
+}
+
+/// Les commandes d'un client — **une page**, demandée au serveur.
+Future<void> ouvrirCommandesDuClient(BuildContext context, eccore.Customer client) async {
+  final service = context.read<ClientManagementService>();
+  eccore.Page<eccore.Order> page;
+  try {
+    page = await service.commandes(client.id);
+  } on eccore.ApiException catch (e) {
+    if (context.mounted) annoncerEchec(context, Echec.de(e));
+    return;
+  }
+  if (!context.mounted) return;
+
+  await DialogHelper.showSafeDialog<void>(
+    context: context,
+    builder: (context) {
+      final scheme = Theme.of(context).colorScheme;
+      return AlertDialog(
+        title: Text('Commandes de ${client.fullName}'),
+        content: SizedBox(
+          width: 560,
+          height: 420,
+          child: page.results.isEmpty
+              ? const Center(child: Text('Aucune commande'))
+              : Column(
+                  children: [
+                    if (page.count > page.results.length)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          'Les ${page.results.length} plus récentes sur ${page.count}.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: page.results.length,
+                        itemBuilder: (context, index) {
+                          final order = page.results[index];
+                          return ListTile(
+                            leading: Icon(
+                              Icons.receipt_long,
+                              color: couleurDeStatut(order.statut, scheme),
+                            ),
+                            title: Text(order.reference),
+                            subtitle: Text(
+                              '${formatMontant(order.total)} — ${order.statut.libelle}'
+                              ' — ${order.restaurantName}',
+                            ),
+                            trailing: Text(dateCourte(order.placedAt)),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Fermer')),
+        ],
+      );
+    },
+  );
+}
+
+/// Suspend un compte — motif obligatoire (le serveur l'exige et le journalise).
+Future<void> suspendreClient(BuildContext context, eccore.Customer client) async {
+  final service = context.read<ClientManagementService>();
+  final motif = TextEditingController();
+
+  final fait = await DialogueDeFormulaire.ouvrir(
+    context,
+    titre: 'Suspendre ${client.fullName}',
+    libelleAction: 'Suspendre',
+    enregistrer: () => service.suspendre(client.id, motif: motif.text.trim()),
+    corps: (context, echec) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Le compte est fermé et ses sessions révoquées : le client ne peut '
+          'plus commander tant qu’il n’est pas réactivé.',
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: motif,
+          maxLines: 3,
+          decoration: InputDecoration(
+            labelText: 'Motif *',
+            helperText: 'Conservé au journal des décisions : c’est lui qu’on cherchera '
+                'le jour où le client rappellera.',
+            helperMaxLines: 2,
+            errorText: echec?.pourLeChamp('reason'),
+          ),
+          validator: (valeur) =>
+              (valeur ?? '').trim().length < 3 ? 'Dites pourquoi, en quelques mots' : null,
+        ),
+      ],
+    ),
+  );
+
+  if (fait && context.mounted) annoncer(context, 'Compte suspendu.');
+}
+
+/// Rouvre un compte suspendu.
+Future<void> reactiverClient(BuildContext context, eccore.Customer client) async {
+  final service = context.read<ClientManagementService>();
+  final confirme = await DialogHelper.showSafeDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text('Réactiver ${client.fullName} ?'),
+      content: const Text(
+        'Le compte pourra de nouveau commander. Le client devra se reconnecter : '
+        'ses sessions ont été révoquées à la suspension.',
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Annuler')),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Réactiver'),
+        ),
+      ],
+    ),
+  );
+  if (confirme != true || !context.mounted) return;
+
+  try {
+    await service.reactiver(client.id);
+    if (context.mounted) annoncer(context, 'Compte réactivé.');
+  } on eccore.ApiException catch (e) {
+    if (context.mounted) annoncerEchec(context, Echec.de(e));
+  }
+}
+
+class _Ligne extends StatelessWidget {
+  const _Ligne(this.label, this.valeur);
+
+  final String label;
+  final String valeur;
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 120,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
+            width: 180,
+            child: Text('$label :', style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
-          Expanded(child: Text(value)),
+          Expanded(child: Text(valeur)),
         ],
-      ),
-    );
-  }
-
-  Future<void> _showClientOrders(eccore.Customer client) async {
-    final clientService = context.read<ClientManagementService>();
-    final orders = await clientService.getClientOrders(client.id);
-
-    if (!mounted) return;
-
-    unawaited(
-      DialogHelper.showSafeDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Historique des commandes: ${client.fullName}'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 400,
-            child: orders.isEmpty
-                ? const Center(child: Text('Aucune commande'))
-                : ListView.builder(
-                    itemCount: orders.length,
-                    itemBuilder: (context, index) {
-                      final order = orders[index];
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: Container(
-                          constraints: const BoxConstraints(minHeight: 56),
-                          child: ListTile(
-                            leading: Icon(
-                              _getOrderStatusIcon(order.statut),
-                              color: _getOrderStatusColor(context, order.statut),
-                            ),
-                            title: Text(
-                              'Commande #${order.id.substring(0, 8).toUpperCase()}',
-                            ),
-                            subtitle: Text(
-                              '${PriceFormatter.format(order.totalAffiche)} - ${order.statut.libelle}',
-                            ),
-                            trailing: Text(
-                              '${order.passeeLe.day}/${order.passeeLe.month}/${order.passeeLe.year}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          actions: [
-            Container(
-              constraints: const BoxConstraints(minHeight: 48),
-              child: TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Fermer'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _getOrderStatusIcon(StatutCommande status) {
-    switch (status) {
-      case StatutCommande.livree:
-        return Icons.check_circle;
-      case StatutCommande.annulee:
-        return Icons.cancel;
-      default:
-        return Icons.pending;
-    }
-  }
-
-  Color _getOrderStatusColor(BuildContext context, StatutCommande status) {
-    final sem = AdminColorTokens.semantic(Theme.of(context).colorScheme);
-    switch (status) {
-      case StatutCommande.livree:
-        return sem.success;
-      case StatutCommande.annulee:
-        return sem.danger;
-      default:
-        return Theme.of(context).colorScheme.primary;
-    }
-  }
-
-  Future<void> _suspendClient(eccore.Customer client) async {
-    final reasonController = TextEditingController();
-    final confirmed = await DialogHelper.showSafeDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Suspendre le client'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Client: ${client.fullName}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            const Text('Raison de la suspension :'),
-            const SizedBox(height: 8),
-            TextField(
-              controller: reasonController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'Entrez la raison de la suspension...',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Annuler'),
-            ),
-          ),
-          Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error,
-              ),
-              child: const Text('Suspendre'),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      if (!mounted) return;
-      // Capturer les valeurs nécessaires avant le gap async
-      final inverseSurfaceColor = Theme.of(context).colorScheme.inverseSurface;
-      final clientService = context.read<ClientManagementService>();
-      final success = await clientService.suspendClient(
-        client.id,
-        reason: reasonController.text.trim(),
-      );
-
-      if (mounted && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              success
-                  ? '${client.fullName} a été suspendu'
-                  : 'Erreur lors de la suspension',
-            ),
-            backgroundColor: inverseSurfaceColor,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _showLoyaltyPoints(eccore.Customer client) async {
-    // Le solde vient du serveur : la liste ne le porte pas, et l'afficher
-    // depuis une valeur locale montrerait un chiffre d'une autre heure.
-    final stats = await context.read<ClientManagementService>().getClientStats(
-          client.id,
-        );
-
-    if (!mounted) return;
-
-    unawaited(
-      DialogHelper.showSafeDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          // Note: on récupère les tokens ici car on est dans le builder du dialog
-          title: Text('Points Fidélité: ${client.fullName}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.stars,
-                size: 64,
-                color: Theme.of(context).colorScheme.tertiary,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '${stats?.loyaltyBalance ?? 0} points',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Cumulés depuis l\'ouverture : ${stats?.loyaltyLifetimeEarned ?? 0}',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fermer'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _exportClients() async {
-    final clientService = Provider.of<ClientManagementService>(context, listen: false);
-    final clients = clientService.clients;
-
-    final csvBuffer = StringBuffer();
-    csvBuffer.writeln('ID,Nom,Email,Téléphone,Actif,Date Création');
-    // Les champs passent par `champCsv` : un nom contenant une virgule ou un
-    // guillemet — « Kodjo "Kojo" Mensah », « Doe, Jane » — décalait toutes les
-    // colonnes suivantes, et un retour à la ligne coupait la fiche en deux.
-
-    for (final client in clients) {
-      csvBuffer.writeln(
-        [
-          client.id,
-          client.fullName,
-          client.email,
-          client.phone ?? '',
-          client.isActive,
-          client.createdAt.toIso8601String(),
-        ].map(champCsv).join(','),
-      );
-    }
-
-    final csvContent = csvBuffer.toString();
-
-    unawaited(
-      DialogHelper.showSafeDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Export CSV'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Copiez le contenu CSV ci-dessous:'),
-                const SizedBox(height: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant,
-                    ),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  padding: const EdgeInsets.all(8),
-                  height: 200,
-                  child: SingleChildScrollView(
-                    child: SelectableText(csvContent),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fermer'),
-            ),
-          ],
-        ),
       ),
     );
   }

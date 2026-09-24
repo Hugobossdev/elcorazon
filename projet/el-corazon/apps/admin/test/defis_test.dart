@@ -1,52 +1,47 @@
 import 'package:admin/screens/admin/gamification/challenges.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter_test/flutter_test.dart';
 
-/// L'expiration d'un défi, dans l'onglet « Défis » du back-office.
+/// Où en est un défi, dans l'onglet « Défis » du back-office.
 ///
-/// La règle vivait dans le corps d'une carte et tirait deux fois sur
-/// l'horloge ; elle est atteignable depuis que l'écran de 1 744 lignes a été
-/// découpé.
+/// La version précédente de ce test fabriquait un défi avec la clé `end_date`
+/// — celle que l'écran lisait, et qu'aucune réponse du serveur ne portait
+/// (`ends_at`). Le test passait, l'écran n'affichait jamais un défi terminé.
+/// Le défi est désormais le modèle du socle, lu depuis le JSON du serveur.
+eccore.ManagedChallenge _defi({required String debut, required String fin}) =>
+    eccore.ManagedChallenge.fromJson({
+      'id': 'd1',
+      'title': 'Dix commandes',
+      'description': '',
+      'challenge_type': 'weekly',
+      'condition_type': 'orders_count',
+      'target_value': 10,
+      'reward_points': 100,
+      'starts_at': debut,
+      'ends_at': fin,
+      'is_active': true,
+    });
+
 void main() {
-  final maintenant = DateTime(2026, 8, 8, 14, 30);
+  final maintenant = DateTime.utc(2026, 8, 8, 14, 30);
 
-  Map<String, dynamic> defi(Object? fin) => {'title': 'Dix commandes', 'end_date': fin};
-
-  group('Expiration', () {
-    test('une date passée expire', () {
-      expect(defiExpire(defi('2026-08-07T12:00:00Z'), maintenant: maintenant),
-          isTrue,);
-    });
-
-    test('une date à venir n’expire pas', () {
-      expect(defiExpire(defi('2026-08-09T12:00:00Z'), maintenant: maintenant),
-          isFalse,);
-    });
-
-    test('sans date de fin, un défi n’expire pas', () {
-      // Le code prenait `DateTime.now()` comme date de fin, puis la comparait
-      // à un second `DateTime.now()` pris juste après : le défi s'affichait
-      // expiré par course entre deux appels à l'horloge.
-      expect(defiExpire(defi(null), maintenant: maintenant), isFalse);
-      expect(defiExpire(const {}, maintenant: maintenant), isFalse);
-    });
-
-    test('une date illisible n’expire pas non plus', () {
-      // `DateTime.parse` levait ; `tryParse` rend `null`, et un défi dont on
-      // ne sait pas quand il finit ne peut pas être déclaré fini.
-      expect(defiExpire(defi('bientôt'), maintenant: maintenant), isFalse);
-    });
+  test('une fin passée : terminé', () {
+    final defi = _defi(debut: '2026-08-01T00:00:00Z', fin: '2026-08-07T12:00:00Z');
+    expect(etatDuDefi(defi, maintenant: maintenant), 'Terminé');
   });
 
-  group('Date de fin', () {
-    test('est rendue quand elle est lisible', () {
-      expect(dateDeFinDefi(defi('2026-08-09T12:00:00Z')),
-          DateTime.parse('2026-08-09T12:00:00Z'),);
-    });
+  test('dans la fenêtre : en cours', () {
+    final defi = _defi(debut: '2026-08-01T00:00:00Z', fin: '2026-08-09T12:00:00Z');
+    expect(etatDuDefi(defi, maintenant: maintenant), 'En cours');
+  });
 
-    test('est absente quand le défi n’en a pas', () {
-      // La carte affichait « Fin: » suivi de la date du jour.
-      expect(dateDeFinDefi(defi(null)), isNull);
-      expect(dateDeFinDefi(defi('bientôt')), isNull);
-    });
+  test('un début à venir : à venir', () {
+    final defi = _defi(debut: '2026-08-10T00:00:00Z', fin: '2026-08-17T00:00:00Z');
+    expect(etatDuDefi(defi, maintenant: maintenant), 'À venir');
+  });
+
+  test('la seconde de fin est déjà terminée', () {
+    final defi = _defi(debut: '2026-08-01T00:00:00Z', fin: '2026-08-08T14:30:00Z');
+    expect(etatDuDefi(defi, maintenant: maintenant), 'Terminé');
   });
 }

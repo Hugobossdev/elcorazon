@@ -3,7 +3,9 @@ import 'dart:math' as math;
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
+import 'package:admin/presentation/flotte.dart';
 import 'package:admin/presentation/statut_livreur.dart';
+
 import 'package:admin/services/admin_auth_service.dart';
 
 /// Gestion de la flotte — `/api/v1/delivery/couriers/` (Phase 6).
@@ -29,71 +31,41 @@ class DriverManagementService extends ChangeNotifier {
   /// bien. Les écrans d'écriture l'affichent — un formulaire qui échoue sans
   /// dire pourquoi se remplit une seconde fois à l'identique.
   String? _error;
-  StatutLivreur? _statusFilter;
-  String? _sortOption;
-  String _searchQuery = '';
+  String _recherche = '';
+  TriFlotte _tri = TriFlotte.nomCroissant;
 
   List<eccore.CourierProfile> get drivers => _drivers;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  String get recherche => _recherche;
+  TriFlotte get tri => _tri;
 
-  /// Liste filtrée et triée des livreurs
-  List<eccore.CourierProfile> get filteredDrivers {
-    var filtered = _drivers;
+  /// Les livreurs d'un onglet de l'écran, recherche et tri appliqués — voir
+  /// [livreursDeLOnglet].
+  List<eccore.CourierProfile> livreursDe(OngletFlotte onglet) =>
+      livreursDeLOnglet(_drivers, onglet, recherche: _recherche, tri: _tri);
 
-    // Filtrer par statut
-    if (_statusFilter != null) {
-      filtered = filtered.where((d) => d.statut == _statusFilter).toList();
-    }
+  /// La flotte a-t-elle été demandée au moins une fois ?
+  bool _demandee = false;
 
-    // Filtrer par recherche
-    if (_searchQuery.isNotEmpty) {
-      filtered = filtered
-          .where(
-            (driver) =>
-                driver.fullName.toLowerCase().contains(
-                      _searchQuery.toLowerCase(),
-                    ) ||
-                driver.email.toLowerCase().contains(
-                      _searchQuery.toLowerCase(),
-                    ),
-          )
-          .toList();
-    }
-
-    // Trier
-    if (_sortOption != null) {
-      switch (_sortOption) {
-        case 'name':
-          filtered.sort((a, b) => a.fullName.compareTo(b.fullName));
-          break;
-        case 'nameDesc':
-          filtered.sort((a, b) => b.fullName.compareTo(a.fullName));
-          break;
-        case 'status':
-          filtered.sort(
-            (a, b) => a.statut.name.compareTo(b.statut.name),
-          );
-          break;
-        case 'rating':
-          filtered.sort((a, b) => b.ratingAverage.compareTo(a.ratingAverage));
-          break;
-        case 'deliveries':
-          filtered.sort(
-            (a, b) => b.deliveriesCompleted.compareTo(a.deliveriesCompleted),
-          );
-          break;
-      }
-    }
-
-    return filtered;
-  }
-
-  DriverManagementService() {
-    _loadDrivers();
+  /// Charge la flotte si personne ne l'a encore demandée.
+  ///
+  /// Le constructeur appelait `_loadDrivers()` : **ouvrir n'importe quel écran
+  /// du back-office** téléchargeait tous les dossiers livreurs du périmètre,
+  /// puisque le fournisseur est monté une fois pour toute l'application. Un
+  /// écran des promotions payait la flotte, et l'écran de la carte la payait
+  /// une seconde fois en rafraîchissant.
+  ///
+  /// Les écrans qui affichent la flotte l'appellent à leur ouverture ; le
+  /// dialogue d'affectation, lui, ne la charge pas du tout — il demande les
+  /// **éligibles** d'une commande ([availableForOrder]).
+  Future<void> ensureLoaded() async {
+    if (_demandee) return;
+    await _loadDrivers();
   }
 
   Future<void> _loadDrivers() async {
+    _demandee = true;
     _isLoading = true;
     notifyListeners();
 
@@ -246,58 +218,48 @@ class DriverManagementService extends ChangeNotifier {
         notes: notes,
       );
       final index = _drivers.indexWhere((driver) => driver.id == driverId);
-      if (index != -1) {
-        _drivers[index] = updated;
-        notifyListeners();
-      }
+      if (index != -1) _drivers[index] = updated;
+      _error = null;
+      notifyListeners();
       return true;
     } on eccore.ApiException catch (e) {
+      // Conservé comme pour la correction et les zones. Il ne l'était pas : le
+      // formulaire affichait alors « Modification refusée. » — ou, pire, le
+      // refus **précédent**, resté dans `_error` — là où le serveur disait
+      // pourquoi : un motif manquant, un dossier jamais validé qu'on ne suspend
+      // pas, une pièce expirée.
+      _error = e.detail;
       eccore.Journal.trace('DriverManagementService: instruction refusée — ${e.code}');
+      notifyListeners();
       return false;
     }
   }
 
   /// Livreurs éligibles pour une commande, du plus proche au plus loin.
   ///
-  /// L'éligibilité est calculée par le serveur : la liste ne se filtre pas ici.
-  Future<List<eccore.CourierProfile>> availableForOrder(String orderId) async {
-    try {
-      final remote = await _couriers.availableFor(orderId);
-      return remote;
-    } on eccore.ApiException catch (e) {
-      eccore.Journal.trace(
-          'DriverManagementService: éligibles indisponibles — ${e.code}',
-          );
-      return [];
-    }
-  }
-
-  /// Les livreurs à qui l'on peut confier une course maintenant.
+  /// L'éligibilité est calculée par le serveur : la liste ne se filtre pas ici
+  /// (`CourierService.available_for` — cuisine, en ligne, dossier validé, zone
+  /// desservie, pas déjà engagé).
   ///
-  /// [engages] porte les identifiants de dossier des livreurs qui **tiennent
-  /// déjà** une course, tels que `AssignmentService.livreursEngages` les
-  /// connaît. Sans lui, cette liste rendait « Disponible » quelqu'un déjà en
-  /// route : `CourierProfile` ne dit rien des affectations — `StatutLivreur` en
-  /// documente d'ailleurs l'absence — et le siège proposait donc à
-  /// l'assignation un livreur que le serveur refuse maintenant (L6).
-  ///
-  /// Le paramètre est facultatif et vaut l'ensemble vide : un écran qui ne
-  /// charge pas les courses n'a pas à mentir sur ce qu'il ignore, il rend la
-  /// liste large plutôt qu'une liste fausse.
-  List<eccore.CourierProfile> getAvailableDrivers({
-    Set<String> engages = const {},
-  }) {
-    return _drivers
-        .where(
-          (driver) =>
-              driver.statut == StatutLivreur.disponible &&
-              driver.estValide &&
-              !engages.contains(driver.id),
-        )
-        .toList();
-  }
+  /// **Lève `ApiException`.** Elle retournait une liste vide sur refus : le
+  /// dialogue d'affectation affichait alors « aucun livreur éligible » devant
+  /// un 403 ou une coupure réseau, et le superviseur attendait un livreur que
+  /// personne ne lui avait refusé — il n'avait simplement pas le droit de lire
+  /// la liste. Un échec se dit ; il ne se déguise pas en flotte vide.
+  Future<List<eccore.CourierProfile>> availableForOrder(String orderId) =>
+      _couriers.availableFor(orderId);
 
-  /// Obtenir les livreurs en livraison
+  // `getAvailableDrivers` a été retirée le 23 septembre 2026.
+  //
+  // Elle recomposait ici l'éligibilité d'un livreur — en ligne, dossier
+  // validé, pas déjà engagé — sur la flotte déjà chargée. Trois termes sur
+  // cinq : il manquait la **cuisine de la commande** (la liste chargée est
+  // celle du périmètre du compte, si bien qu'un siège se voyait proposer
+  // Douala pour une commande de Lomé) et le **périmètre de zone**. Elle ne
+  // pouvait pas non plus trier par distance : la position du livreur n'entre
+  // pas dans le calcul, et la distance à la cuisine est un calcul PostGIS.
+  //
+  // C'est [availableForOrder] qui répond désormais, pour une commande donnée.
 
   /// Obtenir les livreurs hors ligne
   List<eccore.CourierProfile> getOfflineDrivers() {
@@ -313,37 +275,27 @@ class DriverManagementService extends ChangeNotifier {
     return _drivers.where((driver) => driver.estValide).toList();
   }
 
-  /// Rechercher des livreurs
-  void searchDrivers(String query) {
-    _searchQuery = query;
+  /// Nom, courriel, téléphone ou plaque.
+  void rechercher(String recherche) {
+    if (recherche == _recherche) return;
+    _recherche = recherche;
     notifyListeners();
   }
 
-  /// Obtenir les livreurs par statut
-  List<eccore.CourierProfile> getDriversByStatus(StatutLivreur statut) {
-    return _drivers
-        .where((driver) => driver.statut == statut && driver.estValide)
-        .toList();
-  }
-
-  /// Filtrer par statut
-  void filterByStatus(StatutLivreur? statut) {
-    _statusFilter = statut;
+  void trierPar(TriFlotte tri) {
+    if (tri == _tri) return;
+    _tri = tri;
     notifyListeners();
   }
 
-  /// Définir l'option de tri
-  void setSortOption(String sortKey) {
-    _sortOption = sortKey;
-    notifyListeners();
-  }
-
-  /// Obtenir les livreurs les mieux notés
-  List<eccore.CourierProfile> getTopRatedDrivers({int limit = 10}) {
-    final sortedDrivers = List<eccore.CourierProfile>.from(_drivers);
-    sortedDrivers.sort((a, b) => b.ratingAverage.compareTo(a.ratingAverage));
-    return sortedDrivers.take(limit).toList();
-  }
+  /// Les [limite] premiers du classement, **hors recherche** : l'aperçu montre
+  /// la tête de la flotte, pas celle d'une recherche tapée sur un autre onglet.
+  ///
+  /// L'ancienne version triait toute la flotte sur la seule moyenne : un
+  /// dossier en attente ou suspendu y figurait, et un livreur jamais noté
+  /// (moyenne 0) passait après tout le monde, noté ou non.
+  List<eccore.CourierProfile> tetesDeClassement({int limite = 3}) =>
+      livreursDeLOnglet(_drivers, OngletFlotte.classement).take(limite).toList();
 
   /// Obtenir les livreurs les plus actifs
   List<eccore.CourierProfile> getMostActiveDrivers({int limit = 10}) {
@@ -385,40 +337,34 @@ class DriverManagementService extends ChangeNotifier {
         .toList();
   }
 
-  /// Obtenir les statistiques des livreurs
-  Map<String, dynamic> getDriverStats() {
-    final totalDrivers = _drivers.length;
-    final activeDrivers = _drivers.where((d) => d.estValide).length;
-    final availableDrivers =
-        _drivers.where((d) => d.statut == StatutLivreur.disponible).length;
-    final offlineDrivers =
-        _drivers.where((d) => d.statut == StatutLivreur.horsLigne).length;
-
-    final averageRating = _drivers.isNotEmpty
-        ? _drivers.map((d) => d.ratingAverage).reduce((a, b) => a + b) / _drivers.length
-        : 0.0;
-
-    final totalDeliveries = _drivers.fold(
-      0,
-      (sum, driver) => sum + driver.deliveriesCompleted,
+  /// Les compteurs de la flotte chargée — **tels qu'ils se lisent**.
+  ///
+  /// ## Trois chiffres faux, corrigés le 23 septembre 2026
+  ///
+  /// * `busy_drivers` **n'était pas produit** : l'écran affichait
+  ///   « Courses actives : null ». Le nombre de livreurs en course ne se lit
+  ///   pas sur la flotte — le dossier ne porte pas ses affectations — mais sur
+  ///   les courses (`AssignmentService.livreursEngages`). Il n'est donc plus
+  ///   promis ici.
+  /// * « En ligne » comptait les **dossiers validés**, pas les livreurs
+  ///   connectés : un livreur validé mais téléphone éteint y figurait, et le
+  ///   siège croyait avoir dix personnes en ville.
+  /// * La note moyenne divisait par l'effectif entier, **notes nulles
+  ///   comprises** : embaucher deux livreurs faisait chuter la note de la
+  ///   flotte, alors que personne ne les avait encore notés.
+  StatistiquesDeFlotte get statistiques {
+    final notes = [for (final d in _drivers) if (d.ratingCount > 0) d];
+    return StatistiquesDeFlotte(
+      effectif: _drivers.length,
+      enLigne: _drivers.where((d) => d.isOnline).length,
+      disponibles: _drivers.where((d) => d.canAcceptOrders).length,
+      dossiersAInstruire: _drivers.where((d) => d.verificationStatus == 'pending').length,
+      livraisons: _drivers.fold(0, (somme, d) => somme + d.deliveriesCompleted),
+      noteMoyenne: notes.isEmpty
+          ? null
+          : notes.map((d) => d.ratingAverage).reduce((a, b) => a + b) / notes.length,
+      livreursNotes: notes.length,
     );
-    // Les gains sont des montants : on somme en unité mineure, sans passer par
-    // un flottant intermédiaire.
-    final totalEarnings = _drivers.fold<int>(
-      0,
-      (sum, driver) => sum + (driver.totalEarnings?.amountMinor ?? 0),
-    );
-
-    return {
-      'total_drivers': totalDrivers,
-      'active_drivers': activeDrivers,
-      'online_drivers': activeDrivers,
-      'available_drivers': availableDrivers,
-      'offline_drivers': offlineDrivers,
-      'average_rating': averageRating,
-      'total_deliveries': totalDeliveries,
-      'total_earnings': totalEarnings,
-    };
   }
 
   /// Recharger les données
@@ -432,32 +378,21 @@ class DriverManagementService extends ChangeNotifier {
 
   /// Ajouter une notation détaillée
 
-  /// Statistiques détaillées d'un livreur — lues sur son dossier.
+  /// Relit le dossier d'un livreur au serveur. **Lève `ApiException`.**
+  ///
+  /// Elle rendait une carte à clés libres (`{'rating_average': ..., ...}`) —
+  /// un sous-ensemble du dossier, recopié champ par champ — et une carte
+  /// **vide** sur refus. L'écran affichait alors les compteurs du dossier
+  /// qu'on lui avait passé comme s'ils venaient d'être relus, et ses notes par
+  /// critère se repliaient silencieusement sur la note globale.
   ///
   /// Les notes par critère (ponctualité, service, soin du colis) et les badges
   /// livreur n'existent pas au contrat v2 : la note est un **agrégat**
-  /// (`rating_average`, `rating_count`) alimenté par les notes des clients, et
-  /// la gamification est réservée aux comptes clients. L'ancienne version
-  /// lisait `driver_ratings`, `driver_badges` et `driver_earned_badges`, trois
-  /// tables sans contrepartie.
-  Future<Map<String, dynamic>> getDriverDetailedStats(String driverId) async {
-    try {
-      final courier = await _couriers.getById(driverId);
-      return {
-        'deliveries_completed': courier.deliveriesCompleted,
-        'deliveries_cancelled': courier.deliveriesCancelled,
-        'rating_average': courier.ratingAverage,
-        'rating_count': courier.ratingCount,
-        'total_earnings': courier.totalEarnings?.toMajorUnits() ?? 0,
-        'verification_status': courier.verificationStatus,
-      };
-    } on eccore.ApiException catch (e) {
-      eccore.Journal.trace(
-        'DriverManagementService: statistiques indisponibles — ${e.code}',
-      );
-      return {};
-    }
-  }
+  /// (`rating_average`, `rating_count`) alimenté par les clients, et la
+  /// gamification est réservée aux comptes clients. L'ancienne version lisait
+  /// `driver_ratings`, `driver_badges` et `driver_earned_badges`, trois tables
+  /// sans contrepartie.
+  Future<eccore.CourierProfile> relireDossier(String driverId) => _couriers.getById(driverId);
 
   /// Distance à vol d'oiseau en kilomètres (haversine).
   ///
@@ -482,4 +417,44 @@ class DriverManagementService extends ChangeNotifier {
 
     return rayonTerrestreKm * 2 * math.asin(math.sqrt(h));
   }
+}
+
+/// Les compteurs d'en-tête de l'écran de la flotte.
+///
+/// Un objet et non une carte à clés libres : l'écran lisait
+/// `stats['busy_drivers']`, que personne ne produisait, et affichait « null ».
+/// Un champ absent d'une classe ne compile pas.
+@immutable
+class StatistiquesDeFlotte {
+  const StatistiquesDeFlotte({
+    required this.effectif,
+    required this.enLigne,
+    required this.disponibles,
+    required this.dossiersAInstruire,
+    required this.livraisons,
+    required this.noteMoyenne,
+    required this.livreursNotes,
+  });
+
+  /// Les dossiers du périmètre, tous statuts confondus.
+  final int effectif;
+
+  /// Application ouverte — ce qui ne suffit pas à recevoir une course.
+  final int enLigne;
+
+  /// `can_accept_orders` : en ligne **et** dossier validé **et** compte actif
+  /// (L1, calculé par le serveur).
+  final int disponibles;
+
+  /// Dossiers déposés qui attendent une instruction : c'est le seul compteur
+  /// qui appelle un geste.
+  final int dossiersAInstruire;
+
+  final int livraisons;
+
+  /// Moyenne sur les seuls livreurs **notés**. Nulle quand aucun ne l'est —
+  /// « 0,0 » se lirait comme une flotte mal notée.
+  final double? noteMoyenne;
+
+  final int livreursNotes;
 }

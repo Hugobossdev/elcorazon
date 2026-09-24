@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/utils/dialog_helper.dart';
@@ -9,6 +10,10 @@ import 'package:admin/screens/admin/onglet_horaires.dart';
 import 'package:admin/screens/admin/zone_form_dialog.dart';
 import 'package:admin/screens/admin/zone_selection_tab.dart';
 
+/// Les onglets des paramètres. Seul « Sécurité » est ouvert à tout compte :
+/// c'est un réglage du poste, pas une donnée du serveur.
+enum _Onglet { zones, tarifs, horaires, securite }
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -16,10 +21,7 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
+class _SettingsScreenState extends State<SettingsScreen> {
   // Les tarifs de livraison ne sont plus tenus ici. Cet écran portait cinq
   // zones écrites en dur (« Zone Centre », « Zone Nord »…) dont les tarifs
   // étaient enregistrés dans les préférences locales du poste : ils
@@ -49,19 +51,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this)
-      // Le bouton d'enregistrement ne s'affiche que sur « Sécurité » :
-      // sans cet écouteur, il resterait figé sur l'état du premier onglet.
-      ..addListener(() {
-        if (mounted) setState(() {});
-      });
     _loadSettings();
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
   }
 
   /// Les seuls réglages qui restent **locaux au poste**, et qui doivent
@@ -75,7 +65,8 @@ class _SettingsScreenState extends State<SettingsScreen>
     _inactivityTimeout = Duration(minutes: timeoutMinutes);
     _autoLogoutEnabled = prefs.getBool(AdminAuthService.cleDeconnexionAuto) ?? true;
 
-    setState(() {});
+    // L'écran a pu être quitté pendant la lecture des préférences.
+    if (mounted) setState(() {});
   }
 
   Future<void> _saveSettings() async {
@@ -115,44 +106,78 @@ class _SettingsScreenState extends State<SettingsScreen>
     }
   }
 
+  /// Les onglets que ce compte peut lire.
+  ///
+  /// L'écran était ouvert à tout le personnel avec ses quatre onglets : un
+  /// cuisinier sans `restaurants.read` voyait les zones, les barèmes et les
+  /// horaires échouer en 403, affichés comme une panne. Les lectures suivent
+  /// le serveur — les zones `restaurants.read`, les horaires
+  /// `restaurants.read` ou `restaurants.operate` (`restaurants/backoffice.py`).
+  List<_Onglet> _ongletsPermis(BuildContext context) => [
+        if (context.peut('restaurants.read')) ...[_Onglet.zones, _Onglet.tarifs],
+        if (context.peutUne(const ['restaurants.read', 'restaurants.operate']))
+          _Onglet.horaires,
+        _Onglet.securite,
+      ];
+
+  Tab _entete(_Onglet onglet) => switch (onglet) {
+        _Onglet.zones => const Tab(icon: Icon(Icons.map), text: 'Zones'),
+        _Onglet.tarifs => const Tab(icon: Icon(Icons.local_shipping), text: 'Tarifs'),
+        _Onglet.horaires => const Tab(icon: Icon(Icons.access_time), text: 'Horaires'),
+        _Onglet.securite => const Tab(icon: Icon(Icons.security), text: 'Sécurité'),
+      };
+
+  Widget _contenu(_Onglet onglet) => switch (onglet) {
+        // Où l'on livre — la sélection des zones desservies.
+        _Onglet.zones => const ZoneSelectionTab(),
+        // Ce que coûte la livraison — le barème de chaque zone.
+        _Onglet.tarifs => _buildDeliveryRatesTab(),
+        _Onglet.horaires => const OngletHoraires(),
+        _Onglet.securite => _buildSecurityTab(),
+      };
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Paramètres'),
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: const [
-            Tab(icon: Icon(Icons.map), text: 'Zones'),
-            Tab(icon: Icon(Icons.local_shipping), text: 'Tarifs'),
-            Tab(icon: Icon(Icons.access_time), text: 'Horaires'),
-            Tab(icon: Icon(Icons.security), text: 'Sécurité'),
-          ],
-        ),
+    final onglets = _ongletsPermis(context);
+
+    // La clé suit la liste : si les droits changent en cours de session, le
+    // contrôleur est recréé à la bonne longueur au lieu de pointer un onglet
+    // qui n'existe plus.
+    return DefaultTabController(
+      key: ValueKey(onglets.join(',')),
+      length: onglets.length,
+      child: Builder(
+        builder: (context) {
+          final controleur = DefaultTabController.of(context);
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('Paramètres'),
+              bottom: TabBar(
+                isScrollable: true,
+                tabs: [for (final onglet in onglets) _entete(onglet)],
+              ),
+            ),
+            body: TabBarView(
+              children: [for (final onglet in onglets) _contenu(onglet)],
+            ),
+            // Le bouton ne suit que l'onglet « Sécurité » : les autres
+            // écrivent au serveur, ligne par ligne, au moment du geste. Un
+            // bouton global au-dessus d'eux laissait croire que rien n'était
+            // enregistré avant de l'avoir pressé — et qu'y toucher enregistrait
+            // tout.
+            floatingActionButton: ListenableBuilder(
+              listenable: controleur,
+              builder: (context, child) => onglets[controleur.index] == _Onglet.securite
+                  ? FloatingActionButton.extended(
+                      onPressed: _saveSettings,
+                      icon: const Icon(Icons.save),
+                      label: const Text('Enregistrer'),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          );
+        },
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // Où l'on livre — la sélection des zones desservies.
-          const ZoneSelectionTab(),
-          // Ce que coûte la livraison — le barème de chaque zone.
-          _buildDeliveryRatesTab(),
-          const OngletHoraires(),
-          _buildSecurityTab(),
-        ],
-      ),
-      // Le bouton ne suit plus que l'onglet « Sécurité » : les trois autres
-      // écrivent au serveur, ligne par ligne, au moment du geste. Un bouton
-      // global au-dessus d'eux laissait croire que rien n'était enregistré
-      // avant de l'avoir pressé — et qu'y toucher enregistrait tout.
-      floatingActionButton: _tabController.index == 3
-          ? FloatingActionButton.extended(
-              onPressed: _saveSettings,
-              icon: const Icon(Icons.save),
-              label: const Text('Enregistrer'),
-            )
-          : null,
     );
   }
 
@@ -312,11 +337,13 @@ class _SettingsScreenState extends State<SettingsScreen>
                       visualDensity: VisualDensity.compact,
                     ),
                   ),
-                TextButton.icon(
-                  onPressed: () => _editZone(zone),
-                  icon: const Icon(Icons.edit_outlined, size: 18),
-                  label: const Text('Modifier'),
-                ),
+                // Le barème d'une zone relève du siège, comme son ouverture.
+                if (context.peutReglerLesZones)
+                  TextButton.icon(
+                    onPressed: () => _editZone(zone),
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text('Modifier'),
+                  ),
               ],
             ),
             const SizedBox(height: 8),

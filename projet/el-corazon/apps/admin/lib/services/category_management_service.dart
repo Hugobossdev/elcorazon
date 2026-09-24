@@ -1,6 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
 
@@ -23,30 +24,44 @@ class CategoryManagementService extends ChangeNotifier {
 
   List<eccore.ManagedCategory> _categories = [];
   bool _isLoading = false;
-  String? _error;
+  Echec? _echec;
+
+  /// L'établissement dont la liste affichée provient. Nul tant que rien n'a
+  /// été lu — et c'est lui que le rangement désigne au serveur.
+  String? _etablissementLu;
 
   List<eccore.ManagedCategory> get categories => _categories;
   bool get isLoading => _isLoading;
-  String? get error => _error;
 
-  CategoryManagementService() {
-    _loadCategories();
-  }
+  /// Pourquoi la liste est vide, quand elle l'est **parce que la lecture a
+  /// échoué**. Nulle quand elle a abouti — fût-ce sur zéro catégorie.
+  Echec? get echec => _echec;
 
-  Future<void> _loadCategories() async {
+  /// L'établissement de la liste affichée.
+  String? get etablissement => _etablissementLu;
+
+  /// La carte d'**un** établissement, et le service le dit.
+  ///
+  /// La liste était chargée sans filtre : le siège voyait les catégories de
+  /// tous ses établissements mêlées, avec les mêmes noms répétés autant de fois
+  /// qu'il y a de cuisines — et les faisait glisser dans un ordre commun qui
+  /// n'existe pas, `sort_order` étant propre à chaque établissement.
+  ///
+  /// Le chargement ne se fait plus au constructeur : il partait à l'ouverture
+  /// de n'importe quel écran du back-office, le fournisseur étant monté une
+  /// fois pour toute l'application.
+  Future<void> chargerPour(String? slugEtablissement) async {
     _isLoading = true;
-    _error = null;
+    _echec = null;
     notifyListeners();
 
     try {
-      // Sans filtre d'établissement : le serveur rend déjà le périmètre du
-      // compte, et le restreindre ici à une enseigne écrite dans le code
-      // viderait l'écran de tout gérant rattaché à une autre.
-      final remote = await _catalog.categories();
+      final remote = await _catalog.categories(restaurantSlug: slugEtablissement);
       _categories = remote;
+      _etablissementLu = slugEtablissement;
       eccore.Journal.trace('CategoryManagementService: ${_categories.length} catégorie(s)');
     } on eccore.ApiException catch (e) {
-      _error = e.detail;
+      _echec = Echec.de(e);
       _categories = [];
       eccore.Journal.trace('CategoryManagementService: chargement impossible — ${e.code}');
     } finally {
@@ -55,14 +70,20 @@ class CategoryManagementService extends ChangeNotifier {
     }
   }
 
+  Future<void> _loadCategories() => chargerPour(_scope.current?.slug);
+
 
   /// Rafraîchir les catégories
   Future<void> refreshCategories() async {
     await _loadCategories();
   }
 
-  /// Créer une nouvelle catégorie
-  Future<eccore.ManagedCategory?> createCategory({
+  /// Crée une catégorie dans l'établissement courant. **Lève `ApiException`.**
+  ///
+  /// Elle rendait `null` sur refus, en gardant le motif dans un champ que
+  /// l'écran n'affichait pas : un nom déjà pris se soldait par « Erreur lors
+  /// de l'enregistrement », et l'opérateur ressaisissait le même nom.
+  Future<eccore.ManagedCategory> createCategory({
     required String name,
     required String displayName,
     required String emoji,
@@ -70,14 +91,12 @@ class CategoryManagementService extends ChangeNotifier {
     int? sortOrder,
   }) async {
     _isLoading = true;
-    _error = null;
     notifyListeners();
 
     try {
       final etablissement = await _scope.requireSlug();
       if (etablissement == null) {
-        _error = RestaurantScopeService.sansPerimetre;
-        return null;
+        throw StateError(RestaurantScopeService.sansPerimetre);
       }
 
       // L'unicité du slug est une contrainte de base : la vérifier ici par une
@@ -94,10 +113,6 @@ class CategoryManagementService extends ChangeNotifier {
       _categories.add(created);
       _sortCategories();
       return created;
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('CategoryManagementService: création refusée — ${e.code}');
-      return null;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -118,10 +133,9 @@ class CategoryManagementService extends ChangeNotifier {
     return base.replaceAll(RegExp('^-+|-+\u0024'), '');
   }
 
-  /// Mettre à jour une catégorie
-  Future<bool> updateCategory(eccore.ManagedCategory category) async {
+  /// Met à jour une catégorie. **Lève `ApiException`.**
+  Future<eccore.ManagedCategory> updateCategory(eccore.ManagedCategory category) async {
     _isLoading = true;
-    _error = null;
     notifyListeners();
 
     try {
@@ -139,87 +153,75 @@ class CategoryManagementService extends ChangeNotifier {
         _categories[index] = updated;
         _sortCategories();
       }
-      return true;
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('CategoryManagementService: mise à jour refusée — ${e.code}');
-      return false;
+      return updated;
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Supprimer une catégorie
-  /// Supprime une catégorie.
+  /// Supprime une catégorie. **Lève `ApiException`.**
   ///
   /// Le refus de supprimer une catégorie encore utilisée vient du serveur
   /// (`on_delete=PROTECT` sur les articles) : le vérifier ici par une lecture
   /// préalable laissait passer l'article ajouté entre la vérification et la
-  /// suppression.
-  Future<bool> deleteCategory(String categoryId) async {
+  /// suppression. Le 409 porte la phrase du serveur, que l'écran affiche telle
+  /// quelle — elle nomme ce qui bloque.
+  Future<void> deleteCategory(String categoryId) async {
     _isLoading = true;
-    _error = null;
     notifyListeners();
 
     try {
       await _catalog.deleteCategory(categoryId);
       _categories.removeWhere((c) => c.id == categoryId);
-      return true;
-    } on eccore.ApiException catch (e) {
-      _error = e.status == 409
-          ? 'Cette catégorie contient encore des articles.'
-          : e.detail;
-      eccore.Journal.trace('CategoryManagementService: suppression refusée — ${e.code}');
-      return false;
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  /// Réorganiser les catégories
-  /// Réordonne les catégories.
+  /// Range la carte : **un appel, une transaction**. Lève `ApiException`.
   ///
-  /// Un `PATCH` par catégorie déplacée : le contrat n'a pas de route de
-  /// réordonnancement en lot, et l'ordre est une simple valeur (`sort_order`).
-  Future<bool> reorderCategories(List<eccore.ManagedCategory> reorderedCategories) async {
+  /// Elle envoyait un `PATCH` par catégorie, en série, et remettait la liste
+  /// d'avant sur refus. Au quatrième refus, les trois premiers rangs étaient
+  /// déjà écrits : l'écran affichait alors un ordre que la base ne portait
+  /// pas, et le rechargement suivant le contredisait.
+  ///
+  /// La liste envoyée est **entière** — c'est celle de l'écran, qui ne montre
+  /// qu'un établissement. Le serveur refuse une liste partielle plutôt que de
+  /// laisser les absentes à leur ancien rang.
+  Future<void> reorderCategories(List<eccore.ManagedCategory> ordreVoulu) async {
+    final etablissement = _etablissementLu ?? _scope.current?.slug;
+    if (etablissement == null) {
+      throw StateError(RestaurantScopeService.sansPerimetre);
+    }
+
     final avant = List<eccore.ManagedCategory>.from(_categories);
-    _categories = List.from(reorderedCategories);
+    // L'ordre s'affiche tout de suite : un glisser-déposer qui attend le
+    // serveur pour bouger donne l'impression de n'avoir pas pris.
+    _categories = List.from(ordreVoulu);
     notifyListeners();
 
     try {
-      for (var i = 0; i < _categories.length; i++) {
-        await _catalog.updateCategory(
-          categoryId: _categories[i].id,
-          sortOrder: i + 1,
-        );
-      }
-      return true;
-    } on eccore.ApiException catch (e) {
-      // Remettre l'ordre affiché tel qu'il est réellement en base : laisser
-      // l'écran montrer un ordre que le serveur a refusé induirait l'opérateur
-      // en erreur au prochain chargement.
-      _categories = avant;
-      _error = e.detail;
+      _categories = await _catalog.reorderCategories(
+        restaurantSlug: etablissement,
+        categoryIds: [for (final categorie in ordreVoulu) categorie.id],
+      );
       notifyListeners();
-      eccore.Journal.trace('CategoryManagementService: réordonnancement refusé — ${e.code}');
-      return false;
+    } on eccore.ApiException catch (e) {
+      // Rien n'a été écrit — la route est transactionnelle : remettre l'ordre
+      // d'avant, c'est remettre celui de la base.
+      _categories = avant;
+      notifyListeners();
+      eccore.Journal.trace('CategoryManagementService: rangement refusé — ${e.code}');
+      rethrow;
     }
   }
 
-  /// Activer/Désactiver une catégorie
-  Future<bool> toggleCategoryStatus(String categoryId) async {
-    try {
-      final category = _categories.firstWhere((c) => c.id == categoryId);
-      final updatedCategory = category.copyWith(isActive: !category.isActive);
-      return await updateCategory(updatedCategory);
-    } catch (e) {
-      eccore.Journal.trace(
-        'CategoryManagementService: Erreur toggle statut catégorie - $e',
-      );
-      return false;
-    }
+  /// Active ou désactive une catégorie. **Lève `ApiException`.**
+  Future<void> toggleCategoryStatus(String categoryId) async {
+    final category = _categories.firstWhere((c) => c.id == categoryId);
+    await updateCategory(category.copyWith(isActive: !category.isActive));
   }
 
   /// Statistiques d'une catégorie : nombre d'articles et disponibilité.

@@ -1,152 +1,163 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
-/// Dossiers clients — `/administration/customers/` (Phase 6).
+/// Ce qu'un compte client peut être, du point de vue du back-office.
+enum EtatDuClient {
+  tous('Tous', null),
+  actifs('Actifs', true),
+  suspendus('Suspendus', false);
+
+  const EtatDuClient(this.libelle, this.actif);
+
+  final String libelle;
+
+  /// Ce qui part au serveur (`is_active`), `null` pour « tous ».
+  final bool? actif;
+}
+
+/// Comptes clients — `/administration/customers/` (Phase 6).
 ///
-/// Ce service a beaucoup maigri, et chaque méthode disparue correspond à un
-/// geste que le back-office ne devait pas faire :
+/// ## Ce qui a changé
 ///
-/// * **créditer des points de fidélité.** L'ancien code écrivait le solde du
-///   client puis insérait à la main une ligne dans le journal des points : deux
-///   écritures sans transaction, et surtout un back-office capable de frapper
-///   monnaie. Les points s'acquièrent en commandant (`apps.loyalty`) ;
-/// * **modifier le profil d'un client** avec un dictionnaire libre, où rien
-///   n'interdisait `email` — c'est-à-dire un chemin de reprise de compte par
-///   « mot de passe oublié » ;
-/// * **recalculer ses statistiques dans le navigateur**, à partir des pages de
-///   commandes qui avaient bien voulu se charger. Le panier moyen changeait
-///   quand on tournait la page. C'est désormais un agrégat serveur
-///   ([eccore.CustomerStats]).
-///
-/// Reste ce qui appartient vraiment au guichet : consulter, chercher, bloquer.
+/// * **La liste était téléchargée entière**, page après page, et filtrée dans
+///   l'écran : sur une plateforme à cinquante mille comptes, l'écran chargeait
+///   cinquante mille lignes pour en montrer vingt, et la recherche ne portait
+///   que sur ce qui avait été chargé. Le serveur pagine, cherche et filtre ;
+///   l'écran demande **une page**.
+/// * **Réactiver un compte était impossible.** `reactivateClient` existait et
+///   n'avait aucun site d'appel : un client suspendu le restait, et le menu
+///   proposait « Suspendre » sur un compte déjà suspendu.
+/// * Les écritures laissent remonter l'`ApiException` : le motif de refus
+///   s'affiche au lieu d'un échec silencieux.
 class ClientManagementService extends ChangeNotifier {
-  static final ClientManagementService _instance =
-      ClientManagementService._internal();
-  factory ClientManagementService() => _instance;
-  ClientManagementService._internal();
+  ClientManagementService({eccore.AdministrationRepository? depot}) : _depot = depot;
+
+  final eccore.AdministrationRepository? _depot;
 
   eccore.AdministrationRepository get _admin =>
-      eccore.AdministrationRepository(apiClient: AdminAuthService().apiClient);
+      _depot ?? eccore.AdministrationRepository(apiClient: AdminAuthService().apiClient);
 
-  eccore.ManagedOrderRepository get _orders =>
-      eccore.ManagedOrderRepository(apiClient: AdminAuthService().apiClient);
+  eccore.Page<eccore.Customer>? _page;
+  int _numeroDePage = 1;
+  String _recherche = '';
+  EtatDuClient _etat = EtatDuClient.tous;
+  bool _enCours = false;
+  Echec? _echec;
 
-  List<eccore.Customer> _clients = [];
-  bool _isLoading = false;
-  String? _error;
-  bool _isInitialized = false;
+  List<eccore.Customer> get clients => _page?.results ?? const [];
+  int get total => _page?.count ?? 0;
+  int get numeroDePage => _numeroDePage;
+  bool get aPageSuivante => _page?.hasNext ?? false;
+  bool get aPagePrecedente => _page?.hasPrevious ?? false;
+  bool get isLoading => _enCours;
+  Echec? get echec => _echec;
+  String get recherche => _recherche;
+  EtatDuClient get etat => _etat;
 
-  List<eccore.Customer> get clients => _clients;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
+  static const int tailleDePage = 20;
 
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-    _isInitialized = true;
-    await loadClients();
+  int get nombreDePages => total == 0 ? 1 : (total + tailleDePage - 1) ~/ tailleDePage;
+
+  /// Charge la première page pour la recherche et le filtre donnés.
+  ///
+  /// Un changement de critère **remet la pagination à zéro** : rester en page 4
+  /// après avoir changé de filtre montrerait la page 4 d'une autre liste.
+  Future<void> chercher({String? recherche, EtatDuClient? etat}) async {
+    _recherche = recherche ?? _recherche;
+    _etat = etat ?? _etat;
+    _numeroDePage = 1;
+    await _lire(
+      () => _admin.customersPage(
+        search: _recherche.trim().isEmpty ? null : _recherche.trim(),
+        isActive: _etat.actif,
+        pageSize: tailleDePage,
+      ),
+    );
   }
 
-  /// Charge les comptes clients.
-  ///
-  /// [search] est transmis au serveur plutôt que filtré ici : la liste est
-  /// paginée, et une recherche faite à l'écran ne trouverait que ce que la
-  /// première page contenait déjà.
-  Future<void> loadClients({bool force = false, String? search}) async {
-    if (_isLoading && !force) return;
+  Future<void> initialize() async {
+    if (_page == null && !_enCours) await chercher();
+  }
 
-    _isLoading = true;
-    _error = null;
+  Future<void> refresh() => _lire(() => _relirePage(_numeroDePage));
+
+  Future<void> pageSuivante() async {
+    final suivante = _page?.next;
+    if (suivante == null) return;
+    _numeroDePage += 1;
+    await _lire(() => _admin.customersAt(suivante));
+  }
+
+  Future<void> pagePrecedente() async {
+    final precedente = _page?.previous;
+    if (precedente == null) return;
+    _numeroDePage -= 1;
+    await _lire(() => _admin.customersAt(precedente));
+  }
+
+  Future<eccore.Page<eccore.Customer>> _relirePage(int numero) => _admin.customersPage(
+        search: _recherche.trim().isEmpty ? null : _recherche.trim(),
+        isActive: _etat.actif,
+        pageSize: tailleDePage,
+        page: numero,
+      );
+
+  Future<void> _lire(Future<eccore.Page<eccore.Customer>> Function() lecture) async {
+    _enCours = true;
+    _echec = null;
     notifyListeners();
-
     try {
-      final comptes = await _admin.customers(search: search);
-      _clients = comptes;
+      _page = await lecture();
     } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Clients : chargement impossible — ${e.code}');
+      _echec = Echec.de(e);
+      eccore.Journal.trace('Clients : lecture impossible — ${e.code}');
     } finally {
-      _isLoading = false;
+      _enCours = false;
       notifyListeners();
     }
   }
 
-  Future<void> refresh() => loadClients(force: true);
+  /// Un compte client, par son identifiant — lève `ApiException`. Sert à
+  /// ouvrir la fiche d'un client trouvé ailleurs que dans la liste (la
+  /// recherche globale ne rend qu'un identifiant et deux libellés).
+  Future<eccore.Customer> client(String clientId) => _admin.customer(clientId);
 
-  Future<void> searchClients(String query) =>
-      loadClients(force: true, search: query);
+  /// La fiche agrégée d'un client — lève `ApiException`.
+  Future<eccore.CustomerStats> fiche(String clientId) => _admin.customerStats(clientId);
 
-  /// Fiche chiffrée — commandes, dépense, adresses, points.
-  Future<eccore.CustomerStats?> getClientStats(String clientId) async {
-    try {
-      return await _admin.customerStats(clientId);
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Clients : fiche indisponible — ${e.code}');
-      return null;
-    }
-  }
+  /// Les commandes d'un client, **une page**, les plus récentes d'abord.
+  Future<eccore.Page<eccore.Order>> commandes(String clientId, {int pageSize = 20}) =>
+      eccore.ManagedOrderRepository(apiClient: AdminAuthService().apiClient)
+          .listPage(customerId: clientId, pageSize: pageSize);
 
-  /// Commandes d'un client, dans le périmètre d'établissements du compte
-  /// connecté — c'est le serveur qui l'applique.
-  Future<List<eccore.Order>> getClientOrders(String clientId) async {
-    try {
-      final commandes = await _orders.list(customerId: clientId);
-      return commandes;
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Clients : historique indisponible — ${e.code}');
-      return [];
-    }
-  }
-
-  /// Ferme un compte — le serveur **révoque ses jetons** dans la foulée.
-  ///
-  /// Le motif n'est plus facultatif : un compte fermé sans motif est un litige
-  /// qu'on ne saura pas instruire six mois plus tard, quand le client
-  /// rappellera. Le serveur le refuse à vide.
-  /// Les notes internes d'un client. Lève `ApiException` : la fiche dit la
-  /// panne à l'endroit où les notes auraient été.
   Future<List<eccore.InternalNote>> notesOf(String clientId) => _admin.customerNotes(clientId);
 
   Future<eccore.InternalNote> addNote(String clientId, String contenu) =>
       _admin.addCustomerNote(customerId: clientId, content: contenu);
 
-  Future<bool> suspendClient(String clientId, {required String reason}) async {
-    try {
-      final maj = await _admin.blockCustomer(
-        customerId: clientId,
-        reason: reason,
-      );
-      _remplacer(maj);
-      return true;
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Clients : blocage refusé — ${e.code}');
-      notifyListeners();
-      return false;
-    }
+  /// Ferme un compte (permission `customers.block`). Le motif est exigé par le
+  /// serveur, et conservé au journal d'audit. Lève `ApiException`.
+  Future<void> suspendre(String clientId, {required String motif}) async {
+    _remplacer(await _admin.blockCustomer(customerId: clientId, reason: motif));
   }
 
-  /// Rouvre un compte. L'utilisateur devra se reconnecter.
-  Future<bool> reactivateClient(String clientId) async {
-    try {
-      final maj = await _admin.unblockCustomer(clientId);
-      _remplacer(maj);
-      return true;
-    } on eccore.ApiException catch (e) {
-      _error = e.detail;
-      eccore.Journal.trace('Clients : déblocage refusé — ${e.code}');
-      notifyListeners();
-      return false;
-    }
+  /// Rouvre un compte (permission `customers.block`). Lève `ApiException`.
+  Future<void> reactiver(String clientId) async {
+    _remplacer(await _admin.unblockCustomer(clientId));
   }
 
   void _remplacer(eccore.Customer client) {
-    final index = _clients.indexWhere((c) => c.id == client.id);
-    if (index != -1) _clients[index] = client;
+    final page = _page;
+    if (page == null) return;
+    _page = eccore.Page<eccore.Customer>(
+      results: [for (final existant in page.results) existant.id == client.id ? client : existant],
+      count: page.count,
+      next: page.next,
+      previous: page.previous,
+    );
     notifyListeners();
   }
-
 }

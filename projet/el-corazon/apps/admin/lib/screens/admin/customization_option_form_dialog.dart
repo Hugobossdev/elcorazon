@@ -216,11 +216,15 @@ class _CustomizationOptionFormDialogState
                                             _priceModifierController.text,
                                           ) ??
                                           0.0;
+                                      final devise = widget.option?.devise ??
+                                          context
+                                              .read<CustomizationManagementService>()
+                                              .deviseDeCreation;
                                       return Text(
                                         price > 0
-                                            ? '+${formatPrice(price)}'
+                                            ? '+${formatMajeur(price, devise)}'
                                             : price < 0
-                                            ? formatPrice(price)
+                                            ? formatMajeur(price, devise)
                                             : 'Gratuit',
                                         style: TextStyle(
                                           fontSize: 14,

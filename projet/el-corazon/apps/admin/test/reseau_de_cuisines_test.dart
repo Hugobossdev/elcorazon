@@ -2,10 +2,14 @@ import 'package:admin/presentation/filtres_geographiques.dart';
 import 'package:admin/presentation/filtres_supervision.dart';
 import 'package:admin/screens/admin/fermetures_exceptionnelles.dart';
 import 'package:admin/screens/admin/reseau/activite_reseau.dart';
+import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 
 /// Le réseau vu du back-office : filtres hiérarchiques, structure chiffrée,
 /// fermetures exceptionnelles.
@@ -77,7 +81,13 @@ class _DepotFermetures implements eccore.ManagedKitchenClosureRepository {
   }
 }
 
+const _canalStockage = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(_canalStockage, (call) async => null);
+
   final cuisines = [
     _cuisine('lome', pays: 'TG', ville: 'Lomé', villeSlug: 'lome'),
     _cuisine('cocody', pays: 'CI', ville: 'Abidjan', villeSlug: 'abidjan'),
@@ -131,6 +141,14 @@ void main() {
   });
 
   testWidgets('une fermeture en cours se lit, et s’annule', (tester) async {
+    // Annuler une fermeture est un geste d'exploitation : sans
+    // `restaurants.operate` (le gérant) ou `restaurants.write` (le siège),
+    // l'écran ne l'offre plus — le serveur le refusait de toute façon, mais
+    // après le clic.
+    final auth = AdminAuthService(ProviderContainer())
+      ..permissionsDeTest = const ['restaurants.operate'];
+    addTearDown(() => auth.permissionsDeTest = null);
+
     final depot = _DepotFermetures()
       ..fermetures.add(
         eccore.KitchenClosure(
@@ -144,9 +162,16 @@ void main() {
       );
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: FermeturesExceptionnelles(restaurantId: 'r1', nomCuisine: 'Cocody', depot: depot),
+      ChangeNotifierProvider<AdminAuthService>.value(
+        value: auth,
+        child: MaterialApp(
+          home: Scaffold(
+            body: FermeturesExceptionnelles(
+              restaurantId: 'r1',
+              nomCuisine: 'Cocody',
+              depot: depot,
+            ),
+          ),
         ),
       ),
     );

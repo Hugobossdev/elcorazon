@@ -1,143 +1,274 @@
+import 'dart:async';
+
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:admin/services/driver_schedule_service.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+
+import 'package:admin/presentation/autorisations.dart';
+import 'package:admin/presentation/echec.dart';
+import 'package:admin/presentation/retours.dart';
 import 'package:admin/presentation/statut_livreur.dart';
+import 'package:admin/services/driver_schedule_service.dart';
 
-/// Écran de gestion des horaires d'un livreur
+/// Le planning d'un livreur — **indicatif**, jamais opposable.
+///
+/// L'éligibilité reste, côté serveur, « en ligne, dossier validé, compte
+/// actif » (L1). Un créneau ne s'y ajoute pas : refuser une course à 18 h 05 à
+/// quelqu'un de présent laisserait la commande sans porteur. Ce planning dit
+/// qui l'exploitation **attend**, et lui permet de constater les écarts.
+///
+/// ## Ce que l'écran montrait mal (23 septembre 2026)
+///
+/// * **Un seul créneau par jour.** Sept lignes, une par jour, chacune prenant
+///   le premier créneau trouvé : un livreur en service du midi *et* du soir
+///   n'en montrait qu'un, et modifier l'heure affichée écrasait ce créneau-là
+///   en laissant l'autre intact et invisible.
+/// * **Les refus étaient muets.** Chaque geste appelait `saveSchedule` sans en
+///   lire le résultat : un créneau refusé — parce qu'il en recouvre un autre,
+///   ou faute du droit `couriers.write` — revenait à sa valeur d'avant sans
+///   un mot, et l'exploitation recommençait.
+/// * **« Horaires mis à jour avec succès » s'affichait avant le serveur.**
+///   L'uniformisation lançait sept écritures sans les attendre, puis annonçait
+///   le succès ; les sept pouvaient échouer.
+/// * **Rien ne se supprimait.** La route existe (`DELETE /delivery/shifts/`),
+///   le service l'appelait, aucun bouton ne s'en servait.
 class DriverScheduleScreen extends StatefulWidget {
-  final eccore.CourierProfile driver;
+  const DriverScheduleScreen({required this.driver, super.key});
 
-  const DriverScheduleScreen({
-    required this.driver, super.key,
-  });
+  final eccore.CourierProfile driver;
 
   @override
   State<DriverScheduleScreen> createState() => _DriverScheduleScreenState();
 }
 
 class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
+  /// Le geste en cours, pour n'en laisser partir qu'un à la fois : deux
+  /// écritures concurrentes sur le même planning se contredisent, et le
+  /// serveur refuserait la seconde sur un état que l'écran n'a pas encore lu.
+  bool _enEcriture = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context
-          .read<DriverScheduleService>()
-          .loadDriverSchedules(widget.driver.id);
+      if (mounted) unawaited(_charger());
     });
+  }
+
+  Future<void> _charger() =>
+      context.read<DriverScheduleService>().loadDriverSchedules(widget.driver.id);
+
+  /// Exécute une écriture et **dit** ce qu'il en advient.
+  ///
+  /// Le succès n'est annoncé qu'après la réponse du serveur ; un refus reste à
+  /// l'écran avec la phrase du serveur — « Ce livreur est déjà planifié de
+  /// 09:00 à 17:00 ce jour-là », qui indique quoi corriger.
+  Future<void> _ecrire(Future<void> Function() geste, {required String succes}) async {
+    if (_enEcriture) return;
+    setState(() => _enEcriture = true);
+    try {
+      await geste();
+      if (mounted) annoncer(context, succes);
+    } on eccore.ApiException catch (e) {
+      if (mounted) annoncerEchec(context, Echec.de(e));
+    } finally {
+      if (mounted) setState(() => _enEcriture = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final planning = context.watch<DriverScheduleService>();
+    final peutEcrire = context.peut('couriers.write');
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Planning Livreur'),
-        centerTitle: true,
-        elevation: 0,
-      ),
-      body: Consumer<DriverScheduleService>(
-        builder: (context, scheduleService, child) {
-          final schedules =
-              scheduleService.getDriverSchedules(widget.driver.id);
-
-          if (schedules.isEmpty && !scheduleService.isLoading) {
-            scheduleService.loadDriverSchedules(widget.driver.id);
-          }
-
-          if (scheduleService.isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          return Column(
-            children: [
-              _buildDriverHeader(theme),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 16.0),
-                      child: Text(
-                        'Disponibilités hebdomadaires',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    ...List.generate(7, (index) {
-                      final dayOfWeek = index + 1;
-                      final schedule = schedules.firstWhere(
-                        (s) => s.dayOfWeek == dayOfWeek,
-                        orElse: () => DriverSchedule(
-                          driverId: widget.driver.id,
-                          dayOfWeek: dayOfWeek,
-                          startTime: const TimeOfDay(hour: 9, minute: 0),
-                          endTime: const TimeOfDay(hour: 21, minute: 0),
-                        ),
-                      );
-
-                      return _buildScheduleCard(
-                          schedule, scheduleService, theme,);
-                    }),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-      floatingActionButton: Consumer<DriverScheduleService>(
-          builder: (context, scheduleService, _) {
-        final schedules = scheduleService.getDriverSchedules(widget.driver.id);
-        return FloatingActionButton.extended(
-          onPressed: () => _copyScheduleToAllDays(schedules, scheduleService),
-          icon: const Icon(Icons.copy_all),
-          label: const Text('Uniformiser les horaires'),
-          tooltip:
-              'Copier les horaires du premier jour actif sur toute la semaine',
-        );
-      },),
-    );
-  }
-
-  Widget _buildDriverHeader(ThemeData theme) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primary,
-        borderRadius: const BorderRadius.only(
-          bottomLeft: Radius.circular(30),
-          bottomRight: Radius.circular(30),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: theme.colorScheme.primary.withValues(alpha: 0.3),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
+        title: const Text('Planning du livreur'),
+        actions: [
+          IconButton(
+            tooltip: 'Recharger',
+            icon: const Icon(Icons.refresh),
+            onPressed: planning.isLoading ? null : () => unawaited(_charger()),
           ),
         ],
       ),
+      body: Column(
+        children: [
+          _EnTeteLivreur(driver: widget.driver),
+          if (planning.echec != null)
+            BandeauEchec(echec: planning.echec!, onReessayer: () => unawaited(_charger())),
+          if (!peutEcrire)
+            const _Note(
+              icone: Icons.lock_outline_rounded,
+              texte: 'Lecture seule : modifier un planning demande le droit '
+                  '« Gérer les livreurs » (couriers.write).',
+            ),
+          const _Note(
+            icone: Icons.info_outline,
+            // Sans cette phrase, un planning vide passe pour une interdiction
+            // de travailler — et un créneau pour une garantie de présence.
+            texte: 'Le planning est indicatif : il ne conditionne pas les '
+                'courses. Un livreur en ligne et validé reçoit des propositions, '
+                'créneau ou pas.',
+          ),
+          if (planning.isLoading && planning.getDriverSchedules(widget.driver.id).isEmpty)
+            const Expanded(child: Center(child: CircularProgressIndicator()))
+          else
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                itemCount: 7,
+                itemBuilder: (context, index) {
+                  final jour = index + 1;
+                  return _CarteDuJour(
+                    jour: jour,
+                    libelle: planning.getDayName(jour),
+                    creneaux: planning.creneauxDuJour(widget.driver.id, jour),
+                    modifiable: peutEcrire && !_enEcriture,
+                    theme: theme,
+                    onAjouter: () => unawaited(_ajouter(jour)),
+                    onModifier: (creneau) => unawaited(_modifierLesHeures(creneau)),
+                    onBasculer: (creneau, present) => unawaited(
+                      _ecrire(
+                        () => context
+                            .read<DriverScheduleService>()
+                            .saveSchedule(creneau.copyWith(isAvailable: present)),
+                        succes: present
+                            ? 'Créneau rétabli'
+                            : 'Absence marquée sur ce créneau',
+                      ),
+                    ),
+                    onSupprimer: (creneau) => unawaited(_supprimer(creneau)),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _ajouter(int jour) async {
+    final heures = await _demanderLesHeures(
+      titre: 'Ajouter un créneau',
+      debut: const TimeOfDay(hour: 9, minute: 0),
+      fin: const TimeOfDay(hour: 17, minute: 0),
+    );
+    if (heures == null || !mounted) return;
+
+    await _ecrire(
+      () => context.read<DriverScheduleService>().saveSchedule(
+            DriverSchedule(
+              driverId: widget.driver.id,
+              dayOfWeek: jour,
+              startTime: heures.$1,
+              endTime: heures.$2,
+            ),
+          ),
+      succes: 'Créneau ajouté',
+    );
+  }
+
+  Future<void> _modifierLesHeures(DriverSchedule creneau) async {
+    final heures = await _demanderLesHeures(
+      titre: 'Modifier le créneau',
+      debut: creneau.startTime,
+      fin: creneau.endTime,
+    );
+    if (heures == null || !mounted) return;
+
+    await _ecrire(
+      () => context.read<DriverScheduleService>().saveSchedule(
+            creneau.copyWith(startTime: heures.$1, endTime: heures.$2),
+          ),
+      succes: 'Créneau modifié',
+    );
+  }
+
+  Future<void> _supprimer(DriverSchedule creneau) async {
+    // Une absence ponctuelle se **marque** ; supprimer efface la ligne du
+    // planning, et ce n'est pas la même chose. Le dialogue le rappelle.
+    final confirme = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Retirer ce créneau ?'),
+        content: Text(
+          'Le créneau ${creneau.startTime.format(context)} – '
+          '${creneau.endTime.format(context)} disparaîtra du planning.\n\n'
+          'Pour une absence ponctuelle, décochez plutôt « Présent » : '
+          'le créneau reste lisible.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Retirer'),
+          ),
+        ],
+      ),
+    );
+    if (confirme != true || !mounted) return;
+
+    await _ecrire(
+      () => context
+          .read<DriverScheduleService>()
+          .deleteSchedule(creneau.id!, widget.driver.id),
+      succes: 'Créneau retiré',
+    );
+  }
+
+  /// Demande un début et une fin. Rend `null` si l'un des deux est abandonné —
+  /// enregistrer une moitié de créneau n'aurait pas de sens.
+  Future<(TimeOfDay, TimeOfDay)?> _demanderLesHeures({
+    required String titre,
+    required TimeOfDay debut,
+    required TimeOfDay fin,
+  }) async {
+    final nouveauDebut = await showTimePicker(
+      context: context,
+      initialTime: debut,
+      helpText: '$titre — début de service',
+    );
+    if (nouveauDebut == null || !mounted) return null;
+
+    final nouvelleFin = await showTimePicker(
+      context: context,
+      initialTime: fin,
+      helpText: '$titre — fin de service',
+    );
+    if (nouvelleFin == null) return null;
+    return (nouveauDebut, nouvelleFin);
+  }
+}
+
+class _EnTeteLivreur extends StatelessWidget {
+  const _EnTeteLivreur({required this.driver});
+
+  final eccore.CourierProfile driver;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      color: scheme.primaryContainer,
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-            child: CircleAvatar(
-              radius: 30,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              child: Text(
-                widget.driver.fullName.substring(0, 1).toUpperCase(),
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.primary,
-                ),
+          CircleAvatar(
+            radius: 26,
+            backgroundColor: scheme.primary,
+            child: Text(
+              driver.fullName.isEmpty ? '?' : driver.fullName.characters.first.toUpperCase(),
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: scheme.onPrimary,
               ),
             ),
           ),
@@ -147,49 +278,31 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.driver.fullName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
+                  driver.fullName,
+                  style: TextStyle(
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
+                    color: scheme.onPrimaryContainer,
                   ),
                 ),
                 const SizedBox(height: 4),
-                Row(
-                  children: [
-                    const Icon(Icons.email_outlined,
-                        color: Colors.white70, size: 16,),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        widget.driver.email,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+                Text(
+                  driver.email,
+                  style: TextStyle(fontSize: 13, color: scheme.onPrimaryContainer),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
+                // « En service » / « Hors service » disait l'état du **dossier**
+                // — un livreur validé mais déconnecté s'y lisait « en service ».
+                // Le statut, lui, est celui que le reste du back-office montre.
                 Row(
                   children: [
-                    Icon(Icons.circle,
-                        color: widget.driver.estValide
-                            ? Colors.greenAccent
-                            : Colors.orangeAccent,
-                        size: 12,),
-                    const SizedBox(width: 8),
+                    Icon(driver.statut.icone, size: 14, color: scheme.onPrimaryContainer),
+                    const SizedBox(width: 6),
                     Text(
-                      widget.driver.estValide
-                          ? 'En service'
-                          : 'Hors service',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      '${driver.statut.libelle} • '
+                      '${driver.estValide ? 'dossier validé' : 'dossier non validé'}',
+                      style: TextStyle(fontSize: 13, color: scheme.onPrimaryContainer),
                     ),
                   ],
                 ),
@@ -200,310 +313,183 @@ class _DriverScheduleScreenState extends State<DriverScheduleScreen> {
       ),
     );
   }
+}
 
-  Widget _buildScheduleCard(
-    DriverSchedule schedule,
-    DriverScheduleService scheduleService,
-    ThemeData theme,
-  ) {
-    final dayName = scheduleService.getDayName(schedule.dayOfWeek);
-    final isAvailable = schedule.isAvailable;
+class _Note extends StatelessWidget {
+  const _Note({required this.icone, required this.texte});
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: isAvailable ? theme.cardColor : theme.scaffoldBackgroundColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isAvailable
-              ? theme.colorScheme.primary.withValues(alpha: 0.1)
-              : theme.disabledColor.withValues(alpha: 0.1),
-          width: 2,
-        ),
-        boxShadow: isAvailable
-            ? [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ]
-            : null,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: isAvailable
-                              ? theme.colorScheme.primaryContainer
-                                  .withValues(alpha: 0.5)
-                              : theme.disabledColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          Icons.calendar_today_rounded,
-                          size: 20,
-                          color: isAvailable
-                              ? theme.colorScheme.primary
-                              : theme.disabledColor,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        dayName,
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: isAvailable ? null : theme.disabledColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Switch.adaptive(
-                    value: isAvailable,
-                    activeThumbColor: theme.colorScheme.primary,
-                    onChanged: (value) {
-                      final updated = schedule.copyWith(isAvailable: value);
-                      scheduleService.saveSchedule(updated);
-                    },
-                  ),
-                ],
-              ),
-              if (isAvailable) ...[
-                const Divider(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildTimeSelector(
-                        context: context,
-                        label: 'Début de service',
-                        time: schedule.startTime,
-                        icon: Icons.wb_sunny_outlined,
-                        color: Colors.orange,
-                        onTimeSelected: (time) {
-                          final updated = schedule.copyWith(
-                            startTime: time,
-                            isAvailable: true,
-                          );
-                          scheduleService.saveSchedule(updated);
-                        },
-                      ),
-                    ),
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 12),
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: theme.dividerColor.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.arrow_forward_rounded,
-                          size: 16, color: Colors.grey,),
-                    ),
-                    Expanded(
-                      child: _buildTimeSelector(
-                        context: context,
-                        label: 'Fin de service',
-                        time: schedule.endTime,
-                        icon: Icons.nightlight_round,
-                        color: Colors.indigo,
-                        onTimeSelected: (time) {
-                          final updated = schedule.copyWith(
-                            endTime: time,
-                            isAvailable: true,
-                          );
-                          scheduleService.saveSchedule(updated);
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ] else
-                Container(
-                  margin: const EdgeInsets.only(top: 12),
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: theme.disabledColor.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.block, size: 16, color: theme.disabledColor),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Livreur non disponible',
-                        style: TextStyle(
-                          color: theme.disabledColor,
-                          fontStyle: FontStyle.italic,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
+  final IconData icone;
+  final String texte;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icone, size: 16, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              texte,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildTimeSelector({
-    required BuildContext context,
-    required String label,
-    required TimeOfDay time,
-    required IconData icon,
-    required Color color,
-    required Function(TimeOfDay) onTimeSelected,
-  }) {
-    final theme = Theme.of(context);
+/// Un jour de la semaine et **tous** ses créneaux.
+class _CarteDuJour extends StatelessWidget {
+  const _CarteDuJour({
+    required this.jour,
+    required this.libelle,
+    required this.creneaux,
+    required this.modifiable,
+    required this.theme,
+    required this.onAjouter,
+    required this.onModifier,
+    required this.onBasculer,
+    required this.onSupprimer,
+  });
 
-    return InkWell(
-      onTap: () async {
-        final selectedTime = await showTimePicker(
-          context: context,
-          initialTime: time,
-          builder: (context, child) {
-            return Theme(
-              data: theme.copyWith(
-                timePickerTheme: TimePickerThemeData(
-                  dialHandColor: theme.colorScheme.primary,
-                ),
-              ),
-              child: child!,
-            );
-          },
-        );
-        if (selectedTime != null) {
-          onTimeSelected(selectedTime);
-        }
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        decoration: BoxDecoration(
-          color: theme.cardColor,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: theme.dividerColor),
-        ),
+  final int jour;
+  final String libelle;
+  final List<DriverSchedule> creneaux;
+  final bool modifiable;
+  final ThemeData theme;
+  final VoidCallback onAjouter;
+  final void Function(DriverSchedule creneau) onModifier;
+  final void Function(DriverSchedule creneau, bool present) onBasculer;
+  final void Function(DriverSchedule creneau) onSupprimer;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = theme.colorScheme;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, size: 14, color: color),
-                const SizedBox(width: 4),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: theme.hintColor,
-                    fontWeight: FontWeight.w500,
+                Icon(Icons.calendar_today_rounded, size: 18, color: scheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    libelle,
+                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                   ),
+                ),
+                TextButton.icon(
+                  onPressed: modifiable ? onAjouter : null,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Ajouter'),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: theme.textTheme.bodyLarge?.color,
-                letterSpacing: 1,
-              ),
-            ),
+            if (creneaux.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Aucun créneau planifié.',
+                  style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                ),
+              )
+            else
+              for (final creneau in creneaux)
+                _LigneCreneau(
+                  creneau: creneau,
+                  modifiable: modifiable,
+                  onModifier: () => onModifier(creneau),
+                  onBasculer: (present) => onBasculer(creneau, present),
+                  onSupprimer: () => onSupprimer(creneau),
+                ),
           ],
         ),
       ),
     );
   }
+}
 
-  void _copyScheduleToAllDays(
-    List<DriverSchedule> schedules,
-    DriverScheduleService scheduleService,
-  ) {
-    final sourceSchedule = schedules.firstWhere(
-      (s) => s.isAvailable,
-      orElse: () => schedules.isNotEmpty
-          ? schedules.first
-          : DriverSchedule(
-              driverId: widget.driver.id,
-              dayOfWeek: 1,
-              startTime: const TimeOfDay(hour: 9, minute: 0),
-              endTime: const TimeOfDay(hour: 21, minute: 0),
-            ),
-    );
+class _LigneCreneau extends StatelessWidget {
+  const _LigneCreneau({
+    required this.creneau,
+    required this.modifiable,
+    required this.onModifier,
+    required this.onBasculer,
+    required this.onSupprimer,
+  });
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Uniformiser les horaires ?'),
-        content: Text(
-            'Voulez-vous appliquer les horaires du ${scheduleService.getDayName(sourceSchedule.dayOfWeek)} '
-            '(${sourceSchedule.startTime.format(context)} - ${sourceSchedule.endTime.format(context)}) '
-            'à tous les autres jours de la semaine ?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              for (int day = 1; day <= 7; day++) {
-                // On repart de la ligne déjà enregistrée pour ce jour quand
-                // elle existe : sans cela, uniformiser créerait un doublon que
-                // le serveur refuse (un seul créneau par jour et heure de
-                // début).
-                final existante = schedules
-                    .where((ligne) => ligne.dayOfWeek == day)
-                    .firstOrNull;
-                final updated =
-                    (existante ??
-                            DriverSchedule(
-                              driverId: widget.driver.id,
-                              dayOfWeek: day,
-                              startTime: sourceSchedule.startTime,
-                              endTime: sourceSchedule.endTime,
-                            ))
-                        .copyWith(
-                          startTime: sourceSchedule.startTime,
-                          endTime: sourceSchedule.endTime,
-                          isAvailable: sourceSchedule.isAvailable,
-                        );
-                scheduleService.saveSchedule(updated);
-              }
+  final DriverSchedule creneau;
+  final bool modifiable;
+  final VoidCallback onModifier;
+  final ValueChanged<bool> onBasculer;
+  final VoidCallback onSupprimer;
 
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Row(
-                    children: [
-                      Icon(Icons.check_circle, color: Colors.white),
-                      SizedBox(width: 12),
-                      Text('Horaires mis à jour avec succès'),
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final present = creneau.isAvailable;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: modifiable ? onModifier : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      present ? Icons.schedule : Icons.event_busy,
+                      size: 18,
+                      color: present ? scheme.primary : scheme.outline,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '${creneau.startTime.format(context)} – '
+                      '${creneau.endTime.format(context)}',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: present ? null : scheme.outline,
+                        decoration: present ? null : TextDecoration.lineThrough,
+                      ),
+                    ),
+                    if (!present) ...[
+                      const SizedBox(width: 10),
+                      Text(
+                        'absent',
+                        style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                      ),
                     ],
-                  ),
-                  backgroundColor: Colors.green,
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),),
+                  ],
                 ),
-              );
-            },
-            child: const Text('Appliquer'),
+              ),
+            ),
+          ),
+          Tooltip(
+            message: present ? 'Marquer une absence' : 'Rétablir le créneau',
+            child: Switch.adaptive(
+              value: present,
+              onChanged: modifiable ? onBasculer : null,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Retirer ce créneau',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: modifiable ? onSupprimer : null,
           ),
         ],
       ),

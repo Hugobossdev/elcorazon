@@ -27,12 +27,29 @@ eccore.ManagedWithdrawal _retrait(
       createdAt: DateTime(2026, 9, 18),
     );
 
+eccore.ManagedRefund _remboursement(String id, {String statut = 'pending'}) =>
+    eccore.ManagedRefund(
+      id: id,
+      orderId: 'commande-$id',
+      orderReference: 'EC0000$id',
+      restaurantName: 'El Corazón Lomé',
+      customerName: 'Cliente $id',
+      provider: 'paydunya',
+      amount: const eccore.Money(amountMinor: 1500, currency: 'XOF'),
+      reason: 'Plat manquant',
+      status: statut,
+      requestedByName: 'Gérant',
+      createdAt: DateTime(2026, 9, 19),
+    );
+
 class _DepotFactice implements eccore.ManagedPayoutRepository {
-  _DepotFactice(this.retraits);
+  _DepotFactice(this.retraits, {this.remboursements = const []});
 
   List<eccore.ManagedWithdrawal> retraits;
+  List<eccore.ManagedRefund> remboursements;
   final List<String?> statutsDemandes = [];
   final List<String> constats = [];
+  final List<(String, String)> abandons = [];
   Completer<void>? retenue;
   eccore.ApiException? refus;
 
@@ -80,8 +97,12 @@ class _DepotFactice implements eccore.ManagedPayoutRepository {
       throw UnimplementedError();
 
   @override
-  Future<eccore.Page<eccore.ManagedRefund>> refunds({String? status, int pageSize = 50}) async =>
-      const eccore.Page(results: [], count: 0);
+  Future<eccore.Page<eccore.ManagedRefund>> refunds({String? status, int pageSize = 50}) async {
+    statutsDemandes.add(status);
+    final lignes =
+        status == null ? remboursements : remboursements.where((r) => r.status == status).toList();
+    return eccore.Page(results: lignes, count: lignes.length);
+  }
 
   @override
   Future<eccore.ManagedRefund> settleRefund({
@@ -89,9 +110,37 @@ class _DepotFactice implements eccore.ManagedPayoutRepository {
     String providerReference = '',
   }) =>
       throw UnimplementedError();
+
+  /// Une demande abandonnée : le motif rejoint le dossier, et la ligne quitte
+  /// « à traiter ».
+  @override
+  Future<eccore.ManagedRefund> cancelRefund({
+    required String refundId,
+    required String reason,
+  }) async {
+    abandons.add((refundId, reason));
+    await retenue?.future;
+    if (refus != null) throw refus!;
+    final avant = remboursements.firstWhere((r) => r.id == refundId);
+    return eccore.ManagedRefund(
+      id: avant.id,
+      orderId: avant.orderId,
+      orderReference: avant.orderReference,
+      restaurantName: avant.restaurantName,
+      customerName: avant.customerName,
+      provider: avant.provider,
+      amount: avant.amount,
+      reason: '${avant.reason} — abandonné : $reason',
+      status: eccore.StatutVersement.annule,
+      requestedByName: avant.requestedByName,
+      createdAt: avant.createdAt,
+    );
+  }
 }
 
 void main() {
+  abandons();
+
   test('« À traiter » demande au serveur les seules demandes en attente', () async {
     final depot = _DepotFactice([_retrait('a'), _retrait('b', statut: 'completed')]);
     final service = VersementsService(depot: depot);
@@ -181,5 +230,51 @@ void main() {
     await service.chargerRetraits();
 
     expect(service.aVerserParDevise, {'XOF': 5500, 'GHS': 12000});
+  });
+}
+
+/// L'abandon d'un remboursement — la sortie qui manquait.
+///
+/// Une demande saisie par erreur restait « en attente » pour toujours **et**
+/// consommait le plafond du remboursable : la commande ne pouvait plus être
+/// remboursée du bon montant, et le seul recours était l'administration Django.
+void abandons() {
+  test('une demande abandonnée quitte « à traiter » avec son motif', () async {
+    final depot = _DepotFactice([], remboursements: [_remboursement('7')]);
+    final service = VersementsService(depot: depot);
+    await service.chargerRemboursements();
+
+    final refus = await service.abandonnerRemboursement('7', motif: 'Doublon');
+
+    expect(refus, isNull);
+    expect(depot.abandons.single, ('7', 'Doublon'));
+    expect(service.remboursements, isEmpty);
+    expect(service.totalRemboursements, 0);
+  });
+
+  test('dans « tout l’historique », la ligne reste et porte son statut', () async {
+    final depot = _DepotFactice([], remboursements: [_remboursement('7')]);
+    final service = VersementsService(depot: depot);
+    await service.chargerRemboursements(filtre: FiltreVersements.tous);
+
+    await service.abandonnerRemboursement('7', motif: 'Doublon');
+
+    expect(service.remboursements.single.status, eccore.StatutVersement.annule);
+    expect(service.remboursements.single.reason, contains('Doublon'));
+  });
+
+  test('un double clic n’abandonne qu’une fois', () async {
+    final depot = _DepotFactice([], remboursements: [_remboursement('7')])
+      ..retenue = Completer<void>();
+    final service = VersementsService(depot: depot);
+    await service.chargerRemboursements();
+
+    final premier = service.abandonnerRemboursement('7', motif: 'Doublon');
+    final second = await service.abandonnerRemboursement('7', motif: 'Doublon');
+    depot.retenue!.complete();
+    await premier;
+
+    expect(second, isNotNull);
+    expect(depot.abandons, hasLength(1));
   });
 }

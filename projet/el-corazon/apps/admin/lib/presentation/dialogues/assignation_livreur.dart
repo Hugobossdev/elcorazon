@@ -1,19 +1,15 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import 'package:admin/presentation/commande.dart';
-import 'package:admin/presentation/messages_erreur.dart';
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/presentation/statut_livreur.dart';
-import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/services/order_management_service.dart';
-import 'package:admin/ui/ui.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/utils/price_formatter.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
-/// Le choix d'un livreur pour une commande, depuis la gestion avancée.
+/// Le choix d'un livreur pour une commande.
 ///
 /// Pourquoi ce fichier existe
 /// --------------------------
@@ -24,66 +20,60 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 /// mis en évidence — et sa propre fin. Le sortir le rend nommable, donc
 /// racontable.
 ///
-/// Il existe un **second** dialogue d'assignation, dans
-/// `active_deliveries_screen.dart`. Les deux n'ont pas été fondus, et ce n'est
-/// pas un oubli : celui-ci marquait la commande « récupérée » après l'avoir
-/// assignée, l'autre non — une divergence de métier qu'un refactoring n'avait
-/// pas à trancher.
+/// Il existait un **second** dialogue d'assignation, dans
+/// `active_deliveries_screen.dart` ; les deux écrans appellent celui-ci. La
+/// divergence qui les séparait est tranchée, et pas en faveur de ce fichier :
+/// `picked_up` appartient au livreur, et l'écrire ici rendait la commande
+/// inannulable pendant que le repas était encore en cuisine (voir `_assigner`).
 ///
-/// Elle est tranchée, et pas en faveur de ce fichier : `picked_up` appartient au
-/// livreur, et l'écrire ici rendait la commande inannulable pendant que le repas
-/// était encore en cuisine (voir `_assigner`). Les deux dialogues font
-/// désormais la même chose ; les fondre n'attend plus qu'une décision
-/// d'ergonomie.
+/// Ce que l'éligibilité n'est plus (23 septembre 2026)
+/// --------------------------------------------------
+///
+/// Le dialogue lisait la flotte déjà chargée par `DriverManagementService` et
+/// la filtrait ici : en ligne, dossier validé, pas déjà engagé. Trois termes
+/// sur cinq. Il manquait le **périmètre de zone** — un livreur restreint aux
+/// zones de Kara était proposé pour une commande de Lomé — et la **cuisine** :
+/// la liste chargée est celle du périmètre du compte, pas celle de la commande,
+/// si bien qu'un siège se voyait proposer Douala pour une commande de Lomé.
+/// Le serveur refusait ensuite en 409, après le geste.
+///
+/// `GET /delivery/couriers/available/{commande}/` applique les cinq termes
+/// (`CourierService.available_for`) et **trie par distance à la cuisine**, que
+/// le back-office ne pouvait pas calculer : la position du livreur n'est pas
+/// dans la liste de flotte, et la distance PostGIS encore moins. Le dialogue
+/// demande cette liste, et n'en filtre rien.
 Future<void> afficherAssignationLivreur({
   required BuildContext context,
   required eccore.Order order,
   required OrderManagementService orderService,
   required DriverManagementService driverService,
-  required AssignmentService assignmentService,
-}) async {
-  // Les livreurs déjà en course sont écartés (L6) : le serveur les refuse, et
-  // les proposer quand même ne laisse au superviseur qu'un message d'erreur là
-  // où il attendait une affectation.
-  final livreursDisponibles = driverService.getAvailableDrivers(
-    engages: assignmentService.livreursEngages,
-  );
-
-  if (livreursDisponibles.isEmpty) {
-    unawaited(
-      DialogHelper.showSafeDialog(
-        context: context,
-        builder: (context) => const _AucunLivreurDisponible(),
-      ),
-    );
-    return;
-  }
-
-  await DialogHelper.showSafeDialog(
+}) {
+  return DialogHelper.showSafeDialog(
     context: context,
     builder: (context) => _ChoixDuLivreur(
       order: order,
-      livreurs: livreursDisponibles,
       orderService: orderService,
+      driverService: driverService,
     ),
   );
 }
 
-/// L'en-tête commun aux deux dialogues : une icône, un titre, une croix.
+/// L'en-tête du dialogue : une icône, un titre, une croix.
 class _EnTete extends StatelessWidget {
-  const _EnTete({required this.icone, required this.couleur, required this.titre});
+  const _EnTete({required this.titre, required this.fermable});
 
-  final IconData icone;
-  final Color couleur;
   final String titre;
+
+  /// Faux pendant l'envoi : fermer ne rappellerait pas la proposition partie.
+  final bool fermable;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Padding(
       padding: const EdgeInsets.all(20),
       child: Row(
         children: [
-          Icon(icone, color: couleur),
+          Icon(Icons.local_shipping, color: Theme.of(context).colorScheme.primary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -98,7 +88,7 @@ class _EnTete extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
             child: IconButton(
               icon: const Icon(Icons.close),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: fermable ? () => Navigator.of(context).pop() : null,
             ),
           ),
         ],
@@ -107,172 +97,168 @@ class _EnTete extends StatelessWidget {
   }
 }
 
-class _AucunLivreurDisponible extends StatelessWidget {
-  const _AucunLivreurDisponible();
-
-  @override
-  Widget build(BuildContext context) {
-    final largeur = (MediaQuery.of(context).size.width * 0.9).clamp(400.0, 500.0);
-
-    return Dialog(
-      child: SizedBox(
-        width: largeur,
-        height: 250,
-        child: Column(
-          children: [
-            _EnTete(
-              icone: Icons.warning,
-              couleur: Theme.of(context).colorScheme.tertiary,
-              titre: 'Aucun livreur disponible',
-            ),
-            const Divider(height: 1),
-            const Expanded(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: Text(
-                  "Il n'y a actuellement aucun livreur disponible pour cette livraison.\n\n"
-                  'Vous pouvez attendre '
-                  "qu'un livreur devienne disponible ou assigner un livreur "
-                  'manuellement depuis la liste des livreurs.',
-                  style: TextStyle(fontSize: 14),
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            Container(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Fermer'),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ChoixDuLivreur extends StatefulWidget {
   const _ChoixDuLivreur({
     required this.order,
-    required this.livreurs,
     required this.orderService,
+    required this.driverService,
   });
 
   final eccore.Order order;
-  final List<eccore.CourierProfile> livreurs;
   final OrderManagementService orderService;
+  final DriverManagementService driverService;
 
   @override
   State<_ChoixDuLivreur> createState() => _ChoixDuLivreurState();
 }
 
 class _ChoixDuLivreurState extends State<_ChoixDuLivreur> {
+  List<eccore.CourierProfile>? _eligibles;
   eccore.CourierProfile? _choisi;
+  Echec? _echec;
+  bool _chargement = true;
+  bool _envoiEnCours = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _charger();
+  }
+
+  /// Relit les éligibles.
+  ///
+  /// [conserverEchec] est vrai après un refus d'affectation : la relecture
+  /// réussit, mais le motif du refus doit rester à l'écran — c'est lui qui dit
+  /// au superviseur pourquoi la liste vient de changer sous ses yeux.
+  Future<void> _charger({bool conserverEchec = false}) async {
+    setState(() {
+      _chargement = true;
+      if (!conserverEchec) _echec = null;
+    });
+    try {
+      final eligibles = await widget.driverService.availableForOrder(widget.order.id);
+      if (!mounted) return;
+      setState(() {
+        _eligibles = eligibles;
+        // Le livreur mis en évidence peut avoir disparu de la liste entre deux
+        // lectures — quelqu'un d'autre a pu lui confier une course.
+        _choisi = eligibles.any((livreur) => livreur.id == _choisi?.id) ? _choisi : null;
+      });
+    } on eccore.ApiException catch (e) {
+      // Un refus n'est pas une flotte vide : un 403 affichait « Aucun livreur
+      // disponible », et le superviseur attendait un livreur qu'il n'aurait
+      // jamais vu arriver.
+      if (mounted) setState(() => _echec = Echec.de(e));
+    } finally {
+      if (mounted) setState(() => _chargement = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final ecran = MediaQuery.of(context).size;
+    final echec = _echec;
 
-    return Dialog(
-      child: SizedBox(
-        width: (ecran.width * 0.9).clamp(500.0, 800.0),
-        height: (ecran.height * 0.7).clamp(500.0, 800.0),
-        child: Column(
-          children: [
-            _EnTete(
-              icone: Icons.local_shipping,
-              couleur: Theme.of(context).colorScheme.primary,
-              titre: 'Assigner un livreur',
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _RappelCommande(order: widget.order),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Livreurs disponibles (${widget.livreurs.length}):',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      height: 300,
-                      child: ListView.builder(
-                        itemCount: widget.livreurs.length,
-                        itemBuilder: (context, index) {
-                          final livreur = widget.livreurs[index];
-
-                          return _CarteLivreur(
-                            livreur: livreur,
-                            estChoisi: _choisi?.id == livreur.id,
-                            onTap: () => setState(() => _choisi = livreur),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
+    return PopScope(
+      // Pendant l'envoi, la proposition est partie : la fermer laisserait
+      // croire au superviseur qu'elle ne l'est pas.
+      canPop: !_envoiEnCours,
+      child: Dialog(
+        child: SizedBox(
+          width: (ecran.width * 0.9).clamp(500.0, 800.0),
+          height: (ecran.height * 0.7).clamp(500.0, 800.0),
+          child: Column(
+            children: [
+              _EnTete(titre: 'Assigner un livreur', fermable: !_envoiEnCours),
+              const Divider(height: 1),
+              if (echec != null)
+                BandeauEchec(echec: echec, onReessayer: _chargement ? null : _charger),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _RappelCommande(order: widget.order),
+                      const SizedBox(height: 16),
+                      Expanded(child: _corps()),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const Divider(height: 1),
-            _PiedDeDialogue(
-              onAssigner: _choisi == null ? null : _assigner,
-            ),
-          ],
+              const Divider(height: 1),
+              _PiedDeDialogue(
+                envoiEnCours: _envoiEnCours,
+                onAssigner: _choisi == null || _envoiEnCours ? null : _assigner,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  Widget _corps() {
+    final eligibles = _eligibles;
+    if (_chargement) return const Center(child: CircularProgressIndicator());
+    // Rien à lister quand la lecture a échoué : le bandeau dit déjà pourquoi,
+    // et une liste vide ajouterait un second message, faux.
+    if (eligibles == null) return const SizedBox.shrink();
+    if (eligibles.isEmpty) return const _AucunEligible();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eligibles.length == 1
+              ? 'Un livreur éligible, du plus proche de la cuisine :'
+              : '${eligibles.length} livreurs éligibles, du plus proche de la cuisine :',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: ListView.builder(
+            itemCount: eligibles.length,
+            itemBuilder: (context, index) {
+              final livreur = eligibles[index];
+              return _CarteLivreur(
+                livreur: livreur,
+                estChoisi: _choisi?.id == livreur.id,
+                onTap: _envoiEnCours ? null : () => setState(() => _choisi = livreur),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<void> _assigner() async {
     final livreur = _choisi!;
-    final commandeId = widget.order.id;
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
 
-    Navigator.of(context).pop();
-
-    // Vérifier que le livreur a bien une identité avant d'assigner.
-    if (livreur.id.isEmpty) {
-      if (mounted) {
-        _bandeau(
-          context,
-          icone: Icons.warning,
-          teinte: (sem) => sem.warning,
-          message: "Ce livreur n'a pas d'utilisateur correspondant dans la "
-              "table users. Veuillez créer un utilisateur avec role='delivery' "
-              'pour ce livreur.',
-          duree: const Duration(seconds: 5),
-        );
-      }
-      return;
-    }
+    setState(() {
+      _envoiEnCours = true;
+      _echec = null;
+    });
 
     try {
-      await widget.orderService.assignDriver(commandeId, livreur.id);
-    } catch (erreur) {
-      if (mounted) {
-        _bandeau(
-          context,
-          icone: Icons.error,
-          teinte: (sem) => sem.danger,
-          // Le motif du serveur, pas « Erreur lors de l'assignation » : il dit
-          // s'il faut attendre, choisir quelqu'un d'autre, ou réclamer un droit.
-          message: messageErreur(erreur),
-          duree: const Duration(seconds: 5),
-        );
-      }
+      await widget.orderService.assignDriver(widget.order.id, livreur.id);
+    } on eccore.ApiException catch (e) {
+      // Le dialogue **reste ouvert**. Il se fermait avant la réponse, et le
+      // refus s'affichait dans un bandeau sur l'écran d'en dessous : le
+      // superviseur avait perdu sa liste, et devait tout rouvrir pour choisir
+      // quelqu'un d'autre. Un 409 — « ce livreur porte déjà une course » — est
+      // précisément le cas où il faut en choisir un autre, tout de suite.
+      if (!mounted) return;
+      setState(() {
+        _envoiEnCours = false;
+        _echec = Echec.de(e);
+      });
+      // La liste date d'avant le refus ; la relire évite de reproposer
+      // quelqu'un que le serveur vient d'écarter.
+      if (e.status == 409) await _charger(conserverEchec: true);
       return;
     }
 
@@ -292,47 +278,96 @@ class _ChoixDuLivreurState extends State<_ChoixDuLivreur> {
     //
     // `picked_up` appartient au livreur, et à lui seul :
     // `POST /delivery/assignments/{id}/status/`.
-    if (mounted) {
-      _bandeau(
-        context,
-        icone: Icons.check_circle,
-        teinte: (sem) => sem.success,
-        message: 'Course proposée à ${livreur.fullName}',
-      );
-    }
+    navigator.pop();
+    // « Proposée » et non « assignée » : le livreur accepte ou refuse, et
+    // l'annonce ne doit pas laisser croire que la course est partie.
+    messenger.showSnackBar(
+      SnackBar(content: Text('Course proposée à ${livreur.fullName}')),
+    );
   }
 }
 
-/// Les trois issues de l'assignation s'annonçaient par le même bandeau écrit
-/// trois fois ; seuls l'icône, sa teinte et le texte changent.
-void _bandeau(
-  BuildContext context, {
-  required IconData icone,
-  required Color Function(AdminSemanticColors sem) teinte,
-  required String message,
-  Duration duree = const Duration(seconds: 3),
-}) {
-  final scheme = Theme.of(context).colorScheme;
-  final sem = AdminColorTokens.semantic(scheme);
+/// Ce que le serveur exige d'un livreur pour cette commande — affiché quand il
+/// n'en trouve aucun.
+///
+/// L'ancien texte conseillait « d'assigner un livreur manuellement depuis la
+/// liste des livreurs » : il n'existe aucun écran qui le permette, et aucune
+/// route non plus. Un superviseur qui lit une liste vide a besoin de savoir
+/// **quel terme** manque, parce que trois des cinq se corrigent depuis le
+/// back-office.
+class _AucunEligible extends StatelessWidget {
+  const _AucunEligible();
 
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      backgroundColor: scheme.inverseSurface,
-      duration: duree,
-      content: Row(
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icone, color: teinte(sem)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(color: scheme.onInverseSurface),
-            ),
+          Row(
+            children: [
+              Icon(Icons.person_search_outlined, color: scheme.tertiary),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Aucun livreur éligible pour cette commande',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 12),
+          Text(
+            'Le serveur retient les livreurs qui remplissent les cinq conditions '
+            'suivantes. Il en manque au moins une :',
+            style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          for (final critere in const [
+            ('Rattaché à la cuisine de la commande', null),
+            ('En ligne', 'le livreur bascule lui-même sa disponibilité depuis son application'),
+            ('Dossier validé', 'écran Livreurs → Vérification'),
+            (
+              'Desservant la zone de livraison',
+              'écran Livreurs → Zones ; un livreur sans zone roule partout où sa cuisine livre',
+            ),
+            (
+              'Pas déjà en course',
+              'une course acceptée ou en route occupe le livreur jusqu’à sa livraison',
+            ),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.chevron_right, size: 18, color: scheme.onSurfaceVariant),
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: critere.$1,
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                          ),
+                          if (critere.$2 != null)
+                            TextSpan(
+                              text: ' — ${critere.$2}',
+                              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _RappelCommande extends StatelessWidget {
@@ -343,12 +378,10 @@ class _RappelCommande extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final secondaire = TextStyle(
-      fontSize: 12,
-      color: scheme.onSurfaceVariant,
-    );
+    final secondaire = TextStyle(fontSize: 12, color: scheme.onSurfaceVariant);
 
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: scheme.primaryContainer,
@@ -358,14 +391,14 @@ class _RappelCommande extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Commande #${order.id.substring(0, 8).toUpperCase()}',
+            'Commande ${order.reference}',
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
           ),
           const SizedBox(height: 4),
-          Text('Total: ${PriceFormatter.format(order.totalAffiche)}', style: secondaire),
+          Text('Total : ${formatMontant(order.total)}', style: secondaire),
           const SizedBox(height: 4),
           Text(
-            'Adresse: ${order.adresseComplete}',
+            'Adresse : ${order.adresseComplete}',
             style: secondaire,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -385,101 +418,119 @@ class _CarteLivreur extends StatelessWidget {
 
   final eccore.CourierProfile livreur;
   final bool estChoisi;
-  final VoidCallback onTap;
+
+  /// `null` pendant l'envoi : changer d'avis n'annulerait pas la proposition.
+  final VoidCallback? onTap;
+
+  /// « à 1,2 km » ou « à 350 m » de la cuisine.
+  ///
+  /// La distance n'est portée que par la route des éligibles, et reste nulle
+  /// pour un livreur dont aucune position n'est connue — celui qui vient
+  /// d'ouvrir son application. Afficher zéro le placerait en tête de liste, sur
+  /// le pas de la porte.
+  String? get _distance {
+    final metres = livreur.distanceM;
+    if (metres == null) return null;
+    if (metres < 1000) return 'à $metres m';
+    return 'à ${(metres / 1000).toStringAsFixed(1).replaceAll('.', ',')} km';
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final secondaire = TextStyle(fontSize: 12, color: scheme.onSurfaceVariant);
+    final distance = _distance;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      color: estChoisi
-          ? scheme.primaryContainer.withValues(alpha: 0.35)
-          : null,
+      color: estChoisi ? scheme.primaryContainer.withValues(alpha: 0.35) : null,
       elevation: estChoisi ? 4 : 1,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            constraints: const BoxConstraints(minHeight: 60),
-            child: Row(
-              children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: livreur.statut.couleur,
-                    shape: BoxShape.circle,
-                  ),
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          constraints: const BoxConstraints(minHeight: 60),
+          child: Row(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: livreur.statut.couleur,
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              livreur.fullName,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: estChoisi
-                                    ? scheme.onPrimaryContainer
-                                    : null,
-                              ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            livreur.fullName,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: estChoisi ? scheme.onPrimaryContainer : null,
                             ),
                           ),
-                          if (estChoisi)
-                            Icon(
-                              Icons.check_circle,
-                              color: scheme.primary,
-                              size: 20,
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(Icons.star, size: 14, color: scheme.tertiary),
-                          const SizedBox(width: 4),
-                          Text(
-                            livreur.ratingAverage.toStringAsFixed(1),
-                            style: secondaire,
-                          ),
-                          const SizedBox(width: 12),
-                          Icon(
-                            Icons.delivery_dining,
-                            size: 14,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${livreur.deliveriesCompleted} livraisons',
-                            style: secondaire,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Véhicule: ${livreur.vehicleType}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: scheme.onSurfaceVariant
-                              .withValues(alpha: 0.85),
-                          fontStyle: FontStyle.italic,
                         ),
+                        if (estChoisi)
+                          Icon(Icons.check_circle, color: scheme.primary, size: 20),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        // La distance d'abord : c'est sur elle que le serveur
+                        // trie, et la seule information qui départage deux
+                        // livreurs également éligibles.
+                        _Detail(
+                          icone: distance == null
+                              ? Icons.location_off_outlined
+                              : Icons.near_me_outlined,
+                          texte: distance ?? 'Position inconnue',
+                          style: secondaire,
+                          couleurIcone: distance == null ? scheme.outline : scheme.primary,
+                        ),
+                        // Une moyenne sur zéro note vaut 0,0 : l'afficher
+                        // rendait un livreur qui débute indigne de confiance.
+                        _Detail(
+                          icone: Icons.star,
+                          texte: livreur.ratingCount == 0
+                              ? 'Pas encore noté'
+                              : '${livreur.ratingAverage.toStringAsFixed(1)} '
+                                  '(${livreur.ratingCount})',
+                          style: secondaire,
+                          couleurIcone: scheme.tertiary,
+                        ),
+                        _Detail(
+                          icone: Icons.delivery_dining,
+                          texte: '${livreur.deliveriesCompleted} livraisons',
+                          style: secondaire,
+                          couleurIcone: scheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Véhicule : ${livreur.vehicleType}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: scheme.onSurfaceVariant.withValues(alpha: 0.85),
+                        fontStyle: FontStyle.italic,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -487,17 +538,44 @@ class _CarteLivreur extends StatelessWidget {
   }
 }
 
-class _PiedDeDialogue extends StatelessWidget {
-  const _PiedDeDialogue({required this.onAssigner});
+class _Detail extends StatelessWidget {
+  const _Detail({
+    required this.icone,
+    required this.texte,
+    required this.style,
+    required this.couleurIcone,
+  });
 
-  /// `null` tant qu'aucun livreur n'est choisi : le bouton reste inerte.
+  final IconData icone;
+  final String texte;
+  final TextStyle style;
+  final Color couleurIcone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icone, size: 14, color: couleurIcone),
+        const SizedBox(width: 4),
+        Text(texte, style: style),
+      ],
+    );
+  }
+}
+
+class _PiedDeDialogue extends StatelessWidget {
+  const _PiedDeDialogue({required this.onAssigner, required this.envoiEnCours});
+
+  /// `null` tant qu'aucun livreur n'est choisi, ou pendant l'envoi.
   final VoidCallback? onAssigner;
+  final bool envoiEnCours;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    return Container(
+    return Padding(
       padding: const EdgeInsets.all(16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -505,7 +583,7 @@ class _PiedDeDialogue extends StatelessWidget {
           Container(
             constraints: const BoxConstraints(minHeight: 48),
             child: TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: envoiEnCours ? null : () => Navigator.of(context).pop(),
               child: const Text('Annuler'),
             ),
           ),
@@ -514,8 +592,17 @@ class _PiedDeDialogue extends StatelessWidget {
             constraints: const BoxConstraints(minHeight: 48),
             child: ElevatedButton.icon(
               onPressed: onAssigner,
-              icon: const Icon(Icons.local_shipping),
-              label: const Text('Assigner'),
+              icon: envoiEnCours
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.local_shipping),
+              // « Proposer » : le serveur crée une offre que le livreur accepte
+              // ou refuse. Le bouton disait « Assigner », et le superviseur
+              // fermait la commande en croyant la course partie.
+              label: Text(envoiEnCours ? 'Envoi…' : 'Proposer la course'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: scheme.primary,
                 foregroundColor: scheme.onPrimary,

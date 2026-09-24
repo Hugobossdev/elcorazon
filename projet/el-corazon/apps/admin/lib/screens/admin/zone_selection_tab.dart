@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/screens/admin/zone_form_dialog.dart';
 
@@ -47,6 +48,10 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
 
     return Consumer<DeliveryZoneService>(
       builder: (context, service, child) {
+        // Lire les zones suit `restaurants.read` ; les ouvrir, les fermer ou
+        // les tarifer relève du siège. Un gérant voyait les interrupteurs et
+        // recevait un 403 à chaque bascule.
+        final peutRegler = context.peutReglerLesZones;
         final groupes = DeliveryZoneService.filterGroups(
           service.zonesByCity,
           _recherche,
@@ -58,7 +63,7 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(16),
             children: [
-              _buildIntro(scheme),
+              _buildIntro(scheme, peutRegler),
               const SizedBox(height: 16),
               if (service.zones.isNotEmpty) ...[
                 _buildResume(service, scheme),
@@ -81,7 +86,7 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
                 _buildAucunResultat(scheme)
               else
                 ...groupes.entries.map(
-                  (entree) => _buildVille(service, entree.key, entree.value, scheme),
+                  (entree) => _buildVille(service, entree.key, entree.value, scheme, peutRegler),
                 ),
             ],
           ),
@@ -92,7 +97,7 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
 
   // ------------------------------------------------------------------ entête
 
-  Widget _buildIntro(ColorScheme scheme) {
+  Widget _buildIntro(ColorScheme scheme, bool peutRegler) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -114,12 +119,18 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
         const SizedBox(height: 8),
         Row(
           children: [
-            Icon(Icons.cloud_done_outlined, size: 16, color: scheme.primary),
+            Icon(
+              peutRegler ? Icons.cloud_done_outlined : Icons.lock_outline,
+              size: 16,
+              color: scheme.primary,
+            ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                'Chaque changement est enregistré sur le serveur immédiatement — '
-                'le bouton « Sauvegarder » ne concerne pas cet onglet.',
+                peutRegler
+                    ? 'Chaque changement est enregistré sur le serveur immédiatement — '
+                        'le bouton « Sauvegarder » ne concerne pas cet onglet.'
+                    : 'Lecture seule — l’ouverture et le barème des zones relèvent du siège.',
                 style: TextStyle(
                   color: scheme.primary,
                   fontStyle: FontStyle.italic,
@@ -268,6 +279,7 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
     String ville,
     List<DeliveryZone> zones,
     ColorScheme scheme,
+    bool peutRegler,
   ) {
     final ouvertes = zones.where((zone) => zone.isActive).length;
     final toutesOuvertes = ouvertes == zones.length;
@@ -305,15 +317,16 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
                     ],
                   ),
                 ),
-                TextButton(
-                  onPressed: () => _basculerVille(service, ville, zones, !toutesOuvertes),
-                  child: Text(toutesOuvertes ? 'Tout fermer' : 'Tout ouvrir'),
-                ),
+                if (peutRegler)
+                  TextButton(
+                    onPressed: () => _basculerVille(service, ville, zones, !toutesOuvertes),
+                    child: Text(toutesOuvertes ? 'Tout fermer' : 'Tout ouvrir'),
+                  ),
               ],
             ),
           ),
           const Divider(height: 1),
-          ...zones.map((zone) => _buildZone(service, zone, scheme)),
+          ...zones.map((zone) => _buildZone(service, zone, scheme, peutRegler)),
         ],
       ),
     );
@@ -323,13 +336,18 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
     DeliveryZoneService service,
     DeliveryZone zone,
     ColorScheme scheme,
+    bool peutRegler,
   ) {
     final enCours = service.isWriting(zone.id);
 
     return SwitchListTile(
       value: zone.isActive,
       // Neutralisé pendant l'écriture : voir `DeliveryZoneService.isWriting`.
-      onChanged: enCours ? null : (ouverte) => _basculerZone(service, zone, ouverte),
+      // Sans le droit, l'interrupteur reste lisible — ouverte ou fermée — mais
+      // ne se manipule pas.
+      onChanged: enCours || !peutRegler
+          ? null
+          : (ouverte) => _basculerZone(service, zone, ouverte),
       title: Text(
         zone.name,
         style: const TextStyle(fontWeight: FontWeight.w600),
@@ -341,11 +359,13 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
               height: 24,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
-          : IconButton(
-              icon: const Icon(Icons.tune),
-              tooltip: 'Modifier le barème',
-              onPressed: () => _modifierBareme(zone),
-            ),
+          : peutRegler
+              ? IconButton(
+                  icon: const Icon(Icons.tune),
+                  tooltip: 'Modifier le barème',
+                  onPressed: () => _modifierBareme(zone),
+                )
+              : null,
     );
   }
 

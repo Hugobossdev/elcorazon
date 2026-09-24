@@ -1,387 +1,242 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:admin/presentation/autorisations.dart';
+import 'package:admin/presentation/dialogue_formulaire.dart';
+import 'package:admin/screens/admin/gamification/communs.dart';
+import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/gamification_service.dart';
-import 'package:admin/utils/dialog_helper.dart';
+import 'package:admin/services/restaurant_scope_service.dart';
+import 'package:admin/utils/price_formatter.dart';
 
-/// Récompenses — l'onglet du back-office et son formulaire.
+/// Récompenses — l'onglet et son formulaire.
 ///
-/// Extrait de `gamification_management_screen.dart`, qui rassemblait quatre
-/// onglets et quatre formulaires en 1 744 lignes. Les classes étaient déjà
-/// nommées : c'est le fichier qui était trop long, pas les widgets. Elles
-/// perdent leur `_` pour pouvoir vivre chacune chez elle.
-
+/// Relevé le 21 septembre 2026 : l'onglet lisait `title`, `cost` et
+/// `reward_type`, clés que personne ne produisait (le serveur rend `name`,
+/// `points_cost`, `kind`). Les trois récompenses en base s'affichaient sans
+/// titre, « 0 pts », et leur modification repartait avec un titre vide et un
+/// coût nul. Le formulaire ne proposait pas d'établissement — toute récompense
+/// naissait « nationale », que le serveur refuse à un gérant — ni de durée de
+/// validité, et ignorait l'interrupteur « Actif » à la création.
 class RewardsTab extends StatelessWidget {
-  final GamificationService gamificationService;
-
-  const RewardsTab({required this.gamificationService, super.key});
+  const RewardsTab({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final rewards = gamificationService.loyaltyRewards;
+    final service = context.watch<GamificationService>();
+    final perimetre = context.watch<RestaurantScopeService>();
+    final peutEcrire = service.peutEcrire(CatalogueDeFidelisation.recompenses);
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: ElevatedButton.icon(
-            onPressed: () => _showRewardForm(context),
-            icon: const Icon(Icons.add),
-            label: const Text('Créer une Récompense'),
-          ),
-        ),
-        Expanded(
-          child: rewards.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.card_giftcard,
-                        size: 64,
-                        color: Colors.grey[400],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Aucune récompense',
-                        style: TextStyle(color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: rewards.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final reward = rewards[index];
-                    return _buildRewardCard(context, reward);
-                  },
-                ),
-        ),
-      ],
+    return OngletDeCatalogue<eccore.ManagedReward>(
+      elements: service.recompenses,
+      echec: service.echecDe(CatalogueDeFidelisation.recompenses),
+      libelleCreation: 'Nouvelle récompense',
+      peutEcrire: peutEcrire,
+      vide: 'Aucune récompense',
+      onCreer: () => ouvrirFormulaireRecompense(context),
+      carte: (recompense) {
+        final portee = recompense.isNational
+            ? 'Nationale'
+            : (perimetre.parId(recompense.restaurantId)?.name ?? 'Établissement hors périmètre');
+        return CarteDeCatalogue(
+          icone: recompense.kind == eccore.RewardKind.freeDelivery ? '🛵' : '🎁',
+          titre: recompense.name,
+          description: recompense.description,
+          pastilles: [
+            '${recompense.pointsCost} pts',
+            eccore.RewardKind.libelle(recompense.kind),
+            if (recompense.kind == eccore.RewardKind.discount) formatMontant(recompense.discount),
+            'Valable ${recompense.validityDays} j',
+            portee,
+          ],
+          actif: recompense.isActive,
+          // Une récompense nationale ne se modifie qu'au siège : le bouton
+          // n'est pas offert à qui le serveur la refusera.
+          peutEcrire: peutEcrire && (!recompense.isNational || context.estSiege),
+          onModifier: () => ouvrirFormulaireRecompense(context, recompense: recompense),
+          onBasculer: () => context.read<GamificationService>().basculerRecompense(recompense),
+        );
+      },
     );
   }
+}
 
-  Widget _buildRewardCard(BuildContext context, Map<String, dynamic> reward) {
-    return Card(
-      elevation: 2,
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.green.withValues(alpha: 0.15),
-          child: const Icon(Icons.card_giftcard, color: Colors.green),
-        ),
-        title: Text(
-          reward['title'] ?? '',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(reward['description'] ?? ''),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Chip(
-                  label: Text('${reward['cost'] ?? 0} pts'),
-                  backgroundColor: Colors.orange.withValues(alpha: 0.1),
-                ),
-                const SizedBox(width: 4),
-                Chip(
-                  label: Text(reward['reward_type'] ?? ''),
-                  backgroundColor: Colors.blue.withValues(alpha: 0.1),
-                ),
-                const SizedBox(width: 4),
-                Chip(
-                  label: Text(
-                    reward['is_active'] == true ? 'Actif' : 'Inactif',
+/// Qui paie la récompense : un établissement du périmètre, ou toute
+/// l'enseigne (siège seulement).
+const String _nationale = '__nationale__';
+
+Future<void> ouvrirFormulaireRecompense(
+  BuildContext context, {
+  eccore.ManagedReward? recompense,
+}) async {
+  final service = context.read<GamificationService>();
+  final perimetre = context.read<RestaurantScopeService>();
+  // Lu une fois : le formulaire est hors de `build`, `context.estSiege` y
+  // écouterait une session qu'il n'a pas à suivre.
+  final siege = context.read<AdminAuthService>().estSiege;
+
+  final nom = TextEditingController(text: recompense?.name);
+  final description = TextEditingController(text: recompense?.description);
+  final cout = TextEditingController(text: recompense == null ? '' : '${recompense.pointsCost}');
+  final remise = TextEditingController(
+    text: recompense == null || recompense.kind != eccore.RewardKind.discount
+        ? ''
+        : montantEnSaisie(recompense.discount.toMajorUnits()),
+  );
+  final validite = TextEditingController(text: '${recompense?.validityDays ?? 30}');
+  var nature = recompense?.kind ?? eccore.RewardKind.discount;
+  var actif = recompense?.isActive ?? true;
+  // L'établissement par défaut : celui de la récompense, sinon celui qui est
+  // sélectionné. Un gérant n'a pas l'option nationale.
+  var porteur = recompense == null
+      ? (perimetre.current?.id ?? (siege ? _nationale : null))
+      : (recompense.restaurantId ?? _nationale);
+  // La devise d'une récompense nationale se choisit : XOF et XAF sont deux
+  // monnaies, et un code libellé dans l'une est refusé dans l'autre.
+  var deviseNationale = recompense?.isNational ?? false
+      ? recompense!.discount.currency
+      : (perimetre.devises.isEmpty ? 'XOF' : perimetre.devises.first);
+
+  String devise() =>
+      porteur == _nationale ? deviseNationale : (perimetre.parId(porteur)?.currency ?? deviseNationale);
+
+  final enregistre = await DialogueDeFormulaire.ouvrir(
+    context,
+    titre: recompense == null ? 'Nouvelle récompense' : 'Modifier la récompense',
+    libelleAction: recompense == null ? 'Créer' : 'Enregistrer',
+    enregistrer: () => service.enregistrerRecompense(
+      id: recompense?.id,
+      name: nom.text.trim(),
+      description: description.text.trim(),
+      kind: nature,
+      pointsCost: int.parse(cout.text.trim()),
+      validityDays: int.parse(validite.text.trim()),
+      isActive: actif,
+      discount: nature == eccore.RewardKind.discount
+          ? eccore.Money.fromMajorUnits(lireMontant(remise.text)!, devise())
+          : null,
+      restaurantId: recompense != null || porteur == _nationale ? null : porteur,
+    ),
+    corps: (context, echec) => StatefulBuilder(
+      builder: (context, majEtat) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextFormField(
+            controller: nom,
+            decoration: InputDecoration(labelText: 'Nom *', errorText: echec?.pourLeChamp('name')),
+            validator: Valider.requis,
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: description,
+            decoration: const InputDecoration(labelText: 'Description'),
+            maxLines: 2,
+          ),
+          const SizedBox(height: 12),
+          if (recompense == null)
+            DropdownButtonFormField<String>(
+              isExpanded: true,
+              initialValue: porteur,
+              decoration: InputDecoration(
+                labelText: 'Établissement *',
+                helperText: siege
+                    ? 'Une récompense nationale s’échange dans tous les établissements.'
+                    : 'Une récompense nationale relève du siège.',
+                errorText: echec?.pourLeChamp('restaurant'),
+              ),
+              items: [
+                if (siege) const DropdownMenuItem(value: _nationale, child: Text('Nationale — tous')),
+                for (final etablissement in perimetre.restaurants)
+                  DropdownMenuItem(
+                    value: etablissement.id,
+                    child: Text('${etablissement.name} (${etablissement.currency})'),
                   ),
-                  backgroundColor:
-                      (reward['is_active'] == true ? Colors.green : Colors.grey)
-                          .withValues(alpha: 0.1),
-                ),
               ],
+              validator: (valeur) => valeur == null ? 'Choisissez qui offre la récompense' : null,
+              onChanged: (valeur) => majEtat(() => porteur = valeur),
+            )
+          else
+            InputDecorator(
+              decoration: const InputDecoration(labelText: 'Établissement'),
+              child: Text(
+                porteur == _nationale
+                    ? 'Nationale — tous les établissements'
+                    : (perimetre.parId(porteur)?.name ?? 'Établissement hors périmètre'),
+              ),
             ),
-          ],
-        ),
-        trailing: Container(
-          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-          child: PopupMenuButton(
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                child: const Text('Modifier'),
-                onTap: () =>
-                    Future.delayed(const Duration(milliseconds: 100), () {
-                      if (context.mounted) {
-                        _showRewardForm(context, reward: reward);
-                      }
-                    }),
-              ),
-              PopupMenuItem(
-                child: Text(
-                  reward['is_active'] == true ? 'Désactiver' : 'Activer',
-                ),
-                onTap: () {
-                  gamificationService.updateLoyaltyReward(
-                    reward['id'],
-                    isActive: !((reward['is_active'] as bool?) ?? true),
-                  );
-                },
-              ),
-            ],
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: cout,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'Coût en points *',
+              errorText: echec?.pourLeChamp('points_cost'),
+            ),
+            // À zéro point, l'échange ne débite rien : le serveur le refuse.
+            validator: (v) => Valider.entier(v, minimum: 1, message: 'Au moins 1 point'),
           ),
-        ),
-      ),
-    );
-  }
-
-  void _showRewardForm(BuildContext context, {Map<String, dynamic>? reward}) {
-    DialogHelper.showSafeDialog(
-      context: context,
-      builder: (context) => RewardFormDialog(reward: reward),
-    );
-  }
-
-}
-
-// =====================================================
-// FORM DIALOGS
-// =====================================================
-
-class RewardFormDialog extends StatefulWidget {
-  final Map<String, dynamic>? reward;
-
-  const RewardFormDialog({this.reward, super.key});
-
-  @override
-  State<RewardFormDialog> createState() => RewardFormDialogState();
-}
-
-class RewardFormDialogState extends State<RewardFormDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _descController = TextEditingController();
-  final _costController = TextEditingController();
-  final _valueController = TextEditingController();
-
-  String _rewardType = 'discount';
-  bool _isActive = true;
-
-  @override
-  void initState() {
-    super.initState();
-    final r = widget.reward;
-    if (r != null) {
-      _titleController.text = r['title'] ?? '';
-      _descController.text = r['description'] ?? '';
-      _costController.text = (r['cost'] ?? 0).toString();
-      _valueController.text = (r['discount'] ?? 0.0).toString();
-      _rewardType = r['kind'] ?? 'discount';
-      _isActive = r['is_active'] ?? true;
-    } else {
-      _costController.text = '0';
-      _valueController.text = '0';
-    }
-  }
-
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _descController.dispose();
-    _costController.dispose();
-    _valueController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      child: SizedBox(
-        width: 600,
-        height: 650,
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.reward == null
-                          ? 'Créer une Récompense'
-                          : 'Modifier une Récompense',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  Container(
-                    constraints: const BoxConstraints(
-                      minWidth: 48,
-                      minHeight: 48,
-                    ),
-                    child: IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                ],
-              ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            isExpanded: true,
+            initialValue: nature,
+            decoration: InputDecoration(
+              labelText: 'Nature *',
+              errorText: echec?.pourLeChamp('kind'),
             ),
-            const Divider(height: 1),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TextFormField(
-                        controller: _titleController,
-                        decoration: const InputDecoration(
-                          labelText: 'Titre *',
-                          border: OutlineInputBorder(),
-                        ),
-                        validator: (v) =>
-                            v == null || v.isEmpty ? 'Titre requis' : null,
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _descController,
-                        decoration: const InputDecoration(
-                          labelText: 'Description',
-                          border: OutlineInputBorder(),
-                        ),
-                        maxLines: 3,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _costController,
-                              decoration: const InputDecoration(
-                                labelText: 'Coût (points) *',
-                                border: OutlineInputBorder(),
-                              ),
-                              keyboardType: TextInputType.number,
-                              validator: (v) =>
-                                  v == null || int.tryParse(v) == null
-                                  ? 'Coût invalide'
-                                  : null,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              initialValue: _rewardType,
-                              decoration: const InputDecoration(
-                                labelText: 'Type de récompense *',
-                                border: OutlineInputBorder(),
-                              ),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: 'discount',
-                                  child: Text('Remise sur une commande'),
-                                ),
-                                DropdownMenuItem(
-                                  value: 'free_delivery',
-                                  child: Text('Livraison offerte'),
-                                ),
-                              ],
-                              onChanged: (v) =>
-                                  setState(() => _rewardType = v!),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      if (_rewardType == 'discount')
-                        TextFormField(
-                          controller: _valueController,
-                          decoration: const InputDecoration(
-                            labelText: 'Montant de la remise (FCFA) *',
-                            helperText:
-                                'Un montant, pas un pourcentage : le serveur '
-                                'le manie comme une somme.',
-                            border: OutlineInputBorder(),
-                          ),
-                          keyboardType: TextInputType.number,
-                          validator: (v) {
-                            final montant = double.tryParse(v ?? '');
-                            if (montant == null || montant <= 0) {
-                              return 'Une remise doit porter un montant';
-                            }
-                            return null;
-                          },
-                        ),
-                      const SizedBox(height: 16),
-                      SwitchListTile(
-                        title: const Text('Actif'),
-                        value: _isActive,
-                        onChanged: (v) => setState(() => _isActive = v),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            const Divider(height: 1),
-            Container(
-              padding: const EdgeInsets.all(20),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Annuler'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _submit,
-                    child: Text(widget.reward == null ? 'Créer' : 'Modifier'),
-                  ),
+            items: [
+              for (final valeur in eccore.RewardKind.values)
+                DropdownMenuItem(value: valeur, child: Text(eccore.RewardKind.libelle(valeur))),
+            ],
+            onChanged: (valeur) => majEtat(() => nature = valeur ?? nature),
+          ),
+          if (nature == eccore.RewardKind.discount) ...[
+            const SizedBox(height: 12),
+            if (porteur == _nationale && recompense == null && perimetre.devises.length > 1)
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: deviseNationale,
+                decoration: const InputDecoration(labelText: 'Devise de la remise *'),
+                items: [
+                  for (final code in perimetre.devises)
+                    DropdownMenuItem(value: code, child: Text(code)),
                 ],
+                onChanged: (valeur) => majEtat(() => deviseNationale = valeur ?? deviseNationale),
               ),
+            TextFormField(
+              controller: remise,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Montant de la remise (${devise()}) *',
+                helperText: 'Un montant, pas un pourcentage.',
+                errorText: echec?.pourLeChamp('discount'),
+              ),
+              validator: Valider.montant,
             ),
           ],
-        ),
+          const SizedBox(height: 12),
+          TextFormField(
+            controller: validite,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'Validité du code obtenu (jours) *',
+              errorText: echec?.pourLeChamp('validity_days'),
+            ),
+            validator: (v) => Valider.entier(v, minimum: 1, message: 'Au moins 1 jour'),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Active'),
+            subtitle: const Text('Une récompense inactive disparaît du catalogue client.'),
+            value: actif,
+            onChanged: (valeur) => majEtat(() => actif = valeur),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 
-  void _submit() {
-    if (_formKey.currentState!.validate()) {
-      final service = context.read<GamificationService>();
-      // Le serveur ne connaît que deux natures de récompense — une remise, ou
-      // la livraison offerte. « Points » n'en était pas une : offrir des points
-      // contre des points ne fait que déplacer un solde, et « article offert »
-      // n'a jamais eu de champ pour désigner l'article.
-      final montant = _rewardType == 'discount'
-          ? double.tryParse(_valueController.text)
-          : null;
-
-      if (widget.reward == null) {
-        service.createLoyaltyReward(
-          name: _titleController.text.trim(),
-          description: _descController.text.trim(),
-          kind: _rewardType,
-          pointsCost: int.parse(_costController.text),
-          discount: montant,
-        );
-      } else {
-        service.updateLoyaltyReward(
-          widget.reward!['id'],
-          name: _titleController.text.trim(),
-          description: _descController.text.trim(),
-          kind: _rewardType,
-          pointsCost: int.parse(_costController.text),
-          discount: montant,
-          isActive: _isActive,
-        );
-      }
-      Navigator.pop(context);
-    }
+  if (enregistre && context.mounted) {
+    annoncer(context, recompense == null ? 'Récompense créée.' : 'Récompense enregistrée.');
   }
 }
