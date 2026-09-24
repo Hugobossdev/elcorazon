@@ -66,6 +66,13 @@ ENVIRONNEMENT_MINIMAL = {
     # d'un contrôle, pas la validité d'identifiants.
     "PAYDUNYA_GATEWAY": PAYDUNYA,
     "PAYMENT_WEBHOOK_SECRET": "pour-le-test-seulement",
+    # Le garde-fou des notifications push s'exécute **avant** ceux du paiement.
+    # Absent d'ici, il n'était satisfait que par le `backend/.env` du poste,
+    # que `decouple` relit depuis `RACINE` : les tests de paiement passaient en
+    # local et échouaient en CI, où ce fichier n'existe pas, sur le refus de la
+    # console — sans jamais atteindre le contrôle qu'ils visent. Les tests du
+    # push le surchargent.
+    "PUSH_BACKEND": FCM,
 }
 
 
