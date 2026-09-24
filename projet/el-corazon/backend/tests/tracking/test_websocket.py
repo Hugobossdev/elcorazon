@@ -27,6 +27,7 @@ from apps.orders.states import OrderStatus
 from apps.restaurants.models import Restaurant, StaffMembership
 from common.consumers import CLOSE_FORBIDDEN, CLOSE_STALE, CLOSE_UNAUTHENTICATED
 from config.asgi import application
+from tests.temps_reel import DELAI_OUVERTURE
 
 pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.postgis]
 
@@ -72,7 +73,7 @@ class TestAutorisationALaConnexion:
     async def test_sans_jeton_le_socket_est_ferme(self, tracked_order: Order) -> None:
         communicator = await connect(f"/ws/orders/{tracked_order.pk}/tracking/")
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_UNAUTHENTICATED
@@ -83,7 +84,7 @@ class TestAutorisationALaConnexion:
             f"/ws/orders/{tracked_order.pk}/tracking/", token="pas-un-jeton"
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_UNAUTHENTICATED
@@ -97,7 +98,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(customer),
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -114,7 +115,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(intrus),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -128,7 +129,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(courier_user),
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -162,7 +163,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(user),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -194,7 +195,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(user),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -214,7 +215,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(customer),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -233,8 +234,8 @@ class TestPublicationDePosition:
             f"/ws/orders/{course.order_id}/tracking/",
             token=await database_sync_to_async(token_for)(customer),
         )
-        await livreur.connect()
-        await client.connect()
+        await livreur.connect(timeout=DELAI_OUVERTURE)
+        await client.connect(timeout=DELAI_OUVERTURE)
 
         await livreur.send_json_to({"point": LOME, "recorded_at": timezone.now().isoformat()})
         recu = await client.receive_json_from(timeout=5)
@@ -255,7 +256,7 @@ class TestPublicationDePosition:
             f"/ws/orders/{course.order_id}/tracking/",
             token=await database_sync_to_async(token_for)(customer),
         )
-        await client.connect()
+        await client.connect(timeout=DELAI_OUVERTURE)
 
         await client.send_json_to({"point": LOME, "recorded_at": timezone.now().isoformat()})
         message = await client.receive_output(timeout=5)
@@ -277,8 +278,8 @@ class TestPublicationDePosition:
             f"/ws/orders/{course.order_id}/tracking/",
             token=await database_sync_to_async(token_for)(customer),
         )
-        await livreur.connect()
-        await client.connect()
+        await livreur.connect(timeout=DELAI_OUVERTURE)
+        await client.connect(timeout=DELAI_OUVERTURE)
 
         moment = timezone.now()
         await livreur.send_json_to({"point": LOME, "recorded_at": moment.isoformat()})
@@ -307,7 +308,7 @@ class TestRattrapage:
             f"/ws/orders/{course.order_id}/tracking/",
             token=await database_sync_to_async(token_for)(courier_user),
         )
-        await livreur.connect()
+        await livreur.connect(timeout=DELAI_OUVERTURE)
 
         moment = timezone.now()
         for index in range(3):
@@ -325,7 +326,7 @@ class TestRattrapage:
             token=await database_sync_to_async(token_for)(customer),
             since=1,
         )
-        await client.connect()
+        await client.connect(timeout=DELAI_OUVERTURE)
 
         rejoues = [await client.receive_json_from(timeout=5) for _ in range(2)]
 
@@ -345,7 +346,7 @@ class TestRattrapage:
             f"/ws/orders/{course.order_id}/tracking/",
             token=await database_sync_to_async(token_for)(courier_user),
         )
-        await livreur.connect()
+        await livreur.connect(timeout=DELAI_OUVERTURE)
         await livreur.send_json_to({"point": LOME, "recorded_at": timezone.now().isoformat()})
         await livreur.receive_nothing(timeout=0.2)
 
@@ -353,7 +354,7 @@ class TestRattrapage:
             f"/ws/orders/{course.order_id}/tracking/",
             token=await database_sync_to_async(token_for)(customer),
         )
-        await client.connect()
+        await client.connect(timeout=DELAI_OUVERTURE)
 
         assert await client.receive_nothing(timeout=0.5)
 
@@ -369,7 +370,7 @@ class TestFileDuLivreur:
             token=await database_sync_to_async(token_for)(courier.user),
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -380,7 +381,7 @@ class TestFileDuLivreur:
             "/ws/couriers/me/", token=await database_sync_to_async(token_for)(customer)
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -400,7 +401,7 @@ class TestFileDuLivreur:
             token=await database_sync_to_async(token_for)(courier.user),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -417,7 +418,7 @@ class TestChat:
     async def test_sans_jeton_le_socket_est_ferme(self, tracked_order: Order) -> None:
         communicator = await connect(f"/ws/orders/{tracked_order.pk}/chat/")
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_UNAUTHENTICATED
@@ -429,7 +430,7 @@ class TestChat:
             token=await database_sync_to_async(token_for)(customer),
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -443,7 +444,7 @@ class TestChat:
             token=await database_sync_to_async(token_for)(courier_user),
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -473,7 +474,7 @@ class TestChat:
             token=await database_sync_to_async(token_for)(user),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -488,7 +489,7 @@ class TestChat:
             token=await database_sync_to_async(token_for)(intrus),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -506,7 +507,7 @@ class TestChat:
             token=await database_sync_to_async(token_for)(customer),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -523,8 +524,8 @@ class TestChat:
             f"/ws/orders/{course.order_id}/chat/",
             token=await database_sync_to_async(token_for)(courier_user),
         )
-        await client.connect()
-        await livreur.connect()
+        await client.connect(timeout=DELAI_OUVERTURE)
+        await livreur.connect(timeout=DELAI_OUVERTURE)
 
         # La diffusion touche tout le groupe, l'émetteur compris — comme pour
         # le suivi de position. Chacun reçoit donc aussi l'écho de son propre
@@ -561,7 +562,7 @@ class TestChat:
             f"/ws/orders/{course.order_id}/chat/",
             token=await database_sync_to_async(token_for)(customer),
         )
-        await client.connect()
+        await client.connect(timeout=DELAI_OUVERTURE)
 
         await client.send_json_to({"text": ""})
         recu = await client.receive_json_from(timeout=5)

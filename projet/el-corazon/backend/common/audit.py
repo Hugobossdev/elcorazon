@@ -16,9 +16,12 @@ ne reçoit plus.
 ## Ce qui est journalisé, et ce qui ne l'est pas
 
 Seulement ce que l'exploitation a besoin de reconstituer : la géographie, les
-barèmes, et **les droits** — permissions d'un rôle, rôles et périmètre d'un
-compte du personnel, blocage d'un client. Les droits ont la même propriété que
-les barèmes : un rôle qui gagne `orders.refund` ne se voit dans aucun écran.
+barèmes, **les droits** — permissions d'un rôle, rôles et périmètre d'un compte
+du personnel, blocage d'un client — et **l'argent qui sort**, avec les
+décisions qui engagent l'enseigne envers un client. Les droits ont la même
+propriété que les barèmes : un rôle qui gagne `orders.refund` ne se voit dans
+aucun écran. Les sorties d'argent en ont une autre : leur ligne dit où en est
+*ce* versement, et rien ne dit ce qu'un opérateur a signé cette semaine.
 
 Journaliser toute écriture produirait un volume qui rend le journal
 illisible — et donc inutilisé, ce qui est pire qu'absent.
@@ -86,6 +89,33 @@ class AuditAction:
     #: de la vitrine sans que l'on sache qui l'a décidé, et pourquoi.
     REVIEW_VISIBILITY = "review.visibility"
 
+    # L'argent qui **sort**, et les décisions qui engagent l'enseigne envers un
+    # client. Ce sont des changements d'état, et le préambule dit qu'on ne les
+    # duplique pas ici — mais ceux-là n'ont aucune autre lecture chronologique :
+    # leur trace vit sur leur propre ligne, ce qui répond à « où en est ce
+    # retrait ? » et jamais à « qu'a signé cet opérateur cette semaine ? ». Or
+    # c'est la seconde question qu'on pose quand un versement manque, et c'est
+    # celle que le cahier des charges veut pouvoir poser.
+    #
+    # La granularité est la **décision**, pas le geste : une réponse à un ticket
+    # n'entre pas au journal — le fil du ticket la porte déjà, mot pour mot.
+    PAYOUT_SETTLE = "payout.settle"
+    PAYOUT_REJECT = "payout.reject"
+    REFUND_REQUEST = "refund.request"
+    REFUND_SETTLE = "refund.settle"
+    #: Un remboursement abandonné. Sans lui, la ligne restait « en attente »
+    #: pour toujours **et** consommait le plafond du remboursable (P3).
+    REFUND_CANCEL = "refund.cancel"
+    COMPLAINT_DECISION = "complaint.decision"
+    RETURN_DECISION = "return.decision"
+    TICKET_RESOLUTION = "ticket.resolution"
+
+    #: Valider, refuser, suspendre ou rouvrir un dossier livreur. Le dossier ne
+    #: garde que la **dernière** décision (`verified_by`, `verified_at`) : sans
+    #: le journal, « qui a suspendu ce livreur samedi, et pourquoi ? » n'avait
+    #: plus de réponse dès la décision suivante.
+    COURIER_VERIFICATION = "courier.verification"
+
 
 def record_change(
     *,
@@ -96,6 +126,7 @@ def record_change(
     target_label: str,
     before: dict[str, Any],
     after: dict[str, Any],
+    scope_restaurant_id: Any = None,
 ) -> AuditEntry | None:
     """Consigne un changement — **et rien quand il n'y en a pas**.
 
@@ -108,6 +139,10 @@ def record_change(
     L'acteur peut être nul : une commande de peuplement ou une correction en
     `shell` n'en ont pas, et refuser de journaliser dans ces cas-là ferait
     perdre précisément les changements qu'on cherche le plus souvent.
+
+    `scope_restaurant_id` rattache l'entrée à un établissement quand la
+    décision en a un — c'est ce qui la rend lisible par le compte cloisonné qui
+    l'a prise. Voir `AuditEntry.scope_restaurant_id`.
     """
     if before == after:
         return None
@@ -120,4 +155,5 @@ def record_change(
         target_label=target_label,
         before=before,
         after=after,
+        scope_restaurant_id=scope_restaurant_id,
     )

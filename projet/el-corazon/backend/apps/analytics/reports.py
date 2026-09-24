@@ -38,6 +38,7 @@ __all__ = [
     "NETWORK_LEVELS",
     "CategoryRow",
     "CourierPerformanceRow",
+    "CurrencyRevenue",
     "CustomerStats",
     "NetworkRow",
     "Overview",
@@ -48,9 +49,17 @@ __all__ = [
 ]
 
 
+# **Chaque montant porte sa devise.** Un périmètre qui couvre le Togo et le
+# Cameroun encaisse des XOF et des XAF : deux monnaies distinctes, même à
+# parité, qu'aucune ligne n'additionne. Les séries sont donc découpées par
+# devise, comme le rapport réseau l'était déjà (`NetworkRow`) ; c'est l'écran
+# qui choisit laquelle il montre, jamais le serveur qui les mêle.
+
+
 @dataclass(frozen=True, slots=True)
 class RevenueRow:
     day: dt.date
+    currency: str
     orders_count: int
     revenue_minor: int
 
@@ -59,6 +68,7 @@ class RevenueRow:
 class TopProductRow:
     menu_item_id: str
     item_name: str
+    currency: str
     quantity_sold: int
     revenue_minor: int
 
@@ -67,23 +77,42 @@ class TopProductRow:
 class CourierPerformanceRow:
     courier_id: str
     courier_name: str
+    currency: str
     deliveries: int
     earnings_minor: int
 
 
 @dataclass(frozen=True, slots=True)
 class StatusRow:
+    """Commandes par statut — un **compte**, sans montant.
+
+    La ligne portait `revenue_minor`, somme de toutes les commandes du statut :
+    sur un périmètre à deux devises, c'était une addition de XOF et de XAF, et
+    aucun écran ne la lisait. Le chiffre d'affaires a ses propres rapports,
+    découpés par devise.
+    """
+
     status: str
     orders_count: int
-    revenue_minor: int
 
 
 @dataclass(frozen=True, slots=True)
 class CategoryRow:
     category_id: str
     category_name: str
+    currency: str
     quantity_sold: int
     revenue_minor: int
+
+
+@dataclass(frozen=True, slots=True)
+class CurrencyRevenue:
+    """Chiffre d'affaires livré d'une devise, sur la fenêtre de l'aperçu."""
+
+    currency: str
+    orders_delivered: int
+    revenue_minor: int
+    average_basket_minor: int
 
 
 #: Les quatre étages du réseau, et ce qui identifie une ligne à chacun.
@@ -137,8 +166,14 @@ class Overview:
     orders_count: int
     orders_delivered: int
     orders_cancelled: int
-    revenue_minor: int
-    average_basket_minor: int
+    #: Chiffre d'affaires et panier moyen **quand le périmètre n'encaisse
+    #: qu'une devise** (`currency`), nuls sinon : les rendre sur un périmètre à
+    #: deux devises reviendrait à additionner des XOF et des XAF. `revenues`
+    #: porte le détail, une ligne par devise, dans tous les cas.
+    revenue_minor: int | None
+    average_basket_minor: int | None
+    currency: str | None
+    revenues: list[CurrencyRevenue]
     customers_count: int
     couriers_online: int
     menu_items_available: int
@@ -186,7 +221,7 @@ class CustomerStats:
 
 class ReportingService:
     @staticmethod
-    def customer_stats(customer: User) -> CustomerStats:
+    def customer_stats(customer: User, *, perimetre: Perimetre) -> CustomerStats:
         """Agrège le dossier d'un client en une requête d'agrégation.
 
         Le total et le panier moyen ne comptent que les commandes **livrées** :
@@ -197,8 +232,23 @@ class ReportingService:
         Le panier moyen est calculé ici et non côté client : sur une liste
         paginée, une moyenne faite à l'écran ne porte que sur la page affichée
         et change quand on tourne la page.
+
+        **Cloisonné comme les six autres rapports.** Le lot du 8 septembre a
+        porté le périmètre dans tous les agrégats et a oublié celui-ci, qui ne
+        partait pas de la même vue : un gérant de Lomé lisait donc le nombre de
+        commandes et la dépense totale d'un client **tous pays confondus**, et
+        rappelait un habitué d'Abidjan en le croyant sien. Le compte client,
+        lui, reste d'enseigne (`CustomerViewSet`) : ce sont ses **commandes**
+        qui appartiennent à une cuisine, pas lui.
+
+        Les points de fidélité et les adresses ne sont pas cloisonnables — ils
+        n'appartiennent à aucun établissement — et restent rendus tels quels.
         """
-        agregat = Order.objects.filter(customer=customer).aggregate(
+        commandes = Order.objects.filter(customer=customer)
+        if perimetre.restaurant_ids is not None:
+            commandes = commandes.filter(restaurant_id__in=perimetre.restaurant_ids)
+
+        agregat = commandes.aggregate(
             total=Count("id"),
             livrees=Count("id", filter=Q(status=OrderStatus.DELIVERED)),
             annulees=Count("id", filter=Q(status=OrderStatus.CANCELLED)),
@@ -214,10 +264,7 @@ class ReportingService:
         # sa dernière commande, et le défaut de configuration seulement s'il n'en
         # a aucune — auquel cas le montant est nul et la devise n'affiche rien.
         devise = (
-            Order.objects.filter(customer=customer)
-            .order_by("-placed_at")
-            .values_list("total_currency", flat=True)
-            .first()
+            commandes.order_by("-placed_at").values_list("total_currency", flat=True).first()
             or settings.DEFAULT_CURRENCY
         )
 
@@ -253,13 +300,16 @@ class ReportingService:
             # trancher la fenêtre chez la cuisine puis grouper les jours en UTC
             # rendrait des lignes coupées au milieu de la nuit locale.
             .annotate(day=TruncDate("delivered_at", tzinfo=ZoneInfo(perimetre.timezone_name)))
-            .values("day")
+            .values("day", "total_currency")
             .annotate(orders_count=Count("id"), revenue_minor=Sum("total_minor"))
-            .order_by("day")
+            .order_by("day", "total_currency")
         )
         return [
             RevenueRow(
-                day=row["day"], orders_count=row["orders_count"], revenue_minor=row["revenue_minor"]
+                day=row["day"],
+                currency=row["total_currency"],
+                orders_count=row["orders_count"],
+                revenue_minor=row["revenue_minor"],
             )
             for row in rows
         ]
@@ -276,7 +326,7 @@ class ReportingService:
                 order__delivered_at__lt=fin,
                 **perimetre.filtre("order__restaurant_id"),
             )
-            .values("menu_item_id", "item_name")
+            .values("menu_item_id", "item_name", "line_total_currency")
             .annotate(quantity_sold=Sum("quantity"), revenue_minor=Sum("line_total_minor"))
             .order_by("-quantity_sold")[:limit]
         )
@@ -284,6 +334,7 @@ class ReportingService:
             TopProductRow(
                 menu_item_id=str(row["menu_item_id"]),
                 item_name=row["item_name"],
+                currency=row["line_total_currency"],
                 quantity_sold=row["quantity_sold"],
                 revenue_minor=row["revenue_minor"],
             )
@@ -308,17 +359,10 @@ class ReportingService:
                 **perimetre.filtre("restaurant_id"),
             )
             .values("status")
-            .annotate(orders_count=Count("id"), revenue_minor=Sum("total_minor"))
+            .annotate(orders_count=Count("id"))
             .order_by("-orders_count")
         )
-        return [
-            StatusRow(
-                status=row["status"],
-                orders_count=row["orders_count"],
-                revenue_minor=row["revenue_minor"] or 0,
-            )
-            for row in rows
-        ]
+        return [StatusRow(status=row["status"], orders_count=row["orders_count"]) for row in rows]
 
     @staticmethod
     def sales_by_category(
@@ -340,7 +384,7 @@ class ReportingService:
                 menu_item__isnull=False,
                 **perimetre.filtre("order__restaurant_id"),
             )
-            .values("menu_item__category_id", "menu_item__category__name")
+            .values("menu_item__category_id", "menu_item__category__name", "line_total_currency")
             .annotate(quantity_sold=Sum("quantity"), revenue_minor=Sum("line_total_minor"))
             .order_by("-revenue_minor")
         )
@@ -348,6 +392,7 @@ class ReportingService:
             CategoryRow(
                 category_id=str(row["menu_item__category_id"]),
                 category_name=row["menu_item__category__name"],
+                currency=row["line_total_currency"],
                 quantity_sold=row["quantity_sold"],
                 revenue_minor=row["revenue_minor"] or 0,
             )
@@ -432,14 +477,29 @@ class ReportingService:
             placed_at__gte=debut,
             placed_at__lt=fin,
             **perimetre.filtre("restaurant_id"),
-        ).aggregate(
+        )
+        agregat = commandes.aggregate(
             total=Count("id"),
             livrees=Count("id", filter=Q(status=OrderStatus.DELIVERED)),
             annulees=Count("id", filter=Q(status=OrderStatus.CANCELLED)),
-            chiffre=Sum("total_minor", filter=Q(status=OrderStatus.DELIVERED)),
         )
-        livrees = commandes["livrees"]
-        chiffre = commandes["chiffre"] or 0
+        # Le chiffre d'affaires par devise : une requête groupée, pas une
+        # somme globale. Trié du plus gros au plus petit pour que l'écran
+        # puisse mettre en tête la devise dominante du périmètre.
+        revenus = [
+            CurrencyRevenue(
+                currency=ligne["total_currency"],
+                orders_delivered=ligne["livrees"],
+                revenue_minor=ligne["chiffre"] or 0,
+                average_basket_minor=(ligne["chiffre"] or 0) // ligne["livrees"],
+            )
+            for ligne in commandes.filter(status=OrderStatus.DELIVERED)
+            .order_by()
+            .values("total_currency")
+            .annotate(livrees=Count("id"), chiffre=Sum("total_minor"))
+            .order_by("-chiffre", "total_currency")
+        ]
+        unique = revenus[0] if len(revenus) == 1 else None
 
         catalogue = (
             MenuItem.objects.alive()
@@ -448,11 +508,17 @@ class ReportingService:
         )
 
         return Overview(
-            orders_count=commandes["total"],
-            orders_delivered=livrees,
-            orders_cancelled=commandes["annulees"],
-            revenue_minor=chiffre,
-            average_basket_minor=chiffre // livrees if livrees else 0,
+            orders_count=agregat["total"],
+            orders_delivered=agregat["livrees"],
+            orders_cancelled=agregat["annulees"],
+            # Une seule devise — ou aucune livraison : zéro n'additionne rien.
+            # Plusieurs : nul, et `revenues` dit tout.
+            revenue_minor=unique.revenue_minor if unique else (None if revenus else 0),
+            average_basket_minor=(
+                unique.average_basket_minor if unique else (None if revenus else 0)
+            ),
+            currency=unique.currency if unique else None,
+            revenues=revenus,
             customers_count=ReportingService._clients_du_perimetre(perimetre),
             # Les trois termes de L1, et pas le seul `is_online`. Le tableau de
             # bord intitule ce nombre « Livreurs actifs » : ce que le
@@ -514,7 +580,9 @@ class ReportingService:
                 delivered_at__lt=fin,
                 **perimetre.filtre("order__restaurant_id"),
             )
-            .values("courier_id", "courier__user__full_name")
+            # La devise de la commande, qui est celle de la rémunération : un
+            # livreur de Douala est payé en XAF, celui de Lomé en XOF.
+            .values("courier_id", "courier__user__full_name", "order__total_currency")
             .annotate(deliveries=Count("id"), earnings_minor=Sum("courier_fee_minor"))
             .order_by("-deliveries")
         )
@@ -522,6 +590,7 @@ class ReportingService:
             CourierPerformanceRow(
                 courier_id=str(row["courier_id"]),
                 courier_name=row["courier__user__full_name"],
+                currency=row["order__total_currency"],
                 deliveries=row["deliveries"],
                 earnings_minor=row["earnings_minor"] or 0,
             )

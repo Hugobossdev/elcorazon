@@ -110,6 +110,81 @@ class TestPlanification:
         assert not CourierShift.objects.exists()
 
 
+class TestChevauchement:
+    """Un livreur n'est attendu qu'à un endroit à la fois.
+
+    `courier_shift_unique_start` ne refusait que deux créneaux commençant à la
+    même minute : « lundi 9 h – 17 h » et « lundi 12 h – 20 h » passaient tous
+    les deux. Le planning montrait alors le livreur deux fois à midi, et
+    l'amplitude de la journée se lisait seize heures pour onze heures de
+    présence.
+    """
+
+    def test_un_creneau_qui_en_recouvre_un_autre_est_refuse(
+        self, as_planificateur: APIClient, courier: CourierProfile
+    ) -> None:
+        as_planificateur.post(reverse(LISTE), creneau(courier), format="json")
+
+        response = as_planificateur.post(
+            reverse(LISTE),
+            {**creneau(courier, debut="12:00"), "end_time": "20:00"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        # Le refus nomme le créneau qui gêne : sans lui, l'exploitation
+        # corrigerait au hasard.
+        assert "09:00" in response.data["errors"]["start_time"][0]
+        assert CourierShift.objects.count() == 1
+
+    def test_deux_creneaux_qui_s_enchainent_sont_acceptes(
+        self, as_planificateur: APIClient, courier: CourierProfile
+    ) -> None:
+        """Un service du midi puis un service du soir : bornes ouvertes.
+
+        Refuser 12 h – 18 h après 9 h – 12 h obligerait à saisir 12 h 01, et la
+        minute manquante se lirait comme une coupure.
+        """
+        as_planificateur.post(
+            reverse(LISTE),
+            {**creneau(courier), "end_time": "12:00"},
+            format="json",
+        )
+
+        response = as_planificateur.post(
+            reverse(LISTE),
+            {**creneau(courier, debut="12:00"), "end_time": "18:00"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert CourierShift.objects.count() == 2
+
+    def test_un_autre_jour_ne_chevauche_rien(
+        self, as_planificateur: APIClient, courier: CourierProfile
+    ) -> None:
+        as_planificateur.post(reverse(LISTE), creneau(courier, jour=2), format="json")
+
+        response = as_planificateur.post(reverse(LISTE), creneau(courier, jour=3), format="json")
+
+        assert response.status_code == status.HTTP_201_CREATED
+
+    def test_ajuster_un_creneau_ne_le_compare_pas_a_lui_meme(
+        self, as_planificateur: APIClient, courier: CourierProfile
+    ) -> None:
+        """Sinon aucun créneau ne serait plus modifiable : il se recouvre."""
+        cree = as_planificateur.post(reverse(LISTE), creneau(courier), format="json")
+
+        response = as_planificateur.patch(
+            reverse(DETAIL, kwargs={"pk": cree.data["id"]}),
+            {"end_time": "18:00"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["end_time"] == "18:00:00"
+
+
 class TestIndicatifEtNonOpposable:
     def test_le_planning_ne_conditionne_pas_l_eligibilite(self, courier: CourierProfile) -> None:
         """Le cœur du choix : L1 ne compte que trois termes — en ligne, validé,

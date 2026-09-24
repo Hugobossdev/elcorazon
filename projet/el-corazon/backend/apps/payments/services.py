@@ -38,6 +38,7 @@ from apps.payments.signals import (
     withdrawal_requested,
     withdrawal_settled,
 )
+from common.audit import AuditAction, record_change
 from common.exceptions import BusinessRuleViolation, InsufficientBalance
 from common.money import Money
 
@@ -393,6 +394,58 @@ class PaymentService:
             )
 
 
+def _consigner_remboursement(
+    refund: Refund,
+    actor: User | None,
+    action: str,
+    *,
+    avant: dict[str, object],
+    **details: object,
+) -> None:
+    """Porte une décision de remboursement au journal des décisions.
+
+    Le périmètre de l'entrée est l'établissement de la commande : c'est ce qui
+    la rend lisible par le gérant qui l'a prise, le journal étant cloisonné
+    comme le reste (voir `AuditEntry.scope_restaurant_id`).
+    """
+    record_change(
+        actor=actor,
+        action=action,
+        target_type="refund",
+        target_id=refund.pk,
+        target_label=f"{refund.amount} — commande {refund.order.reference}",
+        before=avant,
+        after={
+            "status": refund.status,
+            "amount": str(refund.amount.amount_minor),
+            "currency": refund.amount.currency,
+            **{cle: valeur for cle, valeur in details.items() if valeur},
+        },
+        scope_restaurant_id=refund.order.restaurant_id,
+    )
+
+
+def _consigner_retrait(
+    withdrawal: Withdrawal, actor: User | None, action: str, *, avant: str, **details: object
+) -> None:
+    """Porte une décision de versement au journal — même raison que ci-dessus."""
+    record_change(
+        actor=actor,
+        action=action,
+        target_type="withdrawal",
+        target_id=withdrawal.pk,
+        target_label=f"{withdrawal.amount} — {withdrawal.courier.user.full_name}",
+        before={"status": avant},
+        after={
+            "status": withdrawal.status,
+            "amount": str(withdrawal.amount.amount_minor),
+            "currency": withdrawal.amount.currency,
+            **{cle: valeur for cle, valeur in details.items() if valeur},
+        },
+        scope_restaurant_id=withdrawal.courier.restaurant_id,
+    )
+
+
 class RefundService:
     @staticmethod
     @transaction.atomic
@@ -434,10 +487,10 @@ class RefundService:
             raise BusinessRuleViolation("Le montant remboursé doit être strictement positif.")
 
         already = Money.zero(locked.total.currency)
-        for refund in locked.refunds.filter(
+        for precedent in locked.refunds.filter(
             status__in=[PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.COMPLETED]
         ):
-            already += refund.amount
+            already += precedent.amount
 
         remaining = settled_total(locked) - already
         if amount > remaining:
@@ -448,7 +501,7 @@ class RefundService:
                 currency=remaining.currency,
             )
 
-        return Refund.objects.create(  # type: ignore[misc]
+        refund: Refund = Refund.objects.create(  # type: ignore[misc]
             order=locked,
             transaction=txn,
             amount=amount,
@@ -456,10 +509,14 @@ class RefundService:
             requested_by=actor,
             status=PaymentStatus.PENDING,
         )
+        _consigner_remboursement(refund, actor, AuditAction.REFUND_REQUEST, avant={})
+        return refund
 
     @staticmethod
     @transaction.atomic
-    def settle(*, refund: Refund, provider_reference: str = "") -> Refund:
+    def settle(
+        *, refund: Refund, provider_reference: str = "", actor: User | None = None
+    ) -> Refund:
         """Le virement a été exécuté — **geste de l'exploitation**, pas du client.
 
         ## Pourquoi cette méthode n'existait pas, et pourquoi il en faut une
@@ -494,6 +551,7 @@ class RefundService:
         états sur l'état lu en mémoire.
         """
         refund = Refund.objects.select_for_update().get(pk=refund.pk)
+        avant = refund.status
         PAYMENT_MACHINE.validate(refund.status, PaymentStatus.PROCESSING)
         PAYMENT_MACHINE.validate(PaymentStatus.PROCESSING, PaymentStatus.COMPLETED)
 
@@ -522,7 +580,53 @@ class RefundService:
             refund.reason = f"{refund.reason} — virement {provider_reference}".strip()
             refund.save(update_fields=["reason", "updated_at"])
 
+        _consigner_remboursement(
+            refund,
+            actor,
+            AuditAction.REFUND_SETTLE,
+            avant={"status": avant},
+            provider_reference=provider_reference,
+        )
         return refund
+
+    @staticmethod
+    @transaction.atomic
+    def cancel(*, refund: Refund, reason: str, actor: User | None = None) -> Refund:
+        """Abandonne un remboursement qui ne sera pas versé.
+
+        ## Ce que son absence coûtait
+
+        Un remboursement demandé par erreur — mauvais montant, mauvaise
+        commande, geste finalement refusé par le responsable — n'avait **aucune
+        sortie**. Il restait « en attente » pour toujours, et surtout il
+        continuait de consommer le plafond du remboursable (P3, qui compte les
+        lignes en attente) : la commande devenait irremboursable, et le seul
+        recours était l'administration Django.
+
+        `pending → cancelled` existait dans la machine et n'était jamais
+        atteint. Un remboursement **déjà versé** ne s'annule pas : la machine
+        refuse `completed → cancelled`, et c'est la bonne réponse — l'argent est
+        parti, ce qui se corrige est un nouvel encaissement, pas une écriture.
+
+        Le motif est exigé : « annulé » sans raison est exactement ce qu'on
+        cherche à comprendre six mois plus tard, quand un client réclame un
+        remboursement dont la trace dit qu'il a été abandonné.
+        """
+        if not reason.strip():
+            raise BusinessRuleViolation("Dites pourquoi ce remboursement est abandonné.")
+
+        verrouille = Refund.objects.select_for_update().get(pk=refund.pk)
+        avant = verrouille.status
+        PAYMENT_MACHINE.validate(verrouille.status, PaymentStatus.CANCELLED)
+
+        verrouille.status = PaymentStatus.CANCELLED
+        verrouille.reason = f"{verrouille.reason} — abandonné : {reason.strip()}".strip()
+        verrouille.save(update_fields=["status", "reason", "updated_at"])
+
+        _consigner_remboursement(
+            verrouille, actor, AuditAction.REFUND_CANCEL, avant={"status": avant}, reason=reason
+        )
+        return verrouille
 
 
 class WithdrawalService:
@@ -548,6 +652,12 @@ class WithdrawalService:
         toutes deux la vérification de solde et videraient le compteur deux
         fois. C'est le même schéma que le débit de points de fidélité.
         """
+        # Avant tout : un montant négatif ferait **créditer** les gains par la
+        # soustraction ci-dessous. La contrainte SQL l'arrête, mais un service
+        # appelé ailleurs que par la route ne doit pas dépendre d'elle.
+        if amount.amount_minor <= 0:
+            raise BusinessRuleViolation("Le montant à retirer doit être positif.")
+
         locked = CourierProfile.objects.select_for_update().get(pk=courier.pk)
         earnings = locked.total_earnings
 
@@ -593,6 +703,7 @@ class WithdrawalService:
         versement à la même seconde ne doivent pas le signer deux fois.
         """
         withdrawal = Withdrawal.objects.select_for_update().get(pk=withdrawal.pk)
+        avant = withdrawal.status
         PAYMENT_MACHINE.validate(withdrawal.status, PaymentStatus.PROCESSING)
         PAYMENT_MACHINE.validate(PaymentStatus.PROCESSING, PaymentStatus.COMPLETED)
 
@@ -608,6 +719,13 @@ class WithdrawalService:
                 "processed_by",
                 "updated_at",
             ]
+        )
+        _consigner_retrait(
+            withdrawal,
+            actor,
+            AuditAction.PAYOUT_SETTLE,
+            avant=avant,
+            provider_reference=provider_reference,
         )
         withdrawal_settled.send(sender=Withdrawal, withdrawal=withdrawal)
         return withdrawal
@@ -625,6 +743,7 @@ class WithdrawalService:
         en mémoire, et recréditeraient deux fois.
         """
         withdrawal = Withdrawal.objects.select_for_update().get(pk=withdrawal.pk)
+        avant = withdrawal.status
         PAYMENT_MACHINE.validate(withdrawal.status, PaymentStatus.FAILED)
 
         locked = CourierProfile.objects.select_for_update().get(pk=withdrawal.courier_id)
@@ -636,5 +755,13 @@ class WithdrawalService:
         withdrawal.failure_reason = reason
         withdrawal.processed_by = actor
         withdrawal.save(update_fields=["status", "failure_reason", "processed_by", "updated_at"])
+        _consigner_retrait(
+            withdrawal,
+            actor,
+            AuditAction.PAYOUT_REJECT,
+            avant=avant,
+            reason=reason,
+            restitution=str(withdrawal.amount.amount_minor),
+        )
         withdrawal_failed.send(sender=Withdrawal, withdrawal=withdrawal)
         return withdrawal

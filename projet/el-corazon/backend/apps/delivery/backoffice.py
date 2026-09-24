@@ -22,11 +22,17 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from django.db.models import QuerySet
+from django.db.models import Count, QuerySet, Sum
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
+from rest_framework.decorators import action
+from rest_framework.request import Request
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from apps.delivery.models import Assignment, CourierShift
 from apps.delivery.serializers import AssignmentSerializer, CourierShiftSerializer
+from apps.delivery.states import DeliveryStatus
 from apps.restaurants.scoping import assert_in_scope, is_unscoped, staff_restaurant_ids
 from common.permissions import HasPermission, HasReadWritePermission, authenticated_user
 
@@ -123,7 +129,57 @@ class ManagedAssignmentViewSet(ReadOnlyModelViewSet[Assignment]):
         "order": ["exact"],
         "courier": ["exact"],
         "status": ["exact"],
+        # L'historique d'un livreur se lit sur une période. Sans ces bornes, le
+        # back-office chargeait toutes ses courses — puis croisait le résultat
+        # avec une année de commandes téléchargées — pour n'en montrer qu'un
+        # mois.
+        "delivered_at": ["gte", "lte"],
+        "offered_at": ["gte", "lte"],
     }
+
+    @extend_schema(
+        responses={200: OpenApiTypes.OBJECT},
+        tags=["delivery"],
+        description=(
+            "Totaux de la sélection de courses : compte par statut et **gains "
+            "par devise** du livreur. Mêmes filtres que la liste."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="summary", url_name="summary")
+    def summary(self, request: Request) -> Response:
+        """Ce que l'historique d'un livreur additionnait à l'écran, et mal.
+
+        Il affichait un « Revenu » qui était la somme des **totaux des
+        commandes** — ce que les clients ont payé, pas ce que le livreur a
+        gagné — et mêlait les devises. Les gains d'un livreur sont
+        `courier_fee`, dans la devise de la commande.
+        """
+        selection = self.filter_queryset(self.get_queryset()).order_by()
+        gains = [
+            {
+                "currency": ligne["order__total_currency"],
+                "deliveries": ligne["nombre"],
+                "earnings_minor": ligne["gains"] or 0,
+            }
+            for ligne in selection.filter(status=DeliveryStatus.DELIVERED)
+            .values("order__total_currency")
+            .annotate(nombre=Count("id"), gains=Sum("courier_fee_minor"))
+            .order_by("-gains", "order__total_currency")
+        ]
+        comptes = dict.fromkeys(DeliveryStatus.values, 0)
+        comptes.update(
+            {
+                ligne["status"]: ligne["nombre"]
+                for ligne in selection.values("status").annotate(nombre=Count("id"))
+            }
+        )
+        return Response(
+            {
+                "assignments": sum(comptes.values()),
+                "by_status": comptes,
+                "earnings": gains,
+            }
+        )
 
     def get_queryset(self) -> QuerySet[Assignment]:
         user = authenticated_user(self.request)

@@ -74,6 +74,32 @@ def test_une_lecture_fait_monter_le_taux_d_ouverture(
 def test_une_commande_apres_l_envoi_compte_une_conversion(
     restaurant: Restaurant, customer: User, envoyee: Campaign
 ) -> None:
+    """Le taux se lit au siège : c'est le seul compte dont le numérateur et le
+    dénominateur portent sur la même population (voir le test suivant)."""
+    siege = User.objects.create_superuser("siege@elcorazon.test", "motdepasse")
+    commande = build_order(restaurant, customer)
+    commande.placed_at = envoyee.sent_at + dt.timedelta(days=2)
+    commande.save(update_fields=["placed_at"])
+
+    resultat = bilan(siege, envoyee)
+
+    assert resultat["customers_who_ordered"] == 1
+    assert resultat["conversion_rate"] == 1.0
+    assert resultat["revenue"] == [
+        {"amount": str(commande.total.amount_minor), "currency": commande.total.currency}
+    ]
+
+
+def test_un_compte_cloisonne_ne_lit_pas_de_taux_de_conversion(
+    restaurant: Restaurant, customer: User, envoyee: Campaign
+) -> None:
+    """Son numérateur est cloisonné, son dénominateur — les destinataires de
+    la campagne — ne l'est pas : le rapport des deux ne veut rien dire.
+
+    Un gérant lisait « 2 % » là où la campagne avait converti 20 % de ses
+    destinataires, le reste ayant commandé ailleurs. Ses clients et son chiffre
+    restent lisibles ; le taux, lui, est absent plutôt que faux.
+    """
     lecteur = personnel("marketing@elcorazon.test", restaurant, "notifications.send")
     commande = build_order(restaurant, customer)
     commande.placed_at = envoyee.sent_at + dt.timedelta(days=2)
@@ -82,7 +108,7 @@ def test_une_commande_apres_l_envoi_compte_une_conversion(
     resultat = bilan(lecteur, envoyee)
 
     assert resultat["customers_who_ordered"] == 1
-    assert resultat["conversion_rate"] == 1.0
+    assert resultat["conversion_rate"] is None
     assert resultat["revenue"] == [
         {"amount": str(commande.total.amount_minor), "currency": commande.total.currency}
     ]

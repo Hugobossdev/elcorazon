@@ -8,7 +8,12 @@ from rest_framework import serializers
 
 from apps.notifications.models import Campaign, Notification
 
-__all__ = ["CampaignSerializer", "NotificationSerializer", "UnreadCountSerializer"]
+__all__ = [
+    "CampaignScheduleSerializer",
+    "CampaignSerializer",
+    "NotificationSerializer",
+    "UnreadCountSerializer",
+]
 
 
 class NotificationSerializer(serializers.ModelSerializer[Notification]):
@@ -46,6 +51,11 @@ class CampaignSerializer(serializers.ModelSerializer[Campaign]):
             "audience_label",
             "segment_days",
             "status",
+            # En lecture seule ici : programmer est un **geste**, avec sa route
+            # et ses gardes (heure à venir, campagne pas déjà partie). Le poser
+            # comme un champ ordinaire permettrait de dater une campagne dans
+            # le passé au détour d'un enregistrement de formulaire.
+            "scheduled_at",
             "sent_at",
             "recipient_count",
             "created_by_email",
@@ -56,6 +66,7 @@ class CampaignSerializer(serializers.ModelSerializer[Campaign]):
             "id",
             "audience_label",
             "status",
+            "scheduled_at",
             "sent_at",
             "recipient_count",
             "created_by_email",
@@ -75,4 +86,16 @@ class CampaignStatsSerializer(serializers.Serializer[Any]):
     conversion_rate = serializers.FloatField(allow_null=True)
     revenue = serializers.ListField(
         child=serializers.DictField(), help_text="`amount` (unité mineure) et `currency`."
+    )
+
+
+class CampaignScheduleSerializer(serializers.Serializer[Any]):
+    """L'heure à laquelle une campagne doit partir.
+
+    Un instant, pas une date : « le 3 mars » ne dit pas si le message arrive au
+    réveil ou à minuit, et c'est précisément ce qu'on choisit ici.
+    """
+
+    scheduled_at = serializers.DateTimeField(
+        help_text="Instant ISO-8601, fuseau compris. Doit être à venir."
     )

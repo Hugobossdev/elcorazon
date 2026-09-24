@@ -14,12 +14,15 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.accounts.models import Role, User, UserType
+from apps.accounts.models import Role, User, UserType, VerificationCode, VerificationPurpose
 from apps.delivery.models import Assignment, CourierProfile, VehicleType
 from apps.delivery.states import DeliveryStatus, VerificationStatus
+from apps.notifications.models import Notification, NotificationKind
 from apps.orders.models import Order
 from apps.orders.states import OrderStatus
 from apps.restaurants.models import Restaurant, StaffMembership
+from common.audit import AuditAction
+from common.models import AuditEntry
 from common.money import Money
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
@@ -247,6 +250,30 @@ class TestProvisioningLivreur:
 
         assert CourierProfile.objects.filter(user__email=NOUVEAU).exists()
 
+    def test_l_adresse_de_l_embauche_est_verifiee_comme_celle_d_un_candidat(
+        self, as_recruteur: APIClient, restaurant: Restaurant
+    ) -> None:
+        """Un code part aussi pour une embauche.
+
+        Il ne partait que pour une candidature spontanée. L'adresse saisie par
+        le personnel n'était donc jamais éprouvée : une faute de frappe ne se
+        découvrait qu'au premier « mot de passe oublié », sur un compte auquel
+        plus personne ne pouvait écrire.
+
+        Le code n'ouvre ni ne ferme rien — l'éligibilité aux courses reste L1 :
+        en ligne, dossier validé, compte actif.
+        """
+        as_recruteur.post(
+            reverse("v1:delivery:courier-list"), candidature(restaurant), format="json"
+        )
+
+        embauche = User.objects.get(email=NOUVEAU)
+        assert VerificationCode.objects.filter(
+            user=embauche,
+            purpose=VerificationPurpose.ACCOUNT_VERIFICATION,
+            consumed_at__isnull=True,
+        ).exists()
+
     def test_le_dossier_ne_naît_jamais_valide_meme_si_la_requete_le_demande(
         self, as_recruteur: APIClient, restaurant: Restaurant
     ) -> None:
@@ -404,12 +431,82 @@ class TestValidationDeDossier:
         continuerait d'apparaître dans les listes d'affectation."""
         response = as_dispatcher.post(
             reverse("v1:delivery:courier-verification", args=[courier.pk]),
-            {"status": VerificationStatus.SUSPENDED},
+            {"status": VerificationStatus.SUSPENDED, "notes": "Incident client du 20/09."},
             format="json",
         )
 
         assert response.data["is_online"] is False
         assert response.data["can_accept_orders"] is False
+
+    @pytest.mark.parametrize("cible", [VerificationStatus.SUSPENDED, VerificationStatus.REJECTED])
+    def test_retirer_quelque_chose_au_livreur_exige_un_motif(
+        self, as_dispatcher: APIClient, courier: CourierProfile, cible: str
+    ) -> None:
+        """Le livreur lit ce motif dans son profil : sans lui, il n'a rien à
+        corriger, ni personne à qui demander pourquoi."""
+        if cible == VerificationStatus.REJECTED:
+            CourierProfile.objects.filter(pk=courier.pk).update(
+                verification_status=VerificationStatus.PENDING
+            )
+
+        response = as_dispatcher.post(
+            reverse("v1:delivery:courier-verification", args=[courier.pk]),
+            {"status": cible, "notes": "   "},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "notes" in response.data["errors"]
+        courier.refresh_from_db()
+        assert courier.verification_status != cible
+
+    def test_le_livreur_est_prevenu_du_refus_et_de_son_motif(
+        self, as_dispatcher: APIClient, courier: CourierProfile
+    ) -> None:
+        """Il ne l'apprenait qu'en rouvrant l'application."""
+        CourierProfile.objects.filter(pk=courier.pk).update(
+            verification_status=VerificationStatus.PENDING
+        )
+
+        as_dispatcher.post(
+            reverse("v1:delivery:courier-verification", args=[courier.pk]),
+            {"status": VerificationStatus.REJECTED, "notes": "Photo du permis illisible"},
+            format="json",
+        )
+
+        avis = Notification.objects.get(user=courier.user, kind=NotificationKind.ACCOUNT)
+        assert avis.title == "Dossier refusé"
+        assert "Photo du permis illisible." in avis.body
+
+    def test_la_decision_entre_au_journal_de_la_cuisine(
+        self, as_dispatcher: APIClient, courier: CourierProfile
+    ) -> None:
+        """Le dossier ne garde que la dernière décision ; le journal garde
+        toutes les autres, lisibles par le gérant de la cuisine du livreur."""
+        as_dispatcher.post(
+            reverse("v1:delivery:courier-verification", args=[courier.pk]),
+            {"status": VerificationStatus.SUSPENDED, "notes": "Incident client."},
+            format="json",
+        )
+
+        entree = AuditEntry.objects.get(action=AuditAction.COURIER_VERIFICATION)
+        assert entree.target_id == str(courier.pk)
+        assert entree.before == {"status": VerificationStatus.APPROVED}
+        assert entree.after == {"status": VerificationStatus.SUSPENDED, "notes": "Incident client."}
+        assert entree.scope_restaurant_id == courier.restaurant_id
+
+    def test_une_decision_sans_effet_ne_previent_personne(
+        self, as_dispatcher: APIClient, courier: CourierProfile
+    ) -> None:
+        """Valider un dossier déjà validé ne change rien : ni avis, ni trace."""
+        as_dispatcher.post(
+            reverse("v1:delivery:courier-verification", args=[courier.pk]),
+            {"status": VerificationStatus.APPROVED},
+            format="json",
+        )
+
+        assert not Notification.objects.filter(user=courier.user).exists()
+        assert not AuditEntry.objects.filter(action=AuditAction.COURIER_VERIFICATION).exists()
 
     def test_on_ne_suspend_pas_un_dossier_jamais_valide(
         self, as_dispatcher: APIClient, courier: CourierProfile
@@ -487,7 +584,11 @@ class TestDeuxPermissionsPourDeuxGestes:
         )
         url = reverse("v1:delivery:courier-verification", args=[courier.pk])
 
-        suspension = client.post(url, {"status": VerificationStatus.SUSPENDED}, format="json")
+        suspension = client.post(
+            url,
+            {"status": VerificationStatus.SUSPENDED, "notes": "Astreinte : incident."},
+            format="json",
+        )
         validation = client.post(url, {"status": VerificationStatus.APPROVED}, format="json")
 
         assert suspension.status_code == status.HTTP_200_OK

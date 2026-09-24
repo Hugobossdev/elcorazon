@@ -14,19 +14,23 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Role, User, UserType
+from apps.analytics.perimetre import Perimetre
 from apps.analytics.reports import ReportingService
 from apps.loyalty.models import PointsAccount
 from apps.orders.models import Order
 from apps.orders.services import OrderService
 from apps.orders.states import OrderStatus
 from apps.profiles.models import Address
-from apps.restaurants.models import Restaurant
+from apps.restaurants.models import Restaurant, StaffMembership
 from common.money import Money
 from tests.fixtures import build_order
 
 pytestmark = pytest.mark.django_db
 
 XOF = "XOF"
+
+#: Ce que lit un compte non cloisonné — `None` n'est pas l'ensemble vide.
+TOUTE_L_ENSEIGNE = Perimetre(restaurant_ids=None, timezone_name="UTC", timezone_est_certain=False)
 
 
 def deliver(order: Order) -> Order:
@@ -59,12 +63,19 @@ def stats_url(customer: User) -> str:
 
 
 @pytest.fixture
-def as_agent() -> APIClient:
-    """Service client : consulte les dossiers, sans droit d'analyse ni de blocage."""
+def as_agent(restaurant: Restaurant) -> APIClient:
+    """Service client : consulte les dossiers, sans droit d'analyse ni de blocage.
+
+    **Rattaché à l'établissement**, et ce n'est pas un détail de fixture : les
+    commandes d'un client appartiennent à des cuisines, et la fiche chiffrée
+    porte depuis le périmètre du compte qui la lit. Un agent rattaché à rien ne
+    voit rien — le défaut sûr de l'ADR-005 — et lirait ici des zéros.
+    """
     agent = User.objects.create_user(
         "agent@elcorazon.test", "motdepasse", full_name="Agent", user_type=UserType.STAFF
     )
     agent.roles.add(Role.objects.create(name="Service client", permissions=["customers.read"]))
+    StaffMembership.objects.create(user=agent, restaurant=restaurant)
     client = APIClient()
     client.force_authenticate(agent)
     return client
@@ -138,7 +149,7 @@ class TestAgregat:
         lit sur ses commandes, elle n'est pas une constante du serveur."""
         deliver(commande(restaurant, customer, 1, 4_000))
 
-        stats = ReportingService.customer_stats(customer)
+        stats = ReportingService.customer_stats(customer, perimetre=TOUTE_L_ENSEIGNE)
 
         assert stats.total_spent.currency == XOF
 
@@ -178,3 +189,57 @@ class TestAcces:
         response = as_agent.get(stats_url(membre))
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestCloisonnement:
+    """Le compte d'un client est d'enseigne ; ses commandes sont d'une cuisine.
+
+    Le lot du 8 septembre a porté le périmètre dans les six rapports
+    d'exploitation et a laissé celui-ci de côté : un gérant de Lomé lisait le
+    nombre de commandes et la dépense d'un client **tous pays confondus**.
+    """
+
+    def test_les_commandes_d_une_autre_cuisine_ne_comptent_pas(
+        self, customer: User, restaurant: Restaurant
+    ) -> None:
+        ailleurs = Restaurant.objects.create(
+            name="El Corazón Abidjan",
+            slug="el-corazon-abidjan",
+            zone=restaurant.zone,
+            address="Cocody",
+            location=restaurant.location,
+            phone="+22890000021",
+        )
+        deliver(commande(restaurant, customer, 1, 4_000))
+        deliver(
+            build_order(
+                ailleurs,
+                customer,
+                reference="EC000099",
+                subtotal=Money(9_500, XOF),
+                delivery_fee=Money(500, XOF),
+                total=Money(10_000, XOF),
+            )
+        )
+
+        gerant = User.objects.create_user(
+            "gerant@elcorazon.test", "motdepasse", full_name="Gérant", user_type=UserType.STAFF
+        )
+        gerant.roles.add(Role.objects.create(name="Gérance", permissions=["customers.read"]))
+        StaffMembership.objects.create(user=gerant, restaurant=restaurant)
+        client = APIClient()
+        client.force_authenticate(gerant)
+
+        response = client.get(stats_url(customer))
+
+        assert response.data["orders_count"] == 1
+        assert response.data["total_spent"] == {"amount": "4000", "currency": XOF}
+
+    def test_le_siege_lit_l_ensemble(self, customer: User, restaurant: Restaurant) -> None:
+        deliver(commande(restaurant, customer, 1, 4_000))
+        client = APIClient()
+        client.force_authenticate(User.objects.create_superuser("siege@elcorazon.test", "mdp"))
+
+        response = client.get(stats_url(customer))
+
+        assert response.data["orders_count"] == 1

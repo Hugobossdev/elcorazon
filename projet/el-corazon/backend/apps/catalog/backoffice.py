@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+from django.db import transaction
 from django.db.models import QuerySet
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
@@ -35,6 +36,7 @@ from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 from apps.catalog.models import Category, MenuItem, Option, OptionGroup, OptionTemplate, Review
 from apps.catalog.serializers import (
     ApplyTemplateSerializer,
+    CategoryReorderSerializer,
     ManagedCategorySerializer,
     ManagedMenuItemSerializer,
     ManagedOptionGroupSerializer,
@@ -57,6 +59,20 @@ __all__ = [
     "ManagedOptionTemplateViewSet",
     "ManagedOptionViewSet",
 ]
+
+
+class _RangementIncomplet(BusinessRuleViolation):
+    """La liste envoyée ne couvre pas toutes les catégories de l'établissement.
+
+    Un code propre plutôt que le code générique : l'écran a un geste précis à
+    proposer — recharger la carte puis recommencer — et le distinguer d'un
+    refus quelconque lui évite d'afficher « Opération impossible » là où il
+    suffit de relire.
+    """
+
+    code = "reorder_incomplete"
+    title = "Rangement incomplet"
+
 
 #: Lire le catalogue et le modifier ne sont pas le même métier.
 CATALOG_PERMISSION = HasReadWritePermission.of(read="catalog.read", write="catalog.write")
@@ -118,6 +134,61 @@ class ManagedCategoryViewSet(_ScopedCatalogViewSet[Category]):
         if restaurant is not None:
             assert_in_scope(authenticated_user(self.request), restaurant.pk)
         serializer.save()
+
+    @extend_schema(
+        request=CategoryReorderSerializer,
+        responses={200: ManagedCategorySerializer(many=True)},
+        tags=["catalog"],
+    )
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="reorder",
+        permission_classes=[HasPermission.of("catalog.write")],
+    )
+    def reorder(self, request: Request) -> Response:
+        """Range la carte d'un établissement — **en une transaction**.
+
+        Le back-office envoyait un `PATCH` par catégorie déplacée, en série.
+        Sur un refus au quatrième, les trois premiers étaient déjà écrits : la
+        base gardait un ordre que personne n'avait demandé, et l'écran, qui
+        restaurait sa liste d'avant, affichait autre chose que la base. Ici,
+        tout passe ou rien ne passe.
+
+        Le rang vient de la **position dans la liste**. Laisser le client
+        calculer les `sort_order` l'exposait à les faire diverger — deux fois le
+        rang 3, un trou au 5 — sans que le serveur puisse s'en apercevoir.
+
+        Le verrou porte sur les lignes de l'établissement : deux rangements
+        simultanés se croiseraient sinon au milieu, et l'ordre final ne serait
+        celui d'aucun des deux.
+        """
+        serializer = CategoryReorderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        restaurant = serializer.validated_data["restaurant"]
+        assert_in_scope(authenticated_user(request), restaurant.pk)
+
+        voulu: list[Any] = serializer.validated_data["categories"]
+
+        with transaction.atomic():
+            existantes = list(Category.objects.select_for_update().filter(restaurant=restaurant))
+            connues = {categorie.pk for categorie in existantes}
+            if connues != set(voulu):
+                # La liste doit être **complète** : les absentes garderaient leur
+                # ancien rang, mêlées aux nouvelles sans que rien ne dise où.
+                raise _RangementIncomplet(
+                    f"{restaurant.name} compte {len(connues)} catégorie(s) ; "
+                    f"{len(voulu)} identifiant(s) reçus. Envoyez la liste "
+                    "entière, dans l'ordre voulu."
+                )
+
+            par_id = {categorie.pk: categorie for categorie in existantes}
+            for rang, identifiant in enumerate(voulu, start=1):
+                par_id[identifiant].sort_order = rang
+            Category.objects.bulk_update(par_id.values(), ["sort_order"])
+
+        rangees = [par_id[identifiant] for identifiant in voulu]
+        return Response(ManagedCategorySerializer(rangees, many=True).data)
 
 
 @extend_schema(

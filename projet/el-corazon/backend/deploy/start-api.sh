@@ -17,6 +17,18 @@ set -e
 # dans les journaux, qu'un service en ligne qui répond faux.
 python manage.py migrate --noinput
 
+# Les rôles système suivent le registre des permissions **à chaque démarrage**.
+# Une permission ajoutée par une migration — `payouts.*`, `support.*`,
+# `audit.read` le 19 septembre — n'existe pour personne tant que cette commande
+# n'a pas tourné : le Manager ne voit ni les retraits, ni le service client, ni
+# le journal, et le back-office masque ces écrans sans rien dire. Elle n'était
+# qu'une étape manuelle d'un compte rendu, sur un hébergeur sans shell.
+#
+# Idempotente, et sans risque pour la configuration du client : elle ne touche
+# que les rôles fournis à l'installation, que l'API refuse de modifier ; les
+# rôles sur mesure ne sont jamais réécrits.
+python manage.py bootstrap_roles
+
 # `collectstatic` au démarrage et non à la construction de l'image : `base.py`
 # lit `DJANGO_SECRET_KEY` à l'import sans valeur de repli, donc aucune commande
 # Django ne s'exécute pendant le build. Sans cette ligne, WhiteNoise avertit

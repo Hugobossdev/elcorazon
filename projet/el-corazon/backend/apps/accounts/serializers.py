@@ -91,6 +91,14 @@ class UserSerializer(serializers.ModelSerializer[User]):
             "phone_verified_at",
             "last_seen_at",
             "permissions",
+            # Le siège, en lecture seule. Le back-office en a besoin pour dire
+            # *pourquoi* une action est refusée : ce qui relève de l'enseigne —
+            # une campagne, un pays, un code promotionnel national — n'est ouvert
+            # qu'aux comptes non cloisonnés, et un bouton qui échoue en 403 sans
+            # l'expliquer se lit comme une panne. `is_unscoped` n'est pas
+            # déductible des permissions : un gérant peut détenir
+            # `notifications.send` et n'être pas le siège.
+            "is_superuser",
             "created_at",
             "updated_at",
         ]

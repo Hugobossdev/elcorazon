@@ -135,4 +135,48 @@ class ManagedPromotionSerializer(serializers.ModelSerializer[Promotion]):
                     {"amount": "Un code à montant fixe demande un montant strictement positif."}
                 )
 
+        # Une borne facultative est **positive** ou absente : un minimum de
+        # commande à zéro ou un plafond négatif ne bornent rien.
+        for nom in ("min_order_amount", "max_discount"):
+            borne = valeur(nom)
+            if borne is not None and not borne.is_positive:
+                raise serializers.ValidationError(
+                    {nom: "Laissez ce champ vide plutôt que de le mettre à zéro."}
+                )
+        quota_nul = "Un quota nul rendrait le code inutilisable : laissez vide pour « illimité »."
+        for nom in ("usage_limit", "usage_limit_per_user"):
+            quota = valeur(nom)
+            if quota is not None and quota < 1:
+                raise serializers.ValidationError({nom: quota_nul})
+
+        self._valider_devise(valeur)
         return attrs
+
+    def _valider_devise(self, valeur: Any) -> None:
+        """Tous les montants d'un code dans **une** devise — celle de son établissement.
+
+        Rien ne le vérifiait : un code de Douala (XAF) pouvait porter un minimum
+        en XOF, et n'était refusé qu'au moment où un client le saisissait, avec
+        « Ce code est libellé en XOF, la commande en XAF ». Pour un code
+        national, la devise est celle que le siège a choisie, mais elle reste
+        unique.
+        """
+        montants = {
+            nom: montant
+            for nom in ("amount", "min_order_amount", "max_discount")
+            if (montant := valeur(nom)) is not None
+        }
+        devises = {montant.currency for montant in montants.values()}
+        if len(devises) > 1:
+            recues = ", ".join(sorted(devises))
+            raise serializers.ValidationError(
+                dict.fromkeys(
+                    montants,
+                    f"Les montants d'un code sont dans une seule devise ({recues} reçues).",
+                )
+            )
+        restaurant = valeur("restaurant")
+        if restaurant is not None and devises and devises != {restaurant.currency}:
+            raise serializers.ValidationError(
+                dict.fromkeys(montants, f"{restaurant.name} facture en {restaurant.currency}.")
+            )

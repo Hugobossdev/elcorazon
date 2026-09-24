@@ -597,6 +597,31 @@ class TestHistorique:
 
         assert client.get(reverse("v1:payments:transaction-list")).data["count"] == 0
 
+    def test_le_personnel_sans_droit_sur_les_commandes_ne_lit_rien(
+        self, client: APIClient, restaurant: Restaurant, initiated: Transaction
+    ) -> None:
+        """Le périmètre dit *où* ; la permission dit *qui*. Un poste de cuisine
+        rattaché à l'établissement n'a pas à lire ses encaissements."""
+        cuisinier = User.objects.create_user(
+            "cuisine@elcorazon.test", "motdepasse", full_name="Cuisine", user_type=UserType.STAFF
+        )
+        cuisinier.roles.add(Role.objects.create(name="Cuisine", permissions=["catalog.read"]))
+        StaffMembership.objects.create(user=cuisinier, restaurant=restaurant)
+        client.force_authenticate(cuisinier)
+
+        response = client.get(reverse("v1:payments:transaction-list"))
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_la_caisse_lit_les_encaissements_qu_elle_rembourse(
+        self, as_staff: APIClient, initiated: Transaction
+    ) -> None:
+        """`orders.refund` désigne une transaction : il faut pouvoir la lire."""
+        response = as_staff.get(reverse("v1:payments:transaction-list"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 1
+
 
 class TestServiceDirect:
     def test_le_total_encaisse_ignore_les_transactions_en_cours(

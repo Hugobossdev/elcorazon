@@ -81,6 +81,13 @@ PERMISSIONS: Final[dict[str, str]] = {
     # Exploitation
     "restaurants.read": "Consulter les établissements et leurs zones",
     "restaurants.write": "Créer et modifier établissements et zones",
+    # L'exploitation courante de **ses** établissements : horaires, fermetures
+    # exceptionnelles, zones propres. Distincte de `restaurants.write`, qui
+    # ouvre aussi la fiche de l'établissement — dont le plafond des pertes de
+    # stock (`stock_adjustment_ceiling`). Confier ce plafond au gérant dont il
+    # encadre les écritures annulerait le contrôle à quatre yeux de
+    # l'inventaire : c'est pourquoi le gérant reçoit celle-ci, pas l'autre.
+    "restaurants.operate": "Régler horaires, fermetures et zones propres de ses établissements",
     "analytics.read": "Consulter les statistiques et rapports",
     # Administration
     "roles.read": "Consulter les rôles, les permissions et les comptes du personnel",
@@ -130,6 +137,11 @@ SYSTEM_ROLES: Final[dict[str, tuple[str, ...]]] = {
         "gamification.read",
         "gamification.write",
         "restaurants.read",
+        # Horaires, fermetures exceptionnelles et zones propres de sa cuisine :
+        # les vues serveur le décrivent comme son geste (« c'est le gérant qui
+        # décide jusqu'où *sa* cuisine livre »), et le rôle ne le lui donnait
+        # pas — l'écran des horaires lui rendait un 403.
+        "restaurants.operate",
         "analytics.read",
         # Un gérant relit ce qui a changé sur **ses** établissements : le
         # journal est cloisonné comme le reste (`AuditEntryViewSet`).

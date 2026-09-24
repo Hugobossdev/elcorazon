@@ -20,6 +20,8 @@ from apps.notifications.models import Notification, NotificationKind
 from apps.orders.models import Order
 from apps.orders.services import OrderService
 from apps.orders.states import OrderStatus
+from apps.payments.models import PaymentProvider, PaymentStatus, Refund, Transaction
+from apps.payments.services import RefundService
 from apps.restaurants.models import Restaurant, StaffMembership
 from apps.support.models import (
     Complaint,
@@ -66,6 +68,30 @@ def livrer(order: Order) -> Order:
         OrderService.transition_to(order=order, target=cible)
     order.refresh_from_db()
     return order
+
+
+def rembourser(order: Order, montant: Money, acteur: User) -> Refund:
+    """Un remboursement **réellement constaté** sur la commande.
+
+    Le support ne dit « remboursé » que sur ce que `payments` a soldé : sans
+    cette étape, le client lirait l'annonce d'un virement que personne n'a
+    fait.
+    """
+    transaction = Transaction.objects.create(
+        order=order,
+        provider=PaymentProvider.PAYDUNYA,
+        provider_reference="PD-SUPPORT-001",
+        amount=order.total,
+        status=PaymentStatus.COMPLETED,
+    )
+    demande = RefundService.refund(
+        order=order,
+        transaction_id=str(transaction.pk),
+        amount=montant,
+        reason="Retour accepté",
+        actor=acteur,
+    )
+    return RefundService.settle(refund=demande, actor=acteur)
 
 
 @pytest.fixture
@@ -366,6 +392,7 @@ class TestRetours:
             {"status": ReturnStatus.APPROVED},
             format="json",
         )
+        rembourser(retour.order, Money(500, XOF), agent)
         ensuite = client.post(
             reverse("v1:support:managed-return-decide", args=[retour.pk]),
             {"status": ReturnStatus.REFUNDED},
@@ -376,6 +403,51 @@ class TestRetours:
         assert ensuite.status_code == status.HTTP_200_OK
         retour.refresh_from_db()
         assert retour.resolved_at is not None
+
+    def test_on_ne_dit_pas_rembourse_tant_que_rien_n_est_parti(
+        self, agent: User, retour: ReturnRequest
+    ) -> None:
+        """Le statut se posait d'un clic, sans qu'aucun remboursement n'existe :
+        le client lisait « Retour remboursé » et attendait un virement que
+        personne n'avait fait."""
+        client = connecte(agent)
+        client.post(
+            reverse("v1:support:managed-return-decide", args=[retour.pk]),
+            {"status": ReturnStatus.APPROVED},
+            format="json",
+        )
+
+        response = client.post(
+            reverse("v1:support:managed-return-decide", args=[retour.pk]),
+            {"status": ReturnStatus.REFUNDED},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        retour.refresh_from_db()
+        assert retour.status == ReturnStatus.APPROVED
+        assert not Notification.objects.filter(title__startswith="Retour remboursé").exists()
+
+    def test_un_remboursement_partiel_suffit_a_le_constater(
+        self, agent: User, retour: ReturnRequest
+    ) -> None:
+        """Un geste commercial partiel reste un remboursement : exiger le
+        montant demandé laisserait la demande « approuvée » à vie."""
+        client = connecte(agent)
+        client.post(
+            reverse("v1:support:managed-return-decide", args=[retour.pk]),
+            {"status": ReturnStatus.APPROVED},
+            format="json",
+        )
+        rembourser(retour.order, Money(200, XOF), agent)
+
+        response = client.post(
+            reverse("v1:support:managed-return-decide", args=[retour.pk]),
+            {"status": ReturnStatus.REFUNDED},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
 
     def test_la_demande_previent_la_cuisine(
         self, agent: User, order: Order, customer: User
@@ -394,3 +466,72 @@ class TestRetours:
 @pytest.fixture
 def as_customer_of(customer: User) -> APIClient:
     return connecte(customer)
+
+
+class TestLeFilDuTicket:
+    """Ce qui arrive après la première réponse — et que personne ne voyait."""
+
+    def test_la_relance_du_client_rouvre_un_ticket_resolu(
+        self, agent: User, ticket: SupportTicket, customer: User
+    ) -> None:
+        """**Le défaut.** Le back-office filtre « à traiter » sur *ouvert* et
+        *en cours* : la relance tombait dans un dossier « résolu », et
+        n'apparaissait donc sur aucun écran."""
+        connecte(agent).post(
+            reverse("v1:support:managed-ticket-status", args=[ticket.pk]),
+            {"status": TicketStatus.RESOLVED, "resolution": "Remboursement envoyé."},
+            format="json",
+        )
+
+        connecte(customer).post(
+            reverse("v1:support:ticket-messages", args=[ticket.pk]),
+            {"content": "Je n'ai toujours rien reçu."},
+            format="json",
+        )
+
+        ticket.refresh_from_db()
+        assert ticket.status == TicketStatus.OPEN
+        assert ticket.resolved_at is None
+        a_traiter = connecte(agent).get(
+            reverse("v1:support:managed-ticket-list"),
+            {"status__in": f"{TicketStatus.OPEN},{TicketStatus.IN_PROGRESS}"},
+        )
+        assert [ligne["id"] for ligne in a_traiter.data["results"]] == [str(ticket.pk)]
+
+    def test_une_relance_sur_un_ticket_en_cours_ne_change_rien(
+        self, agent: User, ticket: SupportTicket, customer: User
+    ) -> None:
+        """C'est le même échange qui continue."""
+        connecte(agent).post(
+            reverse("v1:support:managed-ticket-reply", args=[ticket.pk]),
+            {"content": "Nous regardons."},
+            format="json",
+        )
+
+        connecte(customer).post(
+            reverse("v1:support:ticket-messages", args=[ticket.pk]),
+            {"content": "Merci."},
+            format="json",
+        )
+
+        ticket.refresh_from_db()
+        assert ticket.status == TicketStatus.IN_PROGRESS
+
+    def test_resoudre_deux_fois_ne_previent_qu_une_fois(
+        self, agent: User, ticket: SupportTicket, customer: User
+    ) -> None:
+        """Deux agents sur le même dossier : le client recevait deux fois
+        « Demande résolue »."""
+        url = reverse("v1:support:managed-ticket-status", args=[ticket.pk])
+        charge = {"status": TicketStatus.RESOLVED, "resolution": "Remboursement envoyé."}
+
+        premier = connecte(agent).post(url, charge, format="json")
+        second = connecte(agent).post(url, charge, format="json")
+
+        assert premier.status_code == second.status_code == status.HTTP_200_OK
+        assert (
+            Notification.objects.filter(
+                user=customer, kind=NotificationKind.SUPPORT, title__startswith="Demande résolue"
+            ).count()
+            == 1
+        )

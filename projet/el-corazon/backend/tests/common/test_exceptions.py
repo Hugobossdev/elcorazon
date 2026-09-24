@@ -12,7 +12,12 @@ from __future__ import annotations
 
 import pytest
 
-from common.exceptions import RESERVED_MEMBERS, BusinessRuleViolation, InsufficientStock
+from common.exceptions import (
+    RESERVED_MEMBERS,
+    BusinessRuleViolation,
+    InsufficientStock,
+    problem_detail_handler,
+)
 
 
 class TestDonneesContextuelles:
@@ -62,3 +67,56 @@ class TestDonneesContextuelles:
             "title",
             "type",
         }
+
+
+@pytest.mark.django_db
+class TestUneRaisonLisible:
+    """Tout refus porte une phrase affichable — RFC 9457, §`detail`.
+
+    Les trois applications lisent `detail`, et ne retombent sur `errors` que
+    lorsque c'est un objet champ par champ. Trois refus sortaient sans ni l'un
+    ni l'autre, et s'affichaient « Une erreur est survenue » : une
+    `ValidationError` Django levée hors sérialiseur, une liste d'erreurs DRF,
+    et les 403/404 posés par le gestionnaire lui-même.
+    """
+
+    def test_une_validation_django_hors_serialiseur_dit_pourquoi(self) -> None:
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        reponse = problem_detail_handler(
+            DjangoValidationError("Permissions inconnues : orders.refunds."), {}
+        )
+
+        assert reponse is not None
+        assert reponse.data["detail"] == "Permissions inconnues : orders.refunds."
+        assert reponse.data["errors"] == {
+            "non_field_errors": ["Permissions inconnues : orders.refunds."]
+        }
+
+    def test_une_validation_par_champ_reste_par_champ(self) -> None:
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        reponse = problem_detail_handler(DjangoValidationError({"email": ["Déjà pris."]}), {})
+
+        assert reponse is not None
+        assert reponse.data["errors"] == {"email": ["Déjà pris."]}
+
+    def test_une_liste_d_erreurs_drf_devient_une_phrase(self) -> None:
+        from rest_framework.exceptions import ValidationError
+
+        reponse = problem_detail_handler(ValidationError(["Le panier est vide."]), {})
+
+        assert reponse is not None
+        assert reponse.data["detail"] == "Le panier est vide."
+        assert reponse.data["errors"] == {"non_field_errors": ["Le panier est vide."]}
+
+    def test_un_refus_et_un_absent_se_disent(self) -> None:
+        from django.core.exceptions import PermissionDenied
+        from django.http import Http404
+
+        refus = problem_detail_handler(PermissionDenied(), {})
+        absent = problem_detail_handler(Http404(), {})
+
+        assert refus is not None and absent is not None
+        assert refus.data["detail"]
+        assert absent.data["detail"]

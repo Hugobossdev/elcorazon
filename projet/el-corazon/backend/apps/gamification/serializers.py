@@ -147,8 +147,29 @@ class ManagedAchievementSerializer(serializers.ModelSerializer[Achievement]):
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
+    def validate_condition_value(self, value: int) -> int:
+        """Traduit en 400 ce que `achievement_condition_positive` refuserait en 500.
+
+        Un seuil à zéro serait atteint par tous les comptes à leur création :
+        le succès se débloquerait sans qu'on ait rien fait, et créditerait ses
+        points à la clientèle entière.
+        """
+        if value < 1:
+            raise serializers.ValidationError(
+                "Un seuil à zéro est atteint d'avance : le succès se débloquerait pour tous."
+            )
+        return value
+
 
 class ManagedBadgeSerializer(serializers.ModelSerializer[Badge]):
+    def validate_points_required(self, value: int) -> int:
+        """Même règle que les succès — `badge_threshold_positive` en dernier rempart."""
+        if value < 1:
+            raise serializers.ValidationError(
+                "Un badge à zéro point serait obtenu par tous les clients, d'avance."
+            )
+        return value
+
     class Meta:
         model = Badge
         fields = [

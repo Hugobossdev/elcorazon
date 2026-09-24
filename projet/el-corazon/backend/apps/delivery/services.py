@@ -26,6 +26,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.gis.db.models.functions import Distance
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Sum
 from django.utils import timezone
@@ -38,6 +39,7 @@ from apps.delivery.signals import (
     assignment_declined,
     assignment_offered,
     courier_went_online,
+    verification_decided,
 )
 from apps.delivery.states import (
     DELIVERY_MACHINE,
@@ -53,6 +55,7 @@ from apps.orders.models import Order
 from apps.orders.services import OrderService
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from apps.restaurants.models import Restaurant
+from common.audit import AuditAction, record_change
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
 from common.realtime import courier_group, order_group, publish
@@ -229,8 +232,19 @@ class CourierService:
 
         VERIFICATION_MACHINE.validate(locked.verification_status, target)
 
+        # Après la légalité de la transition, pour qu'un geste impossible se dise
+        # impossible plutôt qu'incomplet. Le livreur lit ce motif dans son
+        # profil (`verification_notes`) : un refus ou une suspension sans raison
+        # le laisse sans rien à corriger, et c'est la personne qui décide qui
+        # sait ce qui ne va pas.
+        if target in CourierService.DECISIONS_MOTIVEES and not notes.strip():
+            raise DjangoValidationError(
+                {"notes": ["Dites au livreur pourquoi : il lira ce motif dans son application."]}
+            )
+
+        precedent = locked.verification_status
         locked.verification_status = target
-        locked.verification_notes = notes
+        locked.verification_notes = notes.strip()
         locked.verified_by = actor
         locked.verified_at = timezone.now()
 
@@ -252,7 +266,24 @@ class CourierService:
                 "updated_at",
             ]
         )
+        record_change(
+            actor=actor,
+            action=AuditAction.COURIER_VERIFICATION,
+            target_type="courier",
+            target_id=locked.pk,
+            target_label=locked.user.full_name,
+            before={"status": precedent},
+            after={"status": target, "notes": locked.verification_notes},
+            scope_restaurant_id=locked.restaurant_id,
+        )
+        verification_decided.send(sender=CourierProfile, courier=locked, previous_status=precedent)
         return locked
+
+    #: Les décisions qui exigent un motif : celles qui retirent quelque chose au
+    #: livreur. Valider ou rouvrir un dossier n'ont rien à expliquer.
+    DECISIONS_MOTIVEES: ClassVar[frozenset[str]] = frozenset(
+        {VerificationStatus.REJECTED, VerificationStatus.SUSPENDED}
+    )
 
     #: Les pièces du dossier et le champ qui porte leur date d'expiration.
     PIECES_DATEES: ClassVar[dict[str, str]] = {

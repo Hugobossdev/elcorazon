@@ -92,6 +92,11 @@ class Audience(models.TextChoices):
 
 class CampaignStatus(models.TextChoices):
     DRAFT = "draft", "Brouillon"
+    #: Datée, en attente de son heure. Un troisième état plutôt qu'un simple
+    #: `scheduled_at` sur un brouillon : ce qui est programmé ne se modifie
+    #: plus — le texte relu est celui qui partira — et l'écran doit pouvoir
+    #: distinguer « en préparation » de « partira à 18 h ».
+    SCHEDULED = "scheduled", "Programmée"
     SENT = "sent", "Envoyée"
 
 
@@ -122,8 +127,21 @@ class Campaign(UUIDModel, TimeStampedModel):
     )
 
     status = models.CharField(
-        max_length=8, choices=CampaignStatus.choices, default=CampaignStatus.DRAFT, db_index=True
+        max_length=12, choices=CampaignStatus.choices, default=CampaignStatus.DRAFT, db_index=True
     )
+
+    #: L'heure à laquelle la campagne doit partir, si elle est programmée.
+    #:
+    #: Un envoi de masse se prépare la veille et part quand les gens ont leur
+    #: téléphone en main : « −20 % ce midi » écrit à 3 h du matin n'a aucune
+    #: chance. C'est la dernière pièce du geste que le reste du module porte
+    #: déjà — rédiger, relire, envoyer une fois.
+    #:
+    #: L'envoi effectif reste celui de `send_campaign` : le battement ne fait
+    #: que l'appeler à l'heure dite. Il en hérite donc l'unicité — une campagne
+    #: partie ne repart pas, même si le battement repasse.
+    scheduled_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
     sent_at = models.DateTimeField(null=True, blank=True)
     # Nombre de notifications **réellement écrites**, donc hors comptes ayant
     # refusé le marketing. Compter la taille du segment plutôt que les envois

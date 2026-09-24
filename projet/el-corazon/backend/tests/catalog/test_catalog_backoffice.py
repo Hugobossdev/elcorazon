@@ -358,3 +358,105 @@ class TestInventaire:
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["tracks_stock"] is True
         assert response.data["stock_quantity"] == 24
+
+
+class TestRangementDesCategories:
+    """`POST /catalog/manage/categories/reorder/` — tout passe, ou rien.
+
+    Le back-office envoyait un `PATCH` par catégorie déplacée, en série. Sur un
+    refus au quatrième, les trois premiers étaient déjà écrits : la carte
+    gardait un ordre que personne n'avait demandé, et l'écran — qui restaurait
+    sa liste d'avant — affichait alors autre chose que la base.
+    """
+
+    @staticmethod
+    def _categorie(restaurant: Restaurant, nom: str, rang: int) -> Category:
+        return Category.objects.create(
+            restaurant=restaurant,
+            name=nom,
+            slug=nom.lower(),
+            sort_order=rang,
+        )
+
+    def test_la_carte_se_range_en_un_geste(
+        self, redacteur: APIClient, restaurant: Restaurant, category: Category
+    ) -> None:
+        boissons = self._categorie(restaurant, "Boissons", 2)
+        desserts = self._categorie(restaurant, "Desserts", 3)
+
+        response = redacteur.post(
+            reverse("v1:catalog:managed-category-reorder"),
+            {
+                "restaurant": restaurant.slug,
+                "categories": [str(desserts.pk), str(category.pk), str(boissons.pk)],
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        # Le rang vient de la position : le client n'a aucun numéro à calculer.
+        assert [ligne["name"] for ligne in response.data] == [
+            "Desserts",
+            category.name,
+            "Boissons",
+        ]
+        desserts.refresh_from_db()
+        boissons.refresh_from_db()
+        assert (desserts.sort_order, boissons.sort_order) == (1, 3)
+
+    def test_une_liste_incomplete_ne_range_rien(
+        self, redacteur: APIClient, restaurant: Restaurant, category: Category
+    ) -> None:
+        """Les absentes garderaient leur ancien rang, mêlées aux nouvelles."""
+        boissons = self._categorie(restaurant, "Boissons", 2)
+
+        response = redacteur.post(
+            reverse("v1:catalog:managed-category-reorder"),
+            {"restaurant": restaurant.slug, "categories": [str(boissons.pk)]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT
+        assert response.data["code"] == "reorder_incomplete"
+        boissons.refresh_from_db()
+        assert boissons.sort_order == 2
+
+    def test_deux_fois_la_meme_categorie_est_refuse(
+        self, redacteur: APIClient, restaurant: Restaurant, category: Category
+    ) -> None:
+        response = redacteur.post(
+            reverse("v1:catalog:managed-category-reorder"),
+            {
+                "restaurant": restaurant.slug,
+                "categories": [str(category.pk), str(category.pk)],
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_on_ne_range_pas_la_carte_d_une_autre_enseigne(
+        self, redacteur: APIClient, autre_restaurant: Restaurant
+    ) -> None:
+        ailleurs = self._categorie(autre_restaurant, "Grillades", 1)
+
+        response = redacteur.post(
+            reverse("v1:catalog:managed-category-reorder"),
+            {"restaurant": autre_restaurant.slug, "categories": [str(ailleurs.pk)]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        ailleurs.refresh_from_db()
+        assert ailleurs.sort_order == 1
+
+    def test_lire_la_carte_ne_suffit_pas_a_la_ranger(
+        self, lecteur: APIClient, restaurant: Restaurant, category: Category
+    ) -> None:
+        response = lecteur.post(
+            reverse("v1:catalog:managed-category-reorder"),
+            {"restaurant": restaurant.slug, "categories": [str(category.pk)]},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN

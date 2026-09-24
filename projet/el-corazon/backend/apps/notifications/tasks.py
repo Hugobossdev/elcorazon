@@ -24,7 +24,7 @@ from apps.notifications.push import (
     payload_for,
 )
 
-__all__ = ["purge_unregistered_devices", "send_push"]
+__all__ = ["purge_unregistered_devices", "send_push", "send_scheduled_campaigns"]
 
 logger = logging.getLogger(__name__)
 
@@ -131,3 +131,21 @@ def purge_unregistered_devices(days: int = 180) -> int:
     horizon = timezone.now() - dt.timedelta(days=days)
     deleted, _ = Device.objects.filter(last_used_at__lt=horizon).delete()
     return deleted
+
+
+@shared_task
+def send_scheduled_campaigns() -> dict[str, int]:
+    """Envoie les campagnes dont l'heure est venue.
+
+    Le tour est **idempotent** : `send_campaign` relit le statut sous verrou et
+    rend une campagne déjà partie telle quelle. Un battement rejoué, ou deux
+    battements restés debout après un redéploiement, n'envoient donc rien deux
+    fois.
+
+    Une fonctionnalité qui dépend du battement : sans `celery beat`, une
+    campagne programmée reste programmée. C'est dit dans le guide de
+    déploiement, à côté des rappels d'expiration qui ont la même dépendance.
+    """
+    from apps.notifications.services import send_due_campaigns
+
+    return send_due_campaigns()

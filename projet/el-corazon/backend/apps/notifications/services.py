@@ -14,6 +14,7 @@ chaque changement de statut de commande.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -31,8 +32,20 @@ from apps.notifications.models import (
 from apps.orders.models import Order
 from apps.orders.states import OrderStatus
 from apps.restaurants.scoping import is_unscoped, staff_restaurant_ids, staff_user_ids_for
+from common.exceptions import BusinessRuleViolation
 
-__all__ = ["MARKETING_KINDS", "notify", "recipients_of", "send_campaign", "staff_to_alert"]
+__all__ = [
+    "MARKETING_KINDS",
+    "notify",
+    "recipients_of",
+    "schedule_campaign",
+    "send_campaign",
+    "send_due_campaigns",
+    "staff_to_alert",
+    "unschedule_campaign",
+]
+
+logger = logging.getLogger(__name__)
 
 #: Catégories soumises au consentement de l'utilisateur.
 #:
@@ -185,6 +198,116 @@ def recipients_of(campaign: Campaign) -> models.QuerySet[User]:
 
 
 @transaction.atomic
+def schedule_campaign(campaign: Campaign, *, quand: dt.datetime) -> Campaign:
+    """Date l'envoi d'une campagne — elle partira seule, à l'heure dite.
+
+    Une campagne **envoyée** ne se reprogramme pas : son texte est parti. Une
+    campagne déjà programmée, si — c'est ainsi qu'on décale d'une heure.
+
+    L'heure doit être à venir. Une date passée ferait partir la campagne au
+    tour suivant du battement, ce qui est peut-être ce que l'on voulait, mais
+    se serait décidé sans le dire : mieux vaut refuser et laisser « Envoyer
+    maintenant » dire ce qu'il fait.
+
+    ## Le statut se lit sous verrou
+
+    Lu sur l'instance de la vue, il datait d'avant l'envoi que le battement
+    était peut-être en train de faire. L'écriture attendait alors le verrou de
+    `send_campaign`, puis reposait « programmée » sur une campagne **déjà
+    partie** — qui repartait à la nouvelle heure, vers toute la clientèle.
+    """
+    verrouillee = Campaign.objects.select_for_update().get(pk=campaign.pk)
+    if verrouillee.status == CampaignStatus.SENT:
+        raise BusinessRuleViolation(
+            "Cette campagne est déjà partie : elle ne se reprogramme pas.",
+            current_status=verrouillee.status,
+        )
+    if quand <= timezone.now():
+        raise BusinessRuleViolation(
+            "L'heure d'envoi doit être à venir — pour partir maintenant, utilisez « Envoyer ».",
+            scheduled_at=quand.isoformat(),
+        )
+
+    verrouillee.scheduled_at = quand
+    verrouillee.status = CampaignStatus.SCHEDULED
+    verrouillee.save(update_fields=["scheduled_at", "status", "updated_at"])
+    return verrouillee
+
+
+@transaction.atomic
+def unschedule_campaign(campaign: Campaign) -> Campaign:
+    """Ramène une campagne programmée à l'état de brouillon, pour la reprendre.
+
+    Sous verrou, pour la même raison que `schedule_campaign` : sans lui, une
+    campagne partie pendant le clic redevenait un brouillon — renvoyable.
+    """
+    verrouillee = Campaign.objects.select_for_update().get(pk=campaign.pk)
+    if verrouillee.status != CampaignStatus.SCHEDULED:
+        raise BusinessRuleViolation(
+            "Seule une campagne programmée s'annule.", current_status=verrouillee.status
+        )
+    verrouillee.scheduled_at = None
+    verrouillee.status = CampaignStatus.DRAFT
+    verrouillee.save(update_fields=["scheduled_at", "status", "updated_at"])
+    return verrouillee
+
+
+def send_due_campaigns() -> dict[str, int]:
+    """Envoie les campagnes dont l'heure est venue — appelée par le battement.
+
+    Une campagne dont l'heure est passée pendant un arrêt part au premier tour
+    suivant, avec du retard plutôt que jamais — le contraire serait une
+    campagne silencieusement perdue.
+
+    Chaque campagne est **isolée** : une erreur sur l'une est journalisée et
+    n'empêche pas les suivantes de partir. Sans cela, la même campagne en échec
+    passait en tête de chaque tour, et bloquait toutes les autres pour toujours.
+    """
+    echues = list(
+        Campaign.objects.filter(status=CampaignStatus.SCHEDULED, scheduled_at__lte=timezone.now())
+        .order_by("scheduled_at")
+        .values_list("pk", flat=True)
+    )
+
+    envoyees = 0
+    destinataires = 0
+    echecs = 0
+    for pk in echues:
+        try:
+            partie = _send_if_still_due(pk)
+        except Exception:
+            echecs += 1
+            logger.exception(
+                "Campagne programmée %s : envoi en échec, retenté au tour suivant.", pk
+            )
+            continue
+        if partie is not None:
+            envoyees += 1
+            destinataires += partie.recipient_count
+    return {"campaigns": envoyees, "recipients": destinataires, "failures": echecs}
+
+
+@transaction.atomic
+def _send_if_still_due(pk: UUID) -> Campaign | None:
+    """Envoie la campagne si, **relue sous verrou**, elle est toujours due.
+
+    La liste des campagnes échues est lue sans verrou ; entre cette lecture et
+    l'envoi, quelqu'un a pu annuler la programmation ou la décaler. `send_campaign`
+    ne refuse qu'une campagne déjà partie : un brouillon qu'on venait de
+    déprogrammer partait donc quand même.
+    """
+    verrouillee = Campaign.objects.select_for_update().get(pk=pk)
+    maintenant = timezone.now()
+    if (
+        verrouillee.status != CampaignStatus.SCHEDULED
+        or verrouillee.scheduled_at is None
+        or verrouillee.scheduled_at > maintenant
+    ):
+        return None
+    return send_campaign(verrouillee)
+
+
+@transaction.atomic
 def send_campaign(campaign: Campaign) -> Campaign:
     """Envoie une campagne — **une seule fois**.
 
@@ -247,6 +370,14 @@ def campaign_stats(campaign: Campaign, *, viewer: User) -> dict[str, Any]:
     Les commandes sont cloisonnées au périmètre de qui regarde, comme tout
     rapport : une campagne est un objet d'enseigne, mais le chiffre d'une
     cuisine de Lomé n'a pas à se lire depuis un compte d'Abidjan.
+
+    **Le taux de conversion n'est alors pas calculé**, et c'est la seule
+    réponse honnête : son numérateur serait cloisonné et son dénominateur —
+    les destinataires de la campagne — ne l'est pas. Un gérant de Lomé lisait
+    « 2 % » là où la campagne avait converti 20 % de ses destinataires, les
+    autres ayant commandé ailleurs. Un taux faux est pire qu'un taux absent :
+    il se compare, se rapporte et se décide. Le nombre de clients et le chiffre
+    restent, eux, parfaitement lisibles — ce sont les siens.
     """
     envoyees = Notification.objects.filter(
         kind=NotificationKind.MARKETING, data__campaign=str(campaign.pk)
@@ -271,12 +402,13 @@ def campaign_stats(campaign: Campaign, *, viewer: User) -> dict[str, Any]:
         placed_at__gte=campaign.sent_at,
         placed_at__lt=campaign.sent_at + FENETRE_DE_CONVERSION,
     ).exclude(status=OrderStatus.CANCELLED)
-    if not is_unscoped(viewer):
+    cloisonne = not is_unscoped(viewer)
+    if cloisonne:
         commandes = commandes.filter(restaurant_id__in=staff_restaurant_ids(viewer))
 
     clients = commandes.values("customer_id").distinct().count()
     resultat["customers_who_ordered"] = clients
-    resultat["conversion_rate"] = clients / destinataires
+    resultat["conversion_rate"] = None if cloisonne else clients / destinataires
     resultat["revenue"] = [
         {"amount": str(ligne["somme"]), "currency": ligne["total_currency"]}
         for ligne in commandes.values("total_currency")

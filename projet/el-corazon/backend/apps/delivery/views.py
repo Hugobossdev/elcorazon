@@ -447,9 +447,23 @@ class StaffCourierViewSet(CreateModelMixin, UpdateModelMixin, ReadOnlyModelViewS
 
         assert_in_scope(authenticated_user(request), serializer.validated_data["restaurant"].pk)
 
-        courier = CourierService.provision(
-            application=CourierApplication(**serializer.validated_data)
-        )
+        # Le code de vérification part **aussi** pour une embauche, comme pour
+        # une candidature (`CourierApplicationView`). Il ne l'était pas, et
+        # l'asymétrie coûtait : l'adresse saisie par le personnel n'était
+        # jamais éprouvée, si bien qu'une faute de frappe ne se découvrait
+        # qu'au premier « mot de passe oublié » — sur un compte auquel plus
+        # personne ne pouvait envoyer quoi que ce soit.
+        #
+        # Elle n'ouvre ni ne ferme rien : la vérification d'adresse n'est pas
+        # opposée à la connexion, et l'éligibilité aux courses reste celle de
+        # L1 — en ligne, dossier validé, compte actif.
+        with transaction.atomic():
+            courier = CourierService.provision(
+                application=CourierApplication(**serializer.validated_data)
+            )
+            VerificationService.issue(
+                user=courier.user, purpose=VerificationPurpose.ACCOUNT_VERIFICATION
+            )
         return Response(CourierProfileSerializer(courier).data, status=status.HTTP_201_CREATED)
 
     @extend_schema(

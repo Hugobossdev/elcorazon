@@ -23,6 +23,7 @@ from apps.groupcarts.services import GroupCartService
 from apps.restaurants.models import Restaurant
 from common.consumers import CLOSE_FORBIDDEN, CLOSE_UNAUTHENTICATED
 from config.asgi import application
+from tests.temps_reel import DELAI_OUVERTURE
 
 pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.postgis]
 
@@ -57,7 +58,7 @@ class TestAutorisationALaConnexion:
     ) -> None:
         group_cart = await open_cart(customer, restaurant)
 
-        connected, code = await (await connect(group_cart.pk)).connect()
+        connected, code = await (await connect(group_cart.pk)).connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_UNAUTHENTICATED
@@ -71,7 +72,7 @@ class TestAutorisationALaConnexion:
             group_cart.pk, token=await database_sync_to_async(token_for)(customer)
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -88,7 +89,7 @@ class TestAutorisationALaConnexion:
             group_cart.pk, token=await database_sync_to_async(token_for)(invitee)
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -104,7 +105,7 @@ class TestAutorisationALaConnexion:
             group_cart.pk, token=await database_sync_to_async(token_for)(etrangere)
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -116,7 +117,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(customer),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -136,7 +137,7 @@ class TestDiffusionDesContributions:
         ecoute = await connect(
             group_cart.pk, token=await database_sync_to_async(token_for)(customer)
         )
-        await ecoute.connect()
+        await ecoute.connect(timeout=DELAI_OUVERTURE)
 
         await database_sync_to_async(GroupCartService.add_line)(
             group_cart=group_cart, member=invitee, menu_item=menu_item, quantity=2, options=[]
@@ -159,7 +160,7 @@ class TestDiffusionDesContributions:
         ecoute = await connect(
             group_cart.pk, token=await database_sync_to_async(token_for)(customer)
         )
-        await ecoute.connect()
+        await ecoute.connect(timeout=DELAI_OUVERTURE)
 
         invitee = await make_user("invite.arrivee@elcorazon.test")
         await database_sync_to_async(GroupCartService.join)(group_cart=group_cart, user=invitee)
@@ -181,7 +182,7 @@ class TestDiffusionDesContributions:
         autre = await open_cart(autre_hote, restaurant)
 
         ecoute = await connect(autre.pk, token=await database_sync_to_async(token_for)(autre_hote))
-        await ecoute.connect()
+        await ecoute.connect(timeout=DELAI_OUVERTURE)
 
         await database_sync_to_async(GroupCartService.add_line)(
             group_cart=mien, member=customer, menu_item=menu_item, quantity=1, options=[]

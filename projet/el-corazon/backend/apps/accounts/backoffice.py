@@ -48,6 +48,7 @@ from apps.accounts.serializers import (
     RoleSerializer,
 )
 from apps.accounts.services import AuthService
+from apps.accounts.signals import role_changing
 from common.audit import AuditAction, record_change
 from common.permissions import HasPermission, HasReadWritePermission, authenticated_user
 
@@ -150,7 +151,14 @@ class CustomerViewSet(ReadOnlyModelViewSet[User]):
         responses={201: CustomerNoteSerializer},
         tags=["accounts"],
     )
-    @action(detail=True, methods=["get", "post"], url_path="notes", url_name="notes")
+    # Un tableau, pas une page — voir `ManagedOrderViewSet.notes`.
+    @action(
+        detail=True,
+        methods=["get", "post"],
+        url_path="notes",
+        url_name="notes",
+        pagination_class=None,
+    )
     def notes(self, request: Request, pk: str) -> Response:
         """Les notes internes sur ce client — lire, ou en ajouter une.
 
@@ -195,6 +203,9 @@ class RoleViewSet(
     search_fields: ClassVar[list[str]] = ["name"]
 
     def perform_create(self, serializer: Any) -> None:
+        _assert_dans_ses_droits(
+            authenticated_user(self.request), serializer.validated_data.get("permissions", [])
+        )
         role = serializer.save()
         _consigner_permissions(self.request, role, avant=[])
 
@@ -204,6 +215,12 @@ class RoleViewSet(
                 "Les rôles fournis à l'installation ne se modifient pas : "
                 "créez-en un sur mesure et attribuez-le."
             )
+        acteur = authenticated_user(self.request)
+        _assert_dans_ses_droits(acteur, serializer.validated_data.get("permissions"))
+        # Modifier un rôle, c'est modifier tous ceux qui le portent. Savoir s'ils
+        # sont du ressort de l'acteur demande leur périmètre, que `accounts` ne
+        # connaît pas : `restaurants` répond, et refuse s'il le faut.
+        role_changing.send(sender=Role, role=serializer.instance, actor=acteur)
         avant = sorted(serializer.instance.permissions)
         role = serializer.save()
         _consigner_permissions(self.request, role, avant=avant)
@@ -222,6 +239,26 @@ class RoleViewSet(
             {"code": code, "description": libelle} for code, libelle in sorted(PERMISSIONS.items())
         ]
         return Response(PermissionSerializer(registre, many=True).data, status=status.HTTP_200_OK)
+
+
+def _assert_dans_ses_droits(acteur: User, permissions: list[str] | None) -> None:
+    """On ne compose pas un rôle plus large que ses propres droits.
+
+    `StaffViewSet` refusait déjà d'**attribuer** un tel rôle. Mais le rôle sur
+    mesure qu'on porte soi-même est un rôle comme un autre : lui ajouter
+    `orders.refund` l'accordait à l'instant à son porteur, sans qu'aucune
+    attribution — donc aucune garde — n'ait lieu. `roles.write` valait alors
+    « Super Admin » en une seule requête.
+
+    Le siège n'est pas concerné : il détient tout, par définition.
+    """
+    if permissions is None or acteur.is_superuser:
+        return
+    excedent = sorted(set(permissions) - acteur.permission_codes())
+    if excedent:
+        raise PermissionDenied(
+            "On ne compose pas un rôle plus large que ses propres droits : " + ", ".join(excedent)
+        )
 
 
 def _consigner_permissions(request: Request, role: Role, *, avant: list[str]) -> None:

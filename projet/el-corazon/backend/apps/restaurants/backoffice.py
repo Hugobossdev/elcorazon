@@ -55,6 +55,7 @@ from apps.restaurants.models import (
     kitchen_state_prefetches,
 )
 from apps.restaurants.scoping import (
+    assert_can_manage,
     assert_can_open_in_zone,
     assert_in_scope,
     is_unscoped,
@@ -67,13 +68,19 @@ from apps.restaurants.serializers import (
     ManagedRestaurantSerializer,
     ManagedRestaurantZoneSerializer,
     RestaurantDuplicationSerializer,
+    RestaurantPerimeterSerializer,
     RestaurantStatusTransitionSerializer,
     StaffSerializer,
 )
 from apps.restaurants.states import RestaurantStatus
 from common.audit import AuditAction, AuditEntry, record_change
 from common.exceptions import BusinessRuleViolation
-from common.permissions import HasPermission, HasReadWritePermission, authenticated_user
+from common.permissions import (
+    HasPermission,
+    HasReadWritePermission,
+    IsStaff,
+    authenticated_user,
+)
 
 __all__ = [
     "ManagedOpeningHoursViewSet",
@@ -86,6 +93,14 @@ logger = logging.getLogger(__name__)
 
 RESTAURANT_PERMISSION = HasReadWritePermission.of(
     read="restaurants.read", write="restaurants.write"
+)
+
+#: Horaires, fermetures et zones propres : le geste courant du gérant, sur ses
+#: établissements (le cloisonnement reste celui de chaque vue). `operate` y lit
+#: aussi — on ne règle pas des horaires qu'on ne voit pas.
+OPERATION_PERMISSION = HasReadWritePermission.of(
+    read=("restaurants.read", "restaurants.operate"),
+    write=("restaurants.write", "restaurants.operate"),
 )
 
 
@@ -139,6 +154,11 @@ class StaffViewSet(
         )
 
     def perform_update(self, serializer: Any) -> None:
+        # Avant tout le reste : voir un collègue n'est pas en répondre. Sans
+        # cette garde, remplacer le mot de passe d'un compte plus puissant — le
+        # siège rattaché à l'établissement, un caissier qui rembourse — suffisait
+        # à se connecter à sa place.
+        assert_can_manage(authenticated_user(self.request), serializer.instance)
         self._assert_grantable(serializer.validated_data)
         etait_actif = serializer.instance.is_active
         avant = _empreinte_du_personnel(serializer.instance)
@@ -148,14 +168,20 @@ class StaffViewSet(
         # séparées, un compte fermé travaillerait jusqu'à l'expiration de son
         # jeton d'accès — quinze minutes pendant lesquelles il peut encore
         # rembourser une commande.
-        if etait_actif and not membre.is_active:
+        #
+        # Un mot de passe **remplacé** révoque aussi, pour la raison de T2 en
+        # plus fort : on le remplace quand il est perdu, ou quand on soupçonne
+        # qu'un autre le détient. Sans révocation, celui qui l'avait gardait
+        # son jeton de rafraîchissement — trente jours de session.
+        mot_de_passe_remplace = bool(serializer.validated_data.get("password"))
+        if (etait_actif and not membre.is_active) or mot_de_passe_remplace:
             AuthService.revoke_all_sessions(membre)
 
         _consigner_personnel(
             authenticated_user(self.request),
             membre,
             avant=avant,
-            mot_de_passe_change=bool(serializer.validated_data.get("password")),
+            mot_de_passe_change=mot_de_passe_remplace,
         )
 
     # --------------------------------------------------------- garde-fous
@@ -395,6 +421,44 @@ class ManagedRestaurantViewSet(
                 after={"zone": apres["zone"]},
             )
 
+    # ------------------------------------------------------------ périmètre
+
+    @extend_schema(
+        responses={200: RestaurantPerimeterSerializer(many=True)},
+        tags=["restaurants"],
+    )
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="perimeter",
+        url_name="perimeter",
+        permission_classes=[IsStaff],
+        pagination_class=None,
+    )
+    def perimeter(self, request: Request) -> Response:
+        """Les établissements que **ce compte** supervise — sans `restaurants.read`.
+
+        Tout compte du personnel a besoin de savoir où il travaille : le poste
+        de cuisine, le stock et les recettes sont ceux d'une cuisine. Réserver
+        cette réponse à `restaurants.read` rendait le poste inutilisable pour
+        le rôle même qui le tient (« Opérateur »), sans rien protéger : le
+        cloisonnement ne change pas, seuls les établissements du périmètre
+        sortent, et sous une forme réduite (`RestaurantPerimeterSerializer`).
+
+        Non paginé : un périmètre est borné par la taille du réseau, et l'écran
+        doit l'avoir entier pour proposer le sélecteur. Les établissements en
+        service viennent en tête — le premier est celui qu'on ouvre par défaut,
+        et ouvrir la cuisine d'un établissement fermé n'a pas de sens.
+        """
+        user = authenticated_user(request)
+        base = Restaurant.objects.select_related("zone__city__country")
+        if not is_unscoped(user):
+            base = base.filter(pk__in=staff_restaurant_ids(user))
+        etablissements = base.order_by(
+            "-is_active", "zone__city__country__iso_code", "zone__city__name", "name"
+        )
+        return Response(RestaurantPerimeterSerializer(etablissements, many=True).data)
+
     # ------------------------------------------------------- cycle de vie
 
     @extend_schema(
@@ -552,7 +616,7 @@ class ManagedOpeningHoursViewSet(ModelViewSet[OpeningHours]):
     """
 
     serializer_class = ManagedOpeningHoursSerializer
-    permission_classes = (RESTAURANT_PERMISSION,)
+    permission_classes = (OPERATION_PERMISSION,)
     queryset = OpeningHours.objects.select_related("restaurant").order_by("weekday", "opens_at")
     filterset_fields: ClassVar[dict[str, list[str]]] = {"restaurant": ["exact"]}
 
@@ -589,7 +653,7 @@ class ManagedKitchenClosureViewSet(ModelViewSet[KitchenClosure]):
     """
 
     serializer_class = ManagedKitchenClosureSerializer
-    permission_classes = (RESTAURANT_PERMISSION,)
+    permission_classes = (OPERATION_PERMISSION,)
     queryset = KitchenClosure.objects.none()
     filterset_fields: ClassVar[dict[str, list[str]]] = {"restaurant": ["exact"]}
 
@@ -686,7 +750,7 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
     """
 
     serializer_class = ManagedRestaurantZoneSerializer
-    permission_classes = (RESTAURANT_PERMISSION,)
+    permission_classes = (OPERATION_PERMISSION,)
     queryset = (
         DeliveryZone.objects.filter(restaurant__isnull=False)
         .select_related("city__country", "restaurant")
@@ -854,10 +918,17 @@ class AuditEntryViewSet(ReadOnlyModelViewSet[AuditEntry]):
     ## Cloisonnement
 
     Le siège lit tout. Un compte rattaché lit ce qui touche **son** périmètre :
-    ses établissements, leurs zones, et le personnel qui y est rattaché. Les
-    rôles, les clients et les pays ne relèvent d'aucun établissement : ils ne
-    se lisent qu'au siège — le défaut sûr, comme `assert_unscoped` pour les
-    écritures.
+    ses établissements, leurs zones, le personnel qui y est rattaché, et toute
+    entrée qui porte l'un de ses établissements (`scope_restaurant_id`) — un
+    retrait livreur constaté, un remboursement, une réclamation tranchée, un
+    avis masqué. Les rôles, les clients et les pays ne relèvent d'aucun
+    établissement : ils ne se lisent qu'au siège — le défaut sûr, comme
+    `assert_unscoped` pour les écritures.
+
+    Le périmètre d'une entrée est **écrit au moment de la décision** plutôt que
+    déduit de sa cible : `restaurants` n'a pas le droit de connaître `payments`
+    ni `support` (ADR-002), et une trace qui se déduirait de l'objet suivrait un
+    livreur muté ailleurs au lieu de rester où le versement a été signé.
 
     Il vit ici parce que c'est ici que vit le périmètre (`scoping`) ; le modèle,
     lui, est dans `common`, qui ne connaît pas les établissements (ADR-002).
@@ -892,4 +963,5 @@ class AuditEntryViewSet(ReadOnlyModelViewSet[AuditEntry]):
             Q(target_type="restaurant", target_id__in=[str(pk) for pk in etablissements])
             | Q(target_type="zone", target_id__in=[str(pk) for pk in zones])
             | Q(target_type="staff", target_id__in=[str(pk) for pk in personnel])
+            | Q(scope_restaurant_id__in=etablissements)
         )

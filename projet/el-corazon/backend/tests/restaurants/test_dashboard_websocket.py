@@ -20,6 +20,7 @@ from apps.orders.states import OrderStatus
 from apps.restaurants.models import Restaurant, StaffMembership
 from common.consumers import CLOSE_FORBIDDEN, CLOSE_UNAUTHENTICATED
 from config.asgi import application
+from tests.temps_reel import DELAI_OUVERTURE
 
 pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.postgis]
 
@@ -50,7 +51,7 @@ class TestAutorisationALaConnexion:
     async def test_sans_jeton_le_socket_est_ferme(self, restaurant: Restaurant) -> None:
         communicator = await connect(f"/ws/restaurants/{restaurant.pk}/dashboard/")
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_UNAUTHENTICATED
@@ -63,7 +64,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(user),
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -75,7 +76,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(customer),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -106,7 +107,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(user),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -122,7 +123,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(user),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -136,7 +137,7 @@ class TestAutorisationALaConnexion:
             token=await database_sync_to_async(token_for)(customer),
         )
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_FORBIDDEN
@@ -155,7 +156,7 @@ class TestDiffusionDesCommandes:
             f"/ws/restaurants/{restaurant.pk}/dashboard/",
             token=await database_sync_to_async(token_for)(user),
         )
-        await dashboard.connect()
+        await dashboard.connect(timeout=DELAI_OUVERTURE)
 
         await database_sync_to_async(OrderService.transition_to)(
             order=order, target=OrderStatus.CONFIRMED
@@ -186,7 +187,7 @@ class TestDiffusionDesCommandes:
             f"/ws/restaurants/{restaurant.pk}/dashboard/",
             token=await database_sync_to_async(token_for)(user),
         )
-        await dashboard.connect()
+        await dashboard.connect(timeout=DELAI_OUVERTURE)
 
         @database_sync_to_async
         def commander() -> Order:
@@ -231,7 +232,7 @@ class TestDiffusionDesCommandes:
             f"/ws/restaurants/{autre_restaurant.pk}/dashboard/",
             token=await database_sync_to_async(token_for)(user),
         )
-        await dashboard.connect()
+        await dashboard.connect(timeout=DELAI_OUVERTURE)
 
         await database_sync_to_async(OrderService.transition_to)(
             order=order, target=OrderStatus.CONFIRMED

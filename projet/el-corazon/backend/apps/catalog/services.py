@@ -231,4 +231,7 @@ class ReviewModerationService:
             target_label=f"{review.rating}/5 — {review.menu_item.name}",
             before={"visible": visible_avant},
             after={"visible": not visible_avant, "reason": review.hidden_reason},
+            # La cuisine de l'article : sans elle, le gérant qui vient de masquer
+            # un avis ne relisait pas son propre geste — le journal est cloisonné.
+            scope_restaurant_id=review.menu_item.restaurant_id,
         )

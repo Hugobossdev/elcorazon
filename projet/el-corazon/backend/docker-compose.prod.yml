@@ -92,6 +92,7 @@ services:
     # attendre un verrou de base sur une commande en cours d'écriture.
     command: >
       sh -c "python manage.py migrate --noinput &&
+             python manage.py bootstrap_roles &&
              python manage.py collectstatic --noinput &&
              python manage.py ensure_storage_buckets &&
              gunicorn config.asgi:application

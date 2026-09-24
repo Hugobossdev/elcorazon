@@ -456,3 +456,63 @@ class TestStabiliteDuSchema:
 
         illisibles = [nom for nom in enums if any(car.isdigit() for car in nom)]
         assert not illisibles, f"Énumérations au nom instable : {illisibles}"
+
+
+def _corps(operation: dict[str, Any]) -> str | None:
+    """Le composant du corps de requête JSON d'une opération, ou `None`."""
+    schema = (
+        operation.get("requestBody", {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+    )
+    reference = schema.get("$ref")
+    return reference.rsplit("/", 1)[-1] if reference else None
+
+
+def _reponse(operation: dict[str, Any], code: str) -> dict[str, Any]:
+    reponse: dict[str, Any] = (
+        operation.get("responses", {}).get(code, {}).get("content", {}).get("application/json", {})
+    )
+    return dict(reponse.get("schema", {}))
+
+
+class TestContratDesRoutesDuPersonnel:
+    """Ce que le back-office envoie, tel que le schéma le promet.
+
+    Un décorateur `@extend_schema` décore la **fonction qui le suit**. Insérer
+    une route entre lui et sa méthode le fait changer de propriétaire sans que
+    rien ne casse à l'exécution : c'est arrivé à `cancel` quand `notes` a été
+    ajoutée — le schéma annonçait un corps d'annulation pour écrire une note,
+    une commande entière pour les lire, et plus aucun corps pour annuler.
+    """
+
+    def test_annuler_une_commande_exige_un_motif(self, schema: dict[str, Any]) -> None:
+        operation = schema["paths"]["/api/v1/orders/manage/{id}/cancel/"]["post"]
+
+        assert _corps(operation) == "StaffCancelRequest"
+        assert _reponse(operation, "200") == {"$ref": "#/components/schemas/OrderDetail"}
+
+    def test_les_notes_internes_se_lisent_et_s_ecrivent_comme_des_notes(
+        self, schema: dict[str, Any]
+    ) -> None:
+        route = schema["paths"]["/api/v1/orders/manage/{id}/notes/"]
+
+        assert _reponse(route["get"], "200") == {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/OrderNote"},
+        }
+        assert _corps(route["post"]) == "OrderNoteRequest"
+        assert _reponse(route["post"], "201") == {"$ref": "#/components/schemas/OrderNote"}
+
+    def test_un_corps_d_annulation_ne_sert_qu_a_annuler(self, schema: dict[str, Any]) -> None:
+        """Le symptôme général du décorateur déplacé : un corps de requête qui
+        apparaît sous une route à laquelle il n'appartient pas."""
+        porteurs = sorted(
+            f"{verbe.upper()} {chemin}"
+            for chemin, route in schema["paths"].items()
+            for verbe, operation in route.items()
+            if isinstance(operation, dict) and _corps(operation) == "StaffCancelRequest"
+        )
+
+        assert porteurs == ["POST /api/v1/orders/manage/{id}/cancel/"]

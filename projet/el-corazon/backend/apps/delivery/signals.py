@@ -16,6 +16,7 @@ __all__ = [
     "assignment_offered",
     "courier_went_online",
     "document_expiring",
+    "verification_decided",
 ]
 
 #: Arguments : `assignment`.
@@ -70,3 +71,13 @@ courier_went_online = django.dispatch.Signal()
 #: Émis par le rappel quotidien (`remind_document_expiry`) aux échéances qui
 #: laissent le temps d'agir — un mois, une semaine, la veille, le jour même.
 document_expiring = django.dispatch.Signal()
+
+#: Arguments : `courier` (après décision), `previous_status`.
+#:
+#: Émis quand le **personnel** change le statut d'un dossier — validé, refusé,
+#: suspendu, rouvert. Ce signal manquait : le livreur n'apprenait un refus
+#: qu'en rouvrant l'application, et une suspension décidée un samedi soir ne lui
+#: parvenait qu'au moment où plus aucune course n'arrivait. Pas émis quand la
+#: décision ne change rien (`is_noop`) : personne n'a à être prévenu d'un état
+#: qui n'a pas bougé.
+verification_decided = django.dispatch.Signal()

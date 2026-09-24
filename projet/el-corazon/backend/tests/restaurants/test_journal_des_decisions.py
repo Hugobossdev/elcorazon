@@ -194,3 +194,69 @@ class TestQuiLeRelit:
             AuditAction.STAFF_ROLES,
             AuditAction.STAFF_SCOPE,
         }
+
+
+class TestLArgentQuiSort:
+    """Les décisions d'argent au journal, et leur cloisonnement.
+
+    Un retrait, un remboursement ou une réclamation tranchée ne se rattachent à
+    aucune des trois cibles historiques — établissement, zone, compte — et leur
+    établissement se lit sur `payments` et `support`, que `restaurants` n'a pas
+    le droit de connaître. Le périmètre est donc **écrit sur l'entrée** au
+    moment de la décision ; ces tests vérifient qu'il l'est, et qu'il suffit à
+    rendre l'entrée lisible par celui qui l'a prise — et illisible ailleurs.
+    """
+
+    @pytest.fixture
+    def ailleurs(self, restaurant: Restaurant) -> Restaurant:
+        return Restaurant.objects.create(
+            name="El Corazón Kara",
+            slug="el-corazon-kara",
+            zone=restaurant.zone,
+            address="Kara",
+            location=restaurant.location,
+            phone="+22890000031",
+        )
+
+    def entree(
+        self, restaurant: Restaurant | None, action: str = AuditAction.PAYOUT_SETTLE
+    ) -> None:
+        record_change(
+            actor=None,
+            action=action,
+            target_type="withdrawal",
+            target_id="01a0c0d4-a48e-7563-a977-5b86ec4f8888",
+            target_label="2 000 XOF — Komi Livreur",
+            before={"status": "pending"},
+            after={"status": "completed"},
+            scope_restaurant_id=restaurant.pk if restaurant else None,
+        )
+
+    def test_un_gerant_relit_les_versements_de_sa_cuisine(self, restaurant: Restaurant) -> None:
+        self.entree(restaurant)
+        gerant = personnel("gerant@elcorazon.test", restaurant, "audit.read")
+
+        actions = [
+            ligne["action"] for ligne in connecte(gerant).get(reverse(JOURNAL)).data["results"]
+        ]
+
+        assert actions == [AuditAction.PAYOUT_SETTLE]
+
+    def test_il_ne_relit_pas_ceux_d_ailleurs(
+        self, restaurant: Restaurant, ailleurs: Restaurant
+    ) -> None:
+        self.entree(ailleurs)
+        gerant = personnel("gerant@elcorazon.test", restaurant, "audit.read")
+
+        assert connecte(gerant).get(reverse(JOURNAL)).data["results"] == []
+
+    def test_une_entree_sans_perimetre_ne_se_lit_qu_au_siege(
+        self, restaurant: Restaurant, siege: User
+    ) -> None:
+        """Le défaut sûr : ce qui ne relève d'aucun établissement — un rôle, un
+        client — reste au siège."""
+        self.entree(None)
+        gerant = personnel("gerant@elcorazon.test", restaurant, "audit.read")
+
+        assert connecte(gerant).get(reverse(JOURNAL)).data["results"] == []
+        assert len(connecte(siege).get(reverse(JOURNAL)).data["results"]) == 1

@@ -47,6 +47,7 @@ __all__ = [
     "OpeningHoursSerializer",
     "RestaurantDetailSerializer",
     "RestaurantDuplicationSerializer",
+    "RestaurantPerimeterSerializer",
     "RestaurantSerializer",
     "RestaurantStatusTransitionSerializer",
     "StaffSerializer",
@@ -516,6 +517,53 @@ class ManagedRestaurantSerializer(serializers.ModelSerializer[Restaurant]):
                     {"stock_adjustment_ceiling": "Un plafond ne peut pas être négatif."}
                 )
         return attrs
+
+
+class RestaurantPerimeterSerializer(serializers.ModelSerializer[Restaurant]):
+    """Ce qu'un membre du personnel sait de **ses** établissements.
+
+    Distinct de `ManagedRestaurantSerializer`, et c'est le point : lire son
+    propre rattachement n'est pas administrer le réseau. Le poste de cuisine a
+    besoin du nom, du slug, de la devise, du fuseau, de la position et du délai
+    de préparation de la cuisine où il travaille — pas des compteurs
+    d'exploitation, des lacunes de configuration ni du plafond des pertes, que
+    `restaurants.read` continue de réserver à qui gère.
+
+    Sans cette forme, un « Opérateur » (sans `restaurants.read`) ouvrait le
+    poste de cuisine et lisait « Aucun établissement rattaché » : son 403 sur
+    la liste de gestion était pris pour une absence de rattachement.
+    """
+
+    zone_name = serializers.CharField(source="zone.name", read_only=True)
+    city = serializers.CharField(source="zone.city.name", read_only=True)
+    city_slug = serializers.CharField(source="zone.city.slug", read_only=True)
+    country = serializers.CharField(source="zone.city.country.iso_code", read_only=True)
+    location = LocationField(read_only=True)
+    currency = serializers.CharField(read_only=True)
+    timezone = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = Restaurant
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "zone",
+            "zone_name",
+            "city",
+            "city_slug",
+            "country",
+            "address",
+            "location",
+            "phone",
+            "currency",
+            "timezone",
+            "status",
+            "is_active",
+            "accepts_orders",
+            "default_preparation_minutes",
+        ]
+        read_only_fields = fields
 
 
 class RestaurantStatusTransitionSerializer(serializers.Serializer[Any]):

@@ -248,6 +248,21 @@ class ManagedRewardSerializer(serializers.ModelSerializer[Reward]):
                 {"discount": "Une récompense de type remise doit porter un montant."}
             )
 
+        # La remise dans la devise de l'établissement qui l'offre. Sans cette
+        # garde, un client de Douala échangeait ses points contre un code en
+        # XOF, refusé ensuite à sa caisse : points débités, remise inutilisable.
+        restaurant = attrs.get("restaurant", instance.restaurant if instance else None)
+        nouvelle_remise = attrs.get("discount")
+        if (
+            genre == RewardKind.DISCOUNT
+            and restaurant is not None
+            and nouvelle_remise is not None
+            and nouvelle_remise.currency != restaurant.currency
+        ):
+            raise serializers.ValidationError(
+                {"discount": f"{restaurant.name} facture en {restaurant.currency}."}
+            )
+
         return attrs
 
     def _appliquer_remise(self, validated_data: dict[str, Any], instance: Reward) -> None:

@@ -8,6 +8,7 @@ paierait. Ces champs n'existent pas en écriture — il n'y a donc rien à valid
 
 from __future__ import annotations
 
+from datetime import time
 from typing import Any
 
 from django.contrib.auth.password_validation import validate_password
@@ -103,6 +104,13 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
     # `CourierProfile.service_zones`.
     service_zones = serializers.SerializerMethodField()
 
+    #: Distance jusqu'à la cuisine, en mètres — présente **seulement** là où la
+    #: requête l'annote, c'est-à-dire sur `/delivery/couriers/available/{order}/`
+    #: (`CourierService.available_for`, tri PostGIS depuis le restaurant).
+    #: Ailleurs, elle vaut `null` : inventer un zéro laisserait croire que le
+    #: livreur est sur le pas de la porte.
+    distance_m = serializers.SerializerMethodField()
+
     class Meta:
         model = CourierProfile
         fields = [
@@ -137,6 +145,7 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
             "last_location_at",
             "deliveries_completed",
             "deliveries_cancelled",
+            "distance_m",
             "rating_average",
             "rating_count",
             "total_earnings",
@@ -148,6 +157,11 @@ class CourierProfileSerializer(serializers.ModelSerializer[CourierProfile]):
     @extend_schema_field(
         serializers.ListField(child=serializers.DictField(), help_text="`id` et `name`.")
     )
+    def get_distance_m(self, obj: CourierProfile) -> int | None:
+        """Mètres jusqu'à la cuisine, ou `null` hors de la route des éligibles."""
+        distance = getattr(obj, "to_restaurant", None)
+        return None if distance is None else round(distance.m)
+
     def get_service_zones(self, obj: CourierProfile) -> list[dict[str, str]]:
         return [{"id": str(zone.pk), "name": zone.name} for zone in obj.service_zones.all()]
 
@@ -566,7 +580,49 @@ class CourierShiftSerializer(serializers.ModelSerializer[CourierShift]):
                 }
             )
 
+        self._refuser_le_chevauchement(attrs, debut=debut, fin=fin)
         return attrs
+
+    def _refuser_le_chevauchement(
+        self, attrs: dict[str, Any], *, debut: time | None, fin: time | None
+    ) -> None:
+        """Deux créneaux d'un même livreur ne se recouvrent pas le même jour.
+
+        `courier_shift_unique_start` ne refusait que deux créneaux commençant à
+        la **même** minute. « Lundi 9 h – 17 h » et « lundi 12 h – 20 h »
+        passaient donc tous les deux : le planning affichait le livreur attendu
+        deux fois à midi, et l'exploitation lisait une amplitude fausse — elle
+        comptait huit heures plus huit heures pour onze heures de présence.
+
+        Ce n'est pas une contrainte de base : elle demande de comparer chaque
+        ligne aux autres, ce qu'un `CHECK` ne sait pas faire. Le refus est donc
+        ici, et il est explicite — il nomme le créneau qui gêne, sans quoi
+        l'exploitation corrigerait au hasard.
+        """
+        instance = self.instance
+        livreur = attrs.get("courier") or (instance.courier if instance else None)
+        jour = attrs.get("day_of_week", instance.day_of_week if instance else None)
+        if livreur is None or jour is None or debut is None or fin is None:
+            return
+
+        voisins = CourierShift.objects.filter(courier=livreur, day_of_week=jour)
+        if instance is not None:
+            voisins = voisins.exclude(pk=instance.pk)
+        # Deux intervalles se recouvrent si chacun commence avant que l'autre
+        # finisse. Bornes ouvertes : 9 h – 12 h et 12 h – 18 h s'enchaînent.
+        chevauchant = voisins.filter(start_time__lt=fin, end_time__gt=debut).first()
+        if chevauchant is None:
+            return
+
+        raise serializers.ValidationError(
+            {
+                "start_time": (
+                    f"Ce livreur est déjà planifié de {chevauchant.start_time:%H:%M} "
+                    f"à {chevauchant.end_time:%H:%M} ce jour-là. Ajustez ce créneau, "
+                    "ou supprimez celui qui le recouvre."
+                )
+            }
+        )
 
 
 class CourierSelfUpdateSerializer(serializers.Serializer[Any]):

@@ -277,11 +277,20 @@ def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response 
         )
 
     if isinstance(exc, DjangoValidationError):
+        # Deux formes, et la seconde n'était pas affichable. Une
+        # `ValidationError` levée hors sérialiseur — le registre des
+        # permissions, une méthode `clean()` — n'a pas de `message_dict` : ses
+        # messages sortaient donc en **liste**, sous `errors`, sans `detail`.
+        # Or les trois applications lisent `detail`, et retombent sur `errors`
+        # seulement quand c'est un objet : la raison était dans la réponse, et
+        # l'écran affichait « Une erreur est survenue ».
+        par_champ = getattr(exc, "message_dict", None)
         return _problem(
             code="validation_error",
             title="Données invalides",
             status_code=status.HTTP_400_BAD_REQUEST,
-            errors=exc.message_dict if hasattr(exc, "message_dict") else exc.messages,
+            detail=None if par_champ else " ".join(exc.messages),
+            errors=par_champ if par_champ else {"non_field_errors": exc.messages},
         )
 
     if isinstance(exc, Http404):
@@ -289,6 +298,10 @@ def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response 
             code="not_found",
             title="Ressource introuvable",
             status_code=status.HTTP_404_NOT_FOUND,
+            # Une phrase, parce que le client n'en a aucune autre : sans elle,
+            # un 404 s'affichait « Une erreur est survenue ». Elle ne dit rien
+            # de l'objet — ce qui est introuvable n'a pas à se décrire.
+            detail="Cet élément est introuvable : il a peut-être été supprimé.",
         )
 
     if isinstance(exc, PermissionDenied):
@@ -296,6 +309,7 @@ def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response 
             code="permission_denied",
             title="Accès refusé",
             status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vous n'avez pas l'autorisation d'effectuer cette action.",
         )
 
     if isinstance(exc, IntegrityError):
@@ -315,6 +329,14 @@ def problem_detail_handler(exc: Exception, context: dict[str, Any]) -> Response 
     code = getattr(exc, "default_code", "error")
     errors = detail if isinstance(detail, dict) else None
     message = detail.get("detail") if isinstance(detail, dict) else None
+
+    # DRF rend une **liste** quand la validation échoue hors d'un champ nommé —
+    # `raise ValidationError("…")` dans une vue, ou un `ListSerializer`. Ni
+    # `detail` ni `errors` n'étaient alors renseignés, et le client n'avait
+    # plus rien à afficher que son message par défaut.
+    if isinstance(detail, list) and detail:
+        message = " ".join(str(ligne) for ligne in detail)
+        errors = {"non_field_errors": [str(ligne) for ligne in detail]}
 
     return _problem(
         code=str(code),

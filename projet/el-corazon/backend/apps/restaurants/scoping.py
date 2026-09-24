@@ -25,6 +25,7 @@ from apps.restaurants.models import AreaMembership, Restaurant, StaffMembership
 from common.permissions import is_unscoped
 
 __all__ = [
+    "assert_can_manage",
     "assert_can_open_in_zone",
     "assert_in_scope",
     "is_in_scope",
@@ -187,3 +188,64 @@ def staff_user_ids_for(restaurant_id: uuid.UUID) -> set[uuid.UUID]:
         )
     )
     return directs | par_perimetre
+
+
+def assert_can_manage(actor: User, target: User) -> None:
+    """Refuse de toucher à un compte du personnel qui **dépasse** l'acteur.
+
+    `StaffViewSet` montrait à un gérant muni de `roles.write` tout collègue
+    rattaché à l'un de ses établissements — et le laissait tout modifier. Or
+    voir un collègue n'est pas en répondre : remplacer le mot de passe d'un
+    compte, c'est se connecter à sa place, donc hériter de ses droits et de son
+    périmètre. Un superutilisateur rattaché à Lomé, un caissier qui détient
+    `orders.refund`, un directeur pays : chacun se reprenait en une requête.
+
+    Un compte est du ressort de l'acteur quand il ne le dépasse sur aucun axe :
+
+    * **le statut** — un superutilisateur ne relève que du siège ;
+    * **les droits** — ses permissions sont incluses dans celles de l'acteur ;
+    * **le périmètre** — ses établissements, et ses rattachements de marché ou
+      de ville, sont couverts par ceux de l'acteur.
+
+    Le périmètre compare aussi les rattachements eux-mêmes, et pas seulement
+    les établissements qu'ils couvrent : un directeur d'un pays où rien n'est
+    encore ouvert ne couvre aucun établissement, et paraîtrait sinon plus
+    étroit que le gérant qu'il supervise.
+
+    Le siège n'est pas concerné. Le refus est explicite (403) : le compte est
+    visible, il n'y a pas d'existence à taire.
+    """
+    if is_unscoped(actor):
+        return
+
+    motifs: list[str] = []
+    if target.is_superuser:
+        motifs.append("c'est un compte du siège")
+    if not target.permission_codes() <= actor.permission_codes():
+        motifs.append("il détient des permissions que vous n'avez pas")
+
+    hors_etablissements = staff_restaurant_ids(target) - staff_restaurant_ids(actor)
+    couverts = list(AreaMembership.objects.filter(user=actor).values_list("country_id", "city_id"))
+    pays_couverts = {pays for pays, _ in couverts if pays is not None}
+    villes_couvertes = {ville for _, ville in couverts if ville is not None}
+    hors_marches = [
+        (pays, ville)
+        for pays, ville, pays_de_la_ville in AreaMembership.objects.filter(user=target).values_list(
+            "country_id", "city_id", "city__country_id"
+        )
+        if (pays is not None and pays not in pays_couverts)
+        or (
+            ville is not None
+            and ville not in villes_couvertes
+            and pays_de_la_ville not in pays_couverts
+        )
+    ]
+    if hors_etablissements or hors_marches:
+        motifs.append("son périmètre dépasse le vôtre")
+
+    if motifs:
+        raise PermissionDenied(
+            "Ce compte n'est pas de votre ressort : "
+            + " ; ".join(motifs)
+            + ". Sa gestion relève du siège, ou d'un responsable qui le couvre."
+        )

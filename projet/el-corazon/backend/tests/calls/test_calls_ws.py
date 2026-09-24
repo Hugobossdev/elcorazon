@@ -21,6 +21,7 @@ from apps.orders.models import Order
 from apps.orders.states import OrderStatus
 from common.consumers import CLOSE_UNAUTHENTICATED
 from config.asgi import application
+from tests.temps_reel import DELAI_OUVERTURE
 
 pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.postgis]
 
@@ -48,7 +49,7 @@ class TestAutorisation:
     async def test_sans_jeton_le_socket_est_refuse(self) -> None:
         communicator = await connect("/ws/me/")
 
-        connected, code = await communicator.connect()
+        connected, code = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is False
         assert code == CLOSE_UNAUTHENTICATED
@@ -60,7 +61,7 @@ class TestAutorisation:
             "/ws/me/", token=await database_sync_to_async(token_for)(customer)
         )
 
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
 
         assert connected is True
         await communicator.disconnect()
@@ -76,7 +77,7 @@ class TestSonnerie:
         communicator = await connect(
             "/ws/me/", token=await database_sync_to_async(token_for)(courier.user)
         )
-        connected, _ = await communicator.connect()
+        connected, _ = await communicator.connect(timeout=DELAI_OUVERTURE)
         assert connected is True
 
         await database_sync_to_async(CallService.place)(order=course.order, caller=customer)
@@ -95,7 +96,7 @@ class TestSonnerie:
         communicator = await connect(
             "/ws/me/", token=await database_sync_to_async(token_for)(customer)
         )
-        await communicator.connect()
+        await communicator.connect(timeout=DELAI_OUVERTURE)
 
         call = await database_sync_to_async(CallService.place)(order=course.order, caller=customer)
         await database_sync_to_async(CallService.accept)(call=call, actor=courier.user)
@@ -115,7 +116,7 @@ class TestSonnerie:
         communicator = await connect(
             "/ws/me/", token=await database_sync_to_async(token_for)(intrus)
         )
-        await communicator.connect()
+        await communicator.connect(timeout=DELAI_OUVERTURE)
 
         await database_sync_to_async(CallService.place)(order=course.order, caller=customer)
 

@@ -138,10 +138,20 @@ class TestRappels:
         assert Notification.objects.filter(user=equipe, title="Pièce livreur à renouveler").exists()
 
     def test_entre_deux_echeances_personne_n_est_derange(self, courier: CourierProfile) -> None:
-        """Prévenir chaque jour pendant un mois apprend à ignorer l'avis."""
+        """Prévenir chaque jour pendant un mois apprend à ignorer l'avis.
+
+        À douze jours de l'échéance, le seuil courant est J-30 : il part une
+        fois — la flotte peut avoir été validée après coup — puis plus rien
+        jusqu'à J-7. C'est l'unicité par seuil qui tient la règle, et non le
+        hasard du jour où la tâche tourne.
+        """
         courier.licence_document_expires_on = timezone.localdate() + timedelta(days=12)
         courier.save(update_fields=["licence_document_expires_on"])
 
+        premier = remind_document_expiry()
+
+        assert premier == {"reminders": 1}
+        assert remind_document_expiry() == {"reminders": 0}
         assert remind_document_expiry() == {"reminders": 0}
 
     def test_un_dossier_non_valide_n_est_pas_relance(self, courier: CourierProfile) -> None:
@@ -150,3 +160,67 @@ class TestRappels:
         courier.save(update_fields=["verification_status", "licence_document_expires_on"])
 
         assert remind_document_expiry() == {"reminders": 0}
+
+
+class TestRappelsRejouables:
+    """La tâche quotidienne relancée, retardée, ou doublée.
+
+    Deux défauts d'exploitation que la première écriture ne voyait pas : le
+    rejeu doublait les avis, et une journée non exécutée perdait son rappel
+    pour de bon. `beat` perd son dernier passage à chaque redéploiement, et un
+    service qui déploie plusieurs fois par jour ne lançait donc **jamais** sa
+    tâche quotidienne.
+    """
+
+    def test_rejouer_la_tache_ne_previent_pas_deux_fois(self, courier: CourierProfile) -> None:
+        courier.licence_document_expires_on = timezone.localdate() + timedelta(days=7)
+        courier.save(update_fields=["licence_document_expires_on"])
+
+        premier = remind_document_expiry()
+        second = remind_document_expiry()
+
+        assert premier == {"reminders": 1}
+        assert second == {"reminders": 0}
+        assert Notification.objects.filter(user=courier.user, kind="account").count() == 1
+
+    def test_un_seuil_manque_est_rattrape(self, courier: CourierProfile) -> None:
+        """La tâche n'a pas tourné le jour de J-7 : le rappel part avec du
+        retard, plutôt que jamais."""
+        courier.licence_document_expires_on = timezone.localdate() + timedelta(days=5)
+        courier.save(update_fields=["licence_document_expires_on"])
+
+        assert remind_document_expiry() == {"reminders": 1}
+        avis = Notification.objects.get(user=courier.user, title="Pièce bientôt expirée")
+        assert "expire le" in avis.body
+
+    def test_le_seuil_suivant_part_quand_meme(self, courier: CourierProfile) -> None:
+        """Rattraper J-7 n'éteint pas J-1 : ce sont deux avis différents."""
+        courier.licence_document_expires_on = timezone.localdate() + timedelta(days=5)
+        courier.save(update_fields=["licence_document_expires_on"])
+        remind_document_expiry()
+
+        courier.licence_document_expires_on = timezone.localdate() + timedelta(days=1)
+        courier.save(update_fields=["licence_document_expires_on"])
+
+        assert remind_document_expiry() == {"reminders": 1}
+
+    def test_une_piece_deja_expiree_se_dit_au_passe(self, courier: CourierProfile) -> None:
+        """Le rappel du jour même peut arriver après coup ; « expire le 17/09 »
+        au passé se lirait comme une erreur du système."""
+        courier.licence_document_expires_on = timezone.localdate() - timedelta(days=3)
+        courier.save(update_fields=["licence_document_expires_on"])
+
+        assert remind_document_expiry() == {"reminders": 1}
+        avis = Notification.objects.get(user=courier.user, title="Pièce expirée")
+        assert "a expiré le" in avis.body
+
+    def test_une_piece_renouvelee_a_ses_propres_rappels(self, courier: CourierProfile) -> None:
+        """L'unicité porte sur l'échéance, pas sur la date d'envoi."""
+        courier.licence_document_expires_on = timezone.localdate() + timedelta(days=7)
+        courier.save(update_fields=["licence_document_expires_on"])
+        remind_document_expiry()
+
+        courier.licence_document_expires_on = timezone.localdate() + timedelta(days=6)
+        courier.save(update_fields=["licence_document_expires_on"])
+
+        assert remind_document_expiry() == {"reminders": 1}

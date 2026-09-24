@@ -163,7 +163,15 @@ ALLOWED: dict[str, set[str]] = {
     # l'établissement de sa commande, par la même fonction que partout
     # ailleurs. La même arête qu'ont `payments` et `search`, pour la même
     # raison.
-    "support": {"accounts", "orders", "restaurants"},
+    # `payments` en **lecture seule**, et pour une seule question : un retour
+    # marqué « remboursé » annonce au client que son argent est parti. Rien ne
+    # le vérifiait — le statut se posait d'un clic, sans qu'aucun remboursement
+    # n'existe — et le client lisait « Retour remboursé » en attendant un
+    # virement que personne n'avait fait. Le support constate donc ce que
+    # `payments` a soldé, au lieu de l'affirmer.
+    #
+    # Le sens ne crée pas de cycle : `payments` ne connaît pas `support`.
+    "support": {"accounts", "orders", "payments", "restaurants"},
     # Écoute `orders` par signal, comme `loyalty` et `gamification` ; ses
     # rapports agrègent directement les commandes, leurs lignes et les
     # courses — la source de vérité, plutôt qu'une table dupliquée.

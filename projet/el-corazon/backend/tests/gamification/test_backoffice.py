@@ -273,3 +273,80 @@ class TestAcces:
 
         assert lecture.status_code == status.HTTP_200_OK
         assert ecriture.status_code == status.HTTP_403_FORBIDDEN
+
+
+class TestSeuilsNuls:
+    """Un seuil à zéro violait une contrainte `CHECK` : 500, lu comme une panne.
+
+    Vérifié en réel le 22 septembre 2026 : `POST /gamification/manage/badges/`
+    avec `points_required: 0` rendait `IntegrityError`.
+    """
+
+    def test_un_badge_a_zero_point_est_refuse_lisiblement(self, as_animateur: APIClient) -> None:
+        response = as_animateur.post(
+            reverse("v1:gamification:managed-badge-list"),
+            {"title": "Tout le monde", "points_required": 0},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "points_required" in response.data["errors"]
+        assert not Badge.objects.filter(title="Tout le monde").exists()
+
+    def test_un_succes_a_seuil_nul_est_refuse_lisiblement(self, as_animateur: APIClient) -> None:
+        response = as_animateur.post(
+            reverse("v1:gamification:managed-achievement-list"),
+            {
+                "name": "Gratuit",
+                "condition_type": "orders_count",
+                "condition_value": 0,
+                "points_reward": 50,
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "condition_value" in response.data["errors"]
+
+    @pytest.mark.parametrize("nature", ["orders_count", "total_spent", "streak_days"])
+    def test_les_natures_de_defi_inventees_sont_refusees(
+        self, as_animateur: APIClient, nature: str
+    ) -> None:
+        """Les valeurs que l'écran envoyait avant le 22 septembre 2026."""
+        maintenant = timezone.now()
+        response = as_animateur.post(
+            reverse("v1:gamification:managed-challenge-list"),
+            {
+                "title": "Ancien formulaire",
+                "challenge_type": nature,
+                "condition_type": "orders_count",
+                "target_value": 3,
+                "starts_at": maintenant.isoformat(),
+                "ends_at": (maintenant + dt.timedelta(days=7)).isoformat(),
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "challenge_type" in response.data["errors"]
+
+
+class TestDeviseDesRecompenses:
+    def test_une_remise_dans_une_autre_devise_est_refusee(
+        self, as_gerant: APIClient, restaurant: Restaurant
+    ) -> None:
+        """Points débités contre un code que la caisse refuserait ensuite."""
+        response = as_gerant.post(
+            reverse("v1:loyalty:managed-reward-list"),
+            {
+                "name": "Remise camerounaise",
+                "kind": RewardKind.DISCOUNT,
+                "points_cost": 100,
+                "discount": {"amount": "500", "currency": "XAF"},
+                "restaurant": str(restaurant.pk),
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "discount" in response.data["errors"]

@@ -131,6 +131,7 @@ class ManagedTicketViewSet(ReadOnlyModelViewSet[SupportTicket]):
             ticket=ticket,
             status=serializer.validated_data["status"],
             resolution=serializer.validated_data["resolution"],
+            actor=authenticated_user(request),
         )
         return Response(ManagedTicketSerializer(self.get_queryset().get(pk=ticket.pk)).data)
 
@@ -177,6 +178,7 @@ class ManagedComplaintViewSet(ReadOnlyModelViewSet[Complaint]):
             complaint=complaint,
             status=serializer.validated_data["status"],
             resolution=serializer.validated_data["resolution"],
+            actor=authenticated_user(request),
         )
         return Response(ManagedComplaintSerializer(self.get_queryset().get(pk=complaint.pk)).data)
 
@@ -228,5 +230,6 @@ class ManagedReturnViewSet(ReadOnlyModelViewSet[ReturnRequest]):
             return_request=demande,
             status=serializer.validated_data["status"],
             resolution=serializer.validated_data["resolution"],
+            actor=authenticated_user(request),
         )
         return Response(ManagedReturnSerializer(self.get_queryset().get(pk=demande.pk)).data)

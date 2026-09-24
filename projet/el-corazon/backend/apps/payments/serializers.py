@@ -13,6 +13,7 @@ from rest_framework import serializers
 
 from apps.accounts.models import User
 from apps.payments.models import Refund, SplitPayment, SplitShare, Transaction, Withdrawal
+from common.money import Money
 from common.serializers import MoneyField
 
 __all__ = [
@@ -195,6 +196,15 @@ class WithdrawalRequestSerializer(serializers.Serializer[Any]):
 
     amount = MoneyField()
 
+    def validate_amount(self, value: Money) -> Money:
+        # Un montant négatif **créditait** les gains avant que la contrainte
+        # `withdrawal_amount_positive` n'annule la transaction : la base était
+        # la seule défense, et le livreur lisait une erreur d'intégrité au lieu
+        # d'une phrase.
+        if value.amount_minor <= 0:
+            raise serializers.ValidationError("Le montant à retirer doit être positif.")
+        return value
+
 
 class RefundRequestSerializer(serializers.Serializer[Any]):
     transaction = serializers.UUIDField()
@@ -302,3 +312,14 @@ class RefundSettleSerializer(serializers.Serializer[Any]):
     provider_reference = serializers.CharField(
         max_length=128, required=False, allow_blank=True, trim_whitespace=True
     )
+
+
+class RefundCancelSerializer(serializers.Serializer[Any]):
+    """Abandonner un remboursement — le motif est exigé.
+
+    « Annulé » sans raison est exactement ce qu'on cherche à comprendre six
+    mois plus tard, quand un client réclame un remboursement dont la trace dit
+    qu'il n'a pas été versé.
+    """
+
+    reason = serializers.CharField(max_length=500, allow_blank=False, trim_whitespace=True)

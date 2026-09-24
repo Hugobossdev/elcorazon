@@ -44,6 +44,7 @@ from apps.payments.models import Refund, Withdrawal
 from apps.payments.serializers import (
     ManagedRefundSerializer,
     ManagedWithdrawalSerializer,
+    RefundCancelSerializer,
     RefundSettleSerializer,
     WithdrawalRejectSerializer,
     WithdrawalSettleSerializer,
@@ -199,5 +200,38 @@ class ManagedRefundViewSet(ReadOnlyModelViewSet[Refund]):
         solde = RefundService.settle(
             refund=refund,
             provider_reference=serializer.validated_data.get("provider_reference", ""),
+            actor=authenticated_user(request),
         )
         return Response(ManagedRefundSerializer(self.get_queryset().get(pk=solde.pk)).data)
+
+    @extend_schema(
+        request=RefundCancelSerializer,
+        responses={200: ManagedRefundSerializer},
+        tags=["payments"],
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="cancel",
+        url_name="cancel",
+        permission_classes=[HasPermission.of("orders.refund")],
+    )
+    def cancel(self, request: Request, pk: str) -> Response:
+        """Abandonne un remboursement qui ne sera pas versé — motif exigé.
+
+        Sans cette sortie, une demande saisie par erreur restait « en attente »
+        pour toujours **et** continuait de consommer le plafond du remboursable
+        (P3) : la commande devenait irremboursable, et le seul recours était
+        l'administration Django. Un remboursement déjà versé, lui, ne s'annule
+        pas — la machine à états le refuse, et c'est la bonne réponse.
+        """
+        refund = self.get_object()
+        serializer = RefundCancelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        abandonne = RefundService.cancel(
+            refund=refund,
+            reason=serializer.validated_data["reason"],
+            actor=authenticated_user(request),
+        )
+        return Response(ManagedRefundSerializer(self.get_queryset().get(pk=abandonne.pk)).data)

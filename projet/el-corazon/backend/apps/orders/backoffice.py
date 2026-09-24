@@ -32,6 +32,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from django.db.models import Count, QuerySet
+from django.utils.dateparse import parse_datetime
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
@@ -43,7 +44,7 @@ from rest_framework.serializers import BaseSerializer
 from rest_framework.viewsets import GenericViewSet
 
 from apps.orders.models import Order
-from apps.orders.queries import avec_compteurs
+from apps.orders.queries import avec_compteurs, statistiques_de_commandes
 from apps.orders.serializers import (
     KitchenOrderSerializer,
     OrderDetailSerializer,
@@ -98,7 +99,10 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
     #: de l'exprimer sans borne serait de tout charger pour n'en afficher que la
     #: fin.
     filterset_fields: ClassVar[dict[str, list[str]]] = {
-        "status": ["exact"],
+        # `in` pour la fenêtre de service du back-office : « tout ce qui est
+        # en cours » est une liste de statuts, et la demander statut par
+        # statut coûtait six requêtes là où une suffit.
+        "status": ["exact", "in"],
         "restaurant__slug": ["exact"],
         # Pays → ville → zone → cuisine, sur la géographie **figée** de la
         # commande : une cuisine rattachée ailleurs depuis ne déplace pas son
@@ -213,6 +217,30 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
         return Response(resultat)
 
     @extend_schema(
+        responses={200: OpenApiTypes.OBJECT},
+        tags=["orders"],
+        description=(
+            "Statistiques de la sélection — mêmes filtres et même cloisonnement "
+            "que la liste : compte par statut, chiffre d'affaires livré **par "
+            "devise**, durées et ponctualité des livraisons, taux d'annulation, "
+            "série quotidienne. Tout est agrégé en SQL."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="statistics", url_name="statistics")
+    def statistics(self, request: Request) -> Response:
+        """Ce que le back-office recalculait sur un an de commandes téléchargées.
+
+        Voir `statistiques_de_commandes` : les règles de mesure sont celles que
+        l'écran appliquait, déplacées là où sont les données. Le périmètre nu
+        (`_perimetre`) et non `get_queryset`, pour la même raison que `counts` :
+        les annotations de compteurs fausseraient les regroupements.
+        """
+        selection = self.filter_queryset(self._perimetre())
+        depuis = self.request.query_params.get("placed_at__gte")
+        debut = parse_datetime(depuis) if depuis else None
+        return Response(statistiques_de_commandes(selection, depuis=debut))
+
+    @extend_schema(
         responses={200: KitchenOrderSerializer(many=True)},
         parameters=[
             OpenApiParameter(
@@ -319,9 +347,6 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
         return Response(OrderDetailSerializer(order).data)
 
     @extend_schema(
-        request=StaffCancelSerializer, responses={200: OrderDetailSerializer}, tags=["orders"]
-    )
-    @extend_schema(
         methods=["GET"], responses={200: OrderNoteSerializer(many=True)}, tags=["orders"]
     )
     @extend_schema(
@@ -330,7 +355,16 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
         responses={201: OrderNoteSerializer},
         tags=["orders"],
     )
-    @action(detail=True, methods=["get", "post"], url_path="notes", url_name="notes")
+    # Un tableau, pas une page : les notes d'une fiche se comptent par dizaines,
+    # et le client Dart lit une liste. Sans `pagination_class=None`, le schéma
+    # annonçait une page paginée que le serveur ne rend pas.
+    @action(
+        detail=True,
+        methods=["get", "post"],
+        url_path="notes",
+        url_name="notes",
+        pagination_class=None,
+    )
     def notes(self, request: Request, pk: str) -> Response:
         """Les notes internes de la commande — lire, ou en ajouter une.
 
@@ -349,6 +383,13 @@ class ManagedOrderViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Ord
         note = serializer.save(order=order, author=authenticated_user(request))
         return Response(OrderNoteSerializer(note).data, status=status.HTTP_201_CREATED)
 
+    # Ce décorateur s'était retrouvé au-dessus de `notes` quand la route des
+    # notes a été insérée entre lui et sa méthode : le schéma annonçait alors
+    # un corps d'annulation pour écrire une note, et plus aucun corps pour
+    # annuler. `test_contrat_des_routes_du_personnel` le garde désormais.
+    @extend_schema(
+        request=StaffCancelSerializer, responses={200: OrderDetailSerializer}, tags=["orders"]
+    )
     @action(
         detail=True,
         methods=["post"],

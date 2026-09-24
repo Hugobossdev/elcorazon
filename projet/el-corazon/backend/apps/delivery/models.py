@@ -14,6 +14,8 @@ Trois invariants prouvés de la Phase 1 sont défendus ici :
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from django.contrib.gis.db import models as gis
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -34,7 +36,14 @@ from common.fields import MoneyField
 from common.models import TimeStampedModel, UUIDModel, state_check_constraint
 from common.storage import courier_documents
 
-__all__ = ["Assignment", "CourierProfile", "CourierRating", "CourierShift", "VehicleType"]
+__all__ = [
+    "Assignment",
+    "CourierProfile",
+    "CourierRating",
+    "CourierShift",
+    "DocumentReminder",
+    "VehicleType",
+]
 
 
 class VehicleType(models.TextChoices):
@@ -383,3 +392,62 @@ class CourierShift(UUIDModel, TimeStampedModel):
         return (
             f"{self.courier.user.full_name} — J{self.day_of_week} {self.start_time}–{self.end_time}"
         )
+
+
+class DocumentReminder(UUIDModel):
+    """Le rappel d'expiration **déjà envoyé** — la mémoire de la tâche quotidienne.
+
+    ## Pourquoi une table plutôt qu'un test de date
+
+    Le rappel partait quand une pièce expirait *exactement* dans 30, 7, 1 ou 0
+    jours. Cette écriture a deux défauts qui se voient seulement en
+    exploitation :
+
+    * **le rejeu double les envois.** Une tâche relancée à la main, un
+      redémarrage de `beat`, un `retry` du worker : la même journée est
+      repassée, et le livreur reçoit deux fois le même avis ;
+    * **une journée manquée est perdue.** `beat` écrit son dernier passage dans
+      un fichier que le redéploiement efface (`/tmp` chez Render) et une entrée
+      planifiée à l'intervalle repart de zéro à chaque démarrage. Sur un projet
+      qui déploie plusieurs fois par jour, la tâche quotidienne **ne s'exécutait
+      jamais** — et même exécutée, un jour d'arrêt effaçait définitivement le
+      rappel de ce jour-là, qui ne reviendrait qu'à l'échéance suivante.
+
+    Une ligne par rappel effectivement émis ferme les deux : la tâche peut
+    tourner cent fois par jour sans rien redire, et raisonner en « seuil
+    atteint » plutôt qu'en « jour exact » — ce qu'elle ne peut faire que si
+    elle sait ce qu'elle a déjà dit.
+
+    L'unicité porte sur la **date d'échéance**, pas sur la date d'envoi : une
+    pièce renouvelée porte une nouvelle échéance, donc ses propres rappels.
+    """
+
+    courier = models.ForeignKey(
+        CourierProfile, on_delete=models.CASCADE, related_name="document_reminders"
+    )
+    #: Le champ de la pièce — `id_document`, `licence_document`, `vehicle_document`.
+    piece = models.CharField(max_length=32)
+    expires_on = models.DateField()
+    #: Le seuil atteint : 30, 7, 1 ou 0 jour avant l'échéance.
+    threshold_days = models.PositiveSmallIntegerField()
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "rappel d'expiration envoyé"
+        verbose_name_plural = "rappels d'expiration envoyés"
+        ordering: ClassVar[list[str]] = ["-sent_at"]
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            # L'idempotence est **en base** et non dans la tâche : deux
+            # exécutions concurrentes — un `beat` en double après un
+            # redéploiement — liraient toutes deux « pas encore envoyé ».
+            models.UniqueConstraint(
+                fields=["courier", "piece", "expires_on", "threshold_days"],
+                name="document_reminder_once",
+            ),
+        ]
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=["courier", "expires_on"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.piece} J-{self.threshold_days} — {self.expires_on}"

@@ -74,6 +74,7 @@ class ReportQuerySerializer(serializers.Serializer[Any]):
 
 class RevenueRowSerializer(serializers.Serializer[Any]):
     day = serializers.DateField(read_only=True)
+    currency = serializers.CharField(read_only=True)
     orders_count = serializers.IntegerField(read_only=True)
     revenue_minor = serializers.IntegerField(read_only=True)
 
@@ -81,6 +82,7 @@ class RevenueRowSerializer(serializers.Serializer[Any]):
 class TopProductRowSerializer(serializers.Serializer[Any]):
     menu_item_id = serializers.CharField(read_only=True)
     item_name = serializers.CharField(read_only=True)
+    currency = serializers.CharField(read_only=True)
     quantity_sold = serializers.IntegerField(read_only=True)
     revenue_minor = serializers.IntegerField(read_only=True)
 
@@ -88,6 +90,7 @@ class TopProductRowSerializer(serializers.Serializer[Any]):
 class CourierPerformanceRowSerializer(serializers.Serializer[Any]):
     courier_id = serializers.CharField(read_only=True)
     courier_name = serializers.CharField(read_only=True)
+    currency = serializers.CharField(read_only=True)
     deliveries = serializers.IntegerField(read_only=True)
     earnings_minor = serializers.IntegerField(read_only=True)
 
@@ -117,14 +120,21 @@ class NetworkRowSerializer(serializers.Serializer[Any]):
 class StatusRowSerializer(serializers.Serializer[Any]):
     status = serializers.CharField(read_only=True)
     orders_count = serializers.IntegerField(read_only=True)
-    revenue_minor = serializers.IntegerField(read_only=True)
 
 
 class CategoryRowSerializer(serializers.Serializer[Any]):
     category_id = serializers.CharField(read_only=True)
     category_name = serializers.CharField(read_only=True)
+    currency = serializers.CharField(read_only=True)
     quantity_sold = serializers.IntegerField(read_only=True)
     revenue_minor = serializers.IntegerField(read_only=True)
+
+
+class CurrencyRevenueSerializer(serializers.Serializer[Any]):
+    currency = serializers.CharField(read_only=True)
+    orders_delivered = serializers.IntegerField(read_only=True)
+    revenue_minor = serializers.IntegerField(read_only=True)
+    average_basket_minor = serializers.IntegerField(read_only=True)
 
 
 class OverviewSerializer(serializers.Serializer[Any]):
@@ -139,8 +149,10 @@ class OverviewSerializer(serializers.Serializer[Any]):
     orders_count = serializers.IntegerField(read_only=True)
     orders_delivered = serializers.IntegerField(read_only=True)
     orders_cancelled = serializers.IntegerField(read_only=True)
-    revenue_minor = serializers.IntegerField(read_only=True)
-    average_basket_minor = serializers.IntegerField(read_only=True)
+    revenue_minor = serializers.IntegerField(read_only=True, allow_null=True)
+    average_basket_minor = serializers.IntegerField(read_only=True, allow_null=True)
+    currency = serializers.CharField(read_only=True, allow_null=True)
+    revenues = CurrencyRevenueSerializer(many=True, read_only=True)
     customers_count = serializers.IntegerField(read_only=True)
     couriers_online = serializers.IntegerField(read_only=True)
     menu_items_available = serializers.IntegerField(read_only=True)

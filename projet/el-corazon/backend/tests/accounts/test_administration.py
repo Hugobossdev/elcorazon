@@ -334,6 +334,44 @@ class TestPersonnel:
         assert not membre.is_active
         assert BlacklistedToken.objects.filter(token__user=membre).exists()
 
+    def test_remplacer_le_mot_de_passe_revoque_les_jetons(
+        self, siege: User, restaurant: Restaurant
+    ) -> None:
+        """On remplace un mot de passe quand il est perdu — ou quand un autre le
+        détient. Sans révocation, celui-là gardait trente jours de session."""
+        membre = personnel("membre@elcorazon.test", restaurant, "orders.refund")
+        session = AuthService.issue_tokens(membre)
+
+        response = connecte(siege).patch(
+            reverse("v1:restaurants:staff-detail", args=[membre.pk]),
+            {"password": "NouveauMotDePasse!42"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        membre.refresh_from_db()
+        assert membre.is_active
+        assert membre.check_password("NouveauMotDePasse!42")
+        assert BlacklistedToken.objects.filter(token__user=membre).exists()
+        # Et l'ancienne session ne se rafraîchit plus.
+        rafraichir = APIClient().post(
+            reverse("v1:accounts:token-refresh"), {"refresh": session.refresh}, format="json"
+        )
+        assert rafraichir.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_corriger_un_nom_ne_revoque_rien(self, siege: User, restaurant: Restaurant) -> None:
+        """La révocation suit le mot de passe, pas toute modification."""
+        membre = personnel("membre@elcorazon.test", restaurant, "orders.read")
+        AuthService.issue_tokens(membre)
+
+        connecte(siege).patch(
+            reverse("v1:restaurants:staff-detail", args=[membre.pk]),
+            {"full_name": "Nom corrigé"},
+            format="json",
+        )
+
+        assert not BlacklistedToken.objects.filter(token__user=membre).exists()
+
     def test_le_rattachement_conserve_sa_date(self, siege: User, restaurant: Restaurant) -> None:
         """Un rattachement dit depuis quand quelqu'un travaille là : le
         remplacer en bloc à chaque enregistrement effacerait l'information."""

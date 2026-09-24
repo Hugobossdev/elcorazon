@@ -171,30 +171,48 @@ class HasReadWritePermission(_AuthenticatedBase):
         permission_classes = [
             HasReadWritePermission.of(read="catalog.read", write="catalog.write")
         ]
+
+    Une lecture ou une écriture peut être ouverte à **plusieurs** permissions,
+    passées en tuple : l'une d'elles suffit. C'est ce qui permet à
+    `restaurants.operate` (horaires, fermetures, zones propres de *ses*
+    établissements) d'écrire là où `restaurants.write` écrit aussi, sans
+    recevoir pour autant ce que `restaurants.write` ouvre ailleurs — la fiche
+    de l'établissement, son plafond de pertes, son cycle de vie.
+
+        permission_classes = [
+            HasReadWritePermission.of(
+                read=("restaurants.read", "restaurants.operate"),
+                write=("restaurants.write", "restaurants.operate"),
+            )
+        ]
     """
 
-    read_code: str = ""
-    write_code: str = ""
+    read_codes: tuple[str, ...] = ()
+    write_codes: tuple[str, ...] = ()
 
     @classmethod
-    def of(cls, *, read: str, write: str) -> type[HasReadWritePermission]:
-        suffixe = f"{read}_{write}".replace(".", "_")
+    def of(
+        cls, *, read: str | tuple[str, ...], write: str | tuple[str, ...]
+    ) -> type[HasReadWritePermission]:
+        lecture = (read,) if isinstance(read, str) else tuple(read)
+        ecriture = (write,) if isinstance(write, str) else tuple(write)
+        suffixe = "_".join((*lecture, *ecriture)).replace(".", "_")
         return type(
             f"HasReadWritePermission_{suffixe}",
             (cls,),
-            {"read_code": read, "write_code": write},
+            {"read_codes": lecture, "write_codes": ecriture},
         )
 
     def has_permission(self, request: Request, view: APIView) -> bool:
         user = active_user(request)
         if user is None:
             return False
-        code = self.read_code if request.method in SAFE_METHODS else self.write_code
-        if not code:  # pragma: no cover - erreur de programmation
+        codes = self.read_codes if request.method in SAFE_METHODS else self.write_codes
+        if not codes:  # pragma: no cover - erreur de programmation
             raise ValueError(
                 "HasReadWritePermission doit être paramétrée par .of(read=…, write=…)."
             )
-        return user.has_permission(code)
+        return any(user.has_permission(code) for code in codes)
 
 
 class IsOwner(_AuthenticatedBase):

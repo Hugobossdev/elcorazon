@@ -122,6 +122,7 @@ services:
     # journal ne le dit, sinon l'absence de « Started reloader process ».
     command: >
       sh -c "python manage.py migrate --noinput &&
+             python manage.py bootstrap_roles &&
              python manage.py ensure_storage_buckets &&
              exec uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload --reload-dir apps --reload-dir config --reload-dir common"
     env_file: .env

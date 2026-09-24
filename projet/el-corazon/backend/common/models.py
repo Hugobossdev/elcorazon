@@ -192,6 +192,27 @@ class AuditEntry(UUIDModel, TimeStampedModel):
     before = models.JSONField(default=dict)
     after = models.JSONField(default=dict)
 
+    #: L'établissement auquel la décision se rattache, quand elle en a un.
+    #:
+    #: ## Pourquoi il est porté par l'entrée, et non déduit de la cible
+    #:
+    #: Le journal est cloisonné comme le reste (`AuditEntryViewSet`), et pour
+    #: les trois premières cibles — établissement, zone, compte du personnel —
+    #: le rattachement se déduisait de l'identifiant. Un retrait livreur, un
+    #: remboursement, une réclamation tranchée n'ont pas cette propriété : leur
+    #: établissement se lit sur `payments` et `support`, que `restaurants` —
+    #: où vit le périmètre — n'a pas le droit de connaître (ADR-002).
+    #:
+    #: Déduire aurait donc demandé d'inverser le graphe, ou de recopier trois
+    #: requêtes dans la vue. Écrire le périmètre **au moment de la décision**
+    #: évite les deux, et a une seconde vertu : comme `target_label`, il fige
+    #: ce qui était vrai alors. Un livreur muté ailleurs ne déplace pas
+    #: l'historique de ses versements.
+    #:
+    #: Nul pour ce qui ne relève d'aucun établissement — un rôle, un pays, un
+    #: compte client — qui ne se lit qu'au siège, le défaut sûr.
+    scope_restaurant_id = models.UUIDField(null=True, blank=True, db_index=True)
+
     class Meta:
         verbose_name = "entrée de journal"
         verbose_name_plural = "entrées de journal"

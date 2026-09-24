@@ -19,7 +19,9 @@ from apps.delivery.signals import (
     assignment_cancelled,
     assignment_offered,
     document_expiring,
+    verification_decided,
 )
+from apps.delivery.states import VerificationStatus
 from apps.notifications.models import NotificationKind
 from apps.notifications.services import notify, staff_to_alert
 from apps.orders.models import Order
@@ -68,6 +70,7 @@ __all__ = [
     "on_return_requested",
     "on_ticket_answered",
     "on_ticket_status_changed",
+    "on_verification_decided",
     "on_withdrawal_failed",
     "on_withdrawal_requested",
     "on_withdrawal_settled",
@@ -651,13 +654,23 @@ def on_document_expiring(
     les livreurs, parce que c'est elle qui décidera s'il roule encore.
     """
     libelle = CourierService.LIBELLES_PIECES.get(piece, piece)
-    quand = "aujourd'hui" if days_left == 0 else f"le {expires_on:%d/%m/%Y}"
     donnees = {"courier": str(courier.pk), "piece": piece, "expires_on": str(expires_on)}
+
+    # Trois temps, parce que le rappel peut arriver **après** l'échéance : la
+    # tâche rattrape les journées où elle n'a pas tourné, et « expire le
+    # 17/09 » au passé se lirait comme une erreur du système.
+    if days_left > 0:
+        titre, quand = "Pièce bientôt expirée", f"expire le {expires_on:%d/%m/%Y}"
+    elif days_left == 0:
+        titre, quand = "Pièce expirée aujourd'hui", "expire aujourd'hui"
+    else:
+        titre, quand = "Pièce expirée", f"a expiré le {expires_on:%d/%m/%Y}"
+
     notify(
         user=courier.user,
         kind=NotificationKind.ACCOUNT,
-        title="Pièce bientôt expirée" if days_left else "Pièce expirée aujourd'hui",
-        body=f"Votre {libelle} expire {quand}. Déposez la nouvelle depuis votre profil.",
+        title=titre,
+        body=f"Votre {libelle} {quand}. Déposez la nouvelle depuis votre profil.",
         data=donnees,
     )
     for membre in staff_to_alert(restaurant_id=courier.restaurant_id, permission="couriers.read"):
@@ -665,6 +678,63 @@ def on_document_expiring(
             user=membre,
             kind=NotificationKind.ACCOUNT,
             title="Pièce livreur à renouveler",
-            body=f"La {libelle} de {courier.user.full_name} expire {quand}.",
+            body=f"La {libelle} de {courier.user.full_name} {quand}.",
             data=donnees,
         )
+
+
+#: Ce que le livreur lit pour chaque décision. `pending` n'y est pas : remettre
+#: un dossier en instruction ne lui demande rien, et le prévenir le ferait
+#: s'inquiéter d'un geste qui le concerne à peine.
+_DECISIONS_DE_DOSSIER: dict[str, tuple[str, str]] = {
+    VerificationStatus.APPROVED: (
+        "Dossier validé",
+        "Votre dossier est validé : vous pouvez passer en ligne et recevoir des courses.",
+    ),
+    VerificationStatus.REJECTED: (
+        "Dossier refusé",
+        "Votre dossier n'a pas été validé : {motif} Corrigez-le depuis votre profil.",
+    ),
+    VerificationStatus.SUSPENDED: (
+        "Compte suspendu",
+        "Vous ne recevez plus de courses : {motif} Contactez votre responsable.",
+    ),
+}
+
+
+@receiver(
+    verification_decided,
+    sender=CourierProfile,
+    dispatch_uid="notifications.verification_decided",
+)
+def on_verification_decided(
+    sender: type[CourierProfile],
+    *,
+    courier: CourierProfile,
+    previous_status: str,
+    **kwargs: Any,
+) -> None:
+    """Prévient le livreur de la décision prise sur son dossier.
+
+    Transactionnelle et non commerciale : un refus ou une suspension n'est pas
+    une sollicitation, et le couper au motif du consentement laisserait un
+    livreur attendre des courses qui ne viendront plus.
+    """
+    gabarit = _DECISIONS_DE_DOSSIER.get(courier.verification_status)
+    if gabarit is None:
+        return
+    titre, corps = gabarit
+    motif = courier.verification_notes.strip()
+    if motif and not motif.endswith((".", "!", "?")):
+        motif += "."
+    notify(
+        user=courier.user,
+        kind=NotificationKind.ACCOUNT,
+        title=titre,
+        body=corps.format(motif=motif),
+        data={
+            "courier": str(courier.pk),
+            "status": courier.verification_status,
+            "previous_status": previous_status,
+        },
+    )

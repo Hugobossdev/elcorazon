@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, ClassVar
 
-from django.db.models import QuerySet
+from django.db.models import Count, QuerySet, Sum
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
-from rest_framework.exceptions import AuthenticationFailed, ValidationError
+from rest_framework.decorators import action
+from rest_framework.exceptions import AuthenticationFailed, PermissionDenied, ValidationError
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -30,6 +32,7 @@ from apps.orders.models import Order
 from apps.payments.gateway import GatewayError, gateway_for
 from apps.payments.models import (
     PaymentProvider,
+    PaymentStatus,
     SplitPayment,
     SplitShare,
     Transaction,
@@ -77,12 +80,80 @@ class TransactionViewSet(ReadOnlyModelViewSet[Transaction]):
 
     serializer_class = TransactionSerializer
     queryset = Transaction.objects.none()
-    filterset_fields = {"order": ["exact"], "status": ["exact"]}
+    #: Ce que l'écran des encaissements filtre côté serveur. Il chargeait
+    #: **tout l'historique** de son périmètre, page après page, puis filtrait
+    #: en mémoire : sa recherche ne portait donc que sur ce qu'il avait reçu, et
+    #: son total additionnait ce qui se trouvait là.
+    filterset_fields: ClassVar[dict[str, list[str]]] = {
+        "order": ["exact"],
+        "status": ["exact"],
+        "order__restaurant__slug": ["exact"],
+        "amount_currency": ["exact"],
+        "created_at": ["gte", "lte"],
+    }
+    search_fields: ClassVar[list[str]] = [
+        "provider_reference",
+        "order__reference",
+    ]
+
+    @extend_schema(
+        responses={200: OpenApiTypes.OBJECT},
+        tags=["payments"],
+        description=(
+            "Totaux de la sélection — **une ligne par devise** pour les "
+            "encaissements aboutis, et le compte de chaque statut. Mêmes "
+            "filtres que la liste."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="summary", url_name="summary")
+    def summary(self, request: Request) -> Response:
+        """Ce que l'écran additionnait sur la page chargée.
+
+        Deux devises ne s'additionnent pas : le total de Lomé (XOF) et celui de
+        Douala (XAF) sortent séparés, comme partout ailleurs depuis le
+        22 septembre 2026.
+        """
+        selection = self.filter_queryset(self.get_queryset()).order_by()
+        encaisses = [
+            {
+                "currency": ligne["amount_currency"],
+                "transactions": ligne["nombre"],
+                "amount_minor": ligne["total"] or 0,
+            }
+            for ligne in selection.filter(status=PaymentStatus.COMPLETED)
+            .values("amount_currency")
+            .annotate(nombre=Count("id"), total=Sum("amount_minor"))
+            .order_by("-total", "amount_currency")
+        ]
+        comptes = dict.fromkeys(PaymentStatus.values, 0)
+        comptes.update(
+            {
+                ligne["status"]: ligne["nombre"]
+                for ligne in selection.values("status").annotate(nombre=Count("id"))
+            }
+        )
+        return Response(
+            {
+                "transactions": sum(comptes.values()),
+                "by_status": comptes,
+                "collected": encaisses,
+            }
+        )
 
     def get_queryset(self) -> QuerySet[Transaction]:
         user = authenticated_user(self.request)
         queryset = Transaction.objects.select_related("order").order_by("-created_at")
         if user.user_type == UserType.STAFF:
+            # Un encaissement se lit comme la commande qui le porte — ou par qui
+            # la rembourse, puisque le remboursement désigne une transaction.
+            # Sans cette garde, tout compte du personnel — un cuisinier muni du
+            # seul `catalog.read` — lisait les montants et références de
+            # paiement de son établissement : le périmètre filtrait *où*, rien
+            # ne disait *qui*.
+            if not (user.has_permission("orders.read") or user.has_permission("orders.refund")):
+                raise PermissionDenied(
+                    "Lire les encaissements demande la permission « orders.read »."
+                )
             if is_unscoped(user):
                 return queryset
             # Même périmètre que les commandes : un encaissement appartient à

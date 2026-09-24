@@ -247,3 +247,81 @@ class TestSuspension:
         assert efface.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
         promotion.refresh_from_db()
         assert not promotion.is_active
+
+
+class TestDevisesEtBornes:
+    """Ce que le formulaire du back-office envoie désormais, et ce que le
+    serveur doit refuser lisiblement (22 septembre 2026)."""
+
+    def test_un_gerant_cree_un_code_pour_son_etablissement(
+        self, marketing: APIClient, restaurant: Restaurant
+    ) -> None:
+        # Le formulaire n'avait pas de champ établissement : tout code naissait
+        # national, refusé à un gérant. Il envoie désormais son établissement.
+        reponse = marketing.post(
+            reverse("v1:promotions:promotion-list"),
+            corps(restaurant=restaurant.slug),
+            format="json",
+        )
+
+        assert reponse.status_code == status.HTTP_201_CREATED
+        assert reponse.data["restaurant"] == restaurant.slug
+
+    def test_un_montant_dans_une_autre_devise_est_refuse(
+        self, marketing: APIClient, restaurant: Restaurant
+    ) -> None:
+        reponse = marketing.post(
+            reverse("v1:promotions:promotion-list"),
+            corps(restaurant=restaurant.slug, amount={"amount": "500", "currency": "XAF"}),
+            format="json",
+        )
+
+        assert reponse.status_code == status.HTTP_400_BAD_REQUEST
+        assert "amount" in reponse.data["errors"]
+        assert not Promotion.objects.filter(code="WEEKEND").exists()
+
+    def test_deux_devises_dans_un_meme_code_sont_refusees(self, siege: APIClient) -> None:
+        reponse = siege.post(
+            reverse("v1:promotions:promotion-list"),
+            corps(min_order_amount={"amount": "3000", "currency": "XAF"}),
+            format="json",
+        )
+
+        assert reponse.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_un_quota_nul_est_refuse(self, marketing: APIClient, restaurant: Restaurant) -> None:
+        reponse = marketing.post(
+            reverse("v1:promotions:promotion-list"),
+            corps(restaurant=restaurant.slug, usage_limit=0),
+            format="json",
+        )
+
+        assert reponse.status_code == status.HTTP_400_BAD_REQUEST
+        assert "usage_limit" in reponse.data["errors"]
+
+    def test_une_limite_facultative_s_efface(
+        self, marketing: APIClient, restaurant: Restaurant
+    ) -> None:
+        creee = marketing.post(
+            reverse("v1:promotions:promotion-list"),
+            corps(
+                restaurant=restaurant.slug,
+                kind=DiscountKind.PERCENTAGE,
+                percentage="10",
+                amount=None,
+                max_discount={"amount": "2000", "currency": XOF},
+            ),
+            format="json",
+        )
+        assert creee.status_code == status.HTTP_201_CREATED
+
+        reponse = marketing.patch(
+            reverse("v1:promotions:promotion-detail", args=[creee.data["id"]]),
+            {"max_discount": None, "usage_limit": None},
+            format="json",
+        )
+
+        assert reponse.status_code == status.HTTP_200_OK
+        promotion = Promotion.objects.get(pk=creee.data["id"])
+        assert promotion.max_discount is None
+        assert promotion.usage_limit is None

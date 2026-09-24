@@ -10,12 +10,28 @@ from __future__ import annotations
 import os
 
 from celery import Celery
+from celery.schedules import crontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 
 app = Celery("elcorazon")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
+
+#: L'heure des tâches quotidiennes, en UTC.
+#:
+#: **Un horaire, et non un intervalle de 24 h**, pour une raison d'exploitation
+#: qui ne se voit pas en développement : une entrée planifiée à l'intervalle
+#: compte à partir du démarrage de `beat`, et `beat` perd son dernier passage à
+#: chaque redéploiement (son fichier vit dans `/tmp` chez Render). Un service
+#: qui déploie plus d'une fois par jour repousse donc indéfiniment ses tâches
+#: quotidiennes — rappels d'expiration, extinction des points, purge des
+#: appareils : elles **ne tournaient jamais**.
+#:
+#: 5 h UTC : la nuit sur tous les marchés d'Afrique de l'Ouest desservis
+#: (UTC−1 à UTC+1), donc hors du service, et la même journée civile pour tous —
+#: ce que `timezone.localdate()` lit du côté serveur.
+HEURE_QUOTIDIENNE = crontab(hour=5, minute=0)
 
 # Tâches planifiées.
 #
@@ -38,23 +54,24 @@ app.conf.beat_schedule = {
         "schedule": 3600.0,
     },
     "remind-document-expiry": {
-        # Quotidien : les rappels tombent à J-30, J-7, J-1 et J0, et une passe
-        # par jour suffit à n'en manquer aucun.
+        # Les rappels tombent aux seuils J-30, J-7, J-1 et J0. La tâche est
+        # idempotente et **rattrape** les journées manquées (`DocumentReminder`) :
+        # une panne de `beat` retarde un rappel, elle ne le perd plus.
         "task": "apps.delivery.tasks.remind_document_expiry",
-        "schedule": 86400.0,
+        "schedule": HEURE_QUOTIDIENNE,
     },
     "expire-points": {
         # Les points s'éteignent après une période sans mouvement. Quotidien :
         # la fenêtre se compte en mois, une passe par jour suffit largement.
         "task": "apps.loyalty.tasks.expire_points",
-        "schedule": 86400.0,
+        "schedule": HEURE_QUOTIDIENNE,
     },
     "purge-unregistered-devices": {
         # Un appareil que le service push ne déclare jamais injoignable mais
         # qui ne se manifeste plus : téléphone perdu, application désinstallée
         # sans notification. Quotidien, la fenêtre étant de six mois.
         "task": "apps.notifications.tasks.purge_unregistered_devices",
-        "schedule": 86400.0,
+        "schedule": HEURE_QUOTIDIENNE,
     },
     "expire-group-carts": {
         # Toutes les cinq minutes : l'échéance est déjà opposée à chaque ajout,
@@ -71,6 +88,15 @@ app.conf.beat_schedule = {
         # même tenté.
         "task": "apps.loyalty.tasks.renew_subscriptions",
         "schedule": 3600.0,
+    },
+    "send-scheduled-campaigns": {
+        # Toutes les cinq minutes : une campagne programmée à 18 h part entre
+        # 18 h et 18 h 05, ce qui est la précision d'un envoi commercial. Le
+        # tour est idempotent (`send_campaign` relit sous verrou), et rattrape
+        # les heures passées pendant un arrêt — une campagne perdue vaut bien
+        # pire qu'une campagne en retard de dix minutes.
+        "task": "apps.notifications.tasks.send_scheduled_campaigns",
+        "schedule": 300.0,
     },
     "expire-stale-offers": {
         # Chaque minute : une proposition sans réponse bloque un repas prêt. Le

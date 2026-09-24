@@ -18,6 +18,7 @@ from apps.accounts.models import User
 from apps.delivery.models import CourierProfile
 from apps.payments.models import PaymentStatus, Withdrawal
 from apps.payments.services import WithdrawalService
+from common.exceptions import BusinessRuleViolation
 from common.money import Money
 
 pytestmark = [pytest.mark.django_db, pytest.mark.postgis]
@@ -93,10 +94,30 @@ class TestDemande:
     def test_un_montant_nul_est_refuse(self, as_courier: APIClient) -> None:
         response = as_courier.post(reverse(URL), {"amount": montant(0)}, format="json")
 
-        assert response.status_code in {
-            status.HTTP_400_BAD_REQUEST,
-            status.HTTP_409_CONFLICT,
-        }
+        # 400 et une phrase : la contrainte SQL l'arrêtait aussi, mais en erreur
+        # d'intégrité, que le livreur lisait sans comprendre.
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["errors"]["amount"] == ["Le montant à retirer doit être positif."]
+
+    def test_un_montant_negatif_ne_credite_rien(
+        self, as_courier: APIClient, paid_courier: CourierProfile
+    ) -> None:
+        """`gains − (−5 000)` vaut `gains + 5 000` : sans garde, la demande
+        créditait le livreur avant que la base n'annule la transaction."""
+        response = as_courier.post(reverse(URL), {"amount": montant(-5_000)}, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        paid_courier.refresh_from_db()
+        assert paid_courier.total_earnings == Money(10_000, XOF)
+        assert not Withdrawal.objects.exists()
+
+    def test_le_service_refuse_aussi_un_montant_negatif(self, paid_courier: CourierProfile) -> None:
+        """Le service ne dépend pas de la route pour se défendre."""
+        with pytest.raises(BusinessRuleViolation):
+            WithdrawalService.request(courier=paid_courier, amount=Money(-5_000, XOF))
+
+        paid_courier.refresh_from_db()
+        assert paid_courier.total_earnings == Money(10_000, XOF)
 
     def test_sans_gains_il_n_y_a_rien_a_retirer(
         self, client: APIClient, courier: CourierProfile

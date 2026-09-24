@@ -249,7 +249,13 @@ class CustomerStatsView(APIView):
     @extend_schema(responses={200: CustomerStatsSerializer}, tags=["analytics"])
     def get(self, request: Request, pk: str) -> Response:
         customer = get_object_or_404(User, pk=pk, user_type=UserType.CUSTOMER)
-        stats = ReportingService.customer_stats(customer)
+        # Le compte du client est d'enseigne ; ses commandes appartiennent à des
+        # cuisines. La fiche chiffrée porte donc le périmètre du compte qui la
+        # lit, comme les six rapports d'exploitation.
+        stats = ReportingService.customer_stats(
+            customer,
+            perimetre=resolve_perimetre(user=authenticated_user(request), params={}),
+        )
         return Response(CustomerStatsSerializer(stats).data)
 
 

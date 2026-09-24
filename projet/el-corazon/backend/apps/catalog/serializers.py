@@ -28,6 +28,7 @@ from common.availability import Unavailability
 from common.serializers import MoneyField
 
 __all__ = [
+    "CategoryReorderSerializer",
     "CategorySerializer",
     "ManagedCategorySerializer",
     "ManagedMenuItemSerializer",
@@ -265,6 +266,46 @@ class ManagedCategorySerializer(serializers.ModelSerializer[Category]):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class CategoryReorderSerializer(serializers.Serializer[Any]):
+    """L'ordre voulu pour les catégories **d'un** établissement.
+
+    ## Pourquoi une route plutôt qu'un `PATCH` par ligne
+
+    Le back-office envoyait un `PATCH` par catégorie déplacée, en série. Sur un
+    refus au quatrième, les trois premiers étaient déjà écrits : la carte
+    restait dans un ordre que personne n'avait demandé, et l'écran — qui
+    remettait sa liste telle qu'elle était avant — affichait alors un ordre
+    différent de celui de la base. Un rangement est un geste, pas huit.
+
+    L'ordre est donné par la **position dans la liste** et non par un numéro :
+    laisser le client calculer les `sort_order` l'expose à les faire diverger
+    (deux fois 3, un trou à 5), et le serveur n'aurait aucun moyen de le
+    savoir.
+
+    La liste est **complète** pour l'établissement. Une liste partielle
+    laisserait les absentes à leur ancien rang, donc mêlées aux nouvelles sans
+    que rien ne dise où.
+    """
+
+    restaurant = serializers.SlugRelatedField[Restaurant](
+        slug_field="slug",
+        queryset=Restaurant.objects.all(),
+        help_text="L'établissement dont on range la carte : `sort_order` lui est propre.",
+    )
+    categories = serializers.ListField(
+        child=serializers.UUIDField(),
+        allow_empty=False,
+        help_text="Les identifiants, dans l'ordre voulu. Le rang 1 est le premier.",
+    )
+
+    def validate_categories(self, valeur: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(set(valeur)) != len(valeur):
+            raise serializers.ValidationError(
+                "Une catégorie ne peut pas occuper deux rangs à la fois."
+            )
+        return valeur
 
 
 class ManagedMenuItemSerializer(serializers.ModelSerializer[MenuItem]):
