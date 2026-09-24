@@ -112,4 +112,32 @@ class CampaignRepository {
     );
     return Campaign.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Date l'envoi : la campagne partira seule, à [at] — réservé au siège.
+  ///
+  /// L'instant part en UTC, fuseau compris : « 18 h » saisi à Lomé et « 18 h »
+  /// relu à Abidjan désignent le même moment. Le serveur refuse (409) une
+  /// heure passée — « Envoyer » existe pour partir maintenant — et une
+  /// campagne déjà partie. Reprogrammer une campagne programmée la décale.
+  ///
+  /// **Dépend du battement** (`celery beat`, toutes les cinq minutes) : sans
+  /// lui, une campagne programmée reste programmée.
+  Future<Campaign> schedule(String campaignId, {required DateTime at}) async {
+    final response = await apiClient.post(
+      '/notifications/campaigns/$campaignId/schedule/',
+      data: {'scheduled_at': at.toUtc().toIso8601String()},
+    );
+    return Campaign.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Annule la programmation : la campagne redevient un brouillon, modifiable.
+  ///
+  /// Refusé (409) si elle est déjà partie entre-temps : le serveur relit son
+  /// état sous verrou, et l'écran doit alors la relire au lieu d'insister.
+  Future<Campaign> unschedule(String campaignId) async {
+    final response = await apiClient.post(
+      '/notifications/campaigns/$campaignId/unschedule/',
+    );
+    return Campaign.fromJson(response.data as Map<String, dynamic>);
+  }
 }

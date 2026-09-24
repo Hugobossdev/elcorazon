@@ -134,6 +134,8 @@ void main() {
     });
   });
 
+  plus();
+
   test('aucune phrase ne laisse fuir le nom d’une classe', () {
     final erreurs = <Object>[
       ApiException.network('Connection refused'),
@@ -151,5 +153,47 @@ void main() {
       expect(message, isNot(contains('Exception')), reason: '$erreur');
       expect(message, isNot(contains('Error')), reason: '$erreur');
     }
+  });
+}
+
+/// Ajouts : ce que le serveur n'a pas écrit, et ce qu'il a écrit trop profond.
+void plus() {
+  group('Le serveur n’a écrit ni phrase ni champ', () {
+    test('un 403 dit ce qui manque, et n’invite pas à réessayer', () {
+      final erreur = ApiException.fromProblemDetail(403, {'code': 'permission_denied'});
+
+      final message = messageErreurApi(erreur);
+
+      expect(message, contains('autorisation'));
+      expect(message, isNot(contains('Réessayez')));
+    });
+
+    test('un 404 parle d’un élément introuvable', () {
+      final erreur = ApiException.fromProblemDetail(404, {'code': 'not_found'});
+
+      expect(messageErreurApi(erreur), contains('introuvable'));
+    });
+  });
+
+  group('Les erreurs imbriquées', () {
+    test('une erreur de ligne rend la phrase, pas la structure', () {
+      // Forme d'un sérialiseur imbriqué : DRF range par index, puis par champ.
+      final erreur = ApiException.fromProblemDetail(400, {
+        'code': 'invalid',
+        'errors': {
+          'lines': [
+            {
+              'quantity': ['Au moins un article.'],
+            },
+          ],
+        },
+      });
+
+      final message = messageErreurApi(erreur);
+
+      expect(message, 'Au moins un article.');
+      expect(message, isNot(contains('{')));
+      expect(message, isNot(contains('quantity')));
+    });
   });
 }

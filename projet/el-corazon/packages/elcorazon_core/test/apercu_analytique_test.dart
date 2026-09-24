@@ -29,6 +29,15 @@ void main() {
       'orders_cancelled': 1,
       'revenue_minor': 54000,
       'average_basket_minor': 6000,
+      'currency': 'XAF',
+      'revenues': [
+        {
+          'currency': 'XAF',
+          'orders_delivered': 9,
+          'revenue_minor': 54000,
+          'average_basket_minor': 6000,
+        },
+      ],
       'customers_count': 40,
       'couriers_online': 3,
       'menu_items_available': 18,
@@ -106,6 +115,39 @@ void main() {
       expect(apercu.ordersDelivered, 9);
       expect(apercu.revenueMinor, 54000);
       expect(apercu.averageBasketMinor, 6000);
+    });
+
+    test('un périmètre à deux devises ne rend aucun total mêlé', () {
+      // Forme réelle du serveur depuis le 22 septembre 2026 : XOF et XAF ne
+      // s'additionnent pas ; le total est nul et chaque devise a sa ligne.
+      final apercu = AnalyticsOverview.fromJson(
+        apercuJson(
+          extra: {
+            'revenue_minor': null,
+            'average_basket_minor': null,
+            'currency': null,
+            'revenues': [
+              {
+                'currency': 'XAF',
+                'orders_delivered': 1,
+                'revenue_minor': 10000,
+                'average_basket_minor': 10000,
+              },
+              {
+                'currency': 'XOF',
+                'orders_delivered': 2,
+                'revenue_minor': 6000,
+                'average_basket_minor': 3000,
+              },
+            ],
+          },
+        ),
+      );
+
+      expect(apercu.revenueMinor, isNull);
+      expect(apercu.currency, isNull);
+      expect(apercu.revenues.map((ligne) => ligne.currency), ['XAF', 'XOF']);
+      expect(apercu.revenues.last.averageBasketMinor, 3000);
     });
 
     test('le taux d’achèvement se calcule, et ne divise pas par zéro', () {

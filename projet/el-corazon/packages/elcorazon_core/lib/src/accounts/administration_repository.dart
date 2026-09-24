@@ -1,3 +1,4 @@
+import 'package:elcorazon_core/src/network/page.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/accounts/admin_role.dart';
 import 'package:elcorazon_core/src/accounts/customer.dart';
@@ -41,6 +42,41 @@ class AdministrationRepository {
         if (search != null && search.isNotEmpty) 'search': search,
       },
     );
+  }
+
+  /// **Une page** de comptes clients — recherche et filtre côté serveur.
+  ///
+  /// À préférer à [customers] partout où l'écran affiche une liste qu'on
+  /// parcourt : [customers] suit `next` jusqu'au bout, ce qui convient à un
+  /// export et pas du tout à un annuaire. Le back-office téléchargeait ainsi
+  /// tous les comptes de la plateforme pour en afficher vingt, puis filtrait
+  /// la recherche sur ce qu'il avait chargé — « aucun résultat » y voulait
+  /// dire « pas dans ce que j'ai reçu ».
+  ///
+  /// [search] porte sur l'adresse, le nom et le téléphone (`search_fields`).
+  Future<Page<Customer>> customersPage({
+    bool? isActive,
+    String? search,
+    int page = 1,
+    int pageSize = 25,
+  }) async {
+    final response = await apiClient.get(
+      '/administration/customers/',
+      queryParameters: {
+        'page': page,
+        'page_size': pageSize,
+        if (isActive != null) 'is_active': isActive.toString(),
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      },
+    );
+    return Page<Customer>.fromJson(response.data as Map<String, dynamic>, Customer.fromJson);
+  }
+
+  /// La page désignée par un `next`/`previous` rendu par le serveur : l'URL
+  /// porte déjà les filtres, la rejouer garantit la continuité de la liste.
+  Future<Page<Customer>> customersAt(String url) async {
+    final response = await apiClient.get(url);
+    return Page<Customer>.fromJson(response.data as Map<String, dynamic>, Customer.fromJson);
   }
 
   Future<Customer> customer(String customerId) async {

@@ -3,6 +3,7 @@ import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/network/page.dart';
 import 'package:elcorazon_core/src/orders/kitchen_order.dart';
 import 'package:elcorazon_core/src/orders/order.dart';
+import 'package:elcorazon_core/src/orders/order_statistics.dart';
 
 /// Supervision des commandes — `/api/v1/orders/manage/`
 /// (`backend/apps/orders/backoffice.py`).
@@ -28,8 +29,13 @@ class ManagedOrderRepository {
   /// [placedFrom]/[placedTo] bornent le service en cours : sans elles, un
   /// écran de supervision charge l'historique entier pour n'en afficher que la
   /// fin.
+  ///
+  /// [statuses] demande plusieurs statuts d'un coup (`status__in`) : « tout ce
+  /// qui est en cours » est une liste, et la demander statut par statut
+  /// coûtait une requête par statut.
   Future<List<Order>> list({
     String? status,
+    List<String>? statuses,
     String? countryIsoCode,
     String? citySlug,
     String? deliveryZoneId,
@@ -42,6 +48,7 @@ class ManagedOrderRepository {
     String? path = '/orders/manage/';
     Map<String, dynamic>? queryParameters = {
       if (status != null) 'status': status,
+      if (statuses != null && statuses.isNotEmpty) 'status__in': statuses.join(','),
       ..._geographie(countryIsoCode, citySlug, deliveryZoneId),
       if (restaurantSlug != null) 'restaurant__slug': restaurantSlug,
       if (customerId != null) 'customer': customerId,
@@ -187,6 +194,37 @@ class ManagedOrderRepository {
     return {
       for (final entree in body.entries) entree.key: (entree.value as num).toInt(),
     };
+  }
+
+  /// Statistiques de la sélection — `GET /orders/manage/statistics/`.
+  ///
+  /// Mêmes filtres que la liste et les compteurs : les chiffres portent sur ce
+  /// que l'écran montre. Remplace le calcul que le back-office faisait sur un
+  /// an de commandes téléchargées.
+  Future<OrderStatistics> statistics({
+    String? status,
+    String? countryIsoCode,
+    String? citySlug,
+    String? deliveryZoneId,
+    String? restaurantSlug,
+    String? customerId,
+    DateTime? placedFrom,
+    DateTime? placedTo,
+    String? search,
+  }) async {
+    final response = await apiClient.get(
+      '/orders/manage/statistics/',
+      queryParameters: {
+        if (status != null) 'status': status,
+        ..._geographie(countryIsoCode, citySlug, deliveryZoneId),
+        if (restaurantSlug != null) 'restaurant__slug': restaurantSlug,
+        if (customerId != null) 'customer': customerId,
+        if (placedFrom != null) 'placed_at__gte': placedFrom.toUtc().toIso8601String(),
+        if (placedTo != null) 'placed_at__lte': placedTo.toUtc().toIso8601String(),
+        if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      },
+    );
+    return OrderStatistics.fromJson(response.data as Map<String, dynamic>);
   }
 
   Future<Order> getById(String orderId) async {

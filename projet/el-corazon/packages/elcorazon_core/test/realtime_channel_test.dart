@@ -70,6 +70,38 @@ class _EchoServer {
   Future<void> close() => _server.close(force: true);
 }
 
+/// Accepte, envoie un événement numéroté, puis coupe après [tenue] — une
+/// coupure réseau vue du client. Retient les paramètres de chaque connexion,
+/// pour vérifier ce que la reprise demande au serveur.
+class _ServeurQuiTombe {
+  _ServeurQuiTombe(this._server, this.tenue) {
+    _server.listen((request) async {
+      connexions.add(Map.of(request.uri.queryParameters));
+      // Fermé plus bas, après la tenue : c'est la coupure simulée.
+      // ignore: close_sinks
+      final socket = await WebSocketTransformer.upgrade(request);
+      _seq++;
+      socket.add(jsonEncode({'seq': _seq, 'type': 'chat.message', 'text': 'n°$_seq'}));
+      await Future<void>.delayed(tenue);
+      await socket.close(1011, 'coupure');
+    });
+  }
+
+  final HttpServer _server;
+  final Duration tenue;
+  final List<Map<String, String>> connexions = [];
+  int _seq = 6;
+
+  static Future<_ServeurQuiTombe> start(Duration tenue) async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    return _ServeurQuiTombe(server, tenue);
+  }
+
+  int get port => _server.port;
+
+  Future<void> close() => _server.close(force: true);
+}
+
 class _ForbiddenServer {
   _ForbiddenServer(this._server) {
     _server.listen((request) async {
@@ -218,6 +250,72 @@ void main() {
     // commande confirmée.
     await expectLater(channel.close(), completes);
   }, timeout: const Timeout(Duration(seconds: 20)),);
+
+  test('la reprise demande au serveur ce qui a été publié pendant la coupure', () async {
+    final server = await _ServeurQuiTombe.start(const Duration(milliseconds: 100));
+    addTearDown(server.close);
+
+    final channel = RealtimeChannel(
+      wsUrl: 'ws://127.0.0.1:${server.port}/ws/orders/order-1/chat/',
+      tokenStorage: TokenStorage(),
+      reconnectDelay: const Duration(milliseconds: 50),
+    );
+    addTearDown(channel.close);
+
+    // Deux événements : celui d'avant la coupure, celui d'après la reprise.
+    final recus = await channel.connect().take(2).toList();
+
+    expect(recus.map((e) => e.seq), [7, 8]);
+    // La première connexion ne rejoue rien — il n'y a rien à rattraper.
+    expect(server.connexions.first.containsKey('since'), isFalse);
+    // La reprise repart du dernier numéro reçu : sans lui, un message de chat
+    // émis pendant la coupure était perdu, la conversation n'ayant aucun
+    // autre historique.
+    expect(server.connexions[1]['since'], '7');
+  }, timeout: const Timeout(Duration(seconds: 10)),);
+
+  test('une connexion restée stable regagne une reprise à sa coupure', () async {
+    // Chaque connexion tient 300 ms, au-delà du seuil de stabilité (100 ms) :
+    // chaque coupure est un incident nouveau, qui a droit à sa reprise.
+    final server = await _ServeurQuiTombe.start(const Duration(milliseconds: 300));
+    addTearDown(server.close);
+
+    final channel = RealtimeChannel(
+      wsUrl: 'ws://127.0.0.1:${server.port}/ws/orders/order-1/tracking/',
+      tokenStorage: TokenStorage(),
+      reconnectDelay: const Duration(milliseconds: 50),
+      stableConnection: const Duration(milliseconds: 100),
+    );
+    addTearDown(channel.close);
+
+    final recus = await channel.connect().take(3).toList();
+
+    // Avant la correction, la deuxième coupure fermait le canal pour de bon :
+    // `_hasRetried` n'était jamais remis à zéro, et une livraison de trente
+    // minutes perdait son suivi au second tunnel.
+    expect(recus.map((e) => e.seq), [7, 8, 9]);
+    expect(server.connexions.length, greaterThanOrEqualTo(3));
+  }, timeout: const Timeout(Duration(seconds: 10)),);
+
+  test('une connexion instable n’a droit qu’à une seule reprise', () async {
+    // Chaque connexion tombe avant le seuil de stabilité : c'est la reprise
+    // elle-même qui échoue, et le canal renonce au lieu de boucler.
+    final server = await _ServeurQuiTombe.start(const Duration(milliseconds: 20));
+    addTearDown(server.close);
+
+    final channel = RealtimeChannel(
+      wsUrl: 'ws://127.0.0.1:${server.port}/ws/orders/order-1/tracking/',
+      tokenStorage: TokenStorage(),
+      reconnectDelay: const Duration(milliseconds: 50),
+      // Seuil de stabilité par défaut (30 s) : aucune connexion ne l'atteint.
+    );
+    addTearDown(channel.close);
+
+    final recus = await channel.connect().toList();
+
+    expect(recus.map((e) => e.seq), [7, 8]);
+    expect(server.connexions.length, 2);
+  }, timeout: const Timeout(Duration(seconds: 10)),);
 
   test('une fermeture 4403 (accès refusé) ne déclenche aucune reconnexion', () async {
     final server = await _ForbiddenServer.start();

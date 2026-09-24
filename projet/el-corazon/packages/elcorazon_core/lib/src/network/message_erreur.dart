@@ -48,7 +48,7 @@ String messageErreurApi(
     // répondu. Le distinguer, parce que le geste attendu n'est pas le même —
     // réessayer plus tard plutôt que corriger quelque chose.
     if (erreur.status == 0) {
-      return 'Pas de connexion au serveur. Vérifiez votre réseau, puis réessayez.';
+      return ApiException.detailReseau;
     }
     if (erreur.isUnauthorized) {
       return 'Votre session a expiré. Reconnectez-vous.';
@@ -66,6 +66,20 @@ String messageErreurApi(
     // personne ne la lisait.
     if (erreur.detail == ApiException.detailParDefaut && erreur.errors.isNotEmpty) {
       return erreur.errors.values.expand((messages) => messages).join(' ');
+    }
+    // Le serveur n'a écrit ni phrase ni champ. Cela arrive quand la réponse ne
+    // vient pas de l'application — un 403 de proxy, un 404 de route absente —
+    // et le repli générique, qui invite à réessayer, est alors trompeur : ni
+    // l'un ni l'autre ne s'arrange en réessayant. Le **code** est la seule
+    // chose qu'on sache, et il suffit à dire quoi faire.
+    if (erreur.detail == ApiException.detailParDefaut || erreur.detail.isEmpty) {
+      if (erreur.status == 403) {
+        return 'Vous n\'avez pas l\'autorisation d\'effectuer cette action.';
+      }
+      if (erreur.status == 404) {
+        return 'Cet élément est introuvable : il a peut-être été supprimé.';
+      }
+      return repli;
     }
     // Le cas nominal : 400, 403, 404, 409 portent une phrase écrite pour la
     // personne qui la lira. C'est celle-là, et rien d'autre.

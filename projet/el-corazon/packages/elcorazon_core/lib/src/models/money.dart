@@ -90,6 +90,16 @@ class Money {
   /// signe sur un montant est la dernière chose qu'une interface doive faire.
   String format() => formatPrice(toMajorUnits(), currency: currency);
 
+  /// Même montant, suivi du **code ISO** de la devise : « 12 500 XOF ».
+  ///
+  /// Pour les écrans qui montrent plusieurs marchés — le back-office. [format]
+  /// écrit « CFA » pour le franc d'Afrique de l'Ouest (XOF) comme pour celui
+  /// d'Afrique centrale (XAF) : c'est ce qu'un client lit sur son ticket, et il
+  /// n'en voit qu'un. Un siège qui supervise Lomé et Douala doit, lui, voir
+  /// lequel des deux il regarde — ce sont deux monnaies, qui n'ont pas cours
+  /// l'une chez l'autre.
+  String formatIso() => formatPrice(toMajorUnits(), currency: currency, codeIso: true);
+
   @override
   String toString() => '$amountMinor $currency';
 }
@@ -112,8 +122,11 @@ const _separateurMilliers = ' ';
 /// `NaN` et l'infini rendent « 0 » suivi de la devise : ils ne représentent
 /// aucun montant, et il n'y a rien de mieux à écrire. C'est le seul cas où
 /// cette fonction substitue une valeur.
-String formatPrice(double amount, {String currency = 'XOF'}) {
-  final symbole = Money._symboles[currency] ?? currency;
+///
+/// [codeIso] remplace le symbole d'usage (« CFA ») par le code de la devise
+/// (« XOF », « XAF ») — voir [Money.formatIso].
+String formatPrice(double amount, {String currency = 'XOF', bool codeIso = false}) {
+  final symbole = codeIso ? currency : (Money._symboles[currency] ?? currency);
   if (amount.isNaN || amount.isInfinite) return '0 $symbole';
 
   final exposant = Money._exponents[currency] ?? 0;

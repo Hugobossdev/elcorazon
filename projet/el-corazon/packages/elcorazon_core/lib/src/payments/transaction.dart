@@ -118,3 +118,46 @@ class Refund {
   final DateTime? completedAt;
   final DateTime createdAt;
 }
+
+/// Totaux d'une sélection d'encaissements — `GET /payments/transactions/summary/`.
+///
+/// L'encaissé est rendu **par devise** : additionner des XOF et des XAF sous
+/// un même « FCFA » donnait un nombre qui ne correspondait à aucun relevé.
+class TransactionSummary {
+  const TransactionSummary({
+    required this.transactions,
+    required this.byStatus,
+    required this.collected,
+  });
+
+  factory TransactionSummary.fromJson(Map<String, dynamic> json) {
+    return TransactionSummary(
+      transactions: json['transactions'] as int,
+      byStatus: {
+        for (final entree in (json['by_status'] as Map<String, dynamic>).entries)
+          entree.key: (entree.value as num).toInt(),
+      },
+      collected: [
+        for (final ligne in json['collected'] as List<dynamic>)
+          (
+            amount: Money(
+              amountMinor: ((ligne as Map<String, dynamic>)['amount_minor'] as num).toInt(),
+              currency: ligne['currency'] as String,
+            ),
+            transactions: (ligne['transactions'] as num).toInt(),
+          ),
+      ],
+    );
+  }
+
+  /// Nombre de transactions de la sélection, tous statuts confondus.
+  final int transactions;
+
+  /// Compte par statut — tous les statuts sont présents, à zéro le cas échéant.
+  final Map<String, int> byStatus;
+
+  /// Encaissé **abouti**, une entrée par devise, la plus lourde en tête.
+  final List<({Money amount, int transactions})> collected;
+
+  int compteDe(String statut) => byStatus[statut] ?? 0;
+}

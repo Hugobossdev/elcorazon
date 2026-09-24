@@ -23,6 +23,10 @@ abstract final class CampaignAudience {
 
 abstract final class CampaignStatus {
   static const draft = 'draft';
+
+  /// Datée : elle partira seule, à [Campaign.scheduledAt]. Ne se modifie plus
+  /// — le texte relu au moment de dater est celui qui partira.
+  static const scheduled = 'scheduled';
   static const sent = 'sent';
 }
 
@@ -46,6 +50,7 @@ class Campaign {
     required this.createdAt,
     required this.updatedAt,
     this.sentAt,
+    this.scheduledAt,
     this.createdByEmail,
   });
 
@@ -61,6 +66,9 @@ class Campaign {
       sentAt: json['sent_at'] == null
           ? null
           : DateTime.parse(json['sent_at'] as String),
+      scheduledAt: json['scheduled_at'] == null
+          ? null
+          : DateTime.parse(json['scheduled_at'] as String),
       recipientCount: json['recipient_count'] as int? ?? 0,
       createdByEmail: json['created_by_email'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
@@ -83,6 +91,11 @@ class Campaign {
   final String status;
   final DateTime? sentAt;
 
+  /// L'heure à laquelle la campagne partira, si elle est programmée. Posée par
+  /// le geste `CampaignRepository.schedule`, jamais par une modification : une
+  /// campagne ne se date pas au détour d'un enregistrement de formulaire.
+  final DateTime? scheduledAt;
+
   /// Notifications **réellement écrites**, donc hors comptes ayant refusé le
   /// marketing. Compter la taille du segment donnerait un taux d'ouverture
   /// flatteur et faux.
@@ -95,6 +108,11 @@ class Campaign {
   final DateTime updatedAt;
 
   bool get isDraft => status == CampaignStatus.draft;
+
+  /// Programmée : elle partira seule à [scheduledAt] — si le battement tourne
+  /// (`celery beat`). Elle ne se modifie qu'après annulation de la
+  /// programmation.
+  bool get isScheduled => status == CampaignStatus.scheduled;
 
   /// Une campagne envoyée est **immuable** : la modifier ferait mentir la
   /// trace, et « qu'a-t-on envoyé le 3 mars ? » n'aurait plus de réponse.

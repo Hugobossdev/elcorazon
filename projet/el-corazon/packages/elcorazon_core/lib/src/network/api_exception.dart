@@ -25,11 +25,21 @@ class ApiException implements Exception {
   /// migration non appliquée) : l'application l'a rapporté en
   /// `network_error`, puis en « aucun restaurant en service ». Le serveur avait
   /// répondu ; on cherchait du côté du Wi-Fi. Voir [ApiException.unreadable].
-  factory ApiException.network(String detail) => ApiException(
+  ///
+  /// [cause] est le message **technique** du transport — « The connection
+  /// errored: Failed host lookup… », en anglais. Il était le [detail], et une
+  /// soixantaine d'écrans affichent [detail] tel quel : c'est donc lui qu'un
+  /// client lisait sous un bouton de commande. Il reste lisible dans
+  /// [members] (`cause`) et dans [toString], pour qui diagnostique.
+  factory ApiException.network(String cause) => ApiException(
     status: 0,
     code: 'network_error',
-    detail: detail,
+    detail: detailReseau,
+    members: {'cause': cause},
   );
+
+  /// Ce que vaut [detail] quand aucune réponse n'est arrivée.
+  static const detailReseau = 'Pas de connexion au serveur. Vérifiez votre réseau, puis réessayez.';
 
   /// Le serveur **a répondu**, avec un statut, mais sans corps `problem+json`
   /// lisible : page HTML d'erreur, proxy, corps vide.
@@ -46,19 +56,22 @@ class ApiException implements Exception {
   );
 
   factory ApiException.fromProblemDetail(int status, Map<String, dynamic> body) {
-    final errors = body['errors'];
+    final brutes = body['errors'];
+    final errors = brutes is Map
+        ? brutes.map((key, value) => MapEntry(key.toString(), _phrases(value)))
+        : const <String, List<String>>{};
+    final phrases = errors.values.expand((messages) => messages).join(' ');
     return ApiException(
       status: status,
       code: (body['code'] as String?) ?? 'unknown_error',
-      detail: (body['detail'] as String?) ?? detailParDefaut,
-      errors: errors is Map
-          ? errors.map(
-              (key, value) => MapEntry(
-                key.toString(),
-                value is List ? value.map((v) => v.toString()).toList() : <String>[value.toString()],
-              ),
-            )
-          : const {},
+      // Un refus de validation (400) n'a pas de phrase d'ensemble : DRF range
+      // la raison champ par champ. `messageErreurApi` savait la lire, mais une
+      // soixantaine d'écrans affichent [detail] directement — et lisaient
+      // « Une erreur est survenue. » là où le serveur avait écrit « Dites au
+      // livreur pourquoi ». La raison est donc composée **ici**, une fois,
+      // pour tous les lecteurs.
+      detail: (body['detail'] as String?) ?? (phrases.isNotEmpty ? phrases : detailParDefaut),
+      errors: errors,
       members: Map.unmodifiable({
         for (final entree in body.entries)
           if (!_membresDuContrat.contains(entree.key)) entree.key: entree.value,
@@ -66,11 +79,31 @@ class ApiException implements Exception {
     );
   }
 
-  /// Ce que vaut [detail] quand le serveur n'en a pas écrit.
+  /// Les phrases contenues dans une valeur d'`errors`, à n'importe quelle
+  /// profondeur.
   ///
-  /// C'est le cas des refus de **validation** (400) : DRF range la raison
-  /// champ par champ dans `errors` et ne pose aucun `detail`. Nommer ce repli
-  /// permet à `messageErreurApi` de le reconnaître et d'aller lire [errors].
+  /// DRF imbrique dès qu'un sérialiseur en contient un autre : les erreurs
+  /// d'une ligne de commande arrivent en
+  /// `{"lines": [{"quantity": ["Au moins un article."]}]}`. Converties telles
+  /// quelles, elles s'affichaient `{quantity: [Au moins un article.]}` —
+  /// accolades comprises, sous les yeux de quelqu'un qui voulait juste
+  /// commander. Seules les feuilles nous intéressent ; les noms de champs,
+  /// eux, ne veulent rien dire pour celui qui lit.
+  static List<String> _phrases(Object? valeur) {
+    if (valeur is List) {
+      return valeur.expand(_phrases).toList();
+    }
+    if (valeur is Map) {
+      return valeur.values.expand(_phrases).toList();
+    }
+    final texte = valeur?.toString().trim() ?? '';
+    return texte.isEmpty ? const [] : <String>[texte];
+  }
+
+  /// Ce que vaut [detail] quand le serveur n'a écrit **ni phrase ni champ** —
+  /// une réponse qui ne vient pas de l'application (403 d'un intermédiaire,
+  /// 404 d'une route absente). Nommer ce repli permet à `messageErreurApi` de
+  /// le reconnaître et de dire, d'après le statut, quoi faire.
   static const detailParDefaut = 'Une erreur est survenue.';
 
   /// Membres définis par la RFC 9457 elle-même. Tout le reste est une extension
@@ -128,7 +161,12 @@ class ApiException implements Exception {
   bool get isServerError => status >= 500;
 
   @override
-  String toString() => 'ApiException($status, $code, $detail)';
+  String toString() {
+    final cause = members['cause'];
+    return cause == null
+        ? 'ApiException($status, $code, $detail)'
+        : 'ApiException($status, $code, $detail — $cause)';
+  }
 }
 
 /// Le rafraîchissement de session a échoué — le refresh token est absent,

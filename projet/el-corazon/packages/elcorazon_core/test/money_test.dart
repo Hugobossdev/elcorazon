@@ -124,5 +124,17 @@ void main() {
       expect(const Money(amountMinor: 1250, currency: 'EUR').format(), '12,50 EUR');
       expect(const Money(amountMinor: -1250, currency: 'EUR').format(), '-12,50 EUR');
     });
+
+    test('formatIso distingue XOF et XAF, que « CFA » confond', () {
+      // Le back-office supervise Lomé et Douala : deux monnaies, qu'un même
+      // symbole rendait indiscernables à l'écran.
+      const lome = Money(amountMinor: 12500, currency: 'XOF');
+      const douala = Money(amountMinor: 12500, currency: 'XAF');
+
+      expect(lome.format(), douala.format());
+      expect(lome.formatIso(), '12${nbsp}500 XOF');
+      expect(douala.formatIso(), '12${nbsp}500 XAF');
+      expect(const Money(amountMinor: 1250, currency: 'EUR').formatIso(), '12,50 EUR');
+    });
   });
 }

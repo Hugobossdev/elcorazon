@@ -78,6 +78,7 @@ class CourierProfile {
     this.idDocumentExpiresOn,
     this.licenceDocumentExpiresOn,
     this.vehicleDocumentExpiresOn,
+    this.distanceM,
   });
 
   factory CourierProfile.fromJson(Map<String, dynamic> json) {
@@ -119,6 +120,7 @@ class CourierProfile {
       idDocumentExpiresOn: _parseDate(json['id_document_expires_on']),
       licenceDocumentExpiresOn: _parseDate(json['licence_document_expires_on']),
       vehicleDocumentExpiresOn: _parseDate(json['vehicle_document_expires_on']),
+      distanceM: (json['distance_m'] as num?)?.round(),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
     );
@@ -228,6 +230,12 @@ class CourierProfile {
   final DateTime? lastLocationAt;
   final int deliveriesCompleted;
   final int deliveriesCancelled;
+  /// Distance jusqu'à la cuisine, en mètres — **seulement** sur la route des
+  /// livreurs éligibles (`/delivery/couriers/available/{commande}/`), où le
+  /// serveur la calcule pour trier du plus proche au plus loin. Nulle
+  /// ailleurs : un zéro laisserait croire qu'il est sur le pas de la porte.
+  final int? distanceM;
+
   final double ratingAverage;
   final int ratingCount;
   final Money? totalEarnings;

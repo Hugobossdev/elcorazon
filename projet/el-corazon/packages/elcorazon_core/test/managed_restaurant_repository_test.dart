@@ -86,6 +86,36 @@ class _FakeServer implements HttpClientAdapter {
       );
     }
 
+    if (options.path.endsWith('/restaurants/manage/perimeter/')) {
+      // La forme **réelle** de `RestaurantPerimeterSerializer`, relevée le
+      // 22 septembre 2026 : ni compteurs, ni lacunes, ni plafond des pertes.
+      return ResponseBody.fromString(
+        jsonEncode([
+          {
+            'id': 'rest-lome',
+            'name': 'El Corazón',
+            'slug': 'el-corazon-lome',
+            'zone': 'zone-1',
+            'zone_name': 'Lomé — centre',
+            'city': 'Lomé',
+            'city_slug': 'lome',
+            'country': 'TG',
+            'address': 'Boulevard du 13 Janvier',
+            'location': {'lat': 6.1319, 'lon': 1.2255},
+            'phone': '+22890000000',
+            'currency': 'XOF',
+            'timezone': 'Africa/Lome',
+            'status': 'active',
+            'is_active': true,
+            'accepts_orders': true,
+            'default_preparation_minutes': 20,
+          },
+        ]),
+        200,
+        headers: _jsonHeaders,
+      );
+    }
+
     if (options.path.contains('/restaurants/manage/')) {
       final page = int.tryParse(options.uri.queryParameters['page'] ?? '1') ?? 1;
       final derniere = page >= pages;
@@ -133,6 +163,25 @@ void main() {
   });
 
   group('ManagedRestaurantRepository', () {
+    test('perimeter lit la forme réduite du serveur, sans pagination', () async {
+      // Le rôle « Opérateur » n'a pas `restaurants.read` : c'est cette route,
+      // et non [list], qui lui dit dans quelle cuisine il travaille.
+      final server = _FakeServer();
+
+      final etablissements = await _repository(server).perimeter();
+
+      expect(server.requests.single.path, endsWith('/restaurants/manage/perimeter/'));
+      final lome = etablissements.single;
+      expect(lome.slug, 'el-corazon-lome');
+      expect(lome.currency, 'XOF');
+      expect(lome.defaultPreparationMinutes, 20);
+      expect(lome.latitude, closeTo(6.1319, 1e-9));
+      expect(lome.status, RestaurantLifecycle.active);
+      // Absents de la forme réduite : ils valent leur défaut, sans erreur.
+      expect(lome.stockAdjustmentCeiling, isNull);
+      expect(lome.ordersCount, 0);
+    });
+
     test('list rend le périmètre du compte, sans le lui demander', () async {
       // Aucun filtre n'est envoyé : le périmètre est une décision du serveur,
       // pas un paramètre du client. C'est tout l'écart avec la constante

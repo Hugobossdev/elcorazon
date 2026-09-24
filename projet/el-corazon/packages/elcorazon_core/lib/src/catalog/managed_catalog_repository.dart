@@ -87,6 +87,28 @@ class ManagedCatalogRepository {
     await apiClient.delete('/catalog/manage/categories/$categoryId/');
   }
 
+  /// Range la carte d'un établissement — **en un appel, en une transaction**.
+  ///
+  /// [categoryIds] porte la **liste entière** des catégories de
+  /// [restaurantSlug], dans l'ordre voulu : le rang vient de la position, et le
+  /// serveur refuse une liste partielle (409 `reorder_incomplete`), qui
+  /// laisserait les absentes à leur ancien rang.
+  ///
+  /// Le back-office envoyait un `PATCH` par catégorie déplacée, en série. Sur
+  /// un refus au quatrième, les trois premiers étaient déjà écrits.
+  Future<List<ManagedCategory>> reorderCategories({
+    required String restaurantSlug,
+    required List<String> categoryIds,
+  }) async {
+    final response = await apiClient.post(
+      '/catalog/manage/categories/reorder/',
+      data: {'restaurant': restaurantSlug, 'categories': categoryIds},
+    );
+    return (response.data as List<dynamic>)
+        .map((json) => ManagedCategory.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
   // --------------------------------------------------------------- articles
 
   /// Articles de la carte.

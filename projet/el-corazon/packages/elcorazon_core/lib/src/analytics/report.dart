@@ -3,14 +3,44 @@
 ///
 /// Les montants voyagent en **unité mineure** (`revenue_minor`) et restent des
 /// entiers : une ligne de rapport est un nombre à tracer sur un graphique, pas
-/// une somme à facturer. La devise est celle du marché et n'appartient pas à la
-/// ligne — l'y mettre laisserait croire qu'un rapport peut en mélanger deux.
+/// une somme à facturer.
+///
+/// **Chaque ligne monétaire porte sa devise.** L'en-tête de ce fichier disait
+/// le contraire — « la devise est celle du marché » — et c'était faux dès que
+/// le périmètre couvrait deux pays : le siège additionnait les XOF de Lomé et
+/// les XAF de Douala dans un seul chiffre d'affaires. Le serveur découpe
+/// désormais ses séries par devise ; l'écran choisit celle qu'il montre.
 library;
+
+/// Chiffre d'affaires livré d'une devise, dans un [AnalyticsOverview].
+class CurrencyRevenue {
+  const CurrencyRevenue({
+    required this.currency,
+    required this.ordersDelivered,
+    required this.revenueMinor,
+    required this.averageBasketMinor,
+  });
+
+  factory CurrencyRevenue.fromJson(Map<String, dynamic> json) {
+    return CurrencyRevenue(
+      currency: json['currency'] as String,
+      ordersDelivered: json['orders_delivered'] as int,
+      revenueMinor: json['revenue_minor'] as int,
+      averageBasketMinor: json['average_basket_minor'] as int,
+    );
+  }
+
+  final String currency;
+  final int ordersDelivered;
+  final int revenueMinor;
+  final int averageBasketMinor;
+}
 
 /// Chiffre d'affaires d'une journée.
 class RevenueRow {
   const RevenueRow({
     required this.day,
+    required this.currency,
     required this.ordersCount,
     required this.revenueMinor,
   });
@@ -18,12 +48,16 @@ class RevenueRow {
   factory RevenueRow.fromJson(Map<String, dynamic> json) {
     return RevenueRow(
       day: DateTime.parse(json['day'] as String),
+      currency: json['currency'] as String,
       ordersCount: json['orders_count'] as int,
       revenueMinor: json['revenue_minor'] as int,
     );
   }
 
   final DateTime day;
+
+  /// Une journée à deux devises rend **deux** lignes.
+  final String currency;
   final int ordersCount;
   final int revenueMinor;
 }
@@ -33,6 +67,7 @@ class TopProductRow {
   const TopProductRow({
     required this.menuItemId,
     required this.itemName,
+    required this.currency,
     required this.quantitySold,
     required this.revenueMinor,
   });
@@ -41,6 +76,7 @@ class TopProductRow {
     return TopProductRow(
       menuItemId: json['menu_item_id'] as String,
       itemName: json['item_name'] as String,
+      currency: json['currency'] as String,
       quantitySold: json['quantity_sold'] as int,
       revenueMinor: json['revenue_minor'] as int,
     );
@@ -48,6 +84,7 @@ class TopProductRow {
 
   final String menuItemId;
   final String itemName;
+  final String currency;
   final int quantitySold;
   final int revenueMinor;
 }
@@ -57,6 +94,7 @@ class CourierPerformanceRow {
   const CourierPerformanceRow({
     required this.courierId,
     required this.courierName,
+    required this.currency,
     required this.deliveries,
     required this.earningsMinor,
   });
@@ -65,6 +103,7 @@ class CourierPerformanceRow {
     return CourierPerformanceRow(
       courierId: json['courier_id'] as String,
       courierName: json['courier_name'] as String,
+      currency: json['currency'] as String,
       deliveries: json['deliveries'] as int,
       earningsMinor: json['earnings_minor'] as int,
     );
@@ -72,6 +111,7 @@ class CourierPerformanceRow {
 
   final String courierId;
   final String courierName;
+  final String currency;
   final int deliveries;
   final int earningsMinor;
 }
@@ -126,25 +166,21 @@ class NetworkRow {
   double get cancellationRate => ordersCount == 0 ? 0 : cancelledCount / ordersCount;
 }
 
-/// Commandes rangées par statut.
+/// Commandes rangées par statut — un **compte**, sans montant : la somme
+/// qu'il portait mêlait les devises d'un périmètre multi-pays, et rien ne la
+/// lisait.
 class StatusRow {
-  const StatusRow({
-    required this.status,
-    required this.ordersCount,
-    required this.revenueMinor,
-  });
+  const StatusRow({required this.status, required this.ordersCount});
 
   factory StatusRow.fromJson(Map<String, dynamic> json) {
     return StatusRow(
       status: json['status'] as String,
       ordersCount: json['orders_count'] as int,
-      revenueMinor: json['revenue_minor'] as int,
     );
   }
 
   final String status;
   final int ordersCount;
-  final int revenueMinor;
 }
 
 /// Ventes agrégées par catégorie de la carte.
@@ -152,6 +188,7 @@ class CategoryRow {
   const CategoryRow({
     required this.categoryId,
     required this.categoryName,
+    required this.currency,
     required this.quantitySold,
     required this.revenueMinor,
   });
@@ -160,6 +197,7 @@ class CategoryRow {
     return CategoryRow(
       categoryId: json['category_id'] as String,
       categoryName: json['category_name'] as String,
+      currency: json['currency'] as String,
       quantitySold: json['quantity_sold'] as int,
       revenueMinor: json['revenue_minor'] as int,
     );
@@ -167,6 +205,7 @@ class CategoryRow {
 
   final String categoryId;
   final String categoryName;
+  final String currency;
   final int quantitySold;
   final int revenueMinor;
 }
@@ -184,6 +223,8 @@ class AnalyticsOverview {
     required this.ordersCancelled,
     required this.revenueMinor,
     required this.averageBasketMinor,
+    required this.currency,
+    required this.revenues,
     required this.customersCount,
     required this.couriersOnline,
     required this.menuItemsAvailable,
@@ -199,8 +240,12 @@ class AnalyticsOverview {
       ordersCount: json['orders_count'] as int,
       ordersDelivered: json['orders_delivered'] as int,
       ordersCancelled: json['orders_cancelled'] as int,
-      revenueMinor: json['revenue_minor'] as int,
-      averageBasketMinor: json['average_basket_minor'] as int,
+      revenueMinor: json['revenue_minor'] as int?,
+      averageBasketMinor: json['average_basket_minor'] as int?,
+      currency: json['currency'] as String?,
+      revenues: (json['revenues'] as List<dynamic>? ?? const [])
+          .map((ligne) => CurrencyRevenue.fromJson(ligne as Map<String, dynamic>))
+          .toList(growable: false),
       customersCount: json['customers_count'] as int,
       couriersOnline: json['couriers_online'] as int,
       menuItemsAvailable: json['menu_items_available'] as int,
@@ -215,8 +260,17 @@ class AnalyticsOverview {
   final int ordersCount;
   final int ordersDelivered;
   final int ordersCancelled;
-  final int revenueMinor;
-  final int averageBasketMinor;
+
+  /// Chiffre d'affaires et panier moyen **d'une seule devise** ([currency]) —
+  /// nuls quand le périmètre en encaisse plusieurs, parce que les rendre
+  /// reviendrait à additionner des XOF et des XAF. [revenues] porte le
+  /// détail dans tous les cas.
+  final int? revenueMinor;
+  final int? averageBasketMinor;
+  final String? currency;
+
+  /// Une ligne par devise, la dominante en tête.
+  final List<CurrencyRevenue> revenues;
   final int customersCount;
   final int couriersOnline;
   final int menuItemsAvailable;

@@ -206,6 +206,7 @@ class ManagedGamificationRepository {
     String description = '',
     String icon = '🏆',
     int pointsReward = 0,
+    bool isActive = true,
   }) async {
     final response = await apiClient.post(
       '/gamification/manage/achievements/',
@@ -216,6 +217,7 @@ class ManagedGamificationRepository {
         'condition_type': conditionType,
         'condition_value': conditionValue,
         'points_reward': pointsReward,
+        'is_active': isActive,
       },
     );
     return ManagedAchievement.fromJson(response.data as Map<String, dynamic>);
@@ -261,6 +263,7 @@ class ManagedGamificationRepository {
     required int pointsRequired,
     String description = '',
     String icon = '🏅',
+    bool isActive = true,
   }) async {
     final response = await apiClient.post(
       '/gamification/manage/badges/',
@@ -269,6 +272,7 @@ class ManagedGamificationRepository {
         'description': description,
         'icon': icon,
         'points_required': pointsRequired,
+        'is_active': isActive,
       },
     );
     return ManagedBadge.fromJson(response.data as Map<String, dynamic>);
@@ -314,6 +318,7 @@ class ManagedGamificationRepository {
     required DateTime endsAt,
     String description = '',
     int rewardPoints = 0,
+    bool isActive = true,
   }) async {
     final response = await apiClient.post(
       '/gamification/manage/challenges/',
@@ -326,6 +331,7 @@ class ManagedGamificationRepository {
         'reward_points': rewardPoints,
         'starts_at': startsAt.toUtc().toIso8601String(),
         'ends_at': endsAt.toUtc().toIso8601String(),
+        'is_active': isActive,
       },
     );
     return ManagedChallenge.fromJson(response.data as Map<String, dynamic>);
@@ -382,6 +388,7 @@ class ManagedGamificationRepository {
     Money? discount,
     int validityDays = 30,
     String? restaurantId,
+    bool isActive = true,
   }) async {
     final response = await apiClient.post(
       '/loyalty/manage/rewards/',
@@ -393,6 +400,7 @@ class ManagedGamificationRepository {
         if (discount != null) 'discount': discount.toJson(),
         'validity_days': validityDays,
         'restaurant': restaurantId,
+        'is_active': isActive,
       },
     );
     return ManagedReward.fromJson(response.data as Map<String, dynamic>);

@@ -124,6 +124,51 @@ class PromotionRepository {
     return Promotion.fromJson(response.data as Map<String, dynamic>);
   }
 
+  /// Réécrit **toutes** les conditions d'un code, telles que le formulaire
+  /// les tient.
+  ///
+  /// À la différence d'[update], une valeur nulle part **explicitement** à
+  /// `null` : c'est ainsi qu'on efface une limite facultative (remise
+  /// maximale, minimum de commande, quotas). [update] n'envoyait que les
+  /// valeurs non nulles — vider le champ « Remise maximale » ne retirait donc
+  /// jamais le plafond, en silence. La nature du code ([kind]) suit aussi :
+  /// [update] ne la transmettait pas.
+  ///
+  /// Le code lui-même et l'établissement ne changent pas après la création.
+  Future<Promotion> replace({
+    required String promotionId,
+    required String description,
+    required String kind,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    required bool isActive,
+    double? percentage,
+    Money? amount,
+    Money? minOrderAmount,
+    Money? maxDiscount,
+    int? usageLimit,
+    int? usageLimitPerUser,
+  }) async {
+    final response = await apiClient.patch(
+      '/promotions/$promotionId/',
+      data: {
+        'description': description,
+        'kind': kind,
+        // Le pourcentage n'a pas de valeur nulle côté serveur (défaut zéro).
+        'percentage': (percentage ?? 0).toString(),
+        'amount': amount?.toJson(),
+        'min_order_amount': minOrderAmount?.toJson(),
+        'max_discount': maxDiscount?.toJson(),
+        'starts_at': startsAt.toUtc().toIso8601String(),
+        'ends_at': endsAt.toUtc().toIso8601String(),
+        'usage_limit': usageLimit,
+        'usage_limit_per_user': usageLimitPerUser,
+        'is_active': isActive,
+      },
+    );
+    return Promotion.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// Suspend ou réactive un code — la seule façon de le retirer de la
   /// circulation.
   Future<Promotion> setActive({

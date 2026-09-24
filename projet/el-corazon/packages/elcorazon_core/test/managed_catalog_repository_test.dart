@@ -58,6 +58,21 @@ Map<String, dynamic> _itemJson({String? image = 'https://cdn.test/products/menu/
   };
 }
 
+Map<String, dynamic> _categorieJson({required String id}) {
+  return {
+    'id': id,
+    'restaurant': 'el-corazon-lome',
+    'name': 'Catégorie $id',
+    'slug': id,
+    'emoji': '',
+    'description': '',
+    'sort_order': 1,
+    'is_active': true,
+    'created_at': '2026-07-31T10:00:00Z',
+    'updated_at': '2026-07-31T10:00:00Z',
+  };
+}
+
 class _FakeServer implements HttpClientAdapter {
   final List<RequestOptions> requests = [];
 
@@ -149,6 +164,19 @@ class _FakeServer implements HttpClientAdapter {
       );
     }
 
+    if (options.path.contains('/catalog/manage/categories/reorder/')) {
+      // Le serveur rend la carte **rangée**, dans l'ordre demandé : c'est elle
+      // que l'écran affiche, et non la liste que le client a devinée.
+      final voulu = (options.data as Map<String, dynamic>)['categories'] as List<dynamic>;
+      return ResponseBody.fromString(
+        jsonEncode([
+          for (final id in voulu) _categorieJson(id: id as String),
+        ]),
+        200,
+        headers: _jsonHeaders,
+      );
+    }
+
     throw UnimplementedError('Route non simulée : ${options.path}');
   }
 }
@@ -200,6 +228,26 @@ void main() {
       expect(requete.method, 'POST');
       expect(requete.path, contains('/catalog/manage/items/item-1/restore/'));
       expect(remis.name, 'Burger Corazón');
+    });
+  });
+
+  group('ManagedCatalogRepository — rangement de la carte', () {
+    test('un seul appel range toutes les catégories', () async {
+      // Le back-office envoyait un `PATCH` par catégorie déplacée : sur un
+      // refus au quatrième, les trois premiers rangs étaient déjà écrits.
+      final rangees = await repository.reorderCategories(
+        restaurantSlug: 'el-corazon-lome',
+        categoryIds: ['desserts', 'plats', 'boissons'],
+      );
+
+      expect(server.requests, hasLength(1));
+      final requete = server.requests.single;
+      expect(requete.method, 'POST');
+      expect(requete.path, contains('/catalog/manage/categories/reorder/'));
+      expect((requete.data as Map<String, dynamic>)['restaurant'], 'el-corazon-lome');
+      // Le rang vient de la position : aucun `sort_order` n'est calculé ici.
+      expect(requete.data.toString(), isNot(contains('sort_order')));
+      expect([for (final ligne in rangees) ligne.slug], ['desserts', 'plats', 'boissons']);
     });
   });
 

@@ -32,6 +32,7 @@ class User {
     this.emailVerifiedAt,
     this.phoneVerifiedAt,
     this.lastSeenAt,
+    this.isSuperuser = false,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -49,6 +50,8 @@ class User {
       emailVerifiedAt: _parseDate(json['email_verified_at']),
       phoneVerifiedAt: _parseDate(json['phone_verified_at']),
       lastSeenAt: _parseDate(json['last_seen_at']),
+      // Défaut prudent : un serveur qui ne le dit pas n'est pas le siège.
+      isSuperuser: json['is_superuser'] as bool? ?? false,
       // `created_at`/`updated_at` sont garantis non nuls par le contrat
       // (ADR-009) : un champ absent ici doit faire échouer bruyamment plutôt
       // que produire un utilisateur à moitié renseigné.
@@ -70,6 +73,14 @@ class User {
   final DateTime? lastSeenAt;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// Le siège : le seul compte qui voit et écrit l'enseigne entière.
+  ///
+  /// Ce n'est pas déductible des permissions — un gérant peut détenir
+  /// `notifications.send` sans être le siège — et l'interface en a besoin pour
+  /// dire *pourquoi* une campagne, un pays ou un code national lui sont
+  /// refusés, au lieu de laisser un bouton échouer en 403.
+  final bool isSuperuser;
 
   bool hasPermission(String code) => permissions.contains(code);
 

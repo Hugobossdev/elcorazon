@@ -1,5 +1,6 @@
 import 'package:elcorazon_core/src/models/money.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
+import 'package:elcorazon_core/src/network/page.dart';
 import 'package:elcorazon_core/src/payments/split_payment.dart';
 import 'package:elcorazon_core/src/payments/transaction.dart';
 
@@ -34,31 +35,98 @@ class PaymentRepository {
     return transactions;
   }
 
-  /// Encaissements du périmètre, sans filtre de commande.
+  /// **Une page** d'encaissements du périmètre.
   ///
   /// Le serveur applique le sien : pour un compte du personnel, les
   /// transactions des établissements auxquels il est rattaché ; pour un client,
   /// celles de ses propres commandes.
-  Future<List<Transaction>> listTransactions({String? status}) async {
-    final transactions = <Transaction>[];
-    String? path = '/payments/transactions/';
-    Map<String, dynamic>? queryParameters = {
+  ///
+  /// Remplace la lecture qui suivait `next` jusqu'au bout : le back-office
+  /// téléchargeait tout l'historique des encaissements — sans borne de date —
+  /// pour en afficher vingt, puis cherchait dans ce qu'il avait reçu.
+  ///
+  /// [search] porte sur la référence du prestataire et celle de la commande.
+  Future<Page<Transaction>> transactionsPage({
+    String? status,
+    String? restaurantSlug,
+    String? currency,
+    String? search,
+    DateTime? from,
+    DateTime? to,
+    int page = 1,
+    int pageSize = 25,
+  }) async {
+    final response = await apiClient.get(
+      '/payments/transactions/',
+      queryParameters: _filtres(
+        status: status,
+        restaurantSlug: restaurantSlug,
+        currency: currency,
+        search: search,
+        from: from,
+        to: to,
+      )
+        ..['page'] = page
+        ..['page_size'] = pageSize,
+    );
+    return Page<Transaction>.fromJson(
+      response.data as Map<String, dynamic>,
+      Transaction.fromJson,
+    );
+  }
+
+  /// La page désignée par un `next`/`previous` du serveur — filtres compris.
+  Future<Page<Transaction>> transactionsAt(String url) async {
+    final response = await apiClient.get(url);
+    return Page<Transaction>.fromJson(
+      response.data as Map<String, dynamic>,
+      Transaction.fromJson,
+    );
+  }
+
+  /// Totaux de la sélection — **une ligne par devise** pour l'encaissé, et le
+  /// compte de chaque statut. Mêmes filtres que [transactionsPage].
+  ///
+  /// L'écran additionnait les montants de la page chargée, XOF et XAF
+  /// confondus, et intitulait le résultat « Total encaissé ».
+  Future<TransactionSummary> transactionsSummary({
+    String? status,
+    String? restaurantSlug,
+    String? currency,
+    String? search,
+    DateTime? from,
+    DateTime? to,
+  }) async {
+    final response = await apiClient.get(
+      '/payments/transactions/summary/',
+      queryParameters: _filtres(
+        status: status,
+        restaurantSlug: restaurantSlug,
+        currency: currency,
+        search: search,
+        from: from,
+        to: to,
+      ),
+    );
+    return TransactionSummary.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  Map<String, dynamic> _filtres({
+    String? status,
+    String? restaurantSlug,
+    String? currency,
+    String? search,
+    DateTime? from,
+    DateTime? to,
+  }) {
+    return {
       if (status != null) 'status': status,
+      if (restaurantSlug != null) 'order__restaurant__slug': restaurantSlug,
+      if (currency != null) 'amount_currency': currency,
+      if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
+      if (from != null) 'created_at__gte': from.toUtc().toIso8601String(),
+      if (to != null) 'created_at__lte': to.toUtc().toIso8601String(),
     };
-
-    while (path != null) {
-      final response = await apiClient.get(path, queryParameters: queryParameters);
-      final body = response.data as Map<String, dynamic>;
-      transactions.addAll(
-        (body['results'] as List<dynamic>).map(
-          (json) => Transaction.fromJson(json as Map<String, dynamic>),
-        ),
-      );
-      path = body['next'] as String?;
-      queryParameters = null;
-    }
-
-    return transactions;
   }
 
   // --------------------------------------------------------- remboursement

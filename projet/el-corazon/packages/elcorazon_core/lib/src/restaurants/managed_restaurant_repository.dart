@@ -83,6 +83,29 @@ class ManagedRestaurantRepository {
     return etablissements;
   }
 
+  /// Les établissements que **ce compte** supervise — `/restaurants/manage/perimeter/`.
+  ///
+  /// Ouvert à tout le personnel, contrairement à [list] qui exige
+  /// `restaurants.read` : savoir dans quelle cuisine on travaille n'est pas
+  /// administrer le réseau. Le poste de cuisine, le stock et les recettes en
+  /// dépendent, et le rôle qui les tient (« Opérateur ») n'a pas
+  /// `restaurants.read`.
+  ///
+  /// La forme est **réduite** : identité, géographie, devise, fuseau,
+  /// position, statut et délai de préparation. Les champs d'administration
+  /// (compteurs, lacunes de configuration, plafond des pertes) valent donc
+  /// leur défaut sur les établissements rendus ici — ne pas les lire sur ces
+  /// objets ; l'écran du réseau a [list] pour cela.
+  ///
+  /// Les établissements en service viennent en tête : le premier est celui que
+  /// le back-office ouvre par défaut.
+  Future<List<ManagedRestaurant>> perimeter() async {
+    final response = await apiClient.get('/restaurants/manage/perimeter/');
+    return (response.data as List<dynamic>)
+        .map((json) => ManagedRestaurant.fromJson(json as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
   /// Ouvre un établissement — **en brouillon**.
   ///
   /// Le serveur ne prend pas de statut à la création : toute fiche naît en

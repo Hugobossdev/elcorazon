@@ -22,6 +22,11 @@ abstract final class StatutVersement {
   static const verse = 'completed';
   static const refuse = 'failed';
 
+  /// Une demande de remboursement **abandonnée** : rien n'a été versé, et le
+  /// montant redevient remboursable. Nommée depuis que le back-office sait la
+  /// poser (`/payments/manage/refunds/{id}/cancel/`).
+  static const annule = 'cancelled';
+
   /// Libellé d'écran. Un statut inconnu s'affiche tel quel plutôt que d'être
   /// maquillé en l'un des connus.
   static String libelle(String statut) => switch (statut) {
@@ -29,7 +34,7 @@ abstract final class StatutVersement {
         enCours => 'En cours',
         verse => 'Versé',
         refuse => 'Refusé',
-        'cancelled' => 'Annulé',
+        annule => 'Abandonné',
         'refunded' => 'Remboursé',
         _ => statut,
       };
@@ -224,6 +229,22 @@ class ManagedPayoutRepository {
       data: {
         if (providerReference.trim().isNotEmpty) 'provider_reference': providerReference.trim(),
       },
+    );
+    return ManagedRefund.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Abandonne un remboursement qui ne sera pas versé — `orders.refund`.
+  ///
+  /// Le motif est exigé par le serveur. Sans cette sortie, une demande saisie
+  /// par erreur restait en attente pour toujours **et** consommait le plafond
+  /// du remboursable : la commande devenait irremboursable.
+  Future<ManagedRefund> cancelRefund({
+    required String refundId,
+    required String reason,
+  }) async {
+    final response = await apiClient.post(
+      '/payments/manage/refunds/$refundId/cancel/',
+      data: {'reason': reason},
     );
     return ManagedRefund.fromJson(response.data as Map<String, dynamic>);
   }
