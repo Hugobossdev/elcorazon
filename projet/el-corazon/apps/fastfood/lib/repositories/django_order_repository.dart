@@ -152,6 +152,7 @@ class DjangoOrderRepository implements OrderRepository {
       subtotal: remote.subtotal.toMajorUnits(),
       deliveryFee: remote.deliveryFee.toMajorUnits(),
       total: remote.total.toMajorUnits(),
+      currency: remote.total.currency,
       status: _toLocalStatus(remote.status),
       deliveryAddress: remote.deliveryAddressLine,
       // Le point figé à la commande, et celui d'où part le repas. L'adaptateur
@@ -165,6 +166,9 @@ class DjangoOrderRepository implements OrderRepository {
       deliveryNotes: remote.deliveryInstructions,
       discount: remote.discount.toMajorUnits(),
       paymentMethod: _toLocalPaymentMethod(remote.paymentMethod),
+      // `null` côté serveur veut dire « rien d'encaissé » : c'est un zéro, et
+      // non l'inconnu que `null` signifie sur le modèle local.
+      montantRegle: remote.amountPaid?.toMajorUnits() ?? 0.0,
       orderTime: remote.placedAt,
       createdAt: remote.createdAt,
       estimatedDeliveryTime: remote.estimatedDeliveryAt,
@@ -228,11 +232,15 @@ class DjangoOrderRepository implements OrderRepository {
     };
   }
 
+  /// Un statut inconnu de cette version devient [OrderStatus.inconnu], et se
+  /// dit tel — il retombait sur `pending`, et une commande en route
+  /// s'affichait « En attente ».
   static OrderStatus _toLocalStatus(String remote) {
-    return OrderStatus.values.firstWhere(
-      (s) => s.dbValue == remote,
-      orElse: () => OrderStatus.pending,
-    );
+    final statut = OrderStatus.depuisServeur(remote);
+    if (statut == OrderStatus.inconnu) {
+      eccore.Journal.trace('Statut de commande inconnu de cette version : $remote');
+    }
+    return statut;
   }
 
   static PaymentMethod _toLocalPaymentMethod(String remote) {

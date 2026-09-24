@@ -13,11 +13,15 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 /// et **quatre** priorités. Le serveur en connaît cinq et n'a pas de priorité :
 /// `NotificationPriority` n'a jamais été rempli qu'avec `normal`, écrit en dur
 /// dans l'écran.
+///
+/// `support` manquait : une réponse du service client — le client a écrit, il
+/// attend — se rangeait sous « Compte » et ne menait nulle part.
 enum GenreNotification {
   commande('order_status', 'Commandes'),
   livraison('delivery_offer', 'Livraisons'),
   paiement('payment', 'Paiements'),
   compte('account', 'Compte'),
+  support('support', 'Service client'),
   promotion('marketing', 'Promotions');
 
   const GenreNotification(this.versServeur, this.libelle);

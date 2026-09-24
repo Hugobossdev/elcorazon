@@ -27,7 +27,16 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
   // Filtres
   List<String> _selectedCategoryIds = [];
   double _minPrice = 0.0;
-  double _maxPrice = 10000.0;
+  late double _maxPrice = _prixPlafond;
+
+  /// Borne haute du curseur : le prix du plat le plus cher de la carte
+  /// chargée. Elle valait 10 000 écrits en dur — en francs CFA, alors que la
+  /// carte peut être libellée dans une autre devise, et qu'un plat plus cher
+  /// sortait du filtre sans recours.
+  double get _prixPlafond {
+    final prix = AppService().menuItems.map((a) => a.price.toMajorUnits());
+    return prix.isEmpty ? 0.0 : prix.reduce((a, b) => a > b ? a : b).ceilToDouble();
+  }
   bool _vegetarianOnly = false;
   bool _veganOnly = false;
   bool _popularOnly = false;
@@ -65,7 +74,7 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
             : _searchController.text.trim(),
         categoryIds: _selectedCategoryIds.isEmpty ? null : _selectedCategoryIds,
         minPrice: _minPrice > 0 ? _minPrice : null,
-        maxPrice: _maxPrice < 10000 ? _maxPrice : null,
+        maxPrice: _maxPrice < _prixPlafond ? _maxPrice : null,
         vegetarian: _vegetarianOnly ? true : null,
         vegan: _veganOnly ? true : null,
         popular: _popularOnly ? true : null,
@@ -100,7 +109,7 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
     setState(() {
       _selectedCategoryIds = [];
       _minPrice = 0.0;
-      _maxPrice = 10000.0;
+      _maxPrice = _prixPlafond;
       _vegetarianOnly = false;
       _veganOnly = false;
       _popularOnly = false;
@@ -224,13 +233,18 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 8),
+            // Sans carte chargée, il n'y a pas de bornes à proposer.
+            if (_prixPlafond > 0)
             RangeSlider(
-              values: RangeValues(_minPrice, _maxPrice),
-              max: 10000,
+              values: RangeValues(
+                _minPrice.clamp(0, _prixPlafond),
+                _maxPrice.clamp(0, _prixPlafond),
+              ),
+              max: _prixPlafond,
               divisions: 100,
               labels: RangeLabels(
-                '${_minPrice.toInt()} FCFA',
-                '${_maxPrice.toInt()} FCFA',
+                PriceFormatter.format(_minPrice),
+                PriceFormatter.format(_maxPrice),
               ),
               onChanged: (values) {
                 setState(() {

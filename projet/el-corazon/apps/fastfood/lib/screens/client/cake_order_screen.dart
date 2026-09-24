@@ -809,10 +809,10 @@ class _CakeOrderScreenState extends State<CakeOrderScreen>
               controller: _contactController,
               keyboardType: TextInputType.phone,
               style: AppTypography.bodyLg(color: theme.colorScheme.onSurface),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Contact pour la livraison',
                 hintText: 'Ex. : ${AppConstants.phoneHint}',
-                prefixIcon: Icon(Icons.phone_rounded),
+                prefixIcon: const Icon(Icons.phone_rounded),
               ),
             ),
           ],

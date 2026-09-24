@@ -264,9 +264,10 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget _champTelephone(ThemeData theme) {
     return IntlPhoneField(
       controller: _phoneController,
+      // Le sélecteur porte déjà l'indicatif : l'exemple n'en répète pas.
       decoration: const InputDecoration(
         labelText: 'Téléphone',
-        hintText: AppConstants.phoneHint,
+        hintText: 'Numéro, sans l’indicatif',
       ),
       initialCountryCode: AppConstants.phoneCountryCode,
       languageCode: 'fr',

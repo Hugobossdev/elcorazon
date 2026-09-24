@@ -76,11 +76,24 @@ void main() {
       expect(OrderStatus.onTheWay.dbValue, isNot('onTheWay'));
     });
 
-    test('deux statuts n’ont pas de contrepartie côté serveur', () {
-      // Le remboursement est un mouvement de paiement, pas un statut de
-      // commande ; ce qui n'aboutit pas est **annulé**, avec un motif.
-      expect(OrderStatus.values, contains(OrderStatus.refunded));
-      expect(OrderStatus.values, contains(OrderStatus.failed));
+    test('aucun statut local sans contrepartie serveur', () {
+      // `refunded` et `failed` n'existaient qu'ici : le remboursement est un
+      // mouvement de paiement, et ce qui n'aboutit pas est **annulé**.
+      final valeurs = OrderStatus.values
+          .where((s) => s != OrderStatus.inconnu)
+          .map((s) => s.dbValue)
+          .toSet();
+      expect(valeurs, {
+        'pending', 'confirmed', 'preparing', 'ready',
+        'picked_up', 'on_the_way', 'delivered', 'cancelled',
+      });
+    });
+
+    test('un statut inconnu se dit inconnu, il ne se fait pas passer pour « en attente »', () {
+      expect(OrderStatus.depuisServeur('en_cuisine_bis'), OrderStatus.inconnu);
+      expect(OrderStatus.depuisServeur(''), OrderStatus.inconnu);
+      expect(OrderStatus.depuisServeur('on_the_way'), OrderStatus.onTheWay);
+      expect(OrderStatus.inconnu.displayName, 'Statut inconnu');
     });
   });
 }

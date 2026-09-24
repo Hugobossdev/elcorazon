@@ -61,9 +61,10 @@ void main() {
 
     test('ce qui sort du cycle n’a pas de rang', () {
       expect(rangDuStatut(OrderStatus.cancelled), -1);
-      expect(rangDuStatut(OrderStatus.refunded), -1);
-      expect(rangDuStatut(OrderStatus.failed), -1);
+      expect(rangDuStatut(OrderStatus.inconnu), -1);
       expect(estSortieDuCycle(OrderStatus.cancelled), isTrue);
+      // Inconnu n'est pas « annulé » : l'écran ne referme pas ce qu'il ignore.
+      expect(estSortieDuCycle(OrderStatus.inconnu), isFalse);
       expect(estSortieDuCycle(OrderStatus.delivered), isFalse);
     });
   });
@@ -87,7 +88,7 @@ void main() {
     });
 
     test('un seul jalon est courant à la fois', () {
-      for (final statut in OrderStatus.values) {
+      for (final statut in OrderStatus.values.where((s) => s != OrderStatus.inconnu)) {
         final etapes = etapesDeSuivi(commande(statut: statut));
         expect(
           etapes.where((e) => e.courante).length,
@@ -95,6 +96,15 @@ void main() {
           reason: '$statut ne désigne pas exactement un jalon courant',
         );
       }
+    });
+
+    test('un statut inconnu n’est placé nulle part', () {
+      // Un statut que cette version ignore ne désigne aucun jalon : en
+      // choisir un reviendrait à inventer où en est la commande.
+      final etapes = etapesDeSuivi(commande(statut: OrderStatus.inconnu));
+
+      expect(etapes.where((e) => e.courante), isEmpty);
+      expect(etapes.where((e) => e.franchie), isEmpty);
     });
 
     test('les jalons franchis précèdent toujours ceux qui restent', () {
@@ -132,10 +142,8 @@ void main() {
       expect(etapes.any((e) => !e.franchie), isFalse);
     });
 
-    test('chaque sortie porte son propre mot', () {
+    test('la seule sortie que le serveur connaisse est l’annulation', () {
       expect(libelleDeSortie(OrderStatus.cancelled), 'Annulée');
-      expect(libelleDeSortie(OrderStatus.refunded), 'Remboursée');
-      expect(libelleDeSortie(OrderStatus.failed), 'Échouée');
     });
   });
 

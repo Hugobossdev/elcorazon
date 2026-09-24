@@ -1792,7 +1792,7 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
                         ),
                       ),
                       Text(
-                        PriceFormatter.format(article.totalPrice),
+                        PriceFormatter.format(article.totalPrice, devise: _order!.currency),
                         style: AppTypography.bodyLg(
                           color: theme.colorScheme.onSurface,
                         ),
@@ -1803,22 +1803,22 @@ class _DeliveryTrackingScreenState extends State<DeliveryTrackingScreen>
               const SummaryDivider(),
               SummaryRow(
                 label: 'Sous-total',
-                value: PriceFormatter.format(_order!.subtotal),
+                value: PriceFormatter.format(_order!.subtotal, devise: _order!.currency),
               ),
               SummaryRow(
                 label: 'Livraison',
-                value: PriceFormatter.format(_order!.deliveryFee),
+                value: PriceFormatter.format(_order!.deliveryFee, devise: _order!.currency),
               ),
               if (_order!.discount > 0)
                 SummaryRow(
                   label: 'Remise',
-                  value: '-${PriceFormatter.format(_order!.discount)}',
+                  value: '-${PriceFormatter.format(_order!.discount, devise: _order!.currency)}',
                   isDiscount: true,
                 ),
               const SummaryDivider(),
               SummaryRow(
                 label: 'Total',
-                value: PriceFormatter.format(_order!.total),
+                value: PriceFormatter.format(_order!.total, devise: _order!.currency),
                 isTotal: true,
               ),
             ],

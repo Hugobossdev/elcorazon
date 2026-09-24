@@ -72,73 +72,49 @@ extension MouvementAffiche on eccore.PointsEntry {
   String get deltaAffiche => delta > 0 ? '+$delta' : '$delta';
 }
 
-/// Les paliers du programme de fidélité, et ce qui sépare du suivant.
+/// Rang d'un palier dans l'échelle — ce qui décide de sa couleur, plutôt que
+/// son nom, que l'exploitation peut changer.
+enum RangDePalier { entree, intermediaire, sommet }
+
+/// Où en est le compte dans l'échelle des paliers, **telle que le serveur la
+/// calcule** (`GET /loyalty/account/` : `tier`, `next_tier`,
+/// `points_to_next_tier`).
 ///
-/// ## Où vivent ces seuils, et où ils devraient vivre
+/// Les seuils vivaient ici, écrits en dur (Standard, Fidèle 200, VIP 500), à
+/// côté d'une seconde échelle de « niveaux » sans rapport dans le service de
+/// gamification — BR-006. Ils sont désormais une donnée du serveur, éditée à
+/// l'administration ; ce fichier ne fait plus que les présenter.
 ///
-/// **Ici, c'est-à-dire côté client.** Le serveur ne publie pas de paliers :
-/// `GET /loyalty/account/` rend un solde, un cumul gagné et un cumul dépensé,
-/// rien de plus. C'est une faiblesse connue et consignée — BR-006 de
-/// `docs/STITCH_BACKEND_REQUIREMENTS.md` : deux versions de l'application en
-/// circulation annonceront deux paliers différents pour le même solde, et
-/// aucune ne fera foi au moment d'accorder l'avantage.
-///
-/// Les seuils sont donc rassemblés en **un seul endroit**, pour qu'il n'y ait
-/// qu'une ligne à changer le jour où la route existe. Ils étaient auparavant
-/// écrits dans `profil_utilisateur.dart`, qui les gardait pour lui.
-///
-/// Les noms sont ceux du produit — « Standard », « Fidèle », « VIP » — et non
-/// ceux de la maquette Stitch (« Gold », « Platinum »), dont les seuils ne
-/// correspondent à rien de ce qui est en place.
-enum PalierFidelite {
-  standard('Standard', 0),
-  fidele('Fidèle', 200),
-  vip('VIP', 500);
+/// Le palier se mesure en points **cumulés gagnés**, pas au solde : échanger
+/// ses points ne fait pas redescendre. [progression] se lit donc sur
+/// `lifetimeEarned`.
+({String? palier, String? suivant, int pointsManquants, double progression, RangDePalier rang})
+    avancementDeFidelite(eccore.PointsAccount? compte) {
+  final palier = compte?.tier;
+  final suivant = compte?.nextTier;
+  final gagnes = compte?.lifetimeEarned ?? 0;
 
-  const PalierFidelite(this.libelle, this.seuil);
-
-  final String libelle;
-
-  /// Solde à partir duquel le palier est atteint.
-  final int seuil;
-
-  /// Le palier correspondant à [points].
-  static PalierFidelite pour(int points) {
-    PalierFidelite atteint = standard;
-    for (final palier in values) {
-      if (points >= palier.seuil) atteint = palier;
-    }
-    return atteint;
-  }
-
-  /// Le palier au-dessus, ou `null` au sommet.
-  PalierFidelite? get suivant {
-    final rang = index + 1;
-    return rang < values.length ? values[rang] : null;
-  }
-}
-
-/// Où en est un solde entre son palier et le suivant.
-///
-/// [progression] vaut 1 au sommet : la barre est pleine, et il n'y a plus rien
-/// à atteindre. Elle ne vaut jamais `NaN` — deux paliers ne partagent jamais
-/// le même seuil, mais le garde-fou reste, un seuil se change par erreur.
-({PalierFidelite palier, PalierFidelite? suivant, int pointsManquants, double progression})
-    avancementDeFidelite(int points) {
-  final palier = PalierFidelite.pour(points);
-  final suivant = palier.suivant;
+  final rang = (palier == null || palier.threshold == 0)
+      ? RangDePalier.entree
+      : (suivant == null ? RangDePalier.sommet : RangDePalier.intermediaire);
 
   if (suivant == null) {
-    return (palier: palier, suivant: null, pointsManquants: 0, progression: 1);
+    return (
+      palier: palier?.name,
+      suivant: null,
+      pointsManquants: 0,
+      progression: palier == null ? 0.0 : 1.0,
+      rang: rang,
+    );
   }
 
-  final etendue = suivant.seuil - palier.seuil;
-  final parcouru = points - palier.seuil;
-
+  final base = palier?.threshold ?? 0;
+  final etendue = suivant.threshold - base;
   return (
-    palier: palier,
-    suivant: suivant,
-    pointsManquants: (suivant.seuil - points).clamp(0, suivant.seuil),
-    progression: etendue <= 0 ? 1.0 : (parcouru / etendue).clamp(0.0, 1.0),
+    palier: palier?.name,
+    suivant: suivant.name,
+    pointsManquants: compte?.pointsToNextTier ?? (suivant.threshold - gagnes).clamp(0, suivant.threshold),
+    progression: etendue <= 0 ? 1.0 : ((gagnes - base) / etendue).clamp(0.0, 1.0),
+    rang: rang,
   );
 }

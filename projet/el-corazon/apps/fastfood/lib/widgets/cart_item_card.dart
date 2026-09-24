@@ -43,11 +43,17 @@ class CartItemCard extends StatelessWidget {
   /// d'options à rejouer, et le bouton mènerait à un écran vide.
   final VoidCallback? onEdit;
 
+  /// Pourquoi le serveur refuse cette ligne — `CartService.motifDeRefus`.
+  /// Nul quand elle est acceptée. Une ligne refusée n'est pas dans le panier
+  /// serveur, donc pas dans la commande : elle doit le dire là où on la voit.
+  final String? refus;
+
   const CartItemCard({
     required this.item,
     required this.onRemove,
     required this.onQuantityChanged,
     this.onEdit,
+    this.refus,
     super.key,
   });
 
@@ -136,6 +142,26 @@ class CartItemCard extends StatelessWidget {
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
+                ],
+                if (refus case final motif?) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.error_outline_rounded,
+                        size: 16,
+                        color: theme.colorScheme.error,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          motif,
+                          style: AppTypography.bodyMd(color: theme.colorScheme.error),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
                 if (onEdit != null) ...[
                   const SizedBox(height: 2),

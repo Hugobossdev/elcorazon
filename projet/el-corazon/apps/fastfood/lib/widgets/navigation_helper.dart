@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/widgets/navigation_error_handler.dart';
-import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/paiement_partage.dart';
 import 'package:elcora_fast/services/cart_service.dart';
@@ -70,22 +69,9 @@ class NavigationHelper {
   }
 
   /// Naviguer vers le checkout
-  static Future<void> navigateToCheckout(
-    BuildContext context, {
-    String? existingOrderId,
-    List<CartItem>? items,
-    double? total,
-  }) async {
+  static Future<void> navigateToCheckout(BuildContext context) async {
     try {
-      await NavigationService.pushNamedWithArgs(
-        context,
-        AppRouter.checkout,
-        arguments: {
-          'existingOrderId': existingOrderId,
-          'items': items,
-          'total': total,
-        },
-      );
+      await NavigationService.pushNamedWithArgs(context, AppRouter.checkout);
     } catch (e) {
       if (!context.mounted) return;
       NavigationErrorHandler.handleNavigationError(
@@ -493,17 +479,7 @@ extension NavigationHelperExtension on BuildContext {
   Future<void> navigateToProfile() => NavigationHelper.navigateToProfile(this);
 
   /// Naviguer vers le checkout
-  Future<void> navigateToCheckout({
-    String? existingOrderId,
-    List<CartItem>? items,
-    double? total,
-  }) =>
-      NavigationHelper.navigateToCheckout(
-        this,
-        existingOrderId: existingOrderId,
-        items: items,
-        total: total,
-      );
+  Future<void> navigateToCheckout() => NavigationHelper.navigateToCheckout(this);
 
   /// Naviguer vers la personnalisation d'item
   Future<void> navigateToItemCustomization(

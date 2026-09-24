@@ -166,9 +166,9 @@ class _OrdersScreenState extends State<OrdersScreen>
     switch (commande.status) {
       case OrderStatus.delivered:
       case OrderStatus.cancelled:
-      case OrderStatus.refunded:
-      case OrderStatus.failed:
         return false;
+      // Inconnu : le serveur n'a pas dit « fini », la commande reste en vue.
+      case OrderStatus.inconnu:
       case OrderStatus.pending:
       case OrderStatus.confirmed:
       case OrderStatus.preparing:

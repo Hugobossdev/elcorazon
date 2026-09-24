@@ -28,8 +28,8 @@ void main() {
         -1500.0,
         1250.4,
       ]) {
-        expect(PriceFormatter.format(montant), socle.formatPrice(montant));
-        expect(formatPrice(montant), socle.formatPrice(montant));
+        expect(PriceFormatter.format(montant, devise: 'XOF'), socle.formatPrice(montant, currency: 'XOF'));
+        expect(formatPrice(montant, devise: 'XOF'), socle.formatPrice(montant, currency: 'XOF'));
       }
     });
 
@@ -37,38 +37,50 @@ void main() {
       // Le lot 3 remplacera ces `double` par des `Money` : les deux chemins
       // doivent déjà converger, sans quoi la migration changerait l'affichage.
       const montant = socle.Money(amountMinor: 12500, currency: 'XOF');
-      expect(PriceFormatter.format(montant.toMajorUnits()), montant.format());
+      expect(PriceFormatter.format(montant.toMajorUnits(), devise: 'XOF'), montant.format());
     });
   });
 
   group('Ce que la délégation corrige', () {
     test('les milliers sont séparés par une espace, non par un point', () {
       // Rendait « 12.500 CFA » avant le lot 2.2.
-      expect(PriceFormatter.format(12500), '12${nbsp}500 CFA');
-      expect(PriceFormatter.format(1234567), '1${nbsp}234${nbsp}567 CFA');
+      expect(PriceFormatter.format(12500, devise: 'XOF'), '12${nbsp}500 CFA');
+      expect(PriceFormatter.format(1234567, devise: 'XOF'), '1${nbsp}234${nbsp}567 CFA');
     });
 
     test('en deçà de mille, aucun séparateur', () {
-      expect(PriceFormatter.format(0), '0 CFA');
-      expect(PriceFormatter.format(999), '999 CFA');
+      expect(PriceFormatter.format(0, devise: 'XOF'), '0 CFA');
+      expect(PriceFormatter.format(999, devise: 'XOF'), '999 CFA');
     });
 
     test('un montant négatif garde son signe', () {
       // Rendait « -.500 CFA » avant le lot 2.2 : le signe tombait dans le
       // découpage par groupes de trois.
-      expect(PriceFormatter.format(-500), '-500 CFA');
-      expect(PriceFormatter.format(-1500), '-1${nbsp}500 CFA');
+      expect(PriceFormatter.format(-500, devise: 'XOF'), '-500 CFA');
+      expect(PriceFormatter.format(-1500, devise: 'XOF'), '-1${nbsp}500 CFA');
     });
 
     test('NaN et l’infini ne représentent aucun montant', () {
       // Rendaient « NaN CFA » et « Infinity CFA » avant le lot 2.2.
-      expect(PriceFormatter.format(double.nan), '0 CFA');
-      expect(PriceFormatter.format(double.infinity), '0 CFA');
+      expect(PriceFormatter.format(double.nan, devise: 'XOF'), '0 CFA');
+      expect(PriceFormatter.format(double.infinity, devise: 'XOF'), '0 CFA');
     });
 
     test('le franc CFA n’a pas de centime à afficher', () {
-      expect(PriceFormatter.format(1250.4), '1${nbsp}250 CFA');
-      expect(PriceFormatter.format(1250.6), '1${nbsp}251 CFA');
+      expect(PriceFormatter.format(1250.4, devise: 'XOF'), '1${nbsp}250 CFA');
+      expect(PriceFormatter.format(1250.6, devise: 'XOF'), '1${nbsp}251 CFA');
+    });
+  });
+
+  group('La devise vient de la commande ou de l’établissement', () {
+    test('une autre devise garde son code et ses décimales', () {
+      expect(PriceFormatter.format(12.5, devise: 'GHS'), '12,50 GHS');
+    });
+
+    test('sans devise connue, le nombre seul — aucune unité devinée', () {
+      // Aucun établissement résolu dans ce test : l'ancien repli affichait
+      // « CFA » à tout client, y compris à Accra.
+      expect(PriceFormatter.format(1500), '1${nbsp}500');
     });
   });
 }

@@ -114,58 +114,67 @@ void main() {
   });
 
   group('Les paliers de fidelite', () {
-    // Les seuils vivent cote client faute de route serveur (BR-006). Tant
-    // qu'ils y vivent, ils doivent au moins etre coherents entre le profil et
-    // l'ecran des recompenses — c'est ce que ces cas tiennent.
+    // Les seuils sont calcules par le serveur (`/loyalty/account/`, BR-006) :
+    // ces cas verifient seulement que l'ecran les presente sans les recompter.
+    const standard = eccore.LoyaltyTier(name: 'Standard', threshold: 0);
+    const fidele = eccore.LoyaltyTier(name: 'Fidèle', threshold: 200);
+    const vip = eccore.LoyaltyTier(name: 'VIP', threshold: 500);
 
-    test('un compte neuf part au palier de base', () {
-      expect(PalierFidelite.pour(0), PalierFidelite.standard);
-    });
+    eccore.PointsAccount compte({
+      required int gagnes,
+      int? solde,
+      eccore.LoyaltyTier? palier,
+      eccore.LoyaltyTier? suivant,
+      int? manquants,
+    }) =>
+        eccore.PointsAccount(
+          balance: solde ?? gagnes,
+          lifetimeEarned: gagnes,
+          lifetimeSpent: gagnes - (solde ?? gagnes),
+          tier: palier,
+          nextTier: suivant,
+          pointsToNextTier: manquants,
+        );
 
-    test('le seuil est atteint des qu’il est egale', () {
-      expect(PalierFidelite.pour(200), PalierFidelite.fidele);
-      expect(PalierFidelite.pour(500), PalierFidelite.vip);
-    });
-
-    test('un point de moins ne suffit pas', () {
-      expect(PalierFidelite.pour(199), PalierFidelite.standard);
-      expect(PalierFidelite.pour(499), PalierFidelite.fidele);
-    });
-
-    test('le sommet n’a pas de suivant', () {
-      expect(PalierFidelite.vip.suivant, isNull);
-      expect(PalierFidelite.standard.suivant, PalierFidelite.fidele);
-    });
-
-    test('l’avancement compte ce qui manque, pas ce qui est acquis', () {
-      final avancement = avancementDeFidelite(150);
-      expect(avancement.palier, PalierFidelite.standard);
-      expect(avancement.suivant, PalierFidelite.fidele);
+    test('le palier et les points manquants sont ceux du serveur', () {
+      final avancement = avancementDeFidelite(
+        compte(gagnes: 150, palier: standard, suivant: fidele, manquants: 50),
+      );
+      expect(avancement.palier, 'Standard');
+      expect(avancement.suivant, 'Fidèle');
       expect(avancement.pointsManquants, 50);
       expect(avancement.progression, closeTo(0.75, 0.001));
+      expect(avancement.rang, RangDePalier.entree);
     });
 
-    test('la progression se mesure entre deux seuils, pas depuis zero', () {
-      // 350 points : a mi-chemin entre 200 (Fidele) et 500 (VIP). Mesuree
-      // depuis zero, la barre afficherait 70 % — et un client a 30 points du
-      // palier verrait une barre presque pleine bien trop tot.
-      final avancement = avancementDeFidelite(350);
-      expect(avancement.palier, PalierFidelite.fidele);
+    test('la progression se mesure entre deux seuils, sur le cumul gagne', () {
+      // Solde a 20 apres un echange : la barre suit le cumul (350), a
+      // mi-chemin entre 200 et 500, et non le solde.
+      final avancement = avancementDeFidelite(
+        compte(gagnes: 350, solde: 20, palier: fidele, suivant: vip, manquants: 150),
+      );
       expect(avancement.progression, closeTo(0.5, 0.001));
+      expect(avancement.rang, RangDePalier.intermediaire);
     });
 
     test('au sommet la barre est pleine et rien ne manque', () {
-      final avancement = avancementDeFidelite(900);
-      expect(avancement.palier, PalierFidelite.vip);
+      final avancement = avancementDeFidelite(compte(gagnes: 900, palier: vip));
+      expect(avancement.palier, 'VIP');
       expect(avancement.suivant, isNull);
       expect(avancement.pointsManquants, 0);
       expect(avancement.progression, 1);
+      expect(avancement.rang, RangDePalier.sommet);
     });
 
-    test('le libelle du profil est celui du palier', () {
-      expect(palierDeFidelite(0), PalierFidelite.standard.libelle);
-      expect(palierDeFidelite(250), PalierFidelite.fidele.libelle);
-      expect(palierDeFidelite(800), PalierFidelite.vip.libelle);
+    test('compte pas encore lu : aucun palier affiche, rien d’invente', () {
+      final avancement = avancementDeFidelite(null);
+      expect(avancement.palier, isNull);
+      expect(avancement.progression, 0);
+      expect(palierDeFidelite(null), isNull);
+    });
+
+    test('le libelle du profil est le nom rendu par le serveur', () {
+      expect(palierDeFidelite(compte(gagnes: 250, palier: fidele)), 'Fidèle');
     });
   });
 }

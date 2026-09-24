@@ -31,10 +31,12 @@ class GamificationService extends ChangeNotifier {
   final DjangoGamificationRepository _gamificationRepository = DjangoGamificationRepository();
 
   int _currentPoints = 0;
-  int _currentLevel = 1;
   int _totalOrders = 0;
   int _streakDays = 0;
-  double _levelProgress = 0.0;
+
+  /// Le compte de fidélité tel que le serveur le rend — solde, cumuls, et
+  /// palier calculé. Nul tant qu'il n'a pas été lu.
+  eccore.PointsAccount? _compte;
 
   String? _currentUserId;
   List<Map<String, dynamic>> _achievements = [];
@@ -48,10 +50,9 @@ class GamificationService extends ChangeNotifier {
 
   // Getters
   int get currentPoints => _currentPoints;
-  int get currentLevel => _currentLevel;
+  eccore.PointsAccount? get compteFidelite => _compte;
   int get totalOrders => _totalOrders;
   int get streakDays => _streakDays;
-  double get levelProgress => _levelProgress;
   List<Map<String, dynamic>> get achievements => _achievements;
   List<Map<String, dynamic>> get challenges => _challenges;
   List<eccore.Reward> get rewards => List.unmodifiable(_rewards);
@@ -70,10 +71,9 @@ class GamificationService extends ChangeNotifier {
 
   void reset() {
     _currentPoints = 0;
-    _currentLevel = 1;
+    _compte = null;
     _totalOrders = 0;
     _streakDays = 0;
-    _levelProgress = 0.0;
     _currentUserId = null;
     _achievements = [];
     _challenges = [];
@@ -83,23 +83,6 @@ class GamificationService extends ChangeNotifier {
     _pendingRewardIds.clear();
     _isInitialized = false;
     notifyListeners();
-  }
-
-  String get currentLevelTitle {
-    switch (_currentLevel) {
-      case 1:
-        return 'Gourmand Débutant';
-      case 2:
-        return 'Amateur de Saveurs';
-      case 3:
-        return 'Connaisseur Culinaire';
-      case 4:
-        return 'Expert Gastronome';
-      case 5:
-        return 'Maître El Corazón';
-      default:
-        return 'Légende Culinaire';
-    }
   }
 
   /// [userId] n'est plus qu'un marqueur de changement de compte : toutes les
@@ -167,49 +150,11 @@ class GamificationService extends ChangeNotifier {
   /// qu'à la livraison d'une commande, jamais par ce client.
   Future<void> _refreshLoyaltyBalance() async {
     try {
-      _currentPoints = (await _loyaltyRepository.getAccount()).balance;
-      _currentLevel = _calculateLevel(_currentPoints);
-      _levelProgress = _calculateLevelProgress(_currentPoints);
+      final compte = await _loyaltyRepository.getAccount();
+      _compte = compte;
+      _currentPoints = compte.balance;
     } catch (e) {
       Journal.trace('Error loading loyalty balance: $e');
-    }
-  }
-
-  /// Calcule le niveau basé sur les points
-  int _calculateLevel(int points) {
-    if (points < 100) return 1;
-    if (points < 300) return 2;
-    if (points < 600) return 3;
-    if (points < 1000) return 4;
-    if (points < 1500) return 5;
-    return 6 + ((points - 1500) ~/ 500);
-  }
-
-  /// Calcule le progrès du niveau
-  double _calculateLevelProgress(int points) {
-    final level = _calculateLevel(points);
-    final currentThreshold = _pointsThresholdForLevel(level);
-    final nextThreshold = _pointsThresholdForLevel(level + 1);
-    final totalNeeded = (nextThreshold - currentThreshold).clamp(1, 1000000);
-    final progressPoints = points - currentThreshold;
-    return (progressPoints / totalNeeded).clamp(0.0, 1.0);
-  }
-
-  int _pointsThresholdForLevel(int level) {
-    if (level <= 1) return 0;
-    switch (level) {
-      case 2:
-        return 100;
-      case 3:
-        return 300;
-      case 4:
-        return 600;
-      case 5:
-        return 1000;
-      case 6:
-        return 1500;
-      default:
-        return 1500 + (level - 6) * 500;
     }
   }
 
@@ -298,16 +243,6 @@ class GamificationService extends ChangeNotifier {
     await _loadBadges();
   }
 
-  // Vérifier si l'utilisateur peut monter de niveau
-  void _checkLevelUp() {
-    final previousLevel = _currentLevel;
-    _currentLevel = _calculateLevel(_currentPoints);
-    _levelProgress = _calculateLevelProgress(_currentPoints);
-    if (_currentLevel > previousLevel) {
-      _showLevelUpNotification();
-    }
-  }
-
   // Vérifier les achievements
   // Échanger des points contre une récompense — délègue entièrement au
   // serveur (C1) : ni le solde ni le coût ne sont recalculés ici, seul
@@ -350,14 +285,8 @@ class GamificationService extends ChangeNotifier {
     }
 
     _pendingRewardIds.remove(reward.id);
-    _checkLevelUp();
     notifyListeners();
     return true;
-  }
-
-  // Notifications simulées
-  void _showLevelUpNotification() {
-    Journal.trace('🆙 Félicitations! Vous avez atteint le niveau $_currentLevel!');
   }
 
   /// Une commande vient d'être passée : rien n'est décidé ici.
@@ -382,8 +311,7 @@ class GamificationService extends ChangeNotifier {
   Map<String, dynamic> getUserStats() {
     return {
       'totalPoints': _currentPoints,
-      'level': _currentLevel,
-      'levelTitle': currentLevelTitle,
+      'tier': _compte?.tier?.name,
       'totalOrders': _totalOrders,
       'streakDays': _streakDays,
       'achievementsUnlocked': _achievements.where((a) {

@@ -183,7 +183,7 @@ class DeliveryFeeBreakdownCard extends StatelessWidget {
               ),
             ),
             Text(
-              '0 FCFA',
+              PriceFormatter.format(0),
               style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: Colors.green.shade900,

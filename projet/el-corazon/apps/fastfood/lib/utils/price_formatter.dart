@@ -1,5 +1,7 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as socle;
 
+import 'package:elcora_fast/services/kitchen_context_service.dart';
+
 /// Délégation vers la règle d'affichage des montants du socle.
 ///
 /// Les trois applications portaient chacune la sienne, et elles ne rendaient
@@ -12,14 +14,25 @@ import 'package:elcorazon_core/elcorazon_core.dart' as socle;
 /// porteront des `Money` — voir `docs/refactoring-2026-08.md` §4.
 class PriceFormatter {
   /// Formate un montant exprimé en **unité majeure** — 12500.0 pour
-  /// 12 500 F CFA — en francs CFA, la seule devise que ces écrans affichent.
+  /// 12 500 F CFA.
   ///
-  /// Trois différences avec la version qu'elle remplace, toutes voulues : les
-  /// milliers sont séparés par une espace insécable étroite et non par un
-  /// point, un montant négatif garde son signe au lieu de rendre « -.500 CFA »,
-  /// et `NaN` comme l'infini rendent « 0 CFA » au lieu de « NaN CFA ».
-  static String format(double price) => socle.formatPrice(price);
+  /// La devise est [devise] quand l'appelant la connaît (celle d'une
+  /// commande), sinon celle de l'établissement courant, que le serveur rend
+  /// (`KitchenContextService.currency`). Elle était jusqu'ici implicite : le
+  /// socle retombait sur le franc CFA, et un établissement d'Accra affichait
+  /// ses prix en « CFA ».
+  ///
+  /// Devise encore inconnue — l'annuaire n'a pas répondu : le nombre seul,
+  /// sans unité, plutôt qu'une unité devinée.
+  static String format(double price, {String? devise}) {
+    final code = (devise != null && devise.isNotEmpty)
+        ? devise
+        : (KitchenContextService().currency ?? '');
+    if (code.isEmpty) return socle.formatPrice(price, currency: '').trim();
+    return socle.formatPrice(price, currency: code);
+  }
 }
 
 /// Voir [PriceFormatter.format].
-String formatPrice(double price) => socle.formatPrice(price);
+String formatPrice(double price, {String? devise}) =>
+    PriceFormatter.format(price, devise: devise);

@@ -14,6 +14,9 @@ import 'package:elcora_fast/presentation/adresse.dart';
 import 'package:elcora_fast/presentation/changement_de_cuisine.dart';
 import 'package:elcora_fast/presentation/cle_de_tentative.dart';
 import 'package:elcora_fast/presentation/frais_de_livraison.dart';
+import 'package:elcora_fast/presentation/messages_erreur.dart';
+import 'package:elcora_fast/presentation/moyens_de_paiement.dart';
+import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/widgets/delivery_fee_breakdown_card.dart';
 import 'package:elcora_fast/widgets/zone_not_serviceable_dialog.dart';
@@ -26,17 +29,14 @@ import 'package:elcora_fast/screens/client/payment_screen.dart';
 import 'package:elcora_fast/screens/client/address_selector_screen.dart';
 
 /// Écran de finalisation de commande
+///
+/// La commande de groupe n'y passe pas : elle naît de la confirmation du
+/// panier collaboratif (`group-carts/{id}/confirm/`). L'écran acceptait encore
+/// une commande existante et des lignes « préchargées » dont il recomposait le
+/// total lui-même — une branche que plus rien n'ouvrait, et qui, ouverte,
+/// aurait créé une **nouvelle** commande depuis le panier personnel.
 class CheckoutScreen extends StatefulWidget {
-  final String? existingOrderId;
-  final List<CartItem>? preloadedItems;
-  final double? preloadedTotal;
-
-  const CheckoutScreen({
-    super.key,
-    this.existingOrderId,
-    this.preloadedItems,
-    this.preloadedTotal,
-  });
+  const CheckoutScreen({super.key});
 
   @override
   State<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -47,8 +47,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final _addressController = TextEditingController();
   final _notesController = TextEditingController();
 
-  PaymentMethod _selectedPayment = PaymentMethod
-      .cash; // Par défaut: cash (mobile money, credit card et debit card désactivés)
+  /// Le moyen choisi — `null` tant que la liste du serveur n'est pas connue,
+  /// ou quand elle est vide : la caisse ne commande pas sans lui.
+  PaymentMethod? _selectedPayment;
+
+  /// Les moyens que le serveur accepte (`GET /payments/methods/`), `null`
+  /// pendant leur chargement. Ils étaient écrits ici, mobile money et carte
+  /// désactivés en dur — voir `presentation/moyens_de_paiement.dart`.
+  List<MoyenPropose>? _moyens;
+  Object? _echecMoyens;
   bool _isLoading = false;
   bool _isCalculatingDeliveryFee = false;
 
@@ -76,16 +83,32 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   void initState() {
     super.initState();
     _loadUserAddress();
-    // S'assurer que le wallet n'est pas sélectionné (fonctionnalité désactivée)
-    if (_selectedPayment == PaymentMethod.wallet) {
-      _selectedPayment = PaymentMethod.cash;
+    _chargerMoyens();
+  }
+
+  Future<void> _chargerMoyens() async {
+    try {
+      final acceptes =
+          await eccore.PaymentRepository(apiClient: apiClient).acceptedMethods();
+      if (!mounted) return;
+      final proposes = moyensProposes(acceptes);
+      setState(() {
+        _moyens = proposes;
+        _echecMoyens = null;
+        _selectedPayment = moyenRetenu(_selectedPayment, proposes);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _echecMoyens = e);
     }
-    // S'assurer que mobile money, credit card et debit card ne sont pas sélectionnés (désactivés)
-    if (_selectedPayment == PaymentMethod.mobileMoney ||
-        _selectedPayment == PaymentMethod.creditCard ||
-        _selectedPayment == PaymentMethod.debitCard) {
-      _selectedPayment = PaymentMethod.cash;
-    }
+  }
+
+  void _reessayerMoyens() {
+    setState(() {
+      _moyens = null;
+      _echecMoyens = null;
+    });
+    _chargerMoyens();
   }
 
   @override
@@ -289,21 +312,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       appBar: const GlassAppBar(title: 'Finaliser la commande'),
       body: Consumer2<AppService, CartService>(
         builder: (context, appService, cartService, child) {
-          final isGroupOrder = widget.existingOrderId != null;
-          final cartItems =
-              isGroupOrder ? (widget.preloadedItems ?? []) : cartService.items;
-          final subtotal = isGroupOrder
-              ? (widget.preloadedTotal ?? 0.0)
-              : cartService.subtotal;
+          final cartItems = cartService.items;
+          final subtotal = cartService.subtotal;
           final deliveryFee = cartService.deliveryFee;
-          final discount = isGroupOrder ? 0.0 : cartService.discount;
+          final discount = cartService.discount;
           // Le total vient du devis serveur dès qu'il existe. La ligne
           // précédente le recomposait ici (`sous-total + frais − remise`), ce
           // qui donnait un troisième chiffre, différent de celui du panier et
           // de celui de la commande.
-          final total = isGroupOrder
-              ? (subtotal + deliveryFee - discount)
-              : cartService.total;
+          final total = cartService.total;
 
           if (cartItems.isEmpty) {
             return _buildEmptyCart(context);
@@ -326,7 +343,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       // remplisse le reste : la cuisine a fermé, un plat est en
                       // rupture. Sans cet encart, il l'apprenait en appuyant sur
                       // « Commander », après avoir tout saisi.
-                      if (!isGroupOrder && cartService.motifBloquant != null) ...[
+                      if (cartService.motifBloquant != null) ...[
                         _BandeauCommandeImpossible(motif: cartService.motifBloquant!),
                         const SizedBox(height: DesignConstants.spacingL),
                       ],
@@ -621,111 +638,115 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  /// Modes de paiement, en lignes plutôt qu'en puces.
+  /// Modes de paiement, en lignes plutôt qu'en puces — ceux que le serveur
+  /// accepte, dans son ordre et sous ses libellés.
   ///
-  /// ## Pourquoi les modes indisponibles restent affichés
-  ///
-  /// Mobile Money et les cartes ne sont pas encore raccordés. Les masquer
-  /// laisserait croire qu'ils n'existeront jamais et ferait douter du sérieux
-  /// du service ; les afficher à demi-opacité, comme avant, laissait croire à
-  /// un bogue. Ils portent donc une mention explicite — « bientôt » — et ne
-  /// répondent pas au toucher.
-  ///
-  /// Le portefeuille, lui, est bien retiré : il n'est pas différé, il est
-  /// abandonné.
+  /// Mobile money et carte portaient ici une mention « bientôt » écrite en
+  /// dur, pendant que le panier collaboratif payait déjà en mobile money : la
+  /// décision appartient au serveur (`PAYMENT_METHODS`), qui refuse à la
+  /// création ce qu'il ne publie pas.
   Widget _buildPaymentSection(BuildContext context) {
     final theme = Theme.of(context);
-    final modes = PaymentMethod.values
-        .where((method) => method != PaymentMethod.wallet)
-        .toList();
+    final moyens = _moyens;
+
+    if (_echecMoyens != null) {
+      return SectionCard(
+        child: Row(
+          children: [
+            Icon(Icons.error_outline_rounded, color: theme.colorScheme.error),
+            const SizedBox(width: DesignConstants.spacingM),
+            Expanded(
+              child: Text(
+                messageErreur(_echecMoyens!),
+                style: AppTypography.bodyMd(color: theme.colorScheme.onSurface),
+              ),
+            ),
+            TextButton(onPressed: _reessayerMoyens, child: const Text('Réessayer')),
+          ],
+        ),
+      );
+    }
+
+    if (moyens == null) {
+      return const SectionCard(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(DesignConstants.spacingS),
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    if (moyens.isEmpty) {
+      return SectionCard(
+        child: Text(
+          'Aucun moyen de paiement n’est ouvert pour le moment.',
+          style: AppTypography.bodyMd(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      );
+    }
 
     return Column(
       children: [
-        for (final mode in modes) ...[
-          Builder(
-            builder: (context) {
-              final indisponible = mode == PaymentMethod.mobileMoney ||
-                  mode == PaymentMethod.creditCard ||
-                  mode == PaymentMethod.debitCard;
-              final retenu = _selectedPayment == mode && !indisponible;
-
-              return Padding(
-                padding: const EdgeInsets.only(
-                  bottom: DesignConstants.spacingS + 2,
-                ),
-                child: SectionCard(
-                  padding: const EdgeInsets.all(DesignConstants.spacingS + 4),
-                  borderColor: retenu ? theme.colorScheme.primary : null,
-                  onTap: indisponible
-                      ? null
-                      : () => setState(() => _selectedPayment = mode),
-                  child: Row(
-                    children: [
-                      Icon(
-                        retenu
-                            ? Icons.radio_button_checked_rounded
-                            : Icons.radio_button_unchecked_rounded,
-                        color: indisponible
-                            ? theme.colorScheme.onSurfaceVariant
-                                .withValues(alpha: 0.35)
-                            : retenu
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.outline,
-                      ),
-                      const SizedBox(width: DesignConstants.spacingM),
-                      Container(
-                        width: 40,
-                        height: 40,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHigh,
-                          borderRadius: DesignConstants.borderRadiusMedium,
-                        ),
-                        child: Icon(
-                          mode.icone,
-                          size: 20,
-                          color: indisponible
-                              ? theme.colorScheme.onSurfaceVariant
-                                  .withValues(alpha: 0.35)
-                              : theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(width: DesignConstants.spacingM),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              mode.displayName,
-                              style: AppTypography.titleLg(
-                                color: indisponible
-                                    ? theme.colorScheme.onSurfaceVariant
-                                    : theme.colorScheme.onSurface,
-                              ),
-                            ),
-                            Text(
-                              mode.description,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTypography.bodyMd(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (indisponible) ...[
-                        const SizedBox(width: DesignConstants.spacingS),
-                        const StatusChip(label: 'Bientôt', dense: true),
-                      ],
-                    ],
+        for (final propose in moyens)
+          Padding(
+            padding: const EdgeInsets.only(bottom: DesignConstants.spacingS + 2),
+            child: SectionCard(
+              padding: const EdgeInsets.all(DesignConstants.spacingS + 4),
+              borderColor:
+                  _selectedPayment == propose.moyen ? theme.colorScheme.primary : null,
+              onTap: () => setState(() => _selectedPayment = propose.moyen),
+              child: Row(
+                children: [
+                  Icon(
+                    _selectedPayment == propose.moyen
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    color: _selectedPayment == propose.moyen
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outline,
                   ),
-                ),
-              );
-            },
+                  const SizedBox(width: DesignConstants.spacingM),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHigh,
+                      borderRadius: DesignConstants.borderRadiusMedium,
+                    ),
+                    child: Icon(
+                      propose.moyen.icone,
+                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: DesignConstants.spacingM),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          propose.libelle,
+                          style: AppTypography.titleLg(color: theme.colorScheme.onSurface),
+                        ),
+                        Text(
+                          propose.moyen.description,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTypography.bodyMd(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ],
       ],
     );
   }
@@ -832,11 +853,15 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           isLoading: _isLoading,
           // Neutralisé quand le devis du serveur dit que la commande est
           // impossible : l'encart en tête d'écran a déjà dit pourquoi, et aucune
-          // saisie ici n'y remédie. Sans devis, le bouton reste actif — c'est
-          // la création qui tranchera, et elle rend le même motif.
-          onPressed: _isLoading || cartService.motifBloquant != null
+          // saisie ici n'y remédie. Sans devis, le bouton reste actif mais
+          // demande d'abord le devis (voir `_placeOrder`) : on ne commande pas
+          // sur un total que le client n'a pas vu. Sans moyen de paiement
+          // accepté, il n'y a rien à envoyer.
+          onPressed: _isLoading ||
+                  cartService.motifBloquant != null ||
+                  _selectedPayment == null
               ? null
-              : () => _placeOrder(context, appService, cartService, total),
+              : () => _placeOrder(context, appService, cartService),
         ),
       ),
     );
@@ -846,7 +871,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     BuildContext context,
     AppService appService,
     CartService cartService,
-    double total,
   ) async {
     if (!_formKey.currentState!.validate()) {
       setState(() => _adresseReclamee = _selectedAddress == null);
@@ -877,6 +901,29 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         return;
       }
 
+      // Pas de commande sur un montant que le client n'a pas vu.
+      //
+      // Le bouton restait actif sans devis — adresse chiffrée pendant une
+      // coupure, code promo retiré, panier retouché — et la barre affichait
+      // alors le cumul des lignes, **sans** la livraison. Le serveur aurait
+      // facturé davantage que le « Total à payer » annoncé. On redemande le
+      // devis, on l'affiche, et c'est le prochain appui qui commande.
+      if (!cartService.hasQuote) {
+        await _calculateDeliveryFeeForAddress(addressToUse);
+        if (!mounted || !context.mounted) return;
+        if (cartService.hasQuote && cartService.motifBloquant == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Total calculé : ${PriceFormatter.format(cartService.total)}. '
+                'Vérifiez-le, puis appuyez de nouveau sur « Commander ».',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
       // Créer la commande d'abord (Django, Phase 6) — le paiement s'ouvre
       // ensuite contre une commande réelle, jamais l'inverse.
       //
@@ -885,12 +932,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       // est le seul chemin où le serveur sait répartir les lignes entre
       // convives.
       final finalOrderId = await appService.placeOrderFromCartService(
-          addressToUse,
-          _selectedPayment,
-          cartService.items,
-          cartService.subtotal,
-          cartService.deliveryFee,
-          cartService.discount,
+        addressToUse,
+        _selectedPayment!,
+        cartService.items,
         idempotencyKey: _cleDeTentative.valeur,
         notes: _notesController.text.trim().isNotEmpty
             ? _notesController.text.trim()

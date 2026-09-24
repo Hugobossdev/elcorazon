@@ -7,6 +7,7 @@ import 'package:elcora_fast/presentation/reprise_de_commande.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:elcora_fast/utils/price_formatter.dart';
 
 import 'package:elcora_fast/main.dart' show apiClient;
 import 'package:elcora_fast/models/cart_item.dart';
@@ -109,12 +110,36 @@ class CartService extends ChangeNotifier {
   /// La phrase est celle du juge de disponibilité du serveur ; l'application
   /// ne la compose pas.
   String? get motifBloquant {
+    // Une ligne refusée à la synchronisation n'est pas dans le panier serveur,
+    // donc pas dans la commande qu'il produira : le devis, qui ne lit que ce
+    // panier-là, n'a aucune raison de s'en plaindre. C'est ici qu'on le dit.
+    final refusees = _items.where((item) => _lignesRefusees.containsKey(item.id));
+    if (refusees.isNotEmpty) {
+      final noms = refusees.map((item) => '« ${item.name} »').join(', ');
+      return refusees.length == 1
+          ? '$noms ne peut plus être commandé. Retirez-le pour continuer.'
+          : '$noms ne peuvent plus être commandés. Retirez-les pour continuer.';
+    }
     final devis = _quote;
     if (devis == null || devis.isOrderable) return null;
     return devis.unavailableReason.isNotEmpty
         ? devis.unavailableReason
         : 'Cette commande ne peut pas être passée pour le moment.';
   }
+
+  /// Lignes que le serveur a refusées à la dernière synchronisation, avec son
+  /// motif — identifiant de ligne → `detail` du refus.
+  ///
+  /// ## Ce que le silence coûtait
+  ///
+  /// Le refus n'était que tracé. La ligne restait affichée ici, à son ancien
+  /// prix, mais n'existait plus dans le panier serveur — celui dont la
+  /// commande est faite. Le client commandait donc **sans** le plat qu'il
+  /// voyait dans son panier, et personne ne le lui disait.
+  Map<String, String> _lignesRefusees = const {};
+
+  /// Pourquoi le serveur refuse cette ligne ; `null` si elle est acceptée.
+  String? motifDeRefus(String cartItemId) => _lignesRefusees[cartItemId];
 
   String? get promoCode => _promoCode;
   bool get isInitialized => _isInitialized;
@@ -457,18 +482,6 @@ class CartService extends ChangeNotifier {
     }
   }
 
-  /// Retire tous les articles avec le même menuItemId
-  void removeItemById(String menuItemId) {
-    final initialLength = _items.length;
-    _items.removeWhere((item) => item.menuItemId == menuItemId);
-
-    if (_items.length < initialLength) {
-      eccore.Journal.trace('✅ Articles retirés pour menuItemId: $menuItemId');
-      notifyListeners();
-      _persistChanges();
-    }
-  }
-
   /// Rejoue la personnalisation d'une ligne déjà au panier.
   ///
   /// La méthode n'écrivait que [CartItem.customizations] — les **libellés
@@ -570,74 +583,6 @@ class CartService extends ChangeNotifier {
     _persistChanges();
   }
 
-  /// Incrémente la quantité d'un article par son menuItemId
-  void incrementItemQuantity(String menuItemId) {
-    final index = _items.indexWhere((item) => item.menuItemId == menuItemId);
-    if (index < 0) {
-      eccore.Journal.trace('⚠️ Article non trouvé pour increment: $menuItemId');
-      return;
-    }
-
-    final currentQuantity = _items[index].quantity;
-    if (currentQuantity < 999) {
-      _items[index] = _items[index].copyWith(quantity: currentQuantity + 1);
-      eccore.Journal.trace(
-        '✅ Quantité incrémentée: ${_items[index].name} ($currentQuantity → ${currentQuantity + 1})',
-      );
-      notifyListeners();
-      _persistChanges();
-    } else {
-      eccore.Journal.trace(
-        '⚠️ Quantité maximale de 999 atteinte pour ${_items[index].name}',
-      );
-    }
-  }
-
-  /// Décrémente la quantité d'un article par son menuItemId
-  void decrementItemQuantity(String menuItemId) {
-    final index = _items.indexWhere((item) => item.menuItemId == menuItemId);
-    if (index < 0) {
-      eccore.Journal.trace('⚠️ Article non trouvé pour decrement: $menuItemId');
-      return;
-    }
-
-    final currentQuantity = _items[index].quantity;
-    final itemName = _items[index].name;
-
-    if (currentQuantity > 1) {
-      _items[index] = _items[index].copyWith(quantity: currentQuantity - 1);
-      eccore.Journal.trace(
-        '✅ Quantité décrémentée: $itemName ($currentQuantity → ${currentQuantity - 1})',
-      );
-    } else {
-      _items.removeAt(index);
-      eccore.Journal.trace('✅ Article retiré (quantité = 0): $itemName');
-    }
-
-    notifyListeners();
-    _persistChanges();
-  }
-
-  /// Obtient la quantité d'un article par son menuItemId
-  int getItemQuantity(String menuItemId) {
-    final item = _items.firstWhere(
-      (item) => item.menuItemId == menuItemId,
-      orElse: () => CartItem(
-        id: '',
-        menuItemId: '',
-        name: '',
-        price: 0,
-        quantity: 0,
-      ),
-    );
-    return item.quantity;
-  }
-
-  /// Vérifie si un article est dans le panier
-  bool hasItem(String menuItemId) {
-    return _items.any((item) => item.menuItemId == menuItemId);
-  }
-
   /// Demande au serveur le chiffrage du panier pour une adresse donnée.
   ///
   /// Remplace le calcul local des frais, qui appliquait un barème écrit dans
@@ -682,7 +627,7 @@ class CartService extends ChangeNotifier {
     _promoCode = code;
     _promoDiscount = discount;
     eccore.Journal.trace(
-      '✅ Remise appliquée: $_promoCode (-${discount.toStringAsFixed(2)} FCFA)',
+      '✅ Remise appliquée: $_promoCode (-${PriceFormatter.format(discount)})',
     );
     notifyListeners();
     _persistChanges();
@@ -746,28 +691,6 @@ class CartService extends ChangeNotifier {
 
     notifyListeners();
     _persistChanges();
-  }
-
-  /// Convertit le panier en données de commande
-  Map<String, dynamic> toOrderData() {
-    return {
-      'items': _items
-          .map(
-            (item) => {
-              'menu_item_id': item.menuItemId,
-              'name': item.name,
-              'price': item.price,
-              'quantity': item.quantity,
-              'customizations': item.customizations,
-            },
-          )
-          .toList(),
-      'subtotal': subtotal,
-      'delivery_fee': deliveryFee,
-      'discount': discount,
-      'promo_code': _promoCode,
-      'total': total,
-    };
   }
 
   /// Sauvegarde le panier (exposed for compatibilité)
@@ -965,7 +888,7 @@ class CartService extends ChangeNotifier {
     final etablissement = await _slug();
     await _cartRepository.clear(restaurantSlug: etablissement);
 
-    final refused = <String>[];
+    final refused = <String, String>{};
     for (final item in lignes) {
       try {
         await _cartRepository.addLine(
@@ -980,15 +903,44 @@ class CartService extends ChangeNotifier {
         // panne serveur : dans les deux cas la ligne est encore valide et doit
         // repartir plus tard. Seul un refus 4xx est définitif.
         if (error.status < 400 || error.status >= 500) rethrow;
-        refused.add('${item.name} (${error.code})');
+        refused[item.id] = motifDeLigneRefusee(error);
       }
     }
 
     if (refused.isNotEmpty) {
       eccore.Journal.trace(
-        '⚠️ Lignes refusées par le serveur, non synchronisées : ${refused.join(' ; ')}',
+        '⚠️ Lignes refusées par le serveur, non synchronisées : '
+        '${refused.entries.map((e) => '${e.key} (${e.value})').join(' ; ')}',
       );
     }
+    enregistrerLesRefus(refused);
+  }
+
+  /// La phrase à montrer sous une ligne refusée.
+  ///
+  /// Un plat **retiré du catalogue** n'est pas refusé par une règle métier
+  /// (409, `detail` écrit pour le client) mais par la validation du
+  /// sérialiseur : 400, sans `detail`, et « Clé primaire « 01a0… » non valide
+  /// - l'objet n'existe pas » dans `errors.menu_item`. Vérifié sur le serveur
+  /// local le 2026-09-24. Le champ en cause dit ce qui s'est passé ; le texte,
+  /// lui, n'est pas fait pour être lu.
+  @visibleForTesting
+  static String motifDeLigneRefusee(eccore.ApiException error) {
+    if (error.errors.containsKey('menu_item')) return 'Ce plat n’est plus au menu.';
+    if (error.errors.containsKey('options')) {
+      return 'Une option choisie n’est plus proposée. Modifiez ce plat.';
+    }
+    return error.detail;
+  }
+
+  /// Retient les refus d'une synchronisation complète — et **oublie** ceux
+  /// de la précédente : une ligne retirée, ou redevenue commandable, ne doit
+  /// plus bloquer.
+  @visibleForTesting
+  void enregistrerLesRefus(Map<String, String> refus) {
+    if (refus.isEmpty && _lignesRefusees.isEmpty) return;
+    _lignesRefusees = Map.unmodifiable(refus);
+    notifyListeners();
   }
 
   /// Met une réécriture du panier serveur **à la suite** de celle déjà en vol.
@@ -1194,8 +1146,4 @@ class CartService extends ChangeNotifier {
 
     return true;
   }
-
-  // === Méthodes de compatibilité ===
-  int getTotalItems() => itemCount;
-  double getTotalPrice() => total;
 }

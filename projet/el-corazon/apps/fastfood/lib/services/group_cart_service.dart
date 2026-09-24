@@ -158,10 +158,14 @@ class GroupCartService extends ChangeNotifier {
 
   /// Transforme le panier en commande — réservé à l'hôte.
   ///
-  /// Rend la commande créée, ou `null` si le serveur refuse (panier vide, ligne
-  /// devenue indisponible, appelant qui n'est pas l'hôte). Aucun total n'est
-  /// envoyé : c'est le serveur qui les calcule, comme pour une commande
-  /// ordinaire.
+  /// Rend la commande créée, `null` s'il n'y a pas de panier courant. Un refus
+  /// du serveur **remonte** tel quel (`eccore.ApiException`) : panier vide,
+  /// ligne devenue indisponible, moyen de paiement non accepté.
+  ///
+  /// Il était avalé ici et rendu en `null`, et l'écran le traduisait par une
+  /// supposition — « un article est peut-être devenu indisponible » — là où le
+  /// serveur disait précisément pourquoi. Aucun total n'est envoyé : c'est le
+  /// serveur qui les calcule, comme pour une commande ordinaire.
   Future<eccore.Order?> confirm({
     required String addressId,
     required PaymentMethod paymentMethod,
@@ -171,20 +175,15 @@ class GroupCartService extends ChangeNotifier {
     final cart = _current;
     if (cart == null) return null;
 
-    try {
-      final order = await _repository.confirm(
-        groupCartId: cart.id,
-        addressId: addressId,
-        paymentMethod: _toRemotePaymentMethod(paymentMethod),
-        instructions: instructions,
-        promoCode: promoCode,
-      );
-      await refresh();
-      return order;
-    } on eccore.ApiException catch (e) {
-      eccore.Journal.trace('GroupCartService: confirmation refusée — ${e.code} (${e.detail})');
-      return null;
-    }
+    final order = await _repository.confirm(
+      groupCartId: cart.id,
+      addressId: addressId,
+      paymentMethod: _toRemotePaymentMethod(paymentMethod),
+      instructions: instructions,
+      promoCode: promoCode,
+    );
+    await refresh();
+    return order;
   }
 
   /// Renonce au panier — réservé à l'hôte.

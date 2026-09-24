@@ -1,5 +1,4 @@
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_fast/presentation/fidelite.dart';
 
 /// Vocabulaire d'affichage du compte connecté.
 ///
@@ -72,4 +71,7 @@ extension ProfilAffiche on eccore.User {
 /// le reste du vocabulaire du programme : le profil et l'écran des
 /// récompenses les lisaient chacun de leur côté, et rien ne garantissait
 /// qu'ils restent d'accord.
-String palierDeFidelite(int points) => PalierFidelite.pour(points).libelle;
+///
+/// Il est désormais lu sur le compte, tel que le serveur l'a calculé — nul si
+/// aucun palier n'est atteint ou que le compte n'est pas encore chargé.
+String? palierDeFidelite(eccore.PointsAccount? compte) => compte?.tier?.name;

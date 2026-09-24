@@ -90,6 +90,7 @@ class CartScreen extends StatelessWidget {
                   onEdit: cartService.items[index].personnalisable
                       ? () => _modifierLigne(context, cartService.items[index])
                       : null,
+                  refus: cartService.motifDeRefus(cartService.items[index].id),
                 ),
               Center(
                 child: TextButton.icon(

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/presentation/annulation_commande.dart';
 import 'package:elcora_fast/presentation/messages_erreur.dart';
+import 'package:elcora_fast/presentation/reglement_commande.dart';
+import 'package:elcora_fast/screens/client/payment_screen.dart';
 import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/presentation/suivi_commande.dart';
@@ -495,7 +497,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         ),
         const SizedBox(width: DesignConstants.spacingS),
         Text(
-          PriceFormatter.format(article.totalPrice),
+          PriceFormatter.format(article.totalPrice, devise: _commande.currency),
           style: AppTypography.titleLg(color: theme.colorScheme.onSurface),
         ),
       ],
@@ -515,11 +517,11 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             children: [
               SummaryRow(
                 label: 'Sous-total',
-                value: PriceFormatter.format(_commande.subtotal),
+                value: PriceFormatter.format(_commande.subtotal, devise: _commande.currency),
               ),
               SummaryRow(
                 label: 'Frais de livraison',
-                value: PriceFormatter.format(_commande.deliveryFee),
+                value: PriceFormatter.format(_commande.deliveryFee, devise: _commande.currency),
               ),
               if (_commande.discount > 0)
                 SummaryRow(
@@ -529,27 +531,33 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                   label: (_commande.promoCode ?? '').isEmpty
                       ? 'Remise'
                       : 'Remise (${_commande.promoCode})',
-                  value: '-${PriceFormatter.format(_commande.discount)}',
+                  value: '-${PriceFormatter.format(_commande.discount, devise: _commande.currency)}',
                   isDiscount: true,
                 ),
               const SummaryDivider(),
               SummaryRow(
                 label: 'Total',
-                value: PriceFormatter.format(_commande.total),
+                value: PriceFormatter.format(_commande.total, devise: _commande.currency),
                 isTotal: true,
               ),
               const SizedBox(height: DesignConstants.spacingM),
               Row(
                 children: [
                   Icon(
-                    Icons.check_circle_outline_rounded,
+                    switch (situationDuReglement(_commande)) {
+                      SituationDuReglement.reglee => Icons.check_circle_outline_rounded,
+                      SituationDuReglement.enAttente => Icons.hourglass_top_rounded,
+                      _ => _commande.paymentMethod.icone,
+                    },
                     size: DesignConstants.iconSizeSmall,
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: situationDuReglement(_commande) == SituationDuReglement.enAttente
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.onSurfaceVariant,
                   ),
                   const SizedBox(width: DesignConstants.spacingS),
                   Expanded(
                     child: Text(
-                      'Réglé par ${_commande.paymentMethod.displayName}',
+                      libelleDuReglement(_commande),
                       style: AppTypography.bodyMd(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -568,11 +576,23 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   List<Widget> _actions(ThemeData theme) {
     final enCours = _commande.status != OrderStatus.delivered &&
-        _commande.status != OrderStatus.cancelled &&
-        _commande.status != OrderStatus.refunded &&
-        _commande.status != OrderStatus.failed;
+        _commande.status != OrderStatus.cancelled;
 
     return [
+      // Le paiement en ligne laissé en suspens — écran quitté avant de valider
+      // sur le téléphone, échec, délai dépassé. L'écran de règlement ne
+      // s'ouvrait que depuis la caisse : la commande restait impayée sans
+      // chemin pour la payer. Le serveur rend la demande encore ouverte plutôt
+      // que d'en créer une seconde (`PaymentService.initiate`).
+      if (situationDuReglement(_commande) == SituationDuReglement.enAttente) ...[
+        ActionButton(
+          label: 'Payer ${PriceFormatter.format(_commande.total, devise: _commande.currency)}',
+          emphasis: ActionEmphasis.gradient,
+          icon: Icons.lock_rounded,
+          onPressed: _payer,
+        ),
+        const SizedBox(height: DesignConstants.spacingS),
+      ],
       if (enCours)
         ActionButton(
           label: 'Suivre la livraison',
@@ -612,6 +632,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         onPressed: () => Navigator.of(context).pushNamed(AppRouter.support),
       ),
     ];
+  }
+
+  /// Ouvre le règlement de cette commande, puis relit ce que le serveur en dit.
+  Future<void> _payer() async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => PaymentScreen(orderId: _commande.id)),
+    );
+    if (mounted) unawaited(_relire());
   }
 
   /// Annule la commande, après confirmation.

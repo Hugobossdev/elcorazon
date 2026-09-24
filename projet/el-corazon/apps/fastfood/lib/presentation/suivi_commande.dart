@@ -56,7 +56,8 @@ enum JalonDeSuivi {
 /// Le rang d'un statut dans la chronologie à quatre jalons.
 ///
 /// `-1` pour ce qui sort du cycle — une annulation n'est pas une étape de
-/// plus, c'est une sortie.
+/// plus, c'est une sortie — et pour un statut inconnu, qu'on ne place nulle
+/// part plutôt qu'au hasard.
 int rangDuStatut(OrderStatus statut) {
   switch (statut) {
     case OrderStatus.pending:
@@ -71,17 +72,13 @@ int rangDuStatut(OrderStatus statut) {
     case OrderStatus.delivered:
       return 3;
     case OrderStatus.cancelled:
-    case OrderStatus.refunded:
-    case OrderStatus.failed:
+    case OrderStatus.inconnu:
       return -1;
   }
 }
 
 /// Vrai quand la commande est sortie du cycle sans être livrée.
-bool estSortieDuCycle(OrderStatus statut) =>
-    statut == OrderStatus.cancelled ||
-    statut == OrderStatus.refunded ||
-    statut == OrderStatus.failed;
+bool estSortieDuCycle(OrderStatus statut) => statut == OrderStatus.cancelled;
 
 /// La chronologie de [commande].
 ///
@@ -89,8 +86,7 @@ bool estSortieDuCycle(OrderStatus statut) =>
 ///
 /// Elle ne montre pas quatre jalons dont trois grisés : cela laisserait croire
 /// à une livraison encore possible. Elle montre les étapes **réellement
-/// franchies**, puis un jalon de sortie — « Annulée », « Échouée » ou
-/// « Remboursée » — qui referme la liste.
+/// franchies**, puis un jalon de sortie — « Annulée » — qui referme la liste.
 ///
 /// ## D'où viennent les heures
 ///
@@ -146,23 +142,11 @@ List<EtapeDeSuivi> etapesDeSuivi(Order commande) {
       franchie: true,
       courante: true,
       annulation: true,
-      horodatage: horodatageDe([
-        OrderStatus.cancelled,
-        OrderStatus.failed,
-        OrderStatus.refunded,
-      ]),
+      horodatage: horodatageDe([OrderStatus.cancelled]),
     ),
   ];
 }
 
-/// Le mot qui referme une commande sortie du cycle.
-String libelleDeSortie(OrderStatus statut) {
-  switch (statut) {
-    case OrderStatus.refunded:
-      return 'Remboursée';
-    case OrderStatus.failed:
-      return 'Échouée';
-    default:
-      return 'Annulée';
-  }
-}
+/// Le mot qui referme une commande sortie du cycle — le serveur n'en connaît
+/// qu'une : l'annulation, dont le motif est porté à part.
+String libelleDeSortie(OrderStatus statut) => statut.displayName;

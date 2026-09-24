@@ -24,8 +24,8 @@ bool peutEtreAnnuleeParLeClient(OrderStatus statut) => switch (statut) {
   OrderStatus.onTheWay ||
   OrderStatus.delivered ||
   OrderStatus.cancelled ||
-  OrderStatus.refunded ||
-  OrderStatus.failed => false,
+  // Ce qu'on ne connaît pas, on ne le propose pas : le serveur trancherait.
+  OrderStatus.inconnu => false,
 };
 
 /// Demande confirmation, et le motif — facultatif.

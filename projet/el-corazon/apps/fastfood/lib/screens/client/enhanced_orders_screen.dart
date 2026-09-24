@@ -150,9 +150,9 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
     switch (commande.status) {
       case OrderStatus.delivered:
       case OrderStatus.cancelled:
-      case OrderStatus.refunded:
-      case OrderStatus.failed:
         return false;
+      // Inconnu : le serveur n'a pas dit « fini », la commande reste en vue.
+      case OrderStatus.inconnu:
       case OrderStatus.pending:
       case OrderStatus.confirmed:
       case OrderStatus.preparing:
@@ -335,7 +335,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
                     ),
                   ),
                   Text(
-                    PriceFormatter.format(item.totalPrice),
+                    PriceFormatter.format(item.totalPrice, devise: order.currency),
                     style: AppTypography.bodyLg(
                       color: theme.colorScheme.onSurface,
                     ),
@@ -365,7 +365,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
                       ),
                     ),
                     Text(
-                      PriceFormatter.format(order.total),
+                      PriceFormatter.format(order.total, devise: order.currency),
                       style: AppTypography.priceDisplay(
                         color: theme.colorScheme.primary,
                       ),
@@ -410,15 +410,14 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
           encre: AppColors.success,
         );
       case OrderStatus.cancelled:
-      case OrderStatus.failed:
         return (
-          libelle: statut == OrderStatus.failed ? 'Échouée' : 'Annulée',
+          libelle: 'Annulée',
           fond: theme.colorScheme.errorContainer,
           encre: theme.colorScheme.onErrorContainer,
         );
-      case OrderStatus.refunded:
+      case OrderStatus.inconnu:
         return (
-          libelle: 'Remboursée',
+          libelle: statut.displayName,
           fond: theme.colorScheme.surfaceContainerHighest,
           encre: theme.colorScheme.onSurfaceVariant,
         );

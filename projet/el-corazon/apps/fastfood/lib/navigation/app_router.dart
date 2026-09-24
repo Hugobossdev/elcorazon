@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
-import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/screens/splash_screen.dart';
@@ -33,7 +32,6 @@ import 'package:elcora_fast/screens/client/driver_rating_screen.dart';
 import 'package:elcora_fast/screens/client/order_rating_screen.dart';
 import 'package:elcora_fast/presentation/paiement_partage.dart';
 import 'package:elcora_fast/screens/client/social_groups_screen.dart';
-import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 
 /// Routeur principal de l'application
 class AppRouter {
@@ -129,23 +127,8 @@ class AppRouter {
         );
 
       case checkout:
-        final args = settings.arguments as Map<String, dynamic>?;
-        // Check if items were passed as generic list and cast them
-        List<CartItem>? items;
-        if (args?['items'] != null) {
-          try {
-            items = (args!['items'] as List).cast<CartItem>();
-          } catch (e) {
-            Journal.trace('Error casting items in checkout route: $e');
-          }
-        }
-
         return MaterialPageRoute(
-          builder: (_) => CheckoutScreen(
-            existingOrderId: args?['existingOrderId'] as String?,
-            preloadedItems: items,
-            preloadedTotal: (args?['total'] as num?)?.toDouble(),
-          ),
+          builder: (_) => const CheckoutScreen(),
           settings: settings,
         );
 

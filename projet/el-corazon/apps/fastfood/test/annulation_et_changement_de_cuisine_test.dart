@@ -41,8 +41,7 @@ void main() {
       for (final statut in [
         OrderStatus.delivered,
         OrderStatus.cancelled,
-        OrderStatus.refunded,
-        OrderStatus.failed,
+        OrderStatus.inconnu,
       ]) {
         expect(peutEtreAnnuleeParLeClient(statut), isFalse, reason: '$statut');
       }

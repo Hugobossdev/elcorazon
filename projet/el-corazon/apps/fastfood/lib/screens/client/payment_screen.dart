@@ -40,7 +40,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
   eccore.CheckoutInstruction? _checkout;
   String? _errorMessage;
   Timer? _pollTimer;
-  DateTime? _pollDeadline;
+  /// Relectures restantes avant de rendre la main au client — `null` tant que
+  /// le sondage n'a pas commencé. Un compte de relectures et non une heure
+  /// d'échéance : c'est la même durée (`_pollTimeout`), mais elle suit le
+  /// minuteur qui la produit, là où `DateTime.now()` ne se laisse pas avancer
+  /// par un test.
+  int? _sondagesRestants;
+
+  static int get _sondagesParDelai => _pollTimeout.inSeconds ~/ _pollInterval.inSeconds;
 
   bool get _isCashOnDelivery => _order?.paymentMethod == PaymentMethod.cash;
 
@@ -76,6 +83,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
       }
       _order = order;
 
+      // Déjà soldée — l'écran rouvert depuis le détail d'une commande payée
+      // entre-temps. Le serveur refuserait d'ouvrir une demande (« déjà
+      // réglée »), et ce refus s'affichait comme un **échec** de paiement.
+      final regle = order.montantRegle;
+      if (regle != null && order.total > 0 && regle >= order.total) {
+        setState(() {
+          _isProcessing = false;
+          _etape = EtapeReglement.reglee;
+        });
+        return;
+      }
+
       final checkout = await _paymentRepository.initiate(widget.orderId);
       _checkout = checkout;
 
@@ -90,7 +109,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       }
 
       setState(() => _isProcessing = false);
-      _pollDeadline = DateTime.now().add(_pollTimeout);
+      _sondagesRestants = _sondagesParDelai;
       _pollTimer = Timer.periodic(_pollInterval, (_) => _pollTransaction());
     } catch (e) {
       setState(() {
@@ -107,10 +126,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
     final checkout = _checkout;
     if (checkout == null) return;
 
-    if (DateTime.now().isAfter(_pollDeadline!)) {
+    final restants = _sondagesRestants;
+    if (restants == null) return;
+    if (restants <= 0) {
       _pollTimer?.cancel();
-      return; // Reste en `pending` — l'utilisateur peut continuer manuellement.
+      // Reste en `pending` — l'utilisateur peut continuer manuellement. Le
+      // `setState` fait paraître « Toujours en attente » et le bouton de
+      // relance : sans lui, rien ne redessinait l'écran à l'échéance, et le
+      // sablier tournait pour une vérification qui avait cessé.
+      if (mounted) setState(() {});
+      return;
     }
+    _sondagesRestants = restants - 1;
 
     try {
       final transactions = await _paymentRepository.getTransactions(orderId: widget.orderId);
@@ -126,18 +153,35 @@ class _PaymentScreenState extends State<PaymentScreen> {
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted && context.mounted) Navigator.of(context).pop(true);
         });
-      } else if (current.isFailed) {
+      } else if (current.isFailed || current.isCancelled) {
+        // L'annulation n'était pas reconnue : l'écran continuait de sonder
+        // une demande close, « Vérification en cours… », jusqu'au délai.
         _pollTimer?.cancel();
         setState(() {
           _etape = EtapeReglement.echouee;
           _errorMessage = current.failureReason.isNotEmpty
               ? current.failureReason
-              : 'Le paiement a échoué.';
+              : current.isCancelled
+                  ? 'La demande de paiement a été annulée.'
+                  : 'Le paiement a échoué.';
         });
       }
     } catch (e) {
       eccore.Journal.trace('PaymentScreen: erreur pendant le sondage - $e');
     }
+  }
+
+  /// Reprend la vérification après le délai de sondage.
+  ///
+  /// Passé deux minutes, l'écran cessait de regarder et n'offrait plus que
+  /// « Ouvrir la page de paiement » : un client qui validait son paiement à la
+  /// troisième minute restait devant « Toujours en attente », sans moyen de
+  /// voir la confirmation que le serveur avait pourtant reçue.
+  void _relancerVerification() {
+    _pollTimer?.cancel();
+    setState(() => _sondagesRestants = _sondagesParDelai);
+    _pollTransaction();
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _pollTransaction());
   }
 
   Future<void> _openCheckoutUrl() async {
@@ -202,9 +246,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// taille que le montant ne prenne autant de place que lui.
   Widget _montantDu(ThemeData theme) {
     final montant = _order?.total ?? 0;
-    final reference = widget.orderId.length >= 8
-        ? widget.orderId.substring(0, 8).toUpperCase()
-        : widget.orderId.toUpperCase();
+    // La référence du serveur — celle du détail, de la caisse et du support.
+    // L'écran montrait les huit premiers caractères de l'UUID : un numéro
+    // qu'on ne retrouvait nulle part ailleurs.
+    final reference = _order?.reference ?? '';
 
     return Column(
       children: [
@@ -218,13 +263,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
         FittedBox(
           fit: BoxFit.scaleDown,
           child: Text(
-            PriceFormatter.format(montant),
+            PriceFormatter.format(montant, devise: _order?.currency ?? ''),
             maxLines: 1,
             style: AppTypography.displayLg(color: theme.colorScheme.primary),
           ),
         ),
         const SizedBox(height: DesignConstants.spacingM),
-        StatusChip(label: 'COMMANDE $reference', icon: Icons.receipt_long_rounded),
+        if (reference.isNotEmpty)
+          StatusChip(label: 'COMMANDE $reference', icon: Icons.receipt_long_rounded),
       ],
     );
   }
@@ -374,7 +420,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
         return _encart(
           icone: Icons.check_rounded,
           titre: 'Paiement confirmé',
-          texte: 'Votre commande est en préparation.',
+          // Le paiement confirme la commande (`pending → confirmed`) ; la
+          // préparation, c'est la cuisine qui la lance, plus tard.
+          texte: 'Votre commande est confirmée.',
           fond: AppColors.success.withValues(alpha: 0.1),
           teinte: AppColors.success,
         );
@@ -391,7 +439,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       case EtapeReglement.enAttente:
         final checkout = _checkout;
         final tropLong =
-            _pollDeadline != null && DateTime.now().isAfter(_pollDeadline!);
+            _sondagesRestants == 0;
 
         return _encart(
           icone: Icons.notifications_active_rounded,
@@ -416,13 +464,28 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                     const SizedBox(width: DesignConstants.spacingS),
-                    Text(
-                      'Vérification en cours…',
-                      style: AppTypography.bodyMd(
-                        color: theme.colorScheme.onSurfaceVariant,
+                    // Contraint : avec des caractères agrandis (réglage
+                    // d'accessibilité), le texte débordait de l'encart.
+                    Flexible(
+                      child: Text(
+                        'Vérification en cours…',
+                        style: AppTypography.bodyMd(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ],
+                ),
+              if (tropLong)
+                TextButton.icon(
+                  onPressed: _relancerVerification,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Vérifier à nouveau'),
                 ),
               if (checkout != null)
                 TextButton.icon(

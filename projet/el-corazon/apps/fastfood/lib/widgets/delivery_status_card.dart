@@ -83,7 +83,7 @@ class DeliveryStatusCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    PriceFormatter.format(order.total),
+                    PriceFormatter.format(order.total, devise: order.currency),
                     style: AppTypography.priceDisplay(
                       color: theme.colorScheme.primary,
                     ),
@@ -271,19 +271,12 @@ class _AspectDuStatut {
           fond: schema.errorContainer,
           encre: schema.onErrorContainer,
         );
-      case OrderStatus.refunded:
+      case OrderStatus.inconnu:
         return _AspectDuStatut(
-          libelle: 'Remboursée',
-          icone: Icons.replay_rounded,
+          libelle: 'Statut inconnu',
+          icone: Icons.help_outline_rounded,
           fond: schema.surfaceContainerHighest,
           encre: schema.onSurfaceVariant,
-        );
-      case OrderStatus.failed:
-        return _AspectDuStatut(
-          libelle: 'Échouée',
-          icone: Icons.error_outline_rounded,
-          fond: schema.errorContainer,
-          encre: schema.onErrorContainer,
         );
     }
   }

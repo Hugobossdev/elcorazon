@@ -38,10 +38,12 @@ void main() {
       }
     });
 
-    test('il y en a cinq, pas sept', () {
+    test('il y en a six — ceux du serveur, pas sept', () {
       // `NotificationModel` en déclarait sept — `reminder`, `reward` et
-      // `general` n'ont jamais eu d'émetteur côté serveur.
-      expect(GenreNotification.values, hasLength(5));
+      // `general` n'ont jamais eu d'émetteur côté serveur — et il manquait
+      // `support`, que le serveur émet.
+      expect(GenreNotification.values, hasLength(6));
+      expect(GenreNotification.depuisServeur('support'), GenreNotification.support);
     });
 
     test('un genre inconnu ne fait pas disparaître la notification', () {

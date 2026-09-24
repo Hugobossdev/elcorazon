@@ -1,3 +1,5 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:elcora_fast/services/kitchen_context_service.dart';
 
 /// Constantes de l'application cliente.
@@ -25,52 +27,43 @@ class AppConstants {
   /// back-office, et ne dépend d'aucun libellé d'affichage.
   static const String gateauSurMesureSlug = 'gateau-personnalise';
 
-  /// Code pays ISO 3166-1 alpha-2, en minuscules — attendu ainsi par le
-  /// paramètre `components=country:xx` de Google Places.
-  ///
-  /// **Repli seulement.** Le pays réel vient de l'établissement courant
-  /// (`KitchenContextService.countryCode`), qui le tient du serveur. Cette
-  /// valeur ne sert plus qu'au premier affichage d'un champ téléphonique, avant
-  /// que l'annuaire ait répondu : un sélecteur d'indicatif doit bien s'ouvrir
-  /// sur quelque chose, et le marché historique est le moins mauvais des
-  /// choix — il n'engage rien, l'utilisateur pouvant en changer.
-  ///
-  /// Aucune requête ne la lit : le catalogue, le panier, la commande, les
-  /// adresses et l'autocomplétion passent tous par le contexte.
-  static const String countryCode = 'tg';
-
   /// Rayon, en mètres, dans lequel la recherche de lieux privilégie les
   /// résultats autour de l'établissement. Ne borne pas les résultats : les
   /// biaise seulement, pour qu'une rue homonyme de Lomé passe devant.
   static const int placesBiasRadiusMeters = 25000;
 
-  /// Indicatif téléphonique par défaut des champs de saisie, au format
-  /// attendu par `IntlPhoneField` (ISO 3166-1 alpha-2, en **majuscules**).
+  /// Pays par défaut des champs téléphoniques, au format attendu par
+  /// `IntlPhoneField` (ISO 3166-1 alpha-2, en **majuscules**).
   ///
-  /// Dérivé du pays plutôt qu'écrit à côté : l'inscription proposait le Togo,
-  /// la modification du profil la Côte d'Ivoire, et un même client enregistrait
-  /// donc deux numéros de pays différents selon l'écran par lequel il passait.
-  ///
-  /// Le pays de l'établissement courant l'emporte quand il est connu ; à
-  /// défaut, [countryCode]. Le repli est ici acceptable là où il ne le serait
-  /// pas ailleurs : un indicatif proposé n'est qu'une suggestion, que le client
-  /// corrige d'un geste, alors qu'un slug de restaurant deviné envoie une
-  /// commande au mauvais endroit sans que personne ne le voie.
-  static String get phoneCountryCode =>
-      (KitchenContextService().countryCode ?? countryCode).toUpperCase();
+  /// Celui de l'établissement courant, que le serveur rend ; à défaut, celui
+  /// de l'appareil. Il retombait sur le Togo écrit en dur (`'tg'`), proposé
+  /// aussi à un client d'Abidjan ou d'Accra. Rien de connu : `null`, et le
+  /// champ laisse choisir.
+  static String? get phoneCountryCode {
+    final code = KitchenContextService().countryCode ??
+        PlatformDispatcher.instance.locale.countryCode;
+    return (code == null || code.isEmpty) ? null : code.toUpperCase();
+  }
 
-  /// Exemple montré en filigrane d'un champ téléphone. Suit le pays ci-dessus.
-  static const String phoneHint = '+228 90 00 00 00';
+  /// Exemple montré en filigrane d'un champ téléphone **libre** (sans
+  /// sélecteur de pays). Il commence par l'indicatif du pays de
+  /// l'établissement — il était figé sur `+228`, quel que soit le marché.
+  static String get phoneHint {
+    final indicatif = KitchenContextService().phonePrefix;
+    return (indicatif == null || indicatif.isEmpty)
+        ? '+indicatif numéro'
+        : '$indicatif …';
+  }
 
-  /// Numéro du service client.
+  /// Numéro à appeler pour joindre le service : celui de l'établissement
+  /// courant, tel que le serveur le rend (`Restaurant.phone`). Vide tant que
+  /// l'établissement n'est pas connu — les écrans proposent alors le support
+  /// écrit plutôt qu'un appel.
   ///
-  /// **À renseigner avant mise en production.** Il était jusqu'ici écrit en
-  /// dur à deux endroits, avec deux valeurs différentes et toutes deux
-  /// ivoiriennes (`+22507070707`, `+2250700000000`) alors que l'établissement
-  /// est à Lomé — c'est-à-dire deux numéros inventés, dont l'un au moins
-  /// aboutissait chez un inconnu. Vide, les écrans proposent le support écrit
-  /// plutôt qu'un appel qui ne mènerait nulle part.
-  static const String supportPhone = '';
+  /// C'était une constante vide « à renseigner avant mise en production » :
+  /// le geste d'appel restait masqué pour tout le monde, alors que chaque
+  /// établissement a un téléphone, saisi au back-office.
+  static String get supportPhone => KitchenContextService().current?.phone ?? '';
 
   /// Adresse électronique du service client.
   ///
@@ -81,17 +74,11 @@ class AppConstants {
   ///
   /// Vide, la carte « Email » ne s'affiche pas, exactement comme le geste
   /// d'appel disparaît quand [supportPhone] est vide : mieux vaut un moyen de
-  /// contact en moins qu'un moyen de contact qui n'aboutit pas.
+  /// contact en moins qu'un moyen de contact qui n'aboutit pas. L'adresse de
+  /// l'établissement existe côté serveur (`Restaurant.email`) mais la route
+  /// publique ne la rend pas : il faudrait l'y ajouter pour la lire ici.
   static const String supportEmail = '';
 
   // App Info
   static const String appName = 'Elcora Fast';
-
-  /// Symbole de repli pour un montant dont on ne connaît pas encore la devise.
-  ///
-  /// La devise réelle est portée par chaque montant (`Money`, ADR-007) et par
-  /// l'établissement courant (`KitchenContextService.currency`) : elle est
-  /// héritée du pays et diffère d'un marché à l'autre. Cette constante n'est
-  /// qu'un libellé de secours, jamais une unité de calcul.
-  static const String currency = 'FCFA';
 }

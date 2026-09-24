@@ -8,7 +8,6 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/adresse.dart';
 import 'package:elcora_fast/services/group_cart_service.dart';
 import 'package:elcora_fast/services/address_service.dart';
-import 'package:elcora_fast/models/order.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/widgets/navigation_helper.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
@@ -16,6 +15,8 @@ import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcora_fast/widgets/design/design.dart';
 import 'package:elcora_fast/presentation/paiement_partage.dart';
 import 'package:elcora_fast/presentation/messages_erreur.dart';
+import 'package:elcora_fast/presentation/moyens_de_paiement.dart';
+import 'package:elcora_fast/main.dart' show apiClient;
 
 class GroupOrderScreen extends StatefulWidget {
   const GroupOrderScreen({super.key});
@@ -985,14 +986,14 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
                         subtitle: Text(
                           line.isOrderable
                               ? '${line.memberName} • '
-                                  '${PriceFormatter.format(line.unitPrice.toMajorUnits())} × ${line.quantity}'
+                                  '${PriceFormatter.format(line.unitPrice.toMajorUnits(), devise: line.unitPrice.currency)} × ${line.quantity}'
                               : '${line.memberName} • ${line.unavailableReason}',
                           style: line.isOrderable
                               ? null
                               : const TextStyle(color: AppColors.error),
                         ),
                         trailing: Text(
-                          PriceFormatter.format(line.total.toMajorUnits()),
+                          PriceFormatter.format(line.total.toMajorUnits(), devise: line.total.currency),
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             color: AppColors.primary,
@@ -1297,17 +1298,28 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
 
     if (confirmed != true || !mounted) return;
 
-    final order = await GroupCartService().confirm(
-      addressId: address.id!,
-      paymentMethod: PaymentMethod.mobileMoney,
-    );
-
-    if (!mounted) return;
-
-    if (order == null) {
-      _avertir('Commande refusée : un article est peut-être devenu indisponible');
+    // Le moyen vient de la liste du serveur, comme à la caisse : mobile money
+    // y était écrit en dur, quel que soit ce que le serveur acceptait.
+    final eccore.Order? order;
+    try {
+      final acceptes =
+          await eccore.PaymentRepository(apiClient: apiClient).acceptedMethods();
+      final moyen = moyenPourLeGroupe(moyensProposes(acceptes));
+      if (moyen == null) {
+        _avertir('Aucun moyen de paiement n’est ouvert pour le moment.');
+        return;
+      }
+      order = await GroupCartService().confirm(
+        addressId: address.id!,
+        paymentMethod: moyen,
+      );
+    } catch (e) {
+      // Le motif du serveur, pas une supposition.
+      _avertir(messageErreur(e));
       return;
     }
+
+    if (!mounted || order == null) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

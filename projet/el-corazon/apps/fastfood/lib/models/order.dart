@@ -18,6 +18,12 @@ class Order {
   final List<OrderItem> items;
   final double subtotal;
   final double deliveryFee;
+
+  /// Devise ISO 4217 de la commande, figée par le serveur à sa création
+  /// (ADR-007). Vide si inconnue — une commande relue d'un ancien cache.
+  /// Les montants ci-dessus sont exprimés dans cette devise : une commande
+  /// passée à Accra reste en GHS, même consultée depuis Lomé.
+  final String currency;
   final double total;
   final OrderStatus status;
   final String deliveryAddress;
@@ -51,6 +57,15 @@ class Order {
   final String? promoCode;
   final double discount;
   final PaymentMethod paymentMethod;
+
+  /// Ce que le serveur a réellement encaissé (`amount_paid`), dans la devise
+  /// de la commande.
+  ///
+  /// `0` quand rien ne l'a été — le serveur rend alors `null`, et c'est la
+  /// même chose. `null` **ici** a un autre sens : la commande vient d'un cache
+  /// écrit avant que ce champ existe, et on ne sait pas. Le moyen de paiement
+  /// ne le dit jamais — voir `presentation/reglement_commande.dart`.
+  final double? montantRegle;
   final DateTime orderTime;
   final DateTime createdAt;
   final DateTime? estimatedDeliveryTime;
@@ -63,7 +78,7 @@ class Order {
     required this.userId,
     required this.items,
     required this.subtotal,
-    required this.total, required this.deliveryAddress, required this.paymentMethod, required this.orderTime, required this.createdAt, this.reference = '', this.deliveryFee = 5.0,
+    required this.total, required this.deliveryAddress, required this.paymentMethod, required this.orderTime, required this.createdAt, this.reference = '', this.deliveryFee = 0.0, this.currency = '',
     this.deliveryLatitude,
     this.deliveryLongitude,
     this.restaurantLatitude,
@@ -72,6 +87,7 @@ class Order {
     this.deliveryNotes,
     this.promoCode,
     this.discount = 0.0,
+    this.montantRegle,
     this.estimatedDeliveryTime,
     this.deliveryPersonId,
     this.statusUpdates = const [],
@@ -85,6 +101,7 @@ class Order {
     List<OrderItem>? items,
     double? subtotal,
     double? deliveryFee,
+    String? currency,
     double? total,
     OrderStatus? status,
     String? deliveryAddress,
@@ -96,6 +113,7 @@ class Order {
     String? promoCode,
     double? discount,
     PaymentMethod? paymentMethod,
+    double? montantRegle,
     DateTime? orderTime,
     DateTime? createdAt,
     DateTime? estimatedDeliveryTime,
@@ -110,6 +128,7 @@ class Order {
       items: items ?? this.items,
       subtotal: subtotal ?? this.subtotal,
       deliveryFee: deliveryFee ?? this.deliveryFee,
+      currency: currency ?? this.currency,
       total: total ?? this.total,
       status: status ?? this.status,
       deliveryAddress: deliveryAddress ?? this.deliveryAddress,
@@ -121,6 +140,7 @@ class Order {
       promoCode: promoCode ?? this.promoCode,
       discount: discount ?? this.discount,
       paymentMethod: paymentMethod ?? this.paymentMethod,
+      montantRegle: montantRegle ?? this.montantRegle,
       orderTime: orderTime ?? this.orderTime,
       createdAt: createdAt ?? this.createdAt,
       estimatedDeliveryTime:
@@ -138,6 +158,7 @@ class Order {
       'userId': userId,
       'subtotal': subtotal,
       'deliveryFee': deliveryFee,
+      'currency': currency,
       'total': total,
       'status': status.toString(),
       'deliveryAddress': deliveryAddress,
@@ -145,6 +166,7 @@ class Order {
       'promoCode': promoCode,
       'discount': discount,
       'paymentMethod': paymentMethod.toString(),
+      'montantRegle': montantRegle,
       'orderTime': orderTime.toIso8601String(),
       'estimatedDeliveryTime': estimatedDeliveryTime?.toIso8601String(),
       'deliveryPersonId': deliveryPersonId,
@@ -152,44 +174,10 @@ class Order {
     };
   }
 
-  /// Parse le statut de commande depuis la base de données
-  /// Accepte les formats snake_case (on_the_way) et camelCase (onTheWay)
-  static OrderStatus _parseOrderStatus(dynamic status) {
-    if (status == null) return OrderStatus.pending;
-
-    final statusString = status.toString().toLowerCase();
-
-    switch (statusString) {
-      case 'pending':
-        return OrderStatus.pending;
-      case 'confirmed':
-        return OrderStatus.confirmed;
-      case 'preparing':
-        return OrderStatus.preparing;
-      case 'ready':
-        return OrderStatus.ready;
-      case 'pickedup':
-      case 'picked_up':
-        return OrderStatus.pickedUp;
-      case 'ontheway':
-      case 'on_the_way':
-        return OrderStatus.onTheWay;
-      case 'delivered':
-        return OrderStatus.delivered;
-      case 'cancelled':
-        return OrderStatus.cancelled;
-      case 'refunded':
-        return OrderStatus.refunded;
-      case 'failed':
-        return OrderStatus.failed;
-      default:
-        // Fallback: essayer de matcher avec le nom de l'enum
-        return OrderStatus.values.firstWhere(
-          (e) => e.toString().split('.').last.toLowerCase() == statusString,
-          orElse: () => OrderStatus.pending,
-        );
-    }
-  }
+  /// Le statut d'une carte lue — même règle que l'adaptateur Django : une
+  /// valeur inconnue se dit inconnue, elle ne retombe plus sur `pending`.
+  static OrderStatus _parseOrderStatus(dynamic status) =>
+      OrderStatus.depuisServeur(status?.toString() ?? '');
 
   factory Order.fromMap(Map<String, dynamic> map) {
     // Parser les order_items si présents
@@ -236,7 +224,8 @@ class Order {
       subtotal: (map['subtotal'] as num?)?.toDouble() ?? 0.0,
       deliveryFee: (map['delivery_fee'] as num?)?.toDouble() ??
           (map['deliveryFee'] as num?)?.toDouble() ??
-          5.0,
+          0.0,
+      currency: map['currency'] as String? ?? '',
       total: (map['total'] as num?)?.toDouble() ?? 0.0,
       status: _parseOrderStatus(map['status']),
       deliveryAddress: map['delivery_address'] ?? map['deliveryAddress'] ?? '',
@@ -249,6 +238,7 @@ class Order {
             e.toString().split('.').last == map['paymentMethod'],
         orElse: () => PaymentMethod.cash,
       ),
+      montantRegle: (map['montantRegle'] as num?)?.toDouble(),
       orderTime: map['order_time'] != null
           ? DateTime.parse(map['order_time'])
           : map['orderTime'] != null
@@ -338,46 +328,45 @@ class OrderStatusUpdate {
   });
 }
 
+/// Statut d'une commande — **les valeurs du serveur** (`apps.orders.states.
+/// OrderStatus`), confrontées à lui par `tools/contrat_vocabulaire.py`.
+///
+/// `refunded` et `failed` y figuraient sans contrepartie serveur : le
+/// remboursement est un mouvement de paiement, et ce qui n'aboutit pas est
+/// **annulé**, avec un motif. Six écrans les traitaient pour rien.
 enum OrderStatus {
-  pending,
-  confirmed,
-  preparing,
-  ready,
-  pickedUp,
-  onTheWay,
-  delivered,
-  cancelled,
-  refunded,
-  failed,
+  pending('pending'),
+  confirmed('confirmed'),
+  preparing('preparing'),
+  ready('ready'),
+  pickedUp('picked_up'),
+  onTheWay('on_the_way'),
+  delivered('delivered'),
+  cancelled('cancelled'),
+
+  /// Une valeur que **cette version** ne connaît pas — le serveur a pu en
+  /// ajouter une depuis. Elle retombait sur [pending] : une commande en route
+  /// se serait affichée « En attente ». Elle se dit désormais inconnue,
+  /// plutôt que de prétendre un état que le serveur n'a pas donné.
+  inconnu.horsVocabulaire();
+
+  const OrderStatus(this._valeur);
+  const OrderStatus.horsVocabulaire() : _valeur = '';
+
+  final String _valeur;
+
+  /// Depuis la valeur rendue par le serveur.
+  static OrderStatus depuisServeur(String valeur) {
+    for (final statut in values) {
+      if (statut != inconnu && statut._valeur == valeur) return statut;
+    }
+    return inconnu;
+  }
 }
 
 extension OrderStatusExtension on OrderStatus {
-  /// Valeur canonique stockée en base (compat Supabase/Postgres).
-  /// Important: certains statuts sont en snake_case dans la DB.
-  String get dbValue {
-    switch (this) {
-      case OrderStatus.pending:
-        return 'pending';
-      case OrderStatus.confirmed:
-        return 'confirmed';
-      case OrderStatus.preparing:
-        return 'preparing';
-      case OrderStatus.ready:
-        return 'ready';
-      case OrderStatus.pickedUp:
-        return 'picked_up';
-      case OrderStatus.onTheWay:
-        return 'on_the_way';
-      case OrderStatus.delivered:
-        return 'delivered';
-      case OrderStatus.cancelled:
-        return 'cancelled';
-      case OrderStatus.refunded:
-        return 'refunded';
-      case OrderStatus.failed:
-        return 'failed';
-    }
-  }
+  /// La valeur du serveur ; vide pour [OrderStatus.inconnu].
+  String get dbValue => _valeur;
 
   String get displayName {
     switch (this) {
@@ -397,10 +386,8 @@ extension OrderStatusExtension on OrderStatus {
         return 'Livrée';
       case OrderStatus.cancelled:
         return 'Annulée';
-      case OrderStatus.refunded:
-        return 'Remboursée';
-      case OrderStatus.failed:
-        return 'Échouée';
+      case OrderStatus.inconnu:
+        return 'Statut inconnu';
     }
   }
 
@@ -432,10 +419,8 @@ extension OrderStatusExtension on OrderStatus {
         return AppEmojis.delivered;
       case OrderStatus.cancelled:
         return AppEmojis.error;
-      case OrderStatus.refunded:
+      case OrderStatus.inconnu:
         return AppEmojis.warning;
-      case OrderStatus.failed:
-        return AppEmojis.error;
     }
   }
 }
@@ -449,33 +434,41 @@ enum PaymentMethod {
 }
 
 extension PaymentMethodExtension on PaymentMethod {
+  /// Libellés du serveur (`apps.orders.models.PaymentMethod`). Ils étaient en
+  /// anglais, et le portefeuille portait le nom d'une autre marque
+  /// (« FastFoodGo Wallet »), hérité d'un gabarit.
+  ///
+  /// Carte de crédit et de débit partent toutes deux en `card` : le serveur
+  /// n'en connaît qu'une, et le client lit donc le même libellé.
   String get displayName {
     switch (this) {
       case PaymentMethod.mobileMoney:
         return 'Mobile Money';
       case PaymentMethod.creditCard:
-        return 'Credit Card';
       case PaymentMethod.debitCard:
-        return 'Debit Card';
+        return 'Carte bancaire';
       case PaymentMethod.wallet:
-        return 'FastFoodGo Wallet';
+        return 'Portefeuille';
       case PaymentMethod.cash:
-        return 'Cash on Delivery';
+        return 'Espèces à la livraison';
     }
   }
 
+  /// Ce que recouvre le moyen, sans nommer d'opérateur : les réseaux mobile
+  /// money et les cartes acceptés dépendent du prestataire et du pays, que
+  /// l'application ne connaît pas. « Orange Money, MTN Money, Moov Money »
+  /// s'affichait jusqu'ici au Togo, où deux des trois n'opèrent pas.
   String get description {
     switch (this) {
       case PaymentMethod.mobileMoney:
-        return 'Orange Money, MTN Money, Moov Money';
+        return 'Depuis votre compte mobile money';
       case PaymentMethod.creditCard:
-        return 'Visa, Mastercard, American Express';
       case PaymentMethod.debitCard:
-        return 'Carte de débit bancaire';
+        return 'Paiement en ligne par carte';
       case PaymentMethod.wallet:
-        return 'Portefeuille FastFoodGo';
+        return 'Solde de votre portefeuille';
       case PaymentMethod.cash:
-        return 'Paiement à la livraison';
+        return 'Paiement au livreur, à la réception';
     }
   }
 

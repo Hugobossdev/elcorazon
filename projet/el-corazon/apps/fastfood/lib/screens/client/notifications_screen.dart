@@ -337,6 +337,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         return Icons.payments_outlined;
       case GenreNotification.compte:
         return Icons.person_outline_rounded;
+      case GenreNotification.support:
+        return Icons.support_agent_rounded;
       case GenreNotification.promotion:
         return Icons.local_offer_outlined;
     }
@@ -359,6 +361,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       case GenreNotification.paiement:
         return (AppColors.successLight, AppColors.success);
       case GenreNotification.compte:
+      case GenreNotification.support:
         return (
           theme.colorScheme.surfaceContainerHighest,
           theme.colorScheme.onSurfaceVariant,
@@ -398,6 +401,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         );
       case GenreNotification.promotion:
         Navigator.of(context).pushNamed(AppRouter.menu);
+      case GenreNotification.support:
+        Navigator.of(context).pushNamed(AppRouter.support);
       case GenreNotification.paiement:
       case GenreNotification.compte:
         // Rien à ouvrir : ces notifications se lisent, elles ne mènent pas

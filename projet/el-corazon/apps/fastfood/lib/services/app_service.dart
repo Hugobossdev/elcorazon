@@ -581,13 +581,14 @@ class AppService extends ChangeNotifier {
   /// distinctes. Ce service ne la fabrique pas : il ne sait pas si l'appel
   /// qu'on lui demande est un premier envoi ou le réessai d'un envoi dont la
   /// réponse s'est perdue — l'écran, lui, le sait.
+  ///
+  /// Aucun montant n'est reçu : le serveur relit le panier et le chiffre
+  /// lui-même. La méthode prenait sous-total, frais et remise sans s'en
+  /// servir — une signature qui laissait croire le contraire.
   Future<String> placeOrderFromCartService(
     eccore.Address? deliveryAddress,
     PaymentMethod paymentMethod,
-    List<dynamic> cartItems,
-    double subtotal,
-    double deliveryFee,
-    double discount, {
+    List<dynamic> cartItems, {
     required String idempotencyKey,
     String? notes,
   }) async {

@@ -407,7 +407,7 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
           child: Slider(
             value: valeur,
             max: plafond,
-            divisions: math.max(1, (plafond / _pasDuCurseur).round()),
+            divisions: math.max(1, (plafond / _pasPour(_plusCher(articles))).round()),
             label: PriceFormatter.format(valeur),
             onChanged: (value) {
               setState(() {
@@ -423,25 +423,29 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
     );
   }
 
-  /// Pas du curseur, en francs CFA.
-  static const double _pasDuCurseur = 500;
+  /// Pas du curseur : un dixième de l'ordre de grandeur du plat le plus cher
+  /// — 1 000 pour une carte à 12 500 CFA, 1 pour une carte à 12,50 EUR.
+  ///
+  /// Il valait 500 « francs CFA » écrits en dur : sur une carte en euros ou en
+  /// cédis, un seul cran couvrait toute la carte.
+  static double _pasPour(double plusCher) {
+    if (plusCher <= 0) return 1;
+    final ordre = (math.log(plusCher) / math.ln10).floor() - 1;
+    return math.max(1, math.pow(10, ordre).toDouble());
+  }
+
+  static double _plusCher(List<eccore.MenuItem> articles) => articles.isEmpty
+      ? 0
+      : articles.map((article) => article.prixAffiche).reduce((a, b) => a > b ? a : b);
 
   /// Le plat le plus cher de la carte, arrondi au pas supérieur.
   ///
-  /// Sur un catalogue vide — le temps du chargement — une borne de repli garde
-  /// le curseur constructible ; il n'écarte alors rien, puisque aucun article
-  /// n'est encore là pour être filtré.
+  /// Sur un catalogue vide — le temps du chargement — le curseur tient sur un
+  /// seul pas : il n'écarte rien, puisque aucun article n'est encore là.
   double _plafondDuCatalogue(List<eccore.MenuItem> articles) {
-    if (articles.isEmpty) return 10000;
-
-    final plusCher = articles
-        .map((article) => article.prixAffiche)
-        .reduce((a, b) => a > b ? a : b);
-
-    return math.max(
-      _pasDuCurseur,
-      (plusCher / _pasDuCurseur).ceil() * _pasDuCurseur,
-    );
+    final plusCher = _plusCher(articles);
+    final pas = _pasPour(plusCher);
+    return math.max(pas, (plusCher / pas).ceil() * pas);
   }
 
   Widget _buildMenuItems() {

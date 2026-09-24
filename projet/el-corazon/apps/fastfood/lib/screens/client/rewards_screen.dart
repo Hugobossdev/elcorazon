@@ -112,7 +112,7 @@ class _RewardsScreenState extends State<RewardsScreen> {
 
   Widget _carteDePalier(ThemeData theme, GamificationService gamification) {
     final points = gamification.currentPoints;
-    final avancement = avancementDeFidelite(points);
+    final avancement = avancementDeFidelite(gamification.compteFidelite);
 
     // Le dégradé doré porte une encre sombre : `onSecondaryContainer` tient le
     // contraste dessus, du blanc non.
@@ -138,7 +138,9 @@ class _RewardsScreenState extends State<RewardsScreen> {
               const SizedBox(width: DesignConstants.spacingS),
               Expanded(
                 child: Text(
-                  'Palier ${avancement.palier.libelle}',
+                  avancement.palier == null
+                      ? 'Aucun palier atteint'
+                      : 'Palier ${avancement.palier}',
                   style: AppTypography.titleLg(color: encre),
                 ),
               ),
@@ -173,8 +175,10 @@ class _RewardsScreenState extends State<RewardsScreen> {
           Text(
             avancement.suivant == null
                 ? 'Vous êtes au palier le plus élevé.'
-                : '${avancement.pointsManquants} points jusqu’au palier '
-                    '${avancement.suivant!.libelle}',
+                // Le palier se gagne en points cumulés, pas au solde : un
+                // échange ne fait pas reculer, et la phrase le dit.
+                : '${avancement.pointsManquants} points à gagner jusqu’au palier '
+                    '${avancement.suivant}',
             style: AppTypography.bodyMd(color: encre),
           ),
         ],

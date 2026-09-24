@@ -5,6 +5,7 @@ import 'package:elcora_fast/services/app_service.dart';
 import 'package:elcora_fast/services/theme_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/presentation/profil_utilisateur.dart';
+import 'package:elcora_fast/presentation/fidelite.dart';
 import 'package:elcora_fast/services/gamification_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
@@ -62,7 +63,13 @@ class ProfileScreen extends StatelessWidget {
               DesignConstants.spacingXL,
             ),
             children: [
-              _enTete(context, user, ordersCount: ordersCount, points: points),
+              _enTete(
+                context,
+                user,
+                ordersCount: ordersCount,
+                points: points,
+                compte: gamification.compteFidelite,
+              ),
               const SizedBox(height: DesignConstants.spacingM),
               _raccourcis(context),
               if (user.estClient) ...[
@@ -109,9 +116,11 @@ class ProfileScreen extends StatelessWidget {
     eccore.User user, {
     required int ordersCount,
     required int points,
+    required eccore.PointsAccount? compte,
   }) {
     final theme = Theme.of(context);
-    final palier = palierDeFidelite(points);
+    final palier = palierDeFidelite(compte);
+    final rang = avancementDeFidelite(compte).rang;
 
     return SectionCard(
       onTap: () => _ouvrirLaModification(context),
@@ -178,12 +187,13 @@ class ProfileScreen extends StatelessWidget {
             spacing: DesignConstants.spacingS,
             runSpacing: DesignConstants.spacingS,
             children: [
-              StatusChip(
-                label: palier,
-                icon: Icons.workspace_premium_rounded,
-                background: _fondDuPalier(theme, palier),
-                foreground: _encreDuPalier(theme, palier),
-              ),
+              if (palier != null)
+                StatusChip(
+                  label: palier,
+                  icon: Icons.workspace_premium_rounded,
+                  background: _fondDuPalier(theme, rang),
+                  foreground: _encreDuPalier(theme, rang),
+                ),
               if (user.estClient)
                 StatusChip(
                   label: '$points pts',
@@ -235,30 +245,21 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  /// Le palier ne prend pas une couleur inventée : le VIP porte le doré de la
-  /// secondaire, « Fidèle » l'orange de la tertiaire, « Standard » la surface.
-  /// L'ambre `#FFB300` qu'il portait n'appartenait à aucun jeton.
-  Color _fondDuPalier(ThemeData theme, String palier) {
-    switch (palier) {
-      case 'VIP':
-        return theme.colorScheme.secondaryContainer;
-      case 'Fidèle':
-        return theme.colorScheme.tertiaryContainer;
-      default:
-        return theme.colorScheme.surfaceContainerHigh;
-    }
-  }
+  /// Le palier ne prend pas une couleur inventée : le sommet porte le doré de
+  /// la secondaire, un palier intermédiaire l'orange de la tertiaire, l'entrée
+  /// la surface. La couleur suit le **rang** dans l'échelle et non le nom —
+  /// « VIP », « Fidèle » —, que l'exploitation peut renommer côté serveur.
+  Color _fondDuPalier(ThemeData theme, RangDePalier rang) => switch (rang) {
+        RangDePalier.sommet => theme.colorScheme.secondaryContainer,
+        RangDePalier.intermediaire => theme.colorScheme.tertiaryContainer,
+        RangDePalier.entree => theme.colorScheme.surfaceContainerHigh,
+      };
 
-  Color _encreDuPalier(ThemeData theme, String palier) {
-    switch (palier) {
-      case 'VIP':
-        return theme.colorScheme.onSecondaryContainer;
-      case 'Fidèle':
-        return theme.colorScheme.onTertiaryContainer;
-      default:
-        return theme.colorScheme.onSurfaceVariant;
-    }
-  }
+  Color _encreDuPalier(ThemeData theme, RangDePalier rang) => switch (rang) {
+        RangDePalier.sommet => theme.colorScheme.onSecondaryContainer,
+        RangDePalier.intermediaire => theme.colorScheme.onTertiaryContainer,
+        RangDePalier.entree => theme.colorScheme.onSurfaceVariant,
+      };
 
   // -------------------------------------------------------------- raccourcis
 
@@ -755,7 +756,7 @@ class _EditProfileDialogState extends State<EditProfileDialog> {
               controller: _phoneController,
               enabled: !_enCours,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Téléphone',
                 hintText: AppConstants.phoneHint,
               ),
