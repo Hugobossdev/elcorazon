@@ -82,6 +82,15 @@ class RealtimeTrackingService extends ChangeNotifier
   /// (`delivery.offer_expired`) : la course est passée à un autre livreur.
   final _expiredOffersController = StreamController<String>.broadcast();
 
+  /// Courses **retirées** au livreur — annulées par le personnel, ou fermées
+  /// parce que leur commande l'a été (`delivery.cancelled`), avec le motif.
+  ///
+  /// Le serveur ne l'annonçait que sur le canal de la commande, que cette
+  /// application n'écoute pas : le livreur continuait de suivre un itinéraire
+  /// vers une course qui n'était plus la sienne.
+  final _cancelledCoursesController =
+      StreamController<({String assignmentId, String motif})>.broadcast();
+
   /// Reprise de la file après coupure.
   ///
   /// `RealtimeChannel` ne tente **qu'une seule** reconnexion, puis ferme le
@@ -190,6 +199,10 @@ class RealtimeTrackingService extends ChangeNotifier
 
   /// Les propositions retirées, par identifiant de course.
   Stream<String> get expiredOffers => _expiredOffersController.stream;
+
+  /// Les courses retirées, avec le motif que le serveur donne.
+  Stream<({String assignmentId, String motif})> get cancelledCourses =>
+      _cancelledCoursesController.stream;
 
   Stream<Course> get orderUpdates => _orderUpdatesController.stream;
   Stream<Map<String, dynamic>> get deliveryLocationUpdates =>
@@ -358,6 +371,16 @@ class RealtimeTrackingService extends ChangeNotifier
         if (event.type == 'delivery.offer_expired') {
           final id = event.payload['assignment'];
           if (id != null) _expiredOffersController.add(id.toString());
+          return;
+        }
+        if (event.type == 'delivery.cancelled') {
+          final id = event.payload['assignment'];
+          if (id != null) {
+            _cancelledCoursesController.add((
+              assignmentId: id.toString(),
+              motif: event.payload['reason'] as String? ?? '',
+            ));
+          }
           return;
         }
         if (event.type != 'delivery.offered') return;
@@ -702,6 +725,7 @@ class RealtimeTrackingService extends ChangeNotifier
     disconnect();
     _courseOffersController.close();
     _expiredOffersController.close();
+    _cancelledCoursesController.close();
     _orderUpdatesController.close();
     _deliveryLocationUpdatesController.close();
     super.dispose();

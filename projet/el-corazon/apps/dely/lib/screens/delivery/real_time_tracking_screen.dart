@@ -1,10 +1,11 @@
 import 'dart:async';
 
 import 'package:elcorazon_core/elcorazon_core.dart'
-    show EtatNavigation, EtapeNavigation, Journal, LangueNavigation;
+    show EtatNavigation, EtapeNavigation, Journal, LangueNavigation, PieceJustificative;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -83,6 +84,13 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   bool _cameraPilotee = false;
 
   bool _isUpdatingStatus = false;
+
+  /// La photo de remise est en cours d'envoi.
+  bool _envoiPreuve = false;
+
+  /// La course a quitté ma liste, et le livreur en a été averti : l'avis ne
+  /// se répète pas à chaque notification qui suit.
+  bool _retiree = false;
   bool _pret = false;
 
   @override
@@ -124,14 +132,96 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
   void _surCourse() {
     if (!mounted) return;
     final rafraichie = _appService.courseForOrder(_course.orderId);
-    if (rafraichie == null) return;
-    if (rafraichie.assignment.status == _course.assignment.status) return;
+    if (rafraichie == null) {
+      // La course a disparu de ma liste : annulée par le personnel, fermée
+      // avec sa commande, ou confiée à un autre livreur. L'écran se taisait
+      // (`return`) — la navigation continuait de guider le livreur vers une
+      // course qui n'était plus la sienne, et le geste suivant échouait sur
+      // « liste à recharger ».
+      unawaited(_courseRetiree());
+      return;
+    }
+    if (rafraichie.assignment.status == _course.assignment.status &&
+        rafraichie.assignment.hasProofOfDelivery == _course.assignment.hasProofOfDelivery) {
+      return;
+    }
 
     setState(() => _course = rafraichie);
     // C'est ici que la navigation passe du restaurant au client : elle **suit**
     // l'étape que le livreur a déclarée et que le serveur a enregistrée. Elle
     // ne la provoque jamais.
     unawaited(_navigation.majCourse(rafraichie));
+  }
+
+  /// Arrête la navigation, dit pourquoi, et referme l'écran — une fois.
+  Future<void> _courseRetiree() async {
+    if (_retiree) return;
+    _retiree = true;
+
+    await _navigation.fermer();
+    if (!mounted) return;
+
+    final motif = _appService.motifDeRetrait(_course.orderId);
+    _appService.oublierLeRetrait(_course.orderId);
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Course retirée'),
+        content: Text(
+          motif != null && motif.isNotEmpty
+              ? 'La course ${_course.reference} vous a été retirée : $motif'
+              : 'La course ${_course.reference} n’est plus dans votre liste : '
+                  'elle a été annulée ou confiée à un autre livreur.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Compris'),
+          ),
+        ],
+      ),
+    );
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Prend la photo de la remise et la dépose sur le serveur.
+  ///
+  /// Facultative, et c'est voulu : elle ne bloque jamais « J'ai livré ». Un
+  /// téléphone sans appareil photo, ou sans réseau à la porte, ne doit pas
+  /// empêcher de clore une course faite. Le serveur accepte encore une
+  /// première preuve après la livraison.
+  Future<void> _prendrePreuve() async {
+    final messager = ScaffoldMessenger.of(context);
+    try {
+      final fichier = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        imageQuality: 80,
+      );
+      if (fichier == null) return; // appareil photo refermé : rien à faire
+      final octets = await fichier.readAsBytes();
+      if (!mounted) return;
+
+      setState(() => _envoiPreuve = true);
+      await _appService.deposerPreuve(
+        _course.orderId,
+        PieceJustificative(
+          filename: 'remise-${_course.reference}.jpg',
+          bytes: octets,
+          contentType: 'image/jpeg',
+        ),
+      );
+      messager.showSnackBar(
+        const SnackBar(content: Text('Photo de remise enregistrée.')),
+      );
+    } catch (e) {
+      messager.showSnackBar(
+        SnackBar(content: Text(messageErreur(e)), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _envoiPreuve = false);
+    }
   }
 
   // ------------------------------------------------------------------ caméra
@@ -843,7 +933,7 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
     // en a besoin — sans rien décider à sa place.
     final misEnAvant = _navigation.etat.estUneArrivee;
 
-    return SizedBox(
+    final bouton = SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
         onPressed:
@@ -868,6 +958,45 @@ class _RealTimeTrackingScreenState extends State<RealTimeTrackingScreen> {
           elevation: misEnAvant ? 6 : 2,
         ),
       ),
+    );
+
+    if (!estLivraison) return bouton;
+
+    // À la porte : la preuve de remise, avant le geste qui clôt la course.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_course.assignment.hasProofOfDelivery)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Icon(Icons.photo_camera, color: Colors.green, size: 18),
+                SizedBox(width: 6),
+                Text('Photo de remise enregistrée', style: TextStyle(color: Colors.green)),
+              ],
+            ),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _envoiPreuve || _isUpdatingStatus ? null : _prendrePreuve,
+                icon: _envoiPreuve
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.photo_camera_outlined),
+                label: const Text('Photo de remise'),
+              ),
+            ),
+          ),
+        bouton,
+      ],
     );
   }
 

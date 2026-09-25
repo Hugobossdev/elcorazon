@@ -379,6 +379,12 @@ class DjangoDeliveryRepository {
     return Course(assignment: await _delivery.transitionTo(assignmentId, target));
   }
 
+  /// Dépose la photo prise à la remise. Le serveur la garde sur un stockage
+  /// privé et ne dit plus que [eccore.Assignment.hasProofOfDelivery].
+  Future<Course> submitProof(String assignmentId, eccore.PieceJustificative photo) async {
+    return Course(assignment: await _delivery.submitProof(assignmentId, photo));
+  }
+
   /// Dépose une position sur une course en cours. Rend `false` quand
   /// l'échantillonnage serveur a écarté le relevé (202) — ce n'est pas un
   /// échec : la position a été reçue et le dossier rafraîchi.

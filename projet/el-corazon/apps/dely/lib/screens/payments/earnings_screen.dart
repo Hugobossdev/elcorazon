@@ -814,13 +814,21 @@ class _EarningsScreenState extends State<EarningsScreen> {
   /// le solde côté serveur (`WithdrawalService.fail`) — sa raison est donc
   /// affichée, pour qu'il ne s'étonne pas de voir son solde remonter.
   Widget _buildWithdrawalItem(Withdrawal retrait) {
+    // Un statut que cette version ne connaît pas se dit tel : il retombait sur
+    // « En attente », et un versement fait — ou refusé — s'affichait encore dû.
     final (couleur, libelle) = switch (retrait.status) {
+      'pending' => (Colors.orange, 'En attente'),
       'completed' => (Colors.green, 'Versé'),
       'processing' => (Colors.blue, 'En cours de versement'),
       'failed' => (Colors.red, 'Échoué'),
       'cancelled' => (Colors.grey, 'Annulé'),
-      _ => (Colors.orange, 'En attente'),
+      _ => (Colors.grey, 'Statut inconnu'),
     };
+    // La référence du versement, quand l'exploitation l'a saisie : c'est
+    // elle que le livreur cite s'il ne voit pas l'argent arriver.
+    final reference = retrait.providerReference.isEmpty
+        ? ''
+        : ' · Réf. ${retrait.providerReference}';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -838,8 +846,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 ),
                 Text(
                   retrait.failureReason.isEmpty
-                      ? '$libelle · ${_formatTimestamp(retrait.createdAt)}'
-                      : '$libelle · ${retrait.failureReason}',
+                      ? '$libelle · ${_formatTimestamp(retrait.createdAt)}$reference'
+                      : '$libelle · ${retrait.failureReason}$reference',
                   style: TextStyle(color: Colors.grey[600], fontSize: 12),
                 ),
               ],

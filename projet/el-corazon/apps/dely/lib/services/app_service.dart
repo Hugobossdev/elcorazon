@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_dely/presentation/etat_compte.dart';
 import 'package:elcora_dely/presentation/libelles_course.dart';
+import 'package:elcora_dely/presentation/messages_erreur.dart';
 import 'package:elcora_dely/repositories/django_delivery_repository.dart';
 import 'package:elcora_dely/services/call_service.dart';
 import 'package:elcora_dely/services/location_service.dart';
@@ -87,6 +88,12 @@ class AppService extends ChangeNotifier {
   eccore.CourierProfile? _courierProfile;
   StreamSubscription<eccore.AssignmentOffer>? _courseOffersSubscription;
   StreamSubscription<String>? _expiredOffersSubscription;
+  StreamSubscription<({String assignmentId, String motif})>? _cancelledCoursesSubscription;
+
+  /// Pourquoi une course a quitté ma liste, par commande — le motif que le
+  /// serveur a donné en la retirant. Lu par l'écran de navigation pour dire au
+  /// livreur ce qui s'est passé au lieu de le laisser devant un écran figé.
+  final Map<String, String> _coursesRetirees = {};
 
   /// Construit à la demande : l'`ApiClient` vit dans le conteneur Riverpod créé
   /// par `main()`, et le lire au constructeur d'`AppService` le figerait avant
@@ -128,6 +135,7 @@ class AppService extends ChangeNotifier {
     _sessionSubscription.close();
     unawaited(_courseOffersSubscription?.cancel());
     unawaited(_expiredOffersSubscription?.cancel());
+    unawaited(_cancelledCoursesSubscription?.cancel());
     unawaited(_tokenRefreshSubscription.cancel());
     unawaited(_notificationOpenedSubscription.cancel());
     super.dispose();
@@ -229,6 +237,53 @@ class AppService extends ChangeNotifier {
       eccore.Journal.trace('⌛ Proposition retirée : $assignmentId');
       unawaited(loadAvailableOrders(forceRefresh: true));
     });
+
+    // Une course **retirée** — annulée par le personnel, ou fermée avec sa
+    // commande. Le motif est retenu avant le rechargement, qui fera disparaître
+    // la course : c'est lui que l'écran de navigation dira au livreur.
+    unawaited(_cancelledCoursesSubscription?.cancel());
+    _cancelledCoursesSubscription = tracking.cancelledCourses.listen((retrait) {
+      eccore.Journal.trace('🚫 Course retirée : ${retrait.assignmentId}');
+      for (final course in _coursesByOrderId.values) {
+        if (course.assignmentId == retrait.assignmentId) {
+          _coursesRetirees[course.orderId] = retrait.motif;
+        }
+      }
+      unawaited(_relireSansErreur());
+    });
+  }
+
+  /// Pourquoi la course de cette commande m'a été retirée, si le serveur l'a
+  /// dit ; `null` si rien n'a été annoncé.
+  String? motifDeRetrait(String orderId) => _coursesRetirees[orderId];
+
+  /// L'écran a dit au livreur ce qui s'était passé : le motif ne sert plus.
+  void oublierLeRetrait(String orderId) => _coursesRetirees.remove(orderId);
+
+  /// Recharge sans laisser d'erreur non rattrapée : appelée en arrière-plan,
+  /// elle n'a personne à qui la rendre. La liste en cache reste affichée.
+  Future<void> _relireSansErreur() async {
+    try {
+      await loadAvailableOrders(forceRefresh: true);
+    } catch (e) {
+      eccore.Journal.trace('⚠️ Rechargement des courses impossible : $e');
+    }
+  }
+
+  /// Exécute un geste sur une course, et **relit** si le serveur le refuse.
+  ///
+  /// Un refus 4xx — course prise par un collègue, proposition expirée,
+  /// commande annulée, étape plus permise — dit que la liste affichée est
+  /// périmée. Elle ne l'était pas relue : la carte gardait ses boutons, et le
+  /// livreur pouvait rappuyer indéfiniment sur un geste que le serveur
+  /// refuserait toujours. Le refus remonte tel quel ; seule la liste change.
+  Future<T> _relireSiRefus<T>(Future<T> Function() geste) async {
+    try {
+      return await geste();
+    } on eccore.ApiException catch (e) {
+      if (e.status >= 400 && e.status < 500) unawaited(_relireSansErreur());
+      rethrow;
+    }
   }
 
   /// Appelée par `SplashScreen` une fois que `sessionProvider` a fini de
@@ -448,7 +503,20 @@ class AppService extends ChangeNotifier {
       return;
     }
 
-    _rememberCourse(await _delivery.advanceTo(course.assignmentId, target));
+    _rememberCourse(
+      await _relireSiRefus(() => _delivery.advanceTo(course.assignmentId, target)),
+    );
+  }
+
+  /// Dépose la preuve de livraison — la photo prise à la remise.
+  ///
+  /// Acceptée par le serveur une fois le repas en route, ou livré tant
+  /// qu'aucune preuve n'est posée. Le serveur vérifie que c'est une image.
+  Future<void> deposerPreuve(String orderId, eccore.PieceJustificative photo) async {
+    final course = _requireCourse(orderId);
+    _rememberCourse(
+      await _relireSiRefus(() => _delivery.submitProof(course.assignmentId, photo)),
+    );
   }
 
   // ------------------------------------------------------------- Livraison
@@ -542,7 +610,7 @@ class AppService extends ChangeNotifier {
   /// n'est donc affiché comme acquis avant la réponse.
   Future<void> acceptDelivery(String orderId) async {
     final course = _requireCourse(orderId);
-    _rememberCourse(await _delivery.accept(course.assignmentId));
+    _rememberCourse(await _relireSiRefus(() => _delivery.accept(course.assignmentId)));
     eccore.Journal.trace('✅ Course acceptée pour la commande $orderId');
   }
 
@@ -550,7 +618,9 @@ class AppService extends ChangeNotifier {
   /// proposition n'incrémente pas le compteur d'annulations du livreur.
   Future<void> declineDelivery(String orderId, {String reason = ''}) async {
     final course = _requireCourse(orderId);
-    _rememberCourse(await _delivery.decline(course.assignmentId, reason: reason));
+    _rememberCourse(
+      await _relireSiRefus(() => _delivery.decline(course.assignmentId, reason: reason)),
+    );
   }
 
   /// Marque la course comme récupérée au restaurant (`picked_up`).
@@ -807,7 +877,17 @@ class AppService extends ChangeNotifier {
     final payments = eccore.PaymentRepository(
       apiClient: _container.read(eccore.apiClientProvider),
     );
-    final devise = _courierProfile?.totalEarnings?.currency ?? 'XOF';
+    // La devise des gains, relue au besoin — jamais supposée. Le repli sur
+    // `'XOF'` envoyait un retrait en francs CFA depuis Douala ou Accra, que le
+    // serveur refusait sans que le livreur comprenne pourquoi.
+    var devise = _courierProfile?.totalEarnings?.currency;
+    if (devise == null || devise.isEmpty) {
+      _courierProfile = await _delivery.profile();
+      devise = _courierProfile?.totalEarnings?.currency;
+    }
+    if (devise == null || devise.isEmpty) {
+      throw const RefusLocal('Solde illisible pour le moment : réessayez dans un instant.');
+    }
 
     // L'`ApiException` d'un solde insuffisant remonte telle quelle : son
     // `detail` — « Le montant demandé dépasse les gains disponibles. » — est

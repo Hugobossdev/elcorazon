@@ -12,6 +12,17 @@ void main() {
   eccore.ApiException probleme(int statut, String code, String detail) =>
       eccore.ApiException(status: statut, code: code, detail: detail);
 
+  group('Un refus décidé dans l’application', () {
+    test('dit sa propre phrase, pas celle d’une course périmée', () {
+      // Le solde illisible levait un `StateError`, que ce fichier lit comme
+      // « cette course n’est plus dans votre liste ».
+      const refus = RefusLocal('Solde illisible pour le moment : réessayez dans un instant.');
+
+      expect(messageErreur(refus), 'Solde illisible pour le moment : réessayez dans un instant.');
+      expect(messageErreur(StateError('liste')), contains('plus dans votre liste'));
+    });
+  });
+
   group('Le message du serveur est celui qu\'on affiche', () {
     test('un dossier non validé dit pourquoi', () {
       // Observé : POST /delivery/me/online/ avec un dossier en attente.

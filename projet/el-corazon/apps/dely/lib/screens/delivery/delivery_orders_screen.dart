@@ -1233,7 +1233,7 @@ class _DeliveryDetailsSheetState extends State<DeliveryDetailsSheet> {
 
       // Ouvrir WhatsApp avec un message pré-rempli
       final message =
-          'Bonjour, je suis votre livreur pour la commande #${widget.order.orderId}.';
+          'Bonjour, je suis votre livreur pour la commande ${widget.order.reference}.';
       final uri = Uri.parse(
         'https://wa.me/$cleanPhone?text=${Uri.encodeComponent(message)}',
       );
