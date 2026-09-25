@@ -75,6 +75,12 @@ abstract final class FamilleAudit {
     'zone.': 'Zones et barèmes',
     'restaurant.': 'Établissements',
     'country.': 'Pays',
+    // L'argent qui sort, et ceux qui le reçoivent : ce qu'on vient le plus
+    // souvent chercher dans un journal, et que les familles ne proposaient pas.
+    'refund.': 'Remboursements',
+    'payout.': 'Versements livreurs',
+    'courier.': 'Dossiers livreurs',
+    'review.': 'Avis',
   };
 
   /// Libellé d'une action. Une action inconnue s'affiche telle quelle.
@@ -88,9 +94,23 @@ abstract final class FamilleAudit {
         'zone.tariff' => 'Barème de zone',
         'zone.boundary' => 'Contour de zone',
         'zone.activation' => 'Ouverture de zone',
+        'restaurant.create' => 'Ouverture d’un établissement',
+        'restaurant.status' => 'État d’un établissement',
         'restaurant.location' => 'Emplacement d’un établissement',
         'restaurant.zone' => 'Zone d’un établissement',
         'country.activation' => 'Ouverture de pays',
+        // Les sorties d'argent et les décisions envers un client : écrites au
+        // journal depuis longtemps, elles s'y lisaient sous leur nom technique.
+        'payout.settle' => 'Versement livreur constaté',
+        'payout.reject' => 'Versement livreur refusé',
+        'refund.request' => 'Remboursement demandé',
+        'refund.settle' => 'Remboursement constaté',
+        'refund.cancel' => 'Remboursement abandonné',
+        'review.visibility' => 'Visibilité d’un avis',
+        'complaint.decision' => 'Décision sur une réclamation',
+        'return.decision' => 'Décision sur un retour',
+        'ticket.resolution' => 'Résolution d’un ticket',
+        'courier.verification' => 'Dossier livreur',
         _ => action,
       };
 }
