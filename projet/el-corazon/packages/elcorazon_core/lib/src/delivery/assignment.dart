@@ -79,6 +79,7 @@ class Assignment {
     required this.updatedAt,
     this.deliveryLandmark = '',
     this.courierFee,
+    this.hasProofOfDelivery = false,
     this.acceptedAt,
     this.pickedUpAt,
     this.deliveredAt,
@@ -119,6 +120,7 @@ class Assignment {
           .map((transition) => transition.toString())
           .toList(),
       courierFee: fee == null ? null : Money.fromJson(fee),
+      hasProofOfDelivery: json['has_proof_of_delivery'] as bool? ?? false,
       offeredAt: DateTime.parse(json['offered_at'] as String),
       acceptedAt: _parseDate(json['accepted_at']),
       pickedUpAt: _parseDate(json['picked_up_at']),
@@ -168,6 +170,12 @@ class Assignment {
   /// Rémunération figée à l'acceptation — nulle tant que la course est
   /// seulement proposée.
   final Money? courierFee;
+
+  /// Une preuve de livraison — la photo prise à la remise — est enregistrée.
+  ///
+  /// Le serveur dit **qu'il y en a une**, jamais où elle est : elle reste sur
+  /// un stockage privé, et ne sert qu'à trancher un litige.
+  final bool hasProofOfDelivery;
   final DateTime offeredAt;
   final DateTime? acceptedAt;
   final DateTime? pickedUpAt;

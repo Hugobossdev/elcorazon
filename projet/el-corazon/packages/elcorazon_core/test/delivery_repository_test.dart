@@ -164,6 +164,13 @@ class _FakeServer implements HttpClientAdapter {
       return _json(_assignmentJson(status: 'declined'), 200);
     }
 
+    if (options.path.endsWith('/proof/')) {
+      return _json(
+        {..._assignmentJson(status: 'on_the_way'), 'has_proof_of_delivery': true},
+        200,
+      );
+    }
+
     if (options.path.endsWith('/status/')) {
       final target = (options.data as Map)['status'] as String;
       return _json(_assignmentJson(status: target), 200);
@@ -382,6 +389,22 @@ void main() {
       expect(assignment.courierFee?.amountMinor, 750);
       expect(assignment.acceptedAt, isNotNull);
       expect(server.requests, contains('POST /delivery/assignments/assign-1/accept/'));
+    });
+
+    test('submitProof dépose la photo en multipart, sous le champ photo', () async {
+      final assignment = await repository.submitProof(
+        'assign-1',
+        const PieceJustificative(filename: 'porte.jpg', bytes: [1, 2, 3], contentType: 'image/jpeg'),
+      );
+
+      expect(server.requests.last, 'POST /delivery/assignments/assign-1/proof/');
+      expect(server.formulaires.last.files.map((f) => f.key), ['photo']);
+      // Le serveur dit qu'une preuve existe ; il ne rend jamais la photo.
+      expect(assignment.hasProofOfDelivery, isTrue);
+    });
+
+    test('une course sans le champ n’a pas de preuve', () async {
+      expect((await repository.accept('assign-1')).hasProofOfDelivery, isFalse);
     });
 
     test('decline transmet le motif', () async {

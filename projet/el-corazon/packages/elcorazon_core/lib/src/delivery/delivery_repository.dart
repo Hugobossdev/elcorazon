@@ -291,4 +291,17 @@ class DeliveryRepository {
     );
     return Assignment.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Dépose la preuve de livraison — `POST /delivery/assignments/{id}/proof/`.
+  ///
+  /// Acceptée une fois le repas en route ou livré ; une preuve déjà posée sur
+  /// une course livrée ne se remplace plus (409). Le serveur vérifie que le
+  /// fichier est une image.
+  Future<Assignment> submitProof(String id, PieceJustificative photo) async {
+    final response = await apiClient.post(
+      '/delivery/assignments/$id/proof/',
+      data: FormData.fromMap({'photo': photo.versMultipart()}),
+    );
+    return Assignment.fromJson(response.data as Map<String, dynamic>);
+  }
 }
