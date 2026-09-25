@@ -44,6 +44,12 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelV
 
 from apps.accounts.models import User, UserType
 from apps.accounts.services import AuthService
+from apps.geography.journal import (
+    record_zone_changes,
+    record_zone_creation,
+    record_zone_deletion,
+    zone_fingerprint,
+)
 from apps.geography.models import DeliveryZone
 from apps.restaurants.duplication import SECTION_GENERAL, copy_sections
 from apps.restaurants.models import (
@@ -803,15 +809,7 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
             authenticated_user(self.request), serializer.validated_data["restaurant"].pk
         )
         zone = serializer.save()
-        record_change(
-            actor=authenticated_user(self.request),
-            action=AuditAction.ZONE_BOUNDARY,
-            target_type="zone",
-            target_id=zone.pk,
-            target_label=f"{zone.name} — {zone.restaurant.name}",
-            before={},
-            after={"shape": zone.shape, "radius_meters": zone.radius_meters},
-        )
+        record_zone_creation(authenticated_user(self.request), zone)
 
     def perform_update(self, serializer: Any) -> None:
         # Deux périmètres à garder, et non un : celui de la zone telle qu'elle
@@ -824,25 +822,9 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
         if cible is not None:
             assert_in_scope(acteur, cible.pk)
 
-        avant = {
-            "shape": serializer.instance.shape,
-            "radius_meters": serializer.instance.radius_meters,
-            "base_fee": str(serializer.instance.base_fee),
-        }
+        avant = zone_fingerprint(serializer.instance)
         zone = serializer.save()
-        record_change(
-            actor=acteur,
-            action=AuditAction.ZONE_TARIFF,
-            target_type="zone",
-            target_id=zone.pk,
-            target_label=f"{zone.name} — {zone.restaurant.name}",
-            before=avant,
-            after={
-                "shape": zone.shape,
-                "radius_meters": zone.radius_meters,
-                "base_fee": str(zone.base_fee),
-            },
-        )
+        record_zone_changes(acteur, avant, zone)
 
     def perform_destroy(self, instance: DeliveryZone) -> None:
         etablissement = _etablissement_proprietaire(instance)
@@ -858,15 +840,7 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
                 "rattachez-le à une autre zone avant de la supprimer.",
                 zone=str(instance.pk),
             )
-        record_change(
-            actor=authenticated_user(self.request),
-            action=AuditAction.ZONE_ACTIVATION,
-            target_type="zone",
-            target_id=instance.pk,
-            target_label=f"{instance.name} — {etablissement.name}",
-            before={"exists": True},
-            after={"exists": False},
-        )
+        record_zone_deletion(authenticated_user(self.request), instance)
         instance.delete()
 
 

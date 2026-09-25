@@ -51,8 +51,8 @@ plus bas.
 | Formules d'abonnement | PARTIEL — lues par le client, gérées seulement dans l'administration Django | PARTIEL | COMPLET | À FAIRE | — | PARTIEL | — | — | — |
 | Images de catégorie | À FAIRE (pas de champ) | À FAIRE | À FAIRE | À FAIRE | — | — | — | — | — |
 | Contenus FAQ / CGV | À FAIRE (contenu à fournir, D6) | À FAIRE | À FAIRE | À FAIRE | — | — | — | — | — |
-| Éditeur de contour de zone | COMPLET (le contour est accepté) | COMPLET | — | À FAIRE (saisie centre + rayon) | COMPLET | — | — | — | — |
-| Zones propres à un établissement | COMPLET | COMPLET | — | À FAIRE (aucun écran) | COMPLET | COMPLET | — | — | — |
+| Éditeur de contour de zone (cercle, polygone) | COMPLET — contour refusé s'il se croise, sort du globe, dépasse 500 sommets ou 5 000 km² | COMPLET | — | COMPLET — carte : centre + curseur de rayon, sommets posés, glissés, retirés, zones voisines en gris (zones propres) | COMPLET | COMPLET | COMPLET — 13/13 contre le serveur local (2026-09-25) | À VÉRIFIER (carte sur appareil) | BLOQUÉ |
+| Zones propres à un établissement | COMPLET — journal distinct : création, contour, barème, ouverture, suppression | COMPLET | — | COMPLET — Réseau → établissement → ⋮ → Zones de livraison : liste, création, modification, activation, suppression (409 lisible) | COMPLET — autre cuisine : 404 ; client : 403 ; sans session : 401 | COMPLET | COMPLET — adresse dedans desservie par la zone, dehors non | À VÉRIFIER | BLOQUÉ |
 
 ### Ce que l'audit du 21 septembre a corrigé
 

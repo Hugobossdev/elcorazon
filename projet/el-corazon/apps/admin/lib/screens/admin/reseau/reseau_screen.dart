@@ -10,6 +10,7 @@ import 'package:admin/screens/admin/reseau/pays_form_dialog.dart';
 import 'package:admin/screens/admin/reseau/provisionnement_screen.dart';
 import 'package:admin/screens/admin/reseau/ville_form_dialog.dart';
 import 'package:admin/screens/admin/reseau/zone_creation_dialog.dart';
+import 'package:admin/screens/admin/reseau/zones_de_cuisine_screen.dart';
 import 'package:admin/services/delivery_zone_service.dart';
 import 'package:admin/services/network_service.dart';
 
@@ -791,6 +792,12 @@ class _Actions extends StatelessWidget {
             );
           case 'modifier':
             await _modifier(context);
+          case 'zones':
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ZonesDeCuisineScreen(etablissement: etablissement),
+              ),
+            );
           case 'dupliquer':
             await _dupliquer(context);
         }
@@ -812,6 +819,16 @@ class _Actions extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.edit_outlined),
             title: Text('Modifier la fiche'),
+          ),
+        ),
+        PopupMenuItem(
+          value: 'zones',
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.map_outlined),
+            title: Text('Zones de livraison'),
+            subtitle: Text('Cercles et contours propres à la cuisine'),
           ),
         ),
         PopupMenuItem(

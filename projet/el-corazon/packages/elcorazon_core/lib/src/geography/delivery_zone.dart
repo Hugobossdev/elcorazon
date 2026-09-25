@@ -1,3 +1,4 @@
+import 'package:elcorazon_core/src/directions/geo_point.dart';
 import 'package:elcorazon_core/src/models/money.dart';
 
 /// Zone de livraison et son barème — miroir de `ManagedDeliveryZoneSerializer`.
@@ -25,6 +26,10 @@ class DeliveryZone {
     this.boundary,
     this.freeDeliveryThreshold,
     this.minOrderAmount,
+    this.shape = '',
+    this.center,
+    this.radiusMeters,
+    this.restaurantSlug,
   });
 
   factory DeliveryZone.fromJson(Map<String, dynamic> json) {
@@ -40,6 +45,10 @@ class DeliveryZone {
       maxDistanceKm: _decimal(json['max_distance_km']),
       estimatedDeliveryMinutes: json['estimated_delivery_minutes'] as int,
       isActive: json['is_active'] as bool? ?? true,
+      shape: json['shape'] as String? ?? '',
+      center: _point(json['center']),
+      radiusMeters: json['radius_meters'] as int?,
+      restaurantSlug: json['restaurant'] as String?,
     );
   }
 
@@ -61,6 +70,45 @@ class DeliveryZone {
   final double maxDistanceKm;
   final int estimatedDeliveryMinutes;
   final bool isActive;
+
+  /// `circle`, `polygon` ou `administrative` — l'outil avec lequel le contour
+  /// a été saisi, donc l'éditeur à rouvrir. Vide d'un serveur antérieur.
+  final String shape;
+
+  /// Centre et rayon d'une zone circulaire ; nuls pour un polygone.
+  final GeoPoint? center;
+  final int? radiusMeters;
+
+  /// La cuisine à laquelle la zone est propre ; nul pour une zone de ville.
+  final String? restaurantSlug;
+
+  bool get estCirculaire => shape == 'circle';
+
+  /// Les sommets du contour, dans l'ordre, **sans** le point qui ferme
+  /// l'anneau — ce que l'éditeur de polygone rouvre.
+  ///
+  /// Lit le premier anneau du premier polygone : une zone tracée à la main
+  /// n'en a qu'un. Vide si le contour n'a pas été rendu.
+  List<GeoPoint> get sommets {
+    final polygones = boundary?['coordinates'];
+    if (polygones is! List || polygones.isEmpty) return const [];
+    final anneaux = polygones.first;
+    if (anneaux is! List || anneaux.isEmpty) return const [];
+    final anneau = [
+      for (final point in anneaux.first as List)
+        GeoPoint(
+          ((point as List)[1] as num).toDouble(),
+          (point[0] as num).toDouble(),
+        ),
+    ];
+    if (anneau.length > 1 && anneau.first == anneau.last) anneau.removeLast();
+    return anneau;
+  }
+
+  static GeoPoint? _point(Object? value) {
+    if (value is! Map) return null;
+    return GeoPoint((value['lat'] as num).toDouble(), (value['lon'] as num).toDouble());
+  }
 
   static Money? _money(Object? value) =>
       value == null ? null : Money.fromJson(value as Map<String, dynamic>);

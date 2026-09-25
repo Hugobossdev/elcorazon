@@ -72,9 +72,11 @@ class AuditAction:
     RESTAURANT_STATUS = "restaurant.status"
     RESTAURANT_LOCATION = "restaurant.location"
     RESTAURANT_ZONE = "restaurant.zone"
+    ZONE_CREATE = "zone.create"
     ZONE_BOUNDARY = "zone.boundary"
     ZONE_TARIFF = "zone.tariff"
     ZONE_ACTIVATION = "zone.activation"
+    ZONE_DELETE = "zone.delete"
     COUNTRY_ACTIVATION = "country.activation"
 
     # Les droits — qui peut faire quoi, et sur quoi. Même propriété que la

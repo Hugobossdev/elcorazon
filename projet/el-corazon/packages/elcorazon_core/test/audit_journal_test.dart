@@ -119,7 +119,8 @@ void main() {
     // Le registre `AuditAction` de `backend/common/audit.py`, au 2026-09-25.
     const actionsDuServeur = [
       'restaurant.create', 'restaurant.status', 'restaurant.location', 'restaurant.zone',
-      'zone.boundary', 'zone.tariff', 'zone.activation', 'country.activation',
+      'zone.create', 'zone.boundary', 'zone.tariff', 'zone.activation', 'zone.delete',
+      'country.activation',
       'role.permissions', 'staff.roles', 'staff.scope', 'staff.activation', 'staff.password',
       'customer.block', 'review.visibility', 'payout.settle', 'payout.reject',
       'refund.request', 'refund.settle', 'refund.cancel', 'complaint.decision',

@@ -41,7 +41,14 @@ import math
 
 from django.contrib.gis.geos import LinearRing, MultiPolygon, Point, Polygon
 
-__all__ = ["CIRCLE_SEGMENTS", "circle_to_boundary", "polygon_to_boundary"]
+__all__ = [
+    "CIRCLE_SEGMENTS",
+    "MAX_POLYGON_VERTICES",
+    "MAX_ZONE_AREA_KM2",
+    "check_boundary",
+    "circle_to_boundary",
+    "polygon_to_boundary",
+]
 
 #: Nombre de côtés du polygone qui approche un disque. Voir l'en-tête du module.
 CIRCLE_SEGMENTS = 64
@@ -53,6 +60,51 @@ CIRCLE_SEGMENTS = 64
 #: Les distances qui *facturent*, elles, sont mesurées par PostGIS sur
 #: l'ellipsoïde — ce module ne sert qu'à dessiner.
 EARTH_RADIUS_M = 6_371_008.8
+
+#: Sommets au-delà desquels un contour tracé est refusé.
+#:
+#: Un quartier se dessine en quelques dizaines de points ; cinq cents laissent de
+#: la marge à un contour minutieux, et arrêtent un collage accidentel de trace
+#: GPS qui ferait de chaque test d'appartenance une requête lourde.
+MAX_POLYGON_VERTICES = 500
+
+#: Surface au-delà de laquelle une zone de livraison n'en est plus une.
+#:
+#: Cinq mille kilomètres carrés dépassent le Grand Abidjan tout entier. Au-delà,
+#: c'est une erreur de saisie — un sommet posé dans le mauvais pays, un rayon
+#: tapé en mètres au lieu de kilomètres — que rien d'autre n'attraperait : la
+#: zone serait valide, et desservirait la moitié d'un pays.
+MAX_ZONE_AREA_KM2 = 5_000
+
+#: Projection de surface égale (cylindrique de Lambert, mondiale) : une aire en
+#: mètres carrés juste à toutes les latitudes, ce que ne donne pas Mercator.
+_EQUAL_AREA_SRID = 6933
+
+
+def check_boundary(boundary: MultiPolygon) -> None:
+    """Refuse un contour que PostGIS jugerait faux, ou démesuré.
+
+    Deux fautes que la construction laisse passer :
+
+    * **un contour qui se croise** — quatre sommets saisis dans le mauvais
+      ordre dessinent un « nœud papillon ». GEOS le construit sans broncher ;
+      c'est au premier test d'appartenance qu'il rendrait des réponses
+      incohérentes ;
+    * **une surface démesurée** — voir [MAX_ZONE_AREA_KM2].
+
+    Lève `ValueError` avec la phrase à montrer ; l'appelant choisit le champ.
+    """
+    if not boundary.valid:
+        raise ValueError(
+            "Le contour se croise lui-même : reprenez l'ordre des sommets pour qu'il "
+            "fasse le tour de la zone sans se recouper."
+        )
+    surface_km2 = boundary.transform(_EQUAL_AREA_SRID, clone=True).area / 1_000_000
+    if surface_km2 > MAX_ZONE_AREA_KM2:
+        raise ValueError(
+            f"La zone couvre {surface_km2:,.0f} km², au-delà des "
+            f"{MAX_ZONE_AREA_KM2:,} km² admis : vérifiez les sommets ou le rayon."
+        )
 
 
 def circle_to_boundary(
@@ -119,12 +171,26 @@ def polygon_to_boundary(coordinates: list[list[float]]) -> MultiPolygon:
     """
     if len(coordinates) < 3:
         raise ValueError("Un contour demande au moins trois sommets.")
+    if len(coordinates) > MAX_POLYGON_VERTICES:
+        raise ValueError(
+            f"Un contour compte au plus {MAX_POLYGON_VERTICES} sommets ({len(coordinates)} reçus)."
+        )
 
     sommets = [(float(point[0]), float(point[1])) for point in coordinates]
+    for longitude, latitude in sommets:
+        # Hors du globe, c'est presque toujours une inversion latitude/longitude
+        # que la géométrie accepterait sans rien dire.
+        if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
+            raise ValueError(
+                f"Le sommet [{longitude}, {latitude}] est hors du globe : les sommets "
+                "s'écrivent [longitude, latitude]."
+            )
     if sommets[0] != sommets[-1]:
         sommets.append(sommets[0])
 
     if len(sommets) < 4:
         raise ValueError("Un contour demande au moins trois sommets distincts.")
 
-    return MultiPolygon(Polygon(LinearRing(sommets, srid=4326), srid=4326), srid=4326)
+    contour = MultiPolygon(Polygon(LinearRing(sommets, srid=4326), srid=4326), srid=4326)
+    check_boundary(contour)
+    return contour

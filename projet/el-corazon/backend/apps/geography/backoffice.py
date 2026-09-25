@@ -29,13 +29,13 @@ from rest_framework.mixins import (
 )
 from rest_framework.viewsets import GenericViewSet
 
+from apps.geography.journal import record_zone_changes, record_zone_creation, zone_fingerprint
 from apps.geography.models import City, Country, DeliveryZone
 from apps.geography.serializers import (
     ManagedCitySerializer,
     ManagedCountrySerializer,
     ManagedDeliveryZoneSerializer,
 )
-from common.audit import AuditAction, record_change
 from common.permissions import HasReadWritePermission, assert_unscoped, authenticated_user
 
 __all__ = ["ManagedCityViewSet", "ManagedCountryViewSet", "ManagedDeliveryZoneViewSet"]
@@ -117,84 +117,11 @@ class ManagedDeliveryZoneViewSet(_SiegeViewSet[DeliveryZone]):
     }
     search_fields: ClassVar[list[str]] = ["name"]
 
+    def perform_create(self, serializer: Any) -> None:
+        super().perform_create(serializer)
+        record_zone_creation(authenticated_user(self.request), serializer.instance)
+
     def perform_update(self, serializer: Any) -> None:
-        avant = _empreinte_de_zone(serializer.instance)
+        avant = zone_fingerprint(serializer.instance)
         super().perform_update(serializer)
-        self._journaliser(avant, serializer.instance)
-
-    def _journaliser(self, avant: dict[str, Any], zone: DeliveryZone) -> None:
-        """Deux entrées possibles : le contour, et le barème.
-
-        Séparées parce qu'elles répondent à deux questions différentes —
-        « jusqu'où livre-t-on ? » et « combien fait-on payer ? » — et qu'on les
-        pose rarement ensemble. Fondues, il faudrait lire les deux valeurs pour
-        savoir laquelle a bougé.
-        """
-        acteur = authenticated_user(self.request)
-        apres = _empreinte_de_zone(zone)
-
-        if avant["geometrie"] != apres["geometrie"]:
-            record_change(
-                actor=acteur,
-                action=AuditAction.ZONE_BOUNDARY,
-                target_type="zone",
-                target_id=zone.pk,
-                target_label=f"{zone.name} — {zone.city.name}",
-                before=avant["geometrie"],
-                after=apres["geometrie"],
-            )
-
-        if avant["bareme"] != apres["bareme"]:
-            record_change(
-                actor=acteur,
-                action=AuditAction.ZONE_TARIFF,
-                target_type="zone",
-                target_id=zone.pk,
-                target_label=f"{zone.name} — {zone.city.name}",
-                before=avant["bareme"],
-                after=apres["bareme"],
-            )
-
-        if avant["is_active"] != apres["is_active"]:
-            record_change(
-                actor=acteur,
-                action=AuditAction.ZONE_ACTIVATION,
-                target_type="zone",
-                target_id=zone.pk,
-                target_label=f"{zone.name} — {zone.city.name}",
-                before={"is_active": avant["is_active"]},
-                after={"is_active": apres["is_active"]},
-            )
-
-
-def _empreinte_de_zone(zone: DeliveryZone) -> dict[str, Any]:
-    """Ce qu'on compare pour décider s'il faut journaliser.
-
-    Le contour n'est **pas** repris tel quel : plusieurs kilo-octets de sommets
-    dans chaque entrée rendraient le journal impossible à lire et lourd à
-    stocker. Ce qu'on garde est ce qui se relit — la forme, le centre, le rayon
-    — plus une empreinte du contour, qui suffit à dire *qu'il* a changé sans
-    dire en quoi.
-    """
-    import hashlib
-
-    def montant(valeur: object) -> str | None:
-        return str(valeur) if valeur is not None else None
-
-    return {
-        "geometrie": {
-            "shape": zone.shape,
-            "center": ([round(zone.center.y, 6), round(zone.center.x, 6)] if zone.center else None),
-            "radius_meters": zone.radius_meters,
-            "boundary_digest": hashlib.sha256(zone.boundary.wkb).hexdigest()[:16],
-        },
-        "bareme": {
-            "base_fee": montant(zone.base_fee),
-            "fee_per_km": montant(zone.fee_per_km),
-            "free_delivery_threshold": montant(zone.free_delivery_threshold),
-            "min_order_amount": montant(zone.min_order_amount),
-            "max_distance_km": str(zone.max_distance_km),
-            "estimated_delivery_minutes": zone.estimated_delivery_minutes,
-        },
-        "is_active": zone.is_active,
-    }
+        record_zone_changes(authenticated_user(self.request), avant, serializer.instance)

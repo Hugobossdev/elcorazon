@@ -356,7 +356,7 @@ class ManagedDeliveryZoneSerializer(serializers.ModelSerializer[DeliveryZone]):
         redessiner.
         """
         from apps.geography.models import ZoneShape
-        from apps.geography.shapes import circle_to_boundary, polygon_to_boundary
+        from apps.geography.shapes import check_boundary, circle_to_boundary, polygon_to_boundary
 
         forme = attrs.get("shape") or (self.instance.shape if self.instance else None)
         sommets = attrs.pop("polygon_beacon", None) or attrs.pop("polygon_coordinates", None)
@@ -384,7 +384,12 @@ class ManagedDeliveryZoneSerializer(serializers.ModelSerializer[DeliveryZone]):
                     }
                 )
             attrs["center"], attrs["radius_meters"] = centre, rayon
-            return circle_to_boundary(centre, float(rayon))
+            disque = circle_to_boundary(centre, float(rayon))
+            try:
+                check_boundary(disque)
+            except ValueError as erreur:
+                raise serializers.ValidationError({"radius_meters": str(erreur)}) from erreur
+            return disque
 
         # Polygone et zone administrative partagent la même représentation : des
         # sommets. Ce qui les distingue est l'outil de saisie — l'un se trace à
@@ -402,6 +407,10 @@ class ManagedDeliveryZoneSerializer(serializers.ModelSerializer[DeliveryZone]):
         # contour administratif produit ailleurs.
         contour = attrs.get("boundary")
         if contour is not None:
+            try:
+                check_boundary(contour)
+            except ValueError as erreur:
+                raise serializers.ValidationError({"boundary": str(erreur)}) from erreur
             return contour
 
         # Modification qui ne touche pas à la géométrie : corriger un tarif ne

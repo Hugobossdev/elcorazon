@@ -112,6 +112,27 @@ Une zone peut aussi être rattachée à **un établissement** — depuis sa fich
 elle ne vaut alors que pour lui. C'est ce qui permet à deux cuisines d'une même
 ville de facturer différemment sans que l'une hérite du barème de l'autre.
 
+**Réseau → Établissements → ⋮ → Zones de livraison** liste les zones propres de
+la cuisine. Chacune se crée, se modifie, s'active ou se désactive, et se
+supprime après confirmation. L'éditeur de carte propose deux outils :
+
+- **Cercle** — toucher la carte place le centre (son repère se glisse), le
+  curseur règle le rayon ;
+- **Polygone** — chaque toucher ajoute un sommet ; un sommet se glisse pour le
+  déplacer, se retire en touchant sa bulle ; « Annuler » retire le dernier.
+
+Les autres zones de la cuisine sont dessinées en gris pour repérer un
+chevauchement. **Le serveur refuse** un contour qui se croise, un sommet hors du
+globe (souvent une inversion latitude/longitude), plus de 500 sommets ou plus de
+5 000 km² ; le refus s'affiche sous la fiche, qui reste ouverte.
+
+Une zone sur laquelle la cuisine est **posée** (`Restaurant.zone`) ne se
+supprime pas : le refus (409) nomme la cuisine à rattacher d'abord ailleurs.
+Pour arrêter de livrer une zone sans rien effacer, on la **désactive**.
+
+Chaque geste laisse une entrée distincte au journal d'audit : création, contour,
+barème, ouverture, suppression — avec l'auteur, l'avant et l'après.
+
 ### Quelle zone s'applique, quand plusieurs se recouvrent
 
 Dans l'ordre :
