@@ -27,7 +27,11 @@ Journaliser toute écriture produirait un volume qui rend le journal
 illisible — et donc inutilisé, ce qui est pire qu'absent.
 
 Les transitions d'état ont déjà leur trace ailleurs (machines à états,
-événements de domaine) ; les dupliquer ici ferait deux vérités.
+événements de domaine) ; les dupliquer ici ferait deux vérités. **Sauf quand
+cet ailleurs n'existe pas** : un établissement n'a aucun historique d'états,
+et sa transition ignore son auteur — sa mise en service et sa suspension se
+consignent donc ici (`restaurant.status`), faute de quoi personne ne pourrait
+dire qui a retiré une cuisine de l'application cliente.
 
 ## Pourquoi la cible n'est pas une clé étrangère
 
@@ -64,6 +68,8 @@ class AuditAction:
     partagent les mêmes clés, pas pour que la base les valide.
     """
 
+    RESTAURANT_CREATE = "restaurant.create"
+    RESTAURANT_STATUS = "restaurant.status"
     RESTAURANT_LOCATION = "restaurant.location"
     RESTAURANT_ZONE = "restaurant.zone"
     ZONE_BOUNDARY = "zone.boundary"

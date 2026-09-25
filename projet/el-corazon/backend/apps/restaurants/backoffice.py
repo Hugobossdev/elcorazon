@@ -363,7 +363,17 @@ class ManagedRestaurantViewSet(
         n'ouvre pas à Abidjan.
         """
         assert_can_open_in_zone(authenticated_user(self.request), serializer.validated_data["zone"])
-        serializer.save()
+        etablissement = serializer.save()
+        record_change(
+            actor=authenticated_user(self.request),
+            action=AuditAction.RESTAURANT_CREATE,
+            target_type="restaurant",
+            target_id=etablissement.pk,
+            target_label=etablissement.name,
+            before={},
+            after={"status": etablissement.status, "zone": str(etablissement.zone_id)},
+            scope_restaurant_id=etablissement.pk,
+        )
 
     def perform_update(self, serializer: Any) -> None:
         avant = _empreinte_geographique(serializer.instance)
@@ -506,7 +516,20 @@ class ManagedRestaurantViewSet(
                 "La mise en service d'un établissement",
             )
 
+        avant = etablissement.status
         etablissement.transition_to(cible)
+        # Après la transition, qui lève si elle est refusée : une tentative
+        # rejetée n'a rien décidé, et ne s'écrit pas.
+        record_change(
+            actor=authenticated_user(request),
+            action=AuditAction.RESTAURANT_STATUS,
+            target_type="restaurant",
+            target_id=etablissement.pk,
+            target_label=etablissement.name,
+            before={"status": avant},
+            after={"status": cible},
+            scope_restaurant_id=etablissement.pk,
+        )
         return Response(ManagedRestaurantSerializer(etablissement).data)
 
     @extend_schema(
@@ -824,6 +847,17 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
     def perform_destroy(self, instance: DeliveryZone) -> None:
         etablissement = _etablissement_proprietaire(instance)
         assert_in_scope(authenticated_user(self.request), etablissement.pk)
+        # Une cuisine peut être posée sur l'une de ses propres zones
+        # (`zone_anchoring_problem`). `Restaurant.zone` est `PROTECT` : la base
+        # refusait la suppression en `ProtectedError`, donc en 500. On dit
+        # plutôt ce qui bloque, et quoi faire.
+        portees = list(Restaurant.objects.filter(zone=instance).values_list("name", flat=True))
+        if portees:
+            raise BusinessRuleViolation(
+                f"La zone « {instance.name} » porte l'établissement « {', '.join(portees)} » : "
+                "rattachez-le à une autre zone avant de la supprimer.",
+                zone=str(instance.pk),
+            )
         record_change(
             actor=authenticated_user(self.request),
             action=AuditAction.ZONE_ACTIVATION,
