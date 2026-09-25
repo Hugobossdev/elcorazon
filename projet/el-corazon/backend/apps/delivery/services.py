@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.contrib.gis.db.models.functions import Distance
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Sum
 from django.utils import timezone
@@ -60,6 +61,10 @@ from common.audit import AuditAction, record_change
 from common.exceptions import BusinessRuleViolation
 from common.money import Money
 from common.realtime import courier_group, order_group, publish
+
+#: Étapes où une preuve de livraison se dépose : le repas est en route, ou
+#: remis. Avant l'enlèvement, il n'y a rien à prouver.
+PROOF_STATUSES: frozenset[str] = frozenset({DeliveryStatus.ON_THE_WAY, DeliveryStatus.DELIVERED})
 
 logger = logging.getLogger(__name__)
 
@@ -751,6 +756,58 @@ class AssignmentService:
         return current
 
     @staticmethod
+    @transaction.atomic
+    def attach_proof(
+        *, assignment: Assignment, courier: CourierProfile, photo: UploadedFile
+    ) -> Assignment:
+        """Dépose la preuve de livraison — la photo prise à la remise.
+
+        Une fois le repas parti (`on_the_way`) ou livré : avant l'enlèvement, il
+        n'y a rien à prouver. La course livrée accepte encore une **première**
+        preuve — le réseau manque souvent à la porte, et la photo part après
+        « livré » —, mais plus son remplacement : c'est elle qu'on relira en
+        cas de litige, et la laisser réécrire lui ôterait sa valeur.
+        """
+        locked = Assignment.objects.select_for_update().get(pk=assignment.pk)
+        if locked.courier_id != courier.pk:
+            raise BusinessRuleViolation("Cette course n'est pas la vôtre.")
+        if locked.status not in PROOF_STATUSES:
+            raise BusinessRuleViolation(
+                "La preuve se dépose une fois le repas en route vers le client.",
+                assignment_status=locked.status,
+            )
+        if locked.status == DeliveryStatus.DELIVERED and locked.proof_of_delivery:
+            raise BusinessRuleViolation(
+                "La preuve de cette livraison est déjà enregistrée.",
+                assignment_status=locked.status,
+            )
+
+        locked.proof_of_delivery.save(f"{locked.pk}.jpg", photo, save=False)
+        locked.save(update_fields=["proof_of_delivery", "updated_at"])
+        return locked
+
+    @staticmethod
+    def _annoncer_l_annulation(course: Assignment, reason: str) -> None:
+        """Dit au livreur, sur **sa** file, que cette course lui est retirée.
+
+        La notification poussée le lui disait, et elle seule : la diffusion
+        temps réel portait sur le canal de la commande, que l'application du
+        livreur n'écoute pas. Application ouverte, il continuait donc de suivre
+        un itinéraire vers une course annulée jusqu'au rechargement suivant.
+
+        Après le commit, comme `delivery.offered` : une annulation que la
+        transaction rejette ne doit pas lui faire quitter sa course.
+        """
+        transaction.on_commit(
+            partial(
+                publish,
+                courier_group(course.courier_id),
+                "delivery.cancelled",
+                {"assignment": str(course.pk), "order": str(course.order_id), "reason": reason},
+            )
+        )
+
+    @staticmethod
     def close_for_cancelled_order(*, order: Order, reason: str) -> list[Assignment]:
         """Referme les courses encore ouvertes d'une commande qu'on vient d'annuler.
 
@@ -787,6 +844,7 @@ class AssignmentService:
             )
             # Le livreur l'apprend par son propre canal — même signal que
             # l'annulation d'une course, que `notifications` relaie déjà.
+            AssignmentService._annoncer_l_annulation(course, reason)
             assignment_cancelled.send(sender=Assignment, assignment=course, reason=reason)
             fermees.append(course)
         return fermees
@@ -896,6 +954,7 @@ class AssignmentService:
             # arrivant. La diffusion faite plus haut porte sur le canal de la
             # **commande**, que le client écoute et que le livreur n'écoute
             # pas : sans ce signal, il roulait vers une course annulée.
+            AssignmentService._annoncer_l_annulation(locked, reason)
             assignment_cancelled.send(sender=Assignment, assignment=locked, reason=reason)
 
         return locked

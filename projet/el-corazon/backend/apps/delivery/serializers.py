@@ -356,6 +356,10 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
     # comme facultative.
     courier_fee = MoneyField(read_only=True, allow_null=True)
     allowed_transitions = serializers.SerializerMethodField()
+    # **Qu'il y a** une preuve, jamais où elle est : la photo montre une porte,
+    # une adresse, parfois une personne, et sert à trancher un litige — elle
+    # reste sur le stockage privé, hors de portée de l'application.
+    has_proof_of_delivery = serializers.SerializerMethodField()
 
     class Meta:
         model = Assignment
@@ -383,6 +387,7 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
             "status",
             "allowed_transitions",
             "courier_fee",
+            "has_proof_of_delivery",
             "offered_at",
             "accepted_at",
             "picked_up_at",
@@ -395,6 +400,9 @@ class AssignmentSerializer(serializers.ModelSerializer[Assignment]):
 
     def get_allowed_transitions(self, obj: Assignment) -> list[str]:
         return sorted(DELIVERY_MACHINE.targets_from(obj.status))
+
+    def get_has_proof_of_delivery(self, obj: Assignment) -> bool:
+        return bool(obj.proof_of_delivery)
 
     def get_recipient_phone(self, obj: Assignment) -> str:
         """Le numéro du destinataire — pour le livreur, **tant qu'il porte la course**.
@@ -489,6 +497,13 @@ class VerificationSerializer(serializers.Serializer[Any]):
 
 class OnlineSerializer(serializers.Serializer[Any]):
     is_online = serializers.BooleanField()
+
+
+class ProofOfDeliverySerializer(serializers.Serializer[Any]):
+    """La photo prise à la remise. `ImageField` et non `FileField` : Pillow
+    relit le fichier, et un document qui n'est pas une image est refusé ici."""
+
+    photo = serializers.ImageField()
 
 
 class DocumentsSerializer(serializers.Serializer[Any]):

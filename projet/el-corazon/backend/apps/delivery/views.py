@@ -57,6 +57,7 @@ from apps.delivery.serializers import (
     EarningsSerializer,
     OfferSerializer,
     OnlineSerializer,
+    ProofOfDeliverySerializer,
     VerificationSerializer,
 )
 from apps.delivery.services import (
@@ -345,6 +346,34 @@ class AssignmentViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet[Assig
         responses={200: AssignmentSerializer},
         tags=["delivery"],
     )
+    @extend_schema(
+        request={"multipart/form-data": ProofOfDeliverySerializer},
+        responses={200: AssignmentSerializer},
+        tags=["delivery"],
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="proof",
+        url_name="proof",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def proof(self, request: Request, pk: str) -> Response:
+        """Preuve de livraison : la photo prise à la remise.
+
+        `proof_of_delivery` existait en base sans aucune route pour l'écrire —
+        l'application du livreur ne pouvait rien déposer.
+        """
+        serializer = ProofOfDeliverySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        assignment = AssignmentService.attach_proof(
+            assignment=self.get_object(),
+            courier=courier_of(request),
+            photo=serializer.validated_data["photo"],
+        )
+        return Response(AssignmentSerializer(assignment).data)
+
     @action(detail=True, methods=["post"], url_path="status", url_name="status")
     def update_status(self, request: Request, pk: str) -> Response:
         """Progression de la course : récupérée, en route, livrée.
