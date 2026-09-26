@@ -25,7 +25,7 @@ from django.db import models
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.catalog.models import MenuItem, Option
+from apps.catalog.models import MenuItem, Option, Variant
 from apps.groupcarts.states import GROUP_CART_MACHINE, GroupCartStatus
 from apps.orders.models import Order
 from apps.restaurants.models import Restaurant
@@ -163,6 +163,12 @@ class GroupCartLine(UUIDModel, TimeStampedModel):
     member = models.ForeignKey(User, on_delete=models.CASCADE, related_name="group_cart_lines")
     menu_item = models.ForeignKey(
         MenuItem, on_delete=models.CASCADE, related_name="group_cart_lines"
+    )
+    # La taille retenue, si l'article en a (lot 2). `SET_NULL` : une variante
+    # supprimée laisse une ligne sans taille, que le juge déclare alors
+    # incommandable plutôt que de la facturer au prix de base.
+    variant = models.ForeignKey(
+        Variant, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
     quantity = models.PositiveSmallIntegerField(default=1)
     notes = models.TextField(blank=True)

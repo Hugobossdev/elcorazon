@@ -81,6 +81,7 @@ abstract final class FamilleAudit {
     'payout.': 'Versements livreurs',
     'courier.': 'Dossiers livreurs',
     'review.': 'Avis',
+    'variant.': 'Tailles',
   };
 
   /// Libellé d'une action. Une action inconnue s'affiche telle quelle.
@@ -113,6 +114,10 @@ abstract final class FamilleAudit {
         'return.decision' => 'Décision sur un retour',
         'ticket.resolution' => 'Résolution d’un ticket',
         'courier.verification' => 'Dossier livreur',
+        'variant.create' => 'Création de taille',
+        'variant.update' => 'Taille modifiée',
+        'variant.activation' => 'Taille à la carte ou retirée',
+        'variant.delete' => 'Suppression de taille',
         _ => action,
       };
 }

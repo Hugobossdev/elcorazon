@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from apps.catalog.models import Category, MenuItem, Option, OptionGroup, OptionTemplate
+from apps.catalog.models import Category, MenuItem, Option, OptionGroup, OptionTemplate, Variant
 
 if TYPE_CHECKING:  # pragma: no cover
     from apps.restaurants.models import Restaurant
@@ -163,6 +163,20 @@ def _copier_les_options(articles: dict[str, MenuItem]) -> None:
         for option in Option.objects.filter(group_id__in=groupes_crees).order_by("sort_order")
     ]
     Option.objects.bulk_create(options)
+
+    # Les tailles suivent l'article, avec leur prix absolu (lot 2).
+    Variant.objects.bulk_create(
+        Variant(  # type: ignore[misc]
+            menu_item=articles[str(variante.menu_item_id)],
+            name=variante.name,
+            sku=variante.sku,
+            price=variante.price,
+            is_available=variante.is_available,
+            is_active=variante.is_active,
+            sort_order=variante.sort_order,
+        )
+        for variante in Variant.objects.filter(menu_item_id__in=articles).order_by("sort_order")
+    )
 
 
 def _copier_les_modeles_d_options(source: Restaurant, cible: Restaurant) -> None:

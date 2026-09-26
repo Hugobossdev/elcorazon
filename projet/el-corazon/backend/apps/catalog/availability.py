@@ -33,7 +33,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 
-from apps.catalog.models import MenuItem, Option
+from apps.catalog.models import MenuItem, Option, Variant
 from common.availability import Unavailability, UnavailabilityCode
 
 __all__ = [
@@ -104,7 +104,7 @@ def item_unavailability(
 
 
 def customization_unavailability(
-    item: MenuItem, options: Sequence[Option]
+    item: MenuItem, options: Sequence[Option], variant: Variant | None = None
 ) -> Unavailability | None:
     """Les options retenues respectent-elles encore les règles de l'article ?
 
@@ -122,6 +122,34 @@ def customization_unavailability(
     `item.option_groups` est lue : l'appelant qui juge plusieurs lignes doit
     l'avoir préchargée.
     """
+    # La taille d'abord (lot 2) : elle fixe le prix, et une taille absente ou
+    # étrangère rend le reste de la ligne sans objet.
+    if variant is not None and variant.menu_item_id != item.pk:
+        return Unavailability(
+            code=UnavailabilityCode.INVALID_CUSTOMIZATION,
+            message=f"La taille « {variant.name} » n'appartient pas à « {item.name} ».",
+            details={"variant_id": str(variant.pk)},
+        )
+    actives = [v for v in item.variants.all() if v.is_active]
+    if variant is None and actives:
+        return Unavailability(
+            code=UnavailabilityCode.INVALID_CUSTOMIZATION,
+            message=f"Choisissez une taille pour « {item.name} ».",
+            details={"variants": [str(v.pk) for v in actives]},
+        )
+    if variant is not None and not actives:
+        return Unavailability(
+            code=UnavailabilityCode.INVALID_CUSTOMIZATION,
+            message=f"« {item.name} » ne se décline pas en tailles.",
+            details={"variant_id": str(variant.pk)},
+        )
+    if variant is not None and not (variant.is_active and variant.is_available):
+        return Unavailability(
+            code=UnavailabilityCode.VARIANT_UNAVAILABLE,
+            message=f"La taille « {variant.name} » n'est plus disponible.",
+            details={"variant_id": str(variant.pk)},
+        )
+
     groupes = {groupe.pk: groupe for groupe in item.option_groups.all()}
 
     for option in options:

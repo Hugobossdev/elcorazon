@@ -33,6 +33,7 @@ class MenuItem {
     this.ingredients = const [],
     this.calories,
     this.optionGroups = const [],
+    this.variants = const [],
   });
 
   factory MenuItem.fromJson(Map<String, dynamic> json) {
@@ -64,6 +65,9 @@ class MenuItem {
       calories: json['calories'] as int?,
       optionGroups: (json['option_groups'] as List<dynamic>? ?? const [])
           .map((json) => OptionGroup.fromJson(json as Map<String, dynamic>))
+          .toList(),
+      variants: (json['variants'] as List<dynamic>? ?? const [])
+          .map((json) => Variante.fromJson(json as Map<String, dynamic>))
           .toList(),
     );
   }
@@ -98,6 +102,7 @@ class MenuItem {
         'ingredients': ingredients,
         'calories': calories,
         'option_groups': [for (final groupe in optionGroups) groupe.toJson()],
+        'variants': [for (final variante in variants) variante.toJson()],
       };
 
   final String id;
@@ -139,6 +144,48 @@ class MenuItem {
   final List<String> ingredients;
   final int? calories;
   final List<OptionGroup> optionGroups;
+
+  /// Les tailles **actives** de l'article, dans leur ordre (lot 2). Vide pour
+  /// un article qui ne se décline pas — il n'en accepte alors aucune.
+  final List<Variante> variants;
+
+  /// Un article à tailles en exige une : le serveur refuse la ligne sinon.
+  bool get aDesTailles => variants.isNotEmpty;
+}
+
+/// Une taille — Petite, Moyenne, Grande. Son prix **remplace** celui de
+/// l'article (prix absolu, décision du 2026-09-25) ; les options s'ajoutent
+/// par-dessus. Une taille épuisée se montre, grisée, sans se choisir.
+class Variante {
+  const Variante({
+    required this.id,
+    required this.name,
+    required this.price,
+    this.isAvailable = true,
+    this.sortOrder = 0,
+  });
+
+  factory Variante.fromJson(Map<String, dynamic> json) => Variante(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        price: Money.fromJson(json['price'] as Map<String, dynamic>),
+        isAvailable: json['is_available'] as bool? ?? true,
+        sortOrder: json['sort_order'] as int? ?? 0,
+      );
+
+  final String id;
+  final String name;
+  final Money price;
+  final bool isAvailable;
+  final int sortOrder;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'price': price.toJson(),
+        'is_available': isAvailable,
+        'sort_order': sortOrder,
+      };
 }
 
 /// Groupe d'options d'un article — miroir de `OptionGroupSerializer`.

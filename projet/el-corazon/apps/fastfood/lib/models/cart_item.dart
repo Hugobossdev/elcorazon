@@ -44,6 +44,14 @@ class CartItem {
   /// Le panier ne lui propose donc pas « Modifier ».
   final bool compositionLibre;
 
+  /// Taille retenue (`Variant` du catalogue), transmise au serveur qui en
+  /// tire le prix de base de la ligne — la taille **remplace** le prix du
+  /// plat, les options s'y ajoutent. Nulle pour un plat sans tailles.
+  final String? variantId;
+
+  /// Nom de la taille, pour l'affichage (« Grande »). Vide sans taille.
+  final String variantName;
+
   CartItem({
     required this.id,
     required this.menuItemId,
@@ -55,7 +63,13 @@ class CartItem {
     this.selectedOptionIds = const [],
     this.supplementOptions = 0.0,
     this.compositionLibre = false,
+    this.variantId,
+    this.variantName = '',
   });
+
+  /// Le nom tel qu'une ligne l'affiche : « Pizza Reine · Grande ». La taille
+  /// fait partie de ce qu'on a commandé, pas un détail d'option.
+  String get nomAffiche => variantName.isEmpty ? name : '$name · $variantName';
 
   /// Vrai quand le configurateur générique peut rouvrir cette ligne.
   ///
@@ -125,6 +139,8 @@ class CartItem {
     List<String>? selectedOptionIds,
     double? supplementOptions,
     bool? compositionLibre,
+    String? variantId,
+    String? variantName,
   }) {
     return CartItem(
       id: id ?? this.id,
@@ -137,6 +153,8 @@ class CartItem {
       selectedOptionIds: selectedOptionIds ?? this.selectedOptionIds,
       supplementOptions: supplementOptions ?? this.supplementOptions,
       compositionLibre: compositionLibre ?? this.compositionLibre,
+      variantId: variantId ?? this.variantId,
+      variantName: variantName ?? this.variantName,
     );
   }
 
@@ -153,6 +171,8 @@ class CartItem {
       'selected_option_ids': selectedOptionIds,
       'options_supplement': supplementOptions,
       'composition_libre': compositionLibre,
+      'variant_id': variantId,
+      'variant_name': variantName,
     };
   }
 
@@ -175,6 +195,8 @@ class CartItem {
           .toList(),
       supplementOptions: (map['options_supplement'] as num?)?.toDouble() ?? 0.0,
       compositionLibre: map['composition_libre'] as bool? ?? false,
+      variantId: map['variant_id'] as String?,
+      variantName: map['variant_name'] as String? ?? '',
     );
   }
 
@@ -196,7 +218,9 @@ class CartItem {
         other.customizations.toString() == customizations.toString() &&
         other.selectedOptionIds.toString() == selectedOptionIds.toString() &&
         other.supplementOptions == supplementOptions &&
-        other.compositionLibre == compositionLibre;
+        other.compositionLibre == compositionLibre &&
+        other.variantId == variantId &&
+        other.variantName == variantName;
   }
 
   @override
@@ -210,6 +234,8 @@ class CartItem {
         customizations.hashCode ^
         selectedOptionIds.hashCode ^
         supplementOptions.hashCode ^
-        compositionLibre.hashCode;
+        compositionLibre.hashCode ^
+        variantId.hashCode ^
+        variantName.hashCode;
   }
 }

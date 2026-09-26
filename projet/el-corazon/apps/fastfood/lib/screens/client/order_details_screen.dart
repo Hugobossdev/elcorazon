@@ -469,7 +469,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                article.name,
+                article.nomAffiche,
                 style: AppTypography.titleLg(
                   color: theme.colorScheme.onSurface,
                 ),

@@ -50,6 +50,8 @@ abstract final class MotifIndisponibilite {
   static const articleRetire = 'item_withdrawn';
   static const articleIndisponible = 'item_unavailable';
   static const optionIndisponible = 'option_unavailable';
+  /// La taille retenue n'est plus servie — retirée de la carte ou épuisée.
+  static const tailleIndisponible = 'variant_unavailable';
   static const personnalisationInvalide = 'invalid_customization';
   static const epuise = 'out_of_stock';
 

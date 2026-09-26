@@ -31,7 +31,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.carts.services import PricedSelection, price_selection, validate_selection
-from apps.catalog.models import MenuItem, Option
+from apps.catalog.models import MenuItem, Option, Variant
 from apps.groupcarts.models import GroupCart, GroupCartLine, GroupCartLineOption, GroupCartMember
 from apps.groupcarts.states import EXPIRABLE, GROUP_CART_MACHINE, GroupCartStatus
 from apps.orders.models import Order
@@ -196,6 +196,7 @@ class GroupCartService:
         quantity: int,
         options: Sequence[Option],
         notes: str = "",
+        variant: Variant | None = None,
     ) -> GroupCartLine:
         """Dépose une ligne au nom d'un participant.
 
@@ -210,9 +211,11 @@ class GroupCartService:
         GroupCartService._assert_contributable(locked)
         GroupCartService._assert_member(locked, member)
         GroupCartService._assert_orderable_here(locked, menu_item)
-        validate_selection(menu_item, options)
+        validate_selection(menu_item, options, variant)
 
-        existing = GroupCartService._identical_line(locked, member, menu_item, options, notes)
+        existing = GroupCartService._identical_line(
+            locked, member, menu_item, options, notes, variant=variant
+        )
         if existing is not None:
             existing.quantity += quantity
             existing.save(update_fields=["quantity", "updated_at"])
@@ -222,6 +225,7 @@ class GroupCartService:
                 group_cart=locked,
                 member=member,
                 menu_item=menu_item,
+                variant=variant,
                 quantity=quantity,
                 notes=notes,
             )
@@ -294,7 +298,7 @@ class GroupCartService:
                 Prefetch(
                     "lines",
                     queryset=GroupCartLine.objects.select_related(
-                        "menu_item__category", "member"
+                        "menu_item__category", "member", "variant"
                     ).prefetch_related(
                         Prefetch(
                             "options",
@@ -556,10 +560,11 @@ class GroupCartService:
         menu_item: MenuItem,
         options: Sequence[Option],
         notes: str,
+        variant: Variant | None = None,
     ) -> GroupCartLine | None:
         wanted = {option.pk for option in options}
         candidates = group_cart.lines.filter(
-            member=member, menu_item=menu_item, notes=notes
+            member=member, menu_item=menu_item, notes=notes, variant=variant
         ).prefetch_related("options")
         for line in candidates:
             if {selection.option_id for selection in line.options.all()} == wanted:

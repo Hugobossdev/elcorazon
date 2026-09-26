@@ -326,7 +326,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
                   const SizedBox(width: DesignConstants.spacingS),
                   Expanded(
                     child: Text(
-                      item.name,
+                      item.nomAffiche,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppTypography.bodyLg(
@@ -479,6 +479,7 @@ class _EnhancedOrdersScreenState extends State<EnhancedOrdersScreen>
             nom: item.name,
             quantite: item.quantity,
             options: item.customizations,
+            taille: item.variantName,
           ),
       ],
       appService.menuItems,

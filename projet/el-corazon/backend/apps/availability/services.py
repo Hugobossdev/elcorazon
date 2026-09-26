@@ -61,7 +61,7 @@ from django.contrib.gis.geos import Point
 from django.db.models import prefetch_related_objects
 
 from apps.catalog.availability import customization_unavailability, item_unavailability
-from apps.catalog.models import MenuItem, Option
+from apps.catalog.models import MenuItem, Option, Variant
 from apps.geography.services import DeliveryQuote
 from apps.production.services import MaterialService, MaterialShortage, ProducedLine
 from apps.restaurants.availability import kitchen_unavailability, lock_kitchen_for_order
@@ -92,6 +92,7 @@ class Demand:
     menu_item: MenuItem
     quantity: int = 1
     options: Sequence[Option] = field(default_factory=tuple)
+    variant: Variant | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -361,11 +362,11 @@ def _juger_la_commande(
 
     # 7 à 9 — les articles, leur matière, leurs personnalisations.
     verdicts = AvailabilityService.demands(demands)
-    prefetch_related_objects([demand.menu_item for demand in demands], "option_groups")
+    prefetch_related_objects([demand.menu_item for demand in demands], "option_groups", "variants")
     verdicts = [
         verdict
         if verdict is not None
-        else customization_unavailability(demand.menu_item, demand.options)
+        else customization_unavailability(demand.menu_item, demand.options, demand.variant)
         for demand, verdict in zip(demands, verdicts, strict=True)
     ]
     bloquees = [

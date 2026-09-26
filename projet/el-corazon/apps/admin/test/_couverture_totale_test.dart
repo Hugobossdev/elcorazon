@@ -100,6 +100,7 @@ import 'package:admin/screens/admin/selecteur_etablissement.dart';
 import 'package:admin/screens/admin/send_notification_dialog.dart';
 import 'package:admin/screens/admin/service_client_screen.dart';
 import 'package:admin/screens/admin/settings_screen.dart';
+import 'package:admin/screens/admin/tailles_editor.dart';
 import 'package:admin/screens/admin/versements/communs.dart';
 import 'package:admin/screens/admin/versements/remboursements_screen.dart';
 import 'package:admin/screens/admin/versements/retraits_livreurs_screen.dart';

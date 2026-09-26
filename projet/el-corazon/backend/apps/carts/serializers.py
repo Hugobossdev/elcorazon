@@ -11,7 +11,7 @@ from typing import Any
 
 from rest_framework import serializers
 
-from apps.catalog.models import MenuItem, Option
+from apps.catalog.models import MenuItem, Option, Variant
 from common.serializers import MoneyField
 
 __all__ = [
@@ -45,6 +45,9 @@ class PricedLineSerializer(serializers.Serializer[Any]):
     quantity = serializers.IntegerField(source="line.quantity", read_only=True)
     notes = serializers.CharField(source="line.notes", read_only=True)
     options = SelectedOptionSerializer(many=True, read_only=True)
+    # La taille retenue — nulle pour un article qui n'en a pas.
+    variant = serializers.UUIDField(source="line.variant_id", read_only=True, allow_null=True)
+    variant_name = serializers.SerializerMethodField()
     unit_price = MoneyField(read_only=True)
     total = MoneyField(read_only=True)
     is_orderable = serializers.BooleanField(read_only=True)
@@ -52,6 +55,10 @@ class PricedLineSerializer(serializers.Serializer[Any]):
     # est commandable. C'est lui que le client compare, jamais la phrase.
     unavailable_code = serializers.CharField(read_only=True)
     unavailable_reason = serializers.CharField(read_only=True)
+
+    def get_variant_name(self, obj: Any) -> str:
+        variant = obj.line.variant
+        return variant.name if variant is not None else ""
 
 
 class CartSerializer(serializers.Serializer[Any]):
@@ -88,6 +95,11 @@ class CartLineWriteSerializer(serializers.Serializer[Any]):
     options = serializers.PrimaryKeyRelatedField(
         queryset=Option.objects.all(), many=True, required=False, default=list
     )
+    # La taille, exigée par le service si l'article en a (lot 2). Son
+    # appartenance à l'article se vérifie là-bas, avec le reste de la règle.
+    variant = serializers.PrimaryKeyRelatedField(
+        queryset=Variant.objects.all(), required=False, allow_null=True, default=None
+    )
     notes = serializers.CharField(
         max_length=500, required=False, allow_blank=True, default="", trim_whitespace=True
     )
@@ -114,6 +126,9 @@ class CartLineUpdateSerializer(serializers.Serializer[Any]):
     quantity = serializers.IntegerField(min_value=1, max_value=99, required=False)
     options = serializers.PrimaryKeyRelatedField(
         queryset=Option.objects.all(), many=True, required=False
+    )
+    variant = serializers.PrimaryKeyRelatedField(
+        queryset=Variant.objects.all(), required=False, allow_null=True
     )
     notes = serializers.CharField(
         max_length=500, required=False, allow_blank=True, trim_whitespace=True

@@ -36,7 +36,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text(
-              'Options & Variantes',
+              'Options',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             TextButton.icon(
@@ -57,7 +57,7 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
             ),
             child: const Center(
               child: Text(
-                'Aucune option configurée (ex: Taille, Sauce, Suppléments)',
+                'Aucune option configurée (ex : cuisson, sauce, suppléments)',
                 style: TextStyle(color: Colors.grey),
               ),
             ),

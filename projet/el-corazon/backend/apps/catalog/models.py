@@ -30,6 +30,7 @@ __all__ = [
     "OptionGroup",
     "OptionTemplate",
     "Review",
+    "Variant",
     "VerifiedPurchase",
 ]
 
@@ -210,6 +211,43 @@ class Option(UUIDModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+class Variant(UUIDModel, TimeStampedModel):
+    """Déclinaison d'un article — Petite, Moyenne, Grande.
+
+    **Pas une option.** Une option s'**ajoute** au prix (« + fromage, 500 F ») ;
+    une variante le **remplace** (« Grande, 3 000 F ») — décision du
+    2026-09-25. Les options de l'article s'ajoutent ensuite par-dessus.
+
+    Un article qui a au moins une variante **active** en exige une à la
+    commande ; un article qui n'en a pas n'en accepte aucune. La règle vit dans
+    `customization_unavailability`, que l'ajout au panier et la commande lisent
+    tous deux.
+
+    `is_active` retire la variante de la carte (la saisie se garde) ;
+    `is_available` la dit momentanément épuisée — comme pour un article.
+    """
+
+    menu_item = models.ForeignKey(MenuItem, on_delete=models.CASCADE, related_name="variants")
+    name = models.CharField(max_length=80)
+    sku = models.CharField(max_length=40, blank=True)
+    price = MoneyField()
+    is_available = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "variante"
+        ordering = ["sort_order", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["menu_item", "name"], name="variant_name_unique_per_item"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.menu_item.name} — {self.name}"
 
 
 class VerifiedPurchase(UUIDModel):

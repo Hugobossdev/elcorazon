@@ -724,11 +724,13 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
         onTap: () {
           context.navigateToItemCustomization(
             item,
-            onAddToCart: (customizedItem, quantity, customizations) {
+            onAddToCart: (ligne) {
               _addToGroupCart(
-                customizedItem,
-                quantity: quantity,
-                customizations: customizations,
+                ligne.article,
+                quantity: ligne.quantite,
+                customizations: ligne.libelles,
+                optionIds: ligne.optionIds,
+                taille: ligne.taille,
               );
             },
           );
@@ -781,7 +783,7 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
                     Row(
                       children: [
                         Text(
-                          PriceFormatter.format(item.prixAffiche),
+                          item.libellePrix,
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             color: AppColors.primary,
@@ -979,7 +981,11 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
                             style: const TextStyle(color: Colors.white),
                           ),
                         ),
-                        title: Text(line.name),
+                        title: Text(
+                          line.variantName.isEmpty
+                              ? line.name
+                              : '${line.name} · ${line.variantName}',
+                        ),
                         // Chaque ligne est attribuée à son auteur par le
                         // serveur : le groupe voit qui a commandé quoi, et une
                         // ligne indisponible le dit plutôt que de disparaître.
@@ -1184,6 +1190,8 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
     eccore.MenuItem item, {
     int quantity = 1,
     Map<String, dynamic>? customizations,
+    List<String> optionIds = const [],
+    eccore.Variante? taille,
   }) async {
     if (_cart == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1201,9 +1209,11 @@ class _GroupOrderScreenState extends State<GroupOrderScreen>
     final ajoute = await GroupCartService().addItem(
       menuItemId: item.id,
       quantity: quantity,
-      notes: customizations == null || customizations.isEmpty
-          ? ''
-          : customizations.entries.map((e) => '${e.key}: ${e.value}').join(', '),
+      optionIds: optionIds,
+      variantId: taille?.id,
+      // Seule la note libre part en texte : les options et la taille sont
+      // transmises par leurs identifiants, dont le serveur tire le prix.
+      notes: customizations?['note']?.toString() ?? '',
     );
 
     if (!mounted) return;

@@ -26,6 +26,7 @@ import 'package:elcora_fast/presentation/etape_reglement.dart';
 import 'package:elcora_fast/presentation/fidelite.dart';
 import 'package:elcora_fast/presentation/frais_de_livraison.dart';
 import 'package:elcora_fast/presentation/genre_notification.dart';
+import 'package:elcora_fast/presentation/ligne_composee.dart';
 import 'package:elcora_fast/presentation/messages_erreur.dart';
 import 'package:elcora_fast/presentation/moyens_de_paiement.dart';
 import 'package:elcora_fast/presentation/paiement_partage.dart';

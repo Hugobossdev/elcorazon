@@ -28,6 +28,7 @@ class CartRepository {
     required int quantity,
     List<String> optionIds = const [],
     String notes = '',
+    String? variantId,
   }) async {
     final response = await apiClient.post(
       '/carts/$restaurantSlug/lines/',
@@ -36,6 +37,7 @@ class CartRepository {
         'quantity': quantity,
         'options': optionIds,
         'notes': notes,
+        if (variantId != null) 'variant': variantId,
       },
     );
     return Cart.fromJson(response.data as Map<String, dynamic>);
@@ -71,11 +73,13 @@ class CartRepository {
     List<String>? optionIds,
     int? quantity,
     String? notes,
+    String? variantId,
   }) async {
     final response = await apiClient.patch(
       '/carts/$restaurantSlug/lines/$lineId/',
       data: {
         if (optionIds != null) 'options': optionIds,
+        if (variantId != null) 'variant': variantId,
         if (quantity != null) 'quantity': quantity,
         if (notes != null) 'notes': notes,
       },

@@ -567,7 +567,7 @@ class _BanniereDuJour extends StatelessWidget {
             '${vedette.ratingAverage.toStringAsFixed(1)}/5',
           if (vedette.preparationMinutes > 0)
             'prêt en ${vedette.preparationMinutes} min',
-          vedette.price.format(),
+          vedette.libellePrix,
         ];
 
         return Padding(

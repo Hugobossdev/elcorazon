@@ -114,6 +114,7 @@ class GroupCartService extends ChangeNotifier {
     required String menuItemId,
     int quantity = 1,
     List<String> optionIds = const [],
+    String? variantId,
     String notes = '',
   }) async {
     final cart = _current;
@@ -125,6 +126,7 @@ class GroupCartService extends ChangeNotifier {
         menuItemId: menuItemId,
         quantity: quantity,
         optionIds: optionIds,
+        variantId: variantId,
         notes: notes,
       ),
     );

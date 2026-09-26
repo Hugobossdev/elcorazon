@@ -63,6 +63,7 @@ class GroupCartRepository {
     required String menuItemId,
     int quantity = 1,
     List<String> optionIds = const [],
+    String? variantId,
     String notes = '',
   }) async {
     final response = await apiClient.post(
@@ -71,6 +72,8 @@ class GroupCartRepository {
         'menu_item': menuItemId,
         'quantity': quantity,
         'options': optionIds,
+        // Obligatoire pour un plat à tailles, refusée pour un plat sans (lot 2).
+        if (variantId != null) 'variant': variantId,
         if (notes.isNotEmpty) 'notes': notes,
       },
     );

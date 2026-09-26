@@ -1,3 +1,4 @@
+import 'package:elcora_fast/presentation/ligne_composee.dart';
 import 'package:flutter/material.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:elcora_fast/models/order.dart';
@@ -210,11 +211,7 @@ class AppRouter {
         return MaterialPageRoute(
           builder: (_) => EnhancedItemCustomizationScreen(
             item: args?['item'] as eccore.MenuItem,
-            onAddToCart: args?['onAddToCart'] as Function(
-              eccore.MenuItem,
-              int,
-              Map<String, dynamic>,
-            )?,
+            onAddToCart: args?['onAddToCart'] as AjoutDeLigne?,
           ),
           settings: settings,
         );

@@ -124,12 +124,15 @@ class CartViewSet(GenericViewSet[Cart]):
 
         line = self._line(slug, line_id)
 
-        if "options" in donnees:
+        if "options" in donnees or "variant" in donnees:
+            # Ce qui n'est pas envoyé reste en place : changer la taille ne
+            # vide pas les options, et l'inverse.
             CartService.update_line(
                 line=line,
-                options=donnees["options"],
+                options=donnees.get("options", line.selected_options()),
                 quantity=donnees.get("quantity"),
                 notes=donnees.get("notes"),
+                variant=donnees.get("variant", line.variant),
             )
         else:
             if "notes" in donnees:

@@ -1,3 +1,4 @@
+import 'package:elcora_fast/presentation/ligne_composee.dart';
 import 'package:flutter/material.dart';
 import 'package:elcora_fast/navigation/navigation_service.dart';
 import 'package:elcora_fast/navigation/app_router.dart';
@@ -86,7 +87,7 @@ class NavigationHelper {
   static Future<void> navigateToItemCustomization(
     BuildContext context,
     dynamic item, {
-    Function(eccore.MenuItem, int, Map<String, dynamic>)? onAddToCart,
+    AjoutDeLigne? onAddToCart,
   }) async {
     try {
       await NavigationService.pushNamedWithArgs(
@@ -484,7 +485,7 @@ extension NavigationHelperExtension on BuildContext {
   /// Naviguer vers la personnalisation d'item
   Future<void> navigateToItemCustomization(
     dynamic item, {
-    Function(eccore.MenuItem, int, Map<String, dynamic>)? onAddToCart,
+    AjoutDeLigne? onAddToCart,
   }) =>
       NavigationHelper.navigateToItemCustomization(
         this,

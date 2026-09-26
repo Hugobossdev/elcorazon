@@ -22,6 +22,7 @@ from apps.catalog.models import (
     OptionGroup,
     OptionTemplate,
     Review,
+    Variant,
 )
 from apps.restaurants.models import Restaurant
 from common.availability import Unavailability
@@ -129,6 +130,13 @@ class MenuItemSerializer(serializers.ModelSerializer[MenuItem]):
     is_available = serializers.SerializerMethodField()
     unavailable_code = serializers.SerializerMethodField()
     unavailable_reason = serializers.SerializerMethodField()
+    # Les tailles **actives** seulement, dans leur ordre : une taille retirée de
+    # la carte ne se propose pas, une taille épuisée se montre grisée. Elles
+    # sont sur la liste, et pas seulement sur le détail, contrairement aux
+    # options : il y en a peu, et sans elles une carte ne peut ni annoncer le
+    # bon prix, ni savoir qu'il faut choisir avant d'ajouter, ni reprendre une
+    # commande passée dans sa taille.
+    variants = serializers.SerializerMethodField()
 
     class Meta:
         model = MenuItem
@@ -154,10 +162,16 @@ class MenuItemSerializer(serializers.ModelSerializer[MenuItem]):
             "rating_average",
             "rating_count",
             "sort_order",
+            "variants",
             "created_at",
             "updated_at",
         ]
         read_only_fields = fields
+
+    def get_variants(self, obj: MenuItem) -> list[dict[str, Any]]:
+        actives = [v for v in obj.variants.all() if v.is_active]
+        actives.sort(key=lambda v: (v.sort_order, v.name))
+        return VariantSerializer(actives, many=True).data  # type: ignore[return-value]
 
     def _verdict(self, obj: MenuItem) -> Unavailability | None:
         """Le verdict de la page s'il a été calculé, sinon celui de cet article seul.
@@ -187,12 +201,66 @@ class MenuItemSerializer(serializers.ModelSerializer[MenuItem]):
         return verdict.message if verdict is not None else ""
 
 
+class VariantSerializer(serializers.ModelSerializer[Variant]):
+    """Une taille, telle que le client la choisit : son prix **remplace** celui
+    de l'article (lot 2)."""
+
+    price = MoneyField(read_only=True)
+
+    class Meta:
+        model = Variant
+        fields = ["id", "name", "price", "is_available", "sort_order"]
+        read_only_fields = fields
+
+
 class MenuItemDetailSerializer(MenuItemSerializer):
     option_groups = OptionGroupSerializer(many=True, read_only=True)
 
     class Meta(MenuItemSerializer.Meta):
-        fields = [*MenuItemSerializer.Meta.fields, "ingredients", "calories", "option_groups"]
+        fields = [
+            *MenuItemSerializer.Meta.fields,
+            "ingredients",
+            "calories",
+            "option_groups",
+        ]
         read_only_fields = fields
+
+
+class ManagedVariantSerializer(serializers.ModelSerializer[Variant]):
+    """Une taille, telle que le back-office la saisit."""
+
+    menu_item = serializers.PrimaryKeyRelatedField[MenuItem](queryset=MenuItem.objects.alive())
+    price = MoneyField()
+
+    class Meta:
+        model = Variant
+        fields = [
+            "id",
+            "menu_item",
+            "name",
+            "sku",
+            "price",
+            "is_available",
+            "is_active",
+            "sort_order",
+        ]
+        read_only_fields = ["id"]
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Le prix se libelle dans la devise du marché, comme celui de l'article."""
+        article = attrs.get("menu_item") or (self.instance.menu_item if self.instance else None)
+        prix = attrs.get("price")
+        if article is not None and prix is not None:
+            devise = article.restaurant.currency
+            if prix.currency != devise:
+                raise serializers.ValidationError(
+                    {
+                        "price": (
+                            f"Cet établissement facture en {devise} ; prix reçu en {prix.currency}."
+                        )
+                    }
+                )
+        return attrs
 
 
 class ReviewAuthorSerializer(serializers.ModelSerializer[User]):

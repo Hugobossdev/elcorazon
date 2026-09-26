@@ -69,6 +69,10 @@ class AuditAction:
     """
 
     RESTAURANT_CREATE = "restaurant.create"
+    VARIANT_CREATE = "variant.create"
+    VARIANT_UPDATE = "variant.update"
+    VARIANT_ACTIVATION = "variant.activation"
+    VARIANT_DELETE = "variant.delete"
     RESTAURANT_STATUS = "restaurant.status"
     RESTAURANT_LOCATION = "restaurant.location"
     RESTAURANT_ZONE = "restaurant.zone"

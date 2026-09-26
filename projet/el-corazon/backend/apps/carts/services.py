@@ -18,13 +18,13 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, prefetch_related_objects
 
 from apps.accounts.models import User
 from apps.availability.services import AvailabilityService, Demand
 from apps.carts.models import Cart, CartLine, CartLineOption
 from apps.catalog.availability import customization_unavailability, item_unavailability
-from apps.catalog.models import MenuItem, Option
+from apps.catalog.models import MenuItem, Option, Variant
 from apps.restaurants.models import Restaurant
 from common.availability import Unavailability, UnavailabilityCode
 from common.exceptions import BusinessRuleViolation
@@ -57,6 +57,7 @@ class PriceableLine(Protocol):
 
     menu_item: MenuItem
     menu_item_id: uuid.UUID
+    variant: Variant | None
     quantity: int
     notes: str
 
@@ -187,7 +188,9 @@ def price_selection(
 
     for line in lines:
         options = line.selected_options()
-        unit = line.menu_item.price
+        # La taille **remplace** le prix de base (lot 2, prix absolu) ; les
+        # options s'ajoutent ensuite, qu'il y ait une taille ou non.
+        unit = line.variant.price if line.variant is not None else line.menu_item.price
         for option in options:
             unit += option.price_delta
 
@@ -197,10 +200,29 @@ def price_selection(
 
     verdicts = AvailabilityService.demands(
         [
-            Demand(menu_item=line.menu_item, quantity=line.quantity, options=options)
+            Demand(
+                menu_item=line.menu_item,
+                quantity=line.quantity,
+                options=options,
+                variant=line.variant,
+            )
             for line, options, _, _ in valorisees
         ]
     )
+
+    # La personnalisation se juge aussi à la lecture du panier, et plus
+    # seulement à l'ajout et à la commande : une taille éteinte après coup, ou
+    # des bornes d'options changées, doivent se voir **sur la ligne** — pas au
+    # moment de payer. Même règle que la commande (`customization_unavailability`).
+    prefetch_related_objects(
+        [line.menu_item for line, *_ in valorisees], "option_groups", "variants"
+    )
+    verdicts = [
+        verdict
+        if verdict is not None
+        else customization_unavailability(line.menu_item, options, line.variant)
+        for (line, options, _, _), verdict in zip(valorisees, verdicts, strict=True)
+    ]
 
     priced = [
         PricedLine(line=line, options=options, unit_price=unit, total=total, unavailability=verdict)
@@ -228,7 +250,9 @@ def price_cart(cart: Cart) -> PricedCart:
     )
 
 
-def validate_selection(menu_item: MenuItem, options: Sequence[Option]) -> None:
+def validate_selection(
+    menu_item: MenuItem, options: Sequence[Option], variant: Variant | None = None
+) -> None:
     """Vérifie que les options retenues respectent les bornes de leurs groupes.
 
     Les bornes sont en donnée (`min_select`, `max_select`) et non en code :
@@ -237,7 +261,7 @@ def validate_selection(menu_item: MenuItem, options: Sequence[Option]) -> None:
     le catalogue (`customization_unavailability`), que la commande relit aussi :
     les bornes ont pu changer entre l'ajout et le paiement.
     """
-    verdict = customization_unavailability(menu_item, options)
+    verdict = customization_unavailability(menu_item, options, variant)
     if verdict is not None:
         raise BusinessRuleViolation(verdict.message, **verdict.details)
 
@@ -281,7 +305,7 @@ class CartService:
                     # La catégorie est jugée avec l'article : une catégorie
                     # éteinte rend ses articles incommandables.
                     queryset=CartLine.objects.select_related(
-                        "menu_item__category"
+                        "menu_item__category", "variant"
                     ).prefetch_related(
                         Prefetch(
                             "options",
@@ -302,6 +326,7 @@ class CartService:
         quantity: int,
         options: Sequence[Option],
         notes: str = "",
+        variant: Variant | None = None,
     ) -> CartLine:
         """Ajoute un article, ou renforce la ligne identique si elle existe.
 
@@ -311,16 +336,16 @@ class CartService:
         panier se remplit de doublons à chaque tapotement du bouton.
         """
         CartService._assert_belongs_to_cart(cart, menu_item)
-        validate_selection(menu_item, options)
+        validate_selection(menu_item, options, variant)
 
-        existing = CartService._identical_line(cart, menu_item, options, notes)
+        existing = CartService._identical_line(cart, menu_item, options, notes, variant=variant)
         if existing is not None:
             existing.quantity += quantity
             existing.save(update_fields=["quantity", "updated_at"])
             return existing
 
         line = CartLine.objects.create(
-            cart=cart, menu_item=menu_item, quantity=quantity, notes=notes
+            cart=cart, menu_item=menu_item, variant=variant, quantity=quantity, notes=notes
         )
         CartLineOption.objects.bulk_create(
             CartLineOption(line=line, option=option) for option in options
@@ -363,6 +388,7 @@ class CartService:
         options: Sequence[Option],
         notes: str,
         exclude: uuid.UUID | None = None,
+        variant: Variant | None = None,
     ) -> CartLine | None:
         """Ligne du panier qui porte exactement ce choix, s'il en existe une.
 
@@ -372,7 +398,9 @@ class CartService:
         avant de se supprimer.
         """
         wanted = {option.pk for option in options}
-        candidates = cart.lines.filter(menu_item=menu_item, notes=notes)
+        # La taille distingue deux lignes comme les options : une Petite et une
+        # Grande ne fusionnent pas.
+        candidates = cart.lines.filter(menu_item=menu_item, notes=notes, variant=variant)
         if exclude is not None:
             candidates = candidates.exclude(pk=exclude)
         for line in candidates.prefetch_related("options"):
@@ -394,6 +422,7 @@ class CartService:
         options: Sequence[Option],
         quantity: int | None = None,
         notes: str | None = None,
+        variant: Variant | None = None,
     ) -> CartLine:
         """Rejoue la personnalisation d'une ligne déjà au panier.
 
@@ -414,13 +443,14 @@ class CartService:
         """
         menu_item = line.menu_item
         CartService._assert_belongs_to_cart(line.cart, menu_item)
-        validate_selection(menu_item, options)
+        validate_selection(menu_item, options, variant)
 
         if quantity is not None:
             line.quantity = quantity
         if notes is not None:
             line.notes = notes
-        line.save(update_fields=["quantity", "notes", "updated_at"])
+        line.variant = variant
+        line.save(update_fields=["quantity", "notes", "variant", "updated_at"])
 
         line.options.all().delete()
         CartLineOption.objects.bulk_create(
@@ -428,7 +458,7 @@ class CartService:
         )
 
         jumelle = CartService._identical_line(
-            line.cart, menu_item, options, line.notes, exclude=line.pk
+            line.cart, menu_item, options, line.notes, exclude=line.pk, variant=variant
         )
         if jumelle is not None:
             jumelle.quantity += line.quantity

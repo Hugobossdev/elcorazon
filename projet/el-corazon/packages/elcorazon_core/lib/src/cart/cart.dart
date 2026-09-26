@@ -49,6 +49,8 @@ class CartLine {
     required this.isOrderable,
     required this.unavailableReason,
     this.unavailableCode = '',
+    this.variantId,
+    this.variantName = '',
   });
 
   factory CartLine.fromJson(Map<String, dynamic> json) {
@@ -67,6 +69,8 @@ class CartLine {
       isOrderable: json['is_orderable'] as bool,
       unavailableReason: json['unavailable_reason'] as String? ?? '',
       unavailableCode: json['unavailable_code'] as String? ?? '',
+      variantId: json['variant'] as String?,
+      variantName: json['variant_name'] as String? ?? '',
     );
   }
 
@@ -89,6 +93,10 @@ class CartLine {
   /// d'ingrédient porte un nombre de portions dans la phrase ; le code, lui,
   /// permet de proposer le bon geste (réduire la quantité, retirer la ligne).
   final String unavailableCode;
+
+  /// La taille retenue (lot 2) — nulle pour un article qui ne se décline pas.
+  final String? variantId;
+  final String variantName;
 }
 
 /// Panier serveur d'un restaurant — miroir de `CartSerializer`. Ne stocke

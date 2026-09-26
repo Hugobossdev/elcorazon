@@ -206,6 +206,7 @@ class DjangoOrderRepository implements OrderRepository {
       totalPrice: line.lineTotal.toMajorUnits(),
       notes: line.notes,
       customizations: _toLocalOptions(line.options),
+      variantName: line.variantName,
     );
   }
 

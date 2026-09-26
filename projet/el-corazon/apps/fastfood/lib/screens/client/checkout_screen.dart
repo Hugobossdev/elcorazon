@@ -497,7 +497,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  '${item.quantity} × ${item.name}',
+                  '${item.quantity} × ${item.nomAffiche}',
                   style: AppTypography.bodyLg(
                     color: theme.colorScheme.onSurface,
                   ),

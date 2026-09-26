@@ -88,6 +88,8 @@ class MenuItemViewSet(ReadOnlyModelViewSet[MenuItem]):
             MenuItem.objects.alive()
             .filter(restaurant__is_active=True)
             .select_related("category", "restaurant")
+            # Les tailles sont sur chaque carte : une requête pour la page.
+            .prefetch_related("variants")
         )
 
         if self.action == "retrieve":

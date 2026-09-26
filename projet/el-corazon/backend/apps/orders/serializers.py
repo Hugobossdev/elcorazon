@@ -47,6 +47,7 @@ class OrderLineSerializer(serializers.ModelSerializer[OrderLine]):
             "id",
             "menu_item",
             "item_name",
+            "variant_name",
             "item_image",
             "unit_price",
             "quantity",

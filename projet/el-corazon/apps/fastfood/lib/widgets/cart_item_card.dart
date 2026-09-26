@@ -115,7 +115,7 @@ class CartItemCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        item.name,
+                        item.nomAffiche,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: AppTypography.titleLg(

@@ -87,6 +87,8 @@ class UnavailabilityCode(StrEnum):
     ITEM_UNAVAILABLE = "item_unavailable"
     #: Une option retenue n'est plus servie.
     OPTION_UNAVAILABLE = "option_unavailable"
+    #: La taille retenue n'est plus servie — retirée de la carte ou épuisée.
+    VARIANT_UNAVAILABLE = "variant_unavailable"
     #: Les options retenues ne respectent plus les règles de l'article — une
     #: option d'un autre plat, ou un groupe dont les bornes ont changé depuis
     #: l'ajout au panier.

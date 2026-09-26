@@ -348,6 +348,7 @@ class CartService extends ChangeNotifier {
         retenue.article,
         quantity: retenue.ligne.quantite,
         customizations: retenue.ligne.options,
+        variante: retenue.taille,
       );
       ajoutes += retenue.ligne.quantite;
     }
@@ -377,6 +378,7 @@ class CartService extends ChangeNotifier {
     List<String> optionIds = const [],
     double optionsSupplement = 0.0,
     bool compositionLibre = false,
+    eccore.Variante? variante,
   }) {
     if (quantity <= 0) {
       eccore.Journal.trace('⚠️ La quantité doit être supérieure à 0');
@@ -394,6 +396,7 @@ class CartService extends ChangeNotifier {
     final existingIndex = _items.indexWhere(
       (item) =>
           item.menuItemId == menuItem.id &&
+          item.variantId == variante?.id &&
           _mapsEqual(item.customizations, normalizedCustomizations) &&
           _listsEqual(item.selectedOptionIds, normalizedOptionIds),
     );
@@ -412,13 +415,17 @@ class CartService extends ChangeNotifier {
         id: _nouvelIdentifiantDeLigne(menuItem.id),
         menuItemId: menuItem.id,
         name: menuItem.name,
-        price: menuItem.prixAffiche,
+        // Une taille **remplace** le prix du plat (lot 2) : c'est son prix
+        // qu'on annonce, en attendant celui que le serveur rendra.
+        price: variante?.price.toMajorUnits() ?? menuItem.prixAffiche,
         quantity: quantity,
         imageUrl: menuItem.image,
         customizations: normalizedCustomizations,
         selectedOptionIds: normalizedOptionIds,
         supplementOptions: optionsSupplement,
         compositionLibre: compositionLibre,
+        variantId: variante?.id,
+        variantName: variante?.name ?? '',
       );
 
       _items.add(newItem);
@@ -506,6 +513,7 @@ class CartService extends ChangeNotifier {
     List<String>? optionIds,
     double? optionsSupplement,
     int? quantity,
+    eccore.Variante? variante,
   }) {
     if (index < 0 || index >= _items.length) {
       eccore.Journal.trace('⚠️ Index invalide pour updateItemCustomizations: $index');
@@ -526,6 +534,9 @@ class CartService extends ChangeNotifier {
       selectedOptionIds: normalizedOptionIds,
       supplementOptions: optionsSupplement ?? ancienne.supplementOptions,
       quantity: nouvelleQuantite,
+      variantId: variante?.id,
+      variantName: variante?.name,
+      price: variante?.price.toMajorUnits(),
     );
 
     // La ligne réécrite est écartée **par sa position** et non par son
@@ -536,6 +547,7 @@ class CartService extends ChangeNotifier {
       if (i == index) continue;
       final item = _items[i];
       if (item.menuItemId == modifiee.menuItemId &&
+          item.variantId == modifiee.variantId &&
           _mapsEqual(item.customizations, modifiee.customizations) &&
           _listsEqual(item.selectedOptionIds, modifiee.selectedOptionIds)) {
         jumelle = i;
@@ -818,6 +830,8 @@ class CartService extends ChangeNotifier {
       imageUrl: line.image,
       customizations: customizations,
       selectedOptionIds: line.options.map((option) => option.id).toList()..sort(),
+      variantId: line.variantId,
+      variantName: line.variantName,
       // `supplementOptions` reste à zéro, et c'est le point : `unit_price`
       // intègre déjà les options. Y reporter le supplément estimé par la fiche
       // produit les compterait deux fois — 5 000 + 500 deviendrait 6 000 au
@@ -897,6 +911,7 @@ class CartService extends ChangeNotifier {
           quantity: item.quantity,
           optionIds: item.selectedOptionIds,
           notes: item.remoteNotes,
+          variantId: item.variantId,
         );
       } on eccore.ApiException catch (error) {
         // `status == 0` est une panne réseau (`ApiException.network`), 5xx une
@@ -1076,8 +1091,8 @@ class CartService extends ChangeNotifier {
     return merged;
   }
 
-  /// Ce qui fait que deux lignes n'en sont qu'une : même article, mêmes
-  /// options, mêmes personnalisations libres. Exactement le critère de
+  /// Ce qui fait que deux lignes n'en sont qu'une : même article, même
+  /// taille, mêmes options, mêmes personnalisations libres. Exactement le critère de
   /// `CartService._identical_line` côté serveur — s'en écarter ferait
   /// réapparaître une ligne fusionnée ici à chaque relecture distante.
   String _mergeKey(CartItem item) {
@@ -1085,7 +1100,8 @@ class CartService extends ChangeNotifier {
     final customizations = jsonEncode(
       _normalizeCustomizations(item.customizations),
     );
-    return '${item.menuItemId}_${options.join(',')}_$customizations';
+    return '${item.menuItemId}_${item.variantId ?? ''}_${options.join(',')}'
+        '_$customizations';
   }
 
   bool _listsEqual(List<String> first, List<String> second) {

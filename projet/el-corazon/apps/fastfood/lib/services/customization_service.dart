@@ -202,6 +202,14 @@ class CustomizationService extends ChangeNotifier {
 
 
   final Map<String, List<CustomizationOption>> _itemOptions = {};
+
+  /// Tailles de chaque article, lues avec ses options sur le détail
+  /// (`MenuItemDetailSerializer.variants`). La liste du menu ne les porte pas.
+  ///
+  /// Une taille n'est pas une option : son prix **remplace** celui du plat au
+  /// lieu de s'y ajouter, et le serveur exige d'en retenir une dès que
+  /// l'article en a (`customization_unavailability`, lot 2).
+  final Map<String, List<eccore.Variante>> _tailles = {};
   final Map<String, ItemCustomization> _currentCustomizations = {};
 
   /// Où en est la lecture des options de chaque article.
@@ -296,7 +304,9 @@ class CustomizationService extends ChangeNotifier {
       ];
 
       _itemOptions[menuItemId] = options;
-      _etats[menuItemId] = options.isEmpty
+      _tailles[menuItemId] = [...item.variants]
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+      _etats[menuItemId] = options.isEmpty && item.variants.isEmpty
           ? EtatDesOptions.sansOption
           : EtatDesOptions.avecOptions;
       eccore.Journal.trace(
@@ -318,6 +328,7 @@ class CustomizationService extends ChangeNotifier {
   Future<void> rechargerLesOptions(String menuItemId) async {
     _etats.remove(menuItemId);
     _itemOptions.remove(menuItemId);
+    _tailles.remove(menuItemId);
     await _loadOptionsForMenuItem(menuItemId);
   }
 
@@ -333,10 +344,12 @@ class CustomizationService extends ChangeNotifier {
   @visibleForTesting
   void seedOptionsForTest(
     String menuItemId,
-    List<CustomizationOption> options,
-  ) {
+    List<CustomizationOption> options, {
+    List<eccore.Variante> tailles = const [],
+  }) {
     _itemOptions[menuItemId] = options;
-    _etats[menuItemId] = options.isEmpty
+    _tailles[menuItemId] = tailles;
+    _etats[menuItemId] = options.isEmpty && tailles.isEmpty
         ? EtatDesOptions.sansOption
         : EtatDesOptions.avecOptions;
   }
@@ -346,6 +359,7 @@ class CustomizationService extends ChangeNotifier {
   @visibleForTesting
   void resetForTest() {
     _itemOptions.clear();
+    _tailles.clear();
     _etats.clear();
     _erreurs.clear();
     _currentCustomizations.clear();
@@ -712,9 +726,15 @@ class CustomizationService extends ChangeNotifier {
     if (_isInitialized) {
       await _loadOptionsForMenuItem(menuItemId);
     }
-    return _getOptionsForMenuItem(menuItemId)
-        .any((option) => option.isRemote && option.minSelections > 0);
+    return taillesDe(menuItemId).isNotEmpty ||
+        _getOptionsForMenuItem(menuItemId)
+            .any((option) => option.isRemote && option.minSelections > 0);
   }
+
+  /// Les tailles de l'article, dans l'ordre du catalogue — vide sans tailles,
+  /// ou tant que le détail n'a pas été lu.
+  List<eccore.Variante> taillesDe(String menuItemId) =>
+      _tailles[menuItemId] ?? const <eccore.Variante>[];
 
   // Validate customization for an item
   /// La session porte déjà son article : le nom passé en second argument ne

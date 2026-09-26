@@ -17,6 +17,20 @@ extension ArticleAffiche on eccore.MenuItem {
   /// (ADR-007).
   double get prixAffiche => price.toMajorUnits();
 
+  /// Le prix qu'une carte annonce.
+  ///
+  /// Pour un plat à tailles, le prix de base n'est jamais facturé : chaque
+  /// taille **remplace** le prix du plat (lot 2). Annoncer ce prix de base
+  /// promettrait une somme que personne ne paiera ; c'est donc la moins chère
+  /// des tailles qui s'affiche, précédée de « Dès ».
+  String get libellePrix {
+    if (variants.isEmpty) return price.format();
+    final moinsChere = variants
+        .map((taille) => taille.price)
+        .reduce((a, b) => a.amountMinor <= b.amountMinor ? a : b);
+    return 'Dès ${moinsChere.format()}';
+  }
+
   /// Les deux régimes que les écrans distinguent.
   ///
   /// Le contrat ne porte pas de booléens séparés : ils se lisent sur

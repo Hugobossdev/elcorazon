@@ -257,6 +257,7 @@ class _OrdersScreenState extends State<OrdersScreen>
             nom: item.name,
             quantite: item.quantity,
             options: item.customizations,
+            taille: item.variantName,
           ),
       ],
       appService.menuItems,

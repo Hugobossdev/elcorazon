@@ -23,6 +23,7 @@ router.register(
     "manage/option-groups", backoffice.ManagedOptionGroupViewSet, basename="managed-option-group"
 )
 router.register("manage/options", backoffice.ManagedOptionViewSet, basename="managed-option")
+router.register("manage/variants", backoffice.ManagedVariantViewSet, basename="managed-variant")
 router.register(
     "manage/option-templates",
     backoffice.ManagedOptionTemplateViewSet,

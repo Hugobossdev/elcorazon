@@ -450,7 +450,7 @@ class _AdvancedSearchScreenState extends State<AdvancedSearchScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  PriceFormatter.format(item.prixAffiche),
+                  item.libellePrix,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: AppTheme.primaryColor,

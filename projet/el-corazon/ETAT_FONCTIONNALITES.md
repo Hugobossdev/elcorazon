@@ -1,6 +1,46 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Dernière révision** : 23 septembre 2026
+**Dernière révision** : 26 septembre 2026
+
+## 🧩 Intégration des fonctionnalités manquantes (25–26 septembre 2026)
+
+Six lots, livrés un par un de bout en bout (serveur, socle, écrans, tests).
+
+| Lot | Fonctionnalité | État |
+|-----|----------------|------|
+| 1 | Zones dessinées sur la carte (cercle, polygone) et zones d'une cuisine | ✅ |
+| 2 | Tailles de produit (`Variant`) | ✅ |
+| 3 | Images de catégorie | à venir |
+| 4 | Capacité des cuisines | à venir |
+| 5 | Code de connexion (OTP) du personnel | à venir |
+| 6 | Abonnements clients | à venir |
+
+### Lot 2 — tailles de produit
+
+- ✅ Modèle `Variant` (nom, prix, SKU, disponible, active, ordre), une taille
+  par nom et par plat. Le prix d'une taille **remplace** celui du plat ; les
+  options s'ajoutent par-dessus (décision du 25 septembre).
+- ✅ Un plat qui a une taille active en exige une ; un plat sans taille n'en
+  accepte aucune ; une taille retirée ou épuisée rend la ligne
+  incommandable (`variant_unavailable`). Règle unique, appliquée au panier,
+  au panier collaboratif et à la commande.
+- ✅ La commande fige la taille (`OrderLine.variant_name`) : renommer ou
+  supprimer une taille ne réécrit pas l'historique.
+- ✅ Back-office : `/catalog/manage/variants/`, cloisonné par établissement,
+  devise du marché imposée, chaque geste journalisé (`variant.*`, famille
+  « Tailles » du journal). Éditeur dans la fiche d'un plat (ADMIN).
+- ✅ Catalogue public : tailles actives publiées sur la liste **et** la fiche
+  (une requête par page). Les cartes annoncent « Dès … » ; le prix de base
+  d'un plat à tailles n'est jamais affiché.
+- ✅ FASTFOOD : choix de la taille obligatoire sur la fiche, prix absolu
+  affiché, taille nommée au panier, au récapitulatif et dans les commandes ;
+  le raccourci « + » ouvre la fiche pour un plat à tailles ; recommander une
+  commande retrouve la taille par son nom, ou nomme la ligne perdue.
+- ✅ Panier collaboratif : la fiche transmet désormais les options **et** la
+  taille par identifiant (elle n'envoyait que des libellés, si bien que tout
+  plat à choix obligatoire y était refusé).
+- ✅ Duplication d'un plat : ses tailles sont copiées.
+
 
 ## ✅ État vérifiable au 21 septembre 2026 (audit pré-production)
 
@@ -725,7 +765,8 @@ applications de l'écosystème El Corazón.
 
 #### 🎨 Personnalisation de Produits
 - ✅ Personnalisation avancée (burgers, pizzas, gâteaux)
-- ✅ Options de personnalisation (taille, cuisson, sauce, garniture)
+- ✅ Options de personnalisation (cuisson, sauce, garniture)
+- ✅ Tailles (`Variant`) à prix absolu, choix obligatoire — lot 2
 - ✅ Options transmises au panier serveur, qui les valorise (invariant C1 —
   l'application affiche un **total estimé**, jamais un prix facturable)
 - ✅ Validation des personnalisations sur les bornes du groupe (`min_select`/`max_select`)
@@ -1134,10 +1175,8 @@ n'y vaut que si elle est vraie **du code déployé**, pas du code écrit.
 - ✅ Barèmes de livraison — **écrits sur le serveur** : nom, forfait, seuil de
   livraison offerte (franco), temps estimé, état actif. Le tarif au kilomètre
   et le minimum de commande sont affichés en lecture
-- ⚠️ Le **contour** d'une zone (polygone GeoJSON) ne se dessine pas depuis le
-  back-office : la création d'une zone passe par le serveur. L'API le permet
-  (`POST /geography/manage/zones/`) mais un outil de dessin cartographique
-  reste à faire
+- ✅ Le **contour** d'une zone se dessine sur la carte — cercle ou polygone —
+  depuis l'écran « Zones » d'une cuisine (lot 1, 25 septembre 2026)
 - 🔴 **Retiré le 5 août 2026** : les cinq zones en dur dont les tarifs
   n'atteignaient jamais le serveur
 

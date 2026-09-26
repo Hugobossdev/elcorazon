@@ -54,6 +54,7 @@ class OrderLine {
     required this.lineTotal,
     required this.notes,
     this.options = const [],
+    this.variantName = '',
   });
 
   factory OrderLine.fromJson(Map<String, dynamic> json) {
@@ -73,6 +74,7 @@ class OrderLine {
                 devise: unitPrice.currency,
               ),)
           .toList(),
+      variantName: json['variant_name'] as String? ?? '',
     );
   }
 
@@ -87,6 +89,10 @@ class OrderLine {
 
   /// Ce que le client a choisi sur cette ligne, figé au moment de la commande.
   final List<ChosenOption> options;
+
+  /// La taille commandée, figée à la commande — vide si l'article n'en avait
+  /// pas. Renommer la taille au catalogue ne la réécrit pas.
+  final String variantName;
 }
 
 /// Transition de statut — miroir de `OrderStatusEventSerializer`

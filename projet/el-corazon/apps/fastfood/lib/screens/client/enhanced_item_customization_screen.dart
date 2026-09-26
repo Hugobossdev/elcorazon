@@ -1,5 +1,6 @@
 import 'package:elcora_fast/models/cart_item.dart';
 import 'package:elcora_fast/presentation/catalogue.dart';
+import 'package:elcora_fast/presentation/ligne_composee.dart';
 import 'package:elcora_fast/presentation/tarification.dart';
 import 'package:elcora_fast/services/cart_service.dart';
 import 'package:elcora_fast/services/design_enhancement_service.dart';
@@ -46,11 +47,7 @@ import 'package:elcora_fast/presentation/messages_erreur.dart';
 /// identifiants (ADR-007), qui sont ceux que cet écran transmet.
 class EnhancedItemCustomizationScreen extends StatefulWidget {
   final eccore.MenuItem item;
-  final Function(
-    eccore.MenuItem item,
-    int quantity,
-    Map<String, dynamic> customizations,
-  )? onAddToCart;
+  final AjoutDeLigne? onAddToCart;
 
   /// Ligne du panier qu'on rouvre pour la modifier — nul à l'ajout.
   ///
@@ -90,6 +87,16 @@ class _EnhancedItemCustomizationScreenState
   /// ne lui a pas encore demandé.
   final Set<String> _reclames = <String>{};
 
+  /// Taille retenue (`Variant`), nulle tant que le client n'a pas choisi.
+  ///
+  /// Aucune n'est présélectionnée, pour la même raison qu'aucune option
+  /// obligatoire ne l'est : choisir la Grande à la place du client lui ferait
+  /// payer ce qu'il n'a pas demandé.
+  String? _tailleId;
+
+  /// On a tenté d'ajouter sans taille : le groupe se signale alors en rouge.
+  bool _tailleReclamee = false;
+
   @override
   void initState() {
     super.initState();
@@ -102,6 +109,7 @@ class _EnhancedItemCustomizationScreenState
     final ligne = widget.ligneDuPanier;
     if (ligne != null) {
       _quantity = ligne.quantity;
+      _tailleId = ligne.variantId;
       final note = ligne.customizations['note'];
       if (note != null) _instructionsController.text = note.toString();
     }
@@ -289,7 +297,7 @@ class _EnhancedItemCustomizationScreenState
             ),
             const SizedBox(width: DesignConstants.spacingM),
             Text(
-              widget.item.price.format(),
+              widget.item.libellePrix,
               style: AppTypography.priceDisplay(
                 color: theme.colorScheme.primary,
               ),
@@ -542,6 +550,10 @@ class _EnhancedItemCustomizationScreenState
 
       case EtatDesOptions.avecOptions:
         return [
+          if (service.taillesDe(_menuItemId).isNotEmpty) ...[
+            const SizedBox(height: DesignConstants.spacingL),
+            _groupeDesTailles(service),
+          ],
           for (final famille in _familles(service)) ...[
             const SizedBox(height: DesignConstants.spacingL),
             _groupe(service, famille),
@@ -600,6 +612,62 @@ class _EnhancedItemCustomizationScreenState
     );
   }
 
+  /// Les tailles, présentées comme un groupe obligatoire à choix unique.
+  ///
+  /// Chacune affiche son **prix complet** et non un écart : la taille remplace
+  /// le prix du plat (lot 2), c'est donc bien ce montant-là qu'on paiera avant
+  /// options. Une taille épuisée reste visible et grisée.
+  Widget _groupeDesTailles(CustomizationService service) {
+    final tailles = service.taillesDe(_menuItemId);
+
+    return OptionGroupCard(
+      title: 'Taille',
+      isRequired: true,
+      constraintLabel: 'Requis',
+      error: _tailleId == null && _tailleReclamee
+          ? 'Choisissez une taille pour continuer'
+          : null,
+      children: [
+        for (var i = 0; i < tailles.length; i++)
+          OptionRow(
+            label: tailles[i].name,
+            subtitle: tailles[i].isAvailable ? null : 'Indisponible',
+            selected: tailles[i].id == _tailleId,
+            priceDelta: tailles[i].price.format(),
+            showDivider: i < tailles.length - 1,
+            enabled: tailles[i].isAvailable,
+            onChanged: tailles[i].isAvailable
+                ? (_) => setState(() {
+                      _tailleId = tailles[i].id;
+                      _tailleReclamee = false;
+                    })
+                : null,
+          ),
+      ],
+    );
+  }
+
+  /// La taille retenue, si elle est toujours proposée par le catalogue.
+  eccore.Variante? _tailleRetenue(CustomizationService service) => service
+      .taillesDe(_menuItemId)
+      .where((taille) => taille.id == _tailleId)
+      .firstOrNull;
+
+  /// Le prix sur lequel les options s'ajoutent : celui de la taille retenue,
+  /// qui **remplace** celui du plat. Tant qu'aucune n'est choisie, la moins
+  /// chère — le « Dès » de l'en-tête : le prix de base d'un plat à tailles
+  /// n'est jamais facturé, l'annoncer au total serait promettre une somme
+  /// que personne ne paiera.
+  double _prixDeBase(CustomizationService service) {
+    final retenue = _tailleRetenue(service);
+    if (retenue != null) return retenue.price.toMajorUnits();
+    final tailles = service.taillesDe(_menuItemId);
+    if (tailles.isEmpty) return widget.item.prixAffiche;
+    return tailles
+        .map((taille) => taille.price.toMajorUnits())
+        .reduce((a, b) => a < b ? a : b);
+  }
+
   Widget _groupe(CustomizationService service, _Famille famille) {
     final options = _options(service, famille.cle);
     final retenues = _retenues(service, famille.cle);
@@ -624,7 +692,7 @@ class _EnhancedItemCustomizationScreenState
                 : 'Indisponible',
             selected: retenues.contains(options[i].id),
             multiple: !famille.unique,
-            priceDelta: _libelleEcart(options[i], famille),
+            priceDelta: _libelleEcart(service, options[i], famille),
             showDivider: i < options.length - 1,
             // Épuisée : montrée, jamais cochable. La masquer ferait croire à
             // un menu qui change de forme d'une minute à l'autre, et
@@ -696,10 +764,14 @@ class _EnhancedItemCustomizationScreenState
   /// afficher le prix du plat en face de chaque cuisson laisserait croire
   /// qu'on le paie trois fois. Un supplément gratuit est annoncé comme tel :
   /// une case vide laisse craindre un prix qu'on découvrira au total.
-  String _libelleEcart(CustomizationOption option, _Famille famille) {
+  String _libelleEcart(
+    CustomizationService service,
+    CustomizationOption option,
+    _Famille famille,
+  ) {
     if (famille.unique && famille.tarifante) {
       return PriceFormatter.format(
-        widget.item.prixAffiche + option.priceModifier,
+        _prixDeBase(service) + option.priceModifier,
       );
     }
     if (option.priceModifier == 0) return 'Offert';
@@ -753,12 +825,13 @@ class _EnhancedItemCustomizationScreenState
     // valait donc zéro pendant toute la composition, et cette barre affichait
     // le prix nu du plat quelles que soient les options retenues.
     final ecartOptions = service.calculatePriceModifier(_sessionId);
+    final prixDeBase = _prixDeBase(service);
     final prixUnitaire = prixUnitairePersonnalise(
-      prixDeBase: widget.item.prixAffiche,
+      prixDeBase: prixDeBase,
       supplementOptions: ecartOptions,
     );
     final total = totalDeLigne(
-      prixDeBase: widget.item.prixAffiche,
+      prixDeBase: prixDeBase,
       supplementOptions: ecartOptions,
       quantite: _quantity,
     );
@@ -856,9 +929,13 @@ class _EnhancedItemCustomizationScreenState
       // Refus **avant** de refermer la session : celle-ci porte la
       // composition, et la fermer sur un refus laisserait l'écran vide.
       final manquantes = _insatisfaites(service);
-      if (manquantes.isNotEmpty) {
+      final taille = _tailleRetenue(service);
+      final tailleManquante =
+          service.taillesDe(_menuItemId).isNotEmpty && taille == null;
+      if (manquantes.isNotEmpty || tailleManquante) {
         setState(() {
           _reclames.addAll(manquantes.map((famille) => famille.cle));
+          _tailleReclamee = tailleManquante;
         });
         return;
       }
@@ -940,10 +1017,19 @@ class _EnhancedItemCustomizationScreenState
           optionIds: optionIds,
           optionsSupplement: supplement,
           quantity: _quantity,
+          variante: taille,
         );
         annonce = '${widget.item.name} mis à jour';
       } else if (widget.onAddToCart != null) {
-        widget.onAddToCart!(widget.item, _quantity, customizationsMap);
+        widget.onAddToCart!(
+          (
+            article: widget.item,
+            quantite: _quantity,
+            libelles: customizationsMap,
+            optionIds: optionIds,
+            taille: taille,
+          ),
+        );
         annonce =
             '$_quantity × ${widget.item.name} ajouté${_quantity > 1 ? 's' : ''} au panier';
       } else {
@@ -953,6 +1039,7 @@ class _EnhancedItemCustomizationScreenState
           customizations: customizationsMap,
           optionIds: optionIds,
           optionsSupplement: supplement,
+          variante: taille,
         );
         annonce =
             '$_quantity × ${widget.item.name} ajouté${_quantity > 1 ? 's' : ''} au panier';

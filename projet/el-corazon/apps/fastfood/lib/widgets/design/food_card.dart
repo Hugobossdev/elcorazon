@@ -1,3 +1,4 @@
+import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
 import 'package:elcora_fast/widgets/design/food_image.dart';
@@ -126,7 +127,7 @@ class FoodCard extends StatelessWidget {
                         ),
                         const SizedBox(width: DesignConstants.spacingS),
                         Text(
-                          item.price.format(),
+                          item.libellePrix,
                           style: AppTypography.priceDisplay(
                             color: theme.colorScheme.primary,
                           ),

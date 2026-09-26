@@ -20,7 +20,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 
 from apps.accounts.models import User
-from apps.catalog.models import MenuItem
+from apps.catalog.models import MenuItem, Variant
 from apps.geography.models import City, Country, DeliveryZone
 from apps.orders.states import ORDER_MACHINE, OrderStatus
 from apps.restaurants.models import Restaurant
@@ -234,6 +234,13 @@ class OrderLine(UUIDModel):
     menu_item = models.ForeignKey(MenuItem, on_delete=models.PROTECT, related_name="order_lines")
 
     item_name = models.CharField(max_length=120)
+    # Copie figée de la taille commandée, comme `item_name` : renommer ou
+    # supprimer la variante au catalogue ne réécrit pas ce que le client a
+    # commandé. `variant` ne sert qu'à retrouver l'origine.
+    variant = models.ForeignKey(
+        Variant, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    variant_name = models.CharField(max_length=80, blank=True)
     item_image = models.URLField(blank=True)
     unit_price = MoneyField()
     quantity = models.PositiveSmallIntegerField()

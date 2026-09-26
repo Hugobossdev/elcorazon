@@ -206,6 +206,7 @@ class Order {
                         ),)
                       : const {},
                   notes: item['notes']?.toString(),
+                  variantName: item['variant_name']?.toString() ?? '',
                 );
               } catch (e) {
                 Journal.trace('⚠️ Erreur parsing order item: $e');
@@ -274,6 +275,10 @@ class OrderItem {
   final Map<String, String> customizations;
   final String? notes;
 
+  /// Taille commandée, figée par le serveur au passage de la commande
+  /// (`OrderLine.variant_name`). Vide pour un plat sans tailles.
+  final String variantName;
+
   OrderItem({
     required this.menuItemId,
     required this.menuItemName,
@@ -285,7 +290,12 @@ class OrderItem {
     required this.totalPrice,
     this.customizations = const {},
     this.notes,
+    this.variantName = '',
   });
+
+  /// Le nom tel qu'une ligne l'affiche : « Pizza Reine · Grande ». La taille
+  /// fait partie de ce qu'on a commandé, pas un détail d'option.
+  String get nomAffiche => variantName.isEmpty ? name : '$name · $variantName';
 
   OrderItem copyWith({
     String? menuItemId,
@@ -298,6 +308,7 @@ class OrderItem {
     double? totalPrice,
     Map<String, String>? customizations,
     String? notes,
+    String? variantName,
   }) {
     return OrderItem(
       menuItemId: menuItemId ?? this.menuItemId,
@@ -310,6 +321,7 @@ class OrderItem {
       totalPrice: totalPrice ?? this.totalPrice,
       customizations: customizations ?? this.customizations,
       notes: notes ?? this.notes,
+      variantName: variantName ?? this.variantName,
     );
   }
 }

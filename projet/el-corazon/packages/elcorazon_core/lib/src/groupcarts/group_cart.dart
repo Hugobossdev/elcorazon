@@ -65,6 +65,7 @@ class GroupCartLine {
     required this.unavailableReason,
     this.unavailableCode = '',
     this.image,
+    this.variantName = '',
   });
 
   factory GroupCartLine.fromJson(Map<String, dynamic> json) {
@@ -85,8 +86,12 @@ class GroupCartLine {
       isOrderable: json['is_orderable'] as bool? ?? true,
       unavailableReason: json['unavailable_reason'] as String? ?? '',
       unavailableCode: json['unavailable_code'] as String? ?? '',
+      variantName: json['variant_name'] as String? ?? '',
     );
   }
+
+  /// Taille retenue (« Grande »), vide pour un plat sans tailles — lot 2.
+  final String variantName;
 
   final String id;
   final String memberId;

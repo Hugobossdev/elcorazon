@@ -9,11 +9,15 @@ typedef LigneAReprendre = ({
   String nom,
   int quantite,
   Map<String, String> options,
+
+  /// Nom de la taille commandée (`OrderLine.variant_name`), vide sans taille.
+  String taille,
 });
 
 /// Ce qui peut être repris, et ce qui ne le peut pas.
 typedef TriDeLaReprise = ({
-  List<({eccore.MenuItem article, LigneAReprendre ligne})> retenues,
+  List<({eccore.MenuItem article, LigneAReprendre ligne, eccore.Variante? taille})>
+      retenues,
   List<String> indisponibles,
 });
 
@@ -41,7 +45,11 @@ TriDeLaReprise trierLaReprise(
   List<LigneAReprendre> lignes,
   List<eccore.MenuItem> catalogue,
 ) {
-  final retenues = <({eccore.MenuItem article, LigneAReprendre ligne})>[];
+  final retenues = <({
+    eccore.MenuItem article,
+    LigneAReprendre ligne,
+    eccore.Variante? taille,
+  })>[];
   final indisponibles = <String>[];
 
   for (final ligne in lignes) {
@@ -53,7 +61,25 @@ TriDeLaReprise trierLaReprise(
       continue;
     }
 
-    retenues.add((article: article, ligne: ligne));
+    // Une taille se retrouve par son nom : la commande n'a figé que lui, et
+    // l'identifiant d'une taille recréée au back-office aurait changé. Si
+    // l'article a des tailles et que celle-ci n'est plus servie, la ligne est
+    // perdue et nommée — la reposer sans taille serait refusé par le serveur,
+    // en choisir une autre à la place du client lui ferait payer autre chose.
+    eccore.Variante? taille;
+    if (article.aDesTailles) {
+      taille = article.variants
+          .where((v) => v.name == ligne.taille && v.isAvailable)
+          .firstOrNull;
+      if (taille == null) {
+        indisponibles.add(
+          ligne.taille.isEmpty ? ligne.nom : '${ligne.nom} (${ligne.taille})',
+        );
+        continue;
+      }
+    }
+
+    retenues.add((article: article, ligne: ligne, taille: taille));
   }
 
   return (retenues: retenues, indisponibles: indisponibles);

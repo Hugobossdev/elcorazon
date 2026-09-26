@@ -6,9 +6,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:admin/presentation/regimes_article.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/services/menu_service.dart';
+import 'package:admin/services/admin_auth_service.dart';
 import 'package:admin/services/category_management_service.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/screens/admin/option_groups_editor.dart'; // Import du nouveau widget
+import 'package:admin/screens/admin/tailles_editor.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' show Journal;
 import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
@@ -528,14 +530,25 @@ class _MenuItemFormDialogState extends State<MenuItemFormDialog>
   Widget _buildOptionsTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
-      child: OptionGroupsEditor(
-        menuItemId: widget.menuItem?.id ?? '',
-        initialGroups: _optionGroups,
-        onChanged: (groups) {
-          setState(() {
-            _optionGroups = groups;
-          });
-        },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TaillesEditor(
+            menuItemId: widget.menuItem?.id ?? '',
+            devise: _devise,
+            depot: eccore.ManagedCatalogRepository(apiClient: AdminAuthService().apiClient),
+          ),
+          const Divider(height: 32),
+          OptionGroupsEditor(
+            menuItemId: widget.menuItem?.id ?? '',
+            initialGroups: _optionGroups,
+            onChanged: (groups) {
+              setState(() {
+                _optionGroups = groups;
+              });
+            },
+          ),
+        ],
       ),
     );
   }

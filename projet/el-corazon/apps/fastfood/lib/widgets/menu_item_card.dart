@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:elcora_fast/presentation/catalogue.dart';
 import 'package:elcora_fast/theme.dart';
 import 'package:elcora_fast/utils/design_constants.dart';
-import 'package:elcora_fast/utils/price_formatter.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
@@ -396,7 +395,7 @@ class MenuItemCard extends StatelessWidget {
           ),
           const SizedBox(height: _espaceNomPrix),
           Text(
-            formatPrice(item.prixAffiche),
+            item.libellePrix,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(

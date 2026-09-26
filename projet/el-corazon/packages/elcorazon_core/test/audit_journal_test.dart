@@ -125,6 +125,7 @@ void main() {
       'customer.block', 'review.visibility', 'payout.settle', 'payout.reject',
       'refund.request', 'refund.settle', 'refund.cancel', 'complaint.decision',
       'return.decision', 'ticket.resolution', 'courier.verification',
+      'variant.create', 'variant.update', 'variant.activation', 'variant.delete',
     ];
 
     for (final action in actionsDuServeur) {

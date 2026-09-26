@@ -4,6 +4,7 @@ import 'package:elcorazon_core/src/models/money.dart';
 import 'package:elcorazon_core/src/network/api_client.dart';
 import 'package:elcorazon_core/src/catalog/managed_category.dart';
 import 'package:elcorazon_core/src/catalog/managed_menu_item.dart';
+import 'package:elcorazon_core/src/catalog/managed_variant.dart';
 import 'package:elcorazon_core/src/catalog/menu_item.dart';
 import 'package:elcorazon_core/src/catalog/option_template.dart';
 
@@ -421,6 +422,72 @@ class ManagedCatalogRepository {
 
   Future<void> deleteOption(String optionId) async {
     await apiClient.delete('/catalog/manage/options/$optionId/');
+  }
+
+  // --------------------------------------------------------------- tailles
+
+  /// Les tailles d'un article (lot 2), actives ou non — le back-office voit
+  /// aussi celles retirées de la carte.
+  Future<List<TailleGeree>> tailles(String menuItemId) {
+    return _collect(
+      '/catalog/manage/variants/',
+      TailleGeree.fromJson,
+      queryParameters: {'menu_item': menuItemId},
+    );
+  }
+
+  /// Crée une taille. Le prix est **absolu** et doit être libellé dans la
+  /// devise du marché — le serveur refuse sinon (400).
+  Future<TailleGeree> creerTaille({
+    required String menuItemId,
+    required String nom,
+    required Money prix,
+    String sku = '',
+    int ordre = 0,
+  }) async {
+    final response = await apiClient.post(
+      '/catalog/manage/variants/',
+      data: {
+        'menu_item': menuItemId,
+        'name': nom,
+        'price': prix.toJson(),
+        'sku': sku,
+        'sort_order': ordre,
+      },
+    );
+    return TailleGeree.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// `PATCH` : seul ce qu'on donne part. Chaque changement est journalisé au
+  /// serveur (`variant.update`, `variant.activation`).
+  Future<TailleGeree> modifierTaille(
+    String tailleId, {
+    String? nom,
+    Money? prix,
+    String? sku,
+    bool? disponible,
+    bool? active,
+    int? ordre,
+  }) async {
+    final response = await apiClient.patch(
+      '/catalog/manage/variants/$tailleId/',
+      data: {
+        if (nom != null) 'name': nom,
+        if (prix != null) 'price': prix.toJson(),
+        if (sku != null) 'sku': sku,
+        if (disponible != null) 'is_available': disponible,
+        if (active != null) 'is_active': active,
+        if (ordre != null) 'sort_order': ordre,
+      },
+    );
+    return TailleGeree.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Supprime la taille. Les commandes passées la gardent par copie
+  /// (`OrderLine.variantName`) ; une ligne de panier qui la portait devient
+  /// incommandable, et le dit.
+  Future<void> supprimerTaille(String tailleId) async {
+    await apiClient.delete('/catalog/manage/variants/$tailleId/');
   }
 
   // ------------------------------------------- bibliothèque de modèles

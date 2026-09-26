@@ -259,6 +259,7 @@ class OrderService:
                     menu_item=ligne.line.menu_item,
                     quantity=ligne.line.quantity,
                     options=ligne.options,
+                    variant=ligne.line.variant,
                 )
                 for ligne in priced.lines
             ],
@@ -350,6 +351,10 @@ class OrderService:
                 order=order,
                 menu_item=priced_line.line.menu_item,
                 item_name=priced_line.line.menu_item.name,
+                variant=priced_line.line.variant,
+                variant_name=(
+                    priced_line.line.variant.name if priced_line.line.variant is not None else ""
+                ),
                 unit_price=priced_line.unit_price,
                 quantity=priced_line.line.quantity,
                 line_total=priced_line.total,

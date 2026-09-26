@@ -20,7 +20,7 @@ from rest_framework import serializers
 # aurait produit deux composants homonymes dans le schéma OpenAPI — et deux
 # classes générées côté client, que rien n'empêcherait ensuite de diverger.
 from apps.carts.serializers import QuantitySerializer, SelectedOptionSerializer
-from apps.catalog.models import MenuItem, Option
+from apps.catalog.models import MenuItem, Option, Variant
 from apps.orders.models import PaymentMethod
 from apps.profiles.models import Address
 from apps.restaurants.models import Restaurant
@@ -55,11 +55,17 @@ class GroupCartLineSerializer(serializers.Serializer[Any]):
     quantity = serializers.IntegerField(source="line.quantity", read_only=True)
     notes = serializers.CharField(source="line.notes", read_only=True)
     options = SelectedOptionSerializer(many=True, read_only=True)
+    variant = serializers.UUIDField(source="line.variant_id", read_only=True, allow_null=True)
+    variant_name = serializers.SerializerMethodField()
     unit_price = MoneyField(read_only=True)
     total = MoneyField(read_only=True)
     is_orderable = serializers.BooleanField(read_only=True)
     unavailable_code = serializers.CharField(read_only=True)
     unavailable_reason = serializers.CharField(read_only=True)
+
+    def get_variant_name(self, obj: Any) -> str:
+        variant = obj.line.variant
+        return variant.name if variant is not None else ""
 
 
 class MemberTotalSerializer(serializers.Serializer[Any]):
@@ -138,6 +144,9 @@ class GroupCartLineWriteSerializer(serializers.Serializer[Any]):
     quantity = serializers.IntegerField(min_value=1, max_value=99, default=1)
     options = serializers.PrimaryKeyRelatedField(
         queryset=Option.objects.all(), many=True, required=False, default=list
+    )
+    variant = serializers.PrimaryKeyRelatedField(
+        queryset=Variant.objects.all(), required=False, allow_null=True, default=None
     )
     notes = serializers.CharField(
         max_length=500, required=False, allow_blank=True, default="", trim_whitespace=True

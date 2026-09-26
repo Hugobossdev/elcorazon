@@ -33,7 +33,15 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from apps.catalog.models import Category, MenuItem, Option, OptionGroup, OptionTemplate, Review
+from apps.catalog.models import (
+    Category,
+    MenuItem,
+    Option,
+    OptionGroup,
+    OptionTemplate,
+    Review,
+    Variant,
+)
 from apps.catalog.serializers import (
     ApplyTemplateSerializer,
     CategoryReorderSerializer,
@@ -43,12 +51,14 @@ from apps.catalog.serializers import (
     ManagedOptionSerializer,
     ManagedOptionTemplateSerializer,
     ManagedReviewSerializer,
+    ManagedVariantSerializer,
     OptionGroupSerializer,
     ReviewHideSerializer,
     StockSerializer,
 )
 from apps.catalog.services import ReviewModerationService
 from apps.restaurants.scoping import assert_in_scope, is_unscoped, staff_restaurant_ids
+from common.audit import AuditAction, record_change
 from common.exceptions import BusinessRuleViolation
 from common.permissions import HasPermission, HasReadWritePermission, authenticated_user
 
@@ -78,9 +88,9 @@ class _RangementIncomplet(BusinessRuleViolation):
 CATALOG_PERMISSION = HasReadWritePermission.of(read="catalog.read", write="catalog.write")
 
 
-class _ScopedCatalogViewSet[Model: (Category, MenuItem, OptionGroup, Option, OptionTemplate)](
-    ModelViewSet[Model]
-):
+class _ScopedCatalogViewSet[
+    Model: (Category, MenuItem, OptionGroup, Option, OptionTemplate, Variant)
+](ModelViewSet[Model]):
     """Facteur commun des quatre ressources : permissions et cloisonnement.
 
     Le chemin qui mène de l'objet à son établissement change d'une ressource à
@@ -405,6 +415,100 @@ class ManagedOptionViewSet(_ScopedCatalogViewSet[Option]):
         if group is not None:
             assert_in_scope(authenticated_user(self.request), group.menu_item.restaurant_id)
         serializer.save()
+
+
+def _empreinte_de_variante(variante: Variant) -> dict[str, Any]:
+    return {
+        "name": variante.name,
+        "sku": variante.sku,
+        "price": str(variante.price),
+        "is_available": variante.is_available,
+        "sort_order": variante.sort_order,
+    }
+
+
+class ManagedVariantViewSet(_ScopedCatalogViewSet[Variant]):
+    """Tailles d'un article (lot 2) — journalisées, contrairement au reste du
+    catalogue.
+
+    Une taille porte un **prix absolu** : la modifier change ce que paie le
+    client aussi sûrement qu'un barème de zone, et sans que rien ne se voie à
+    l'écran. C'est la même raison qui fait journaliser les zones.
+    """
+
+    serializer_class = ManagedVariantSerializer
+    queryset = Variant.objects.select_related("menu_item__restaurant")
+    restaurant_path = "menu_item__restaurant"
+    filterset_fields: ClassVar[dict[str, list[str]]] = {
+        "menu_item": ["exact"],
+        "is_active": ["exact"],
+        "is_available": ["exact"],
+    }
+
+    def get_queryset(self) -> QuerySet[Variant]:
+        return self.filter_queryset_by_scope(
+            Variant.objects.select_related("menu_item__restaurant").order_by(
+                "menu_item", "sort_order", "name"
+            )
+        )
+
+    def _journaliser(
+        self, action: str, variante: Variant, avant: dict[str, Any], apres: dict[str, Any]
+    ) -> None:
+        record_change(
+            actor=authenticated_user(self.request),
+            action=action,
+            target_type="variant",
+            target_id=variante.pk,
+            target_label=f"{variante.menu_item.name} — {variante.name}",
+            before=avant,
+            after=apres,
+            scope_restaurant_id=variante.menu_item.restaurant_id,
+        )
+
+    def perform_create(self, serializer: Any) -> None:
+        assert_in_scope(
+            authenticated_user(self.request), serializer.validated_data["menu_item"].restaurant_id
+        )
+        variante = serializer.save()
+        self._journaliser(
+            AuditAction.VARIANT_CREATE,
+            variante,
+            {},
+            {**_empreinte_de_variante(variante), "is_active": variante.is_active},
+        )
+
+    def perform_update(self, serializer: Any) -> None:
+        article = serializer.validated_data.get("menu_item")
+        if article is not None:
+            assert_in_scope(authenticated_user(self.request), article.restaurant_id)
+        avant = _empreinte_de_variante(serializer.instance)
+        etait_active = serializer.instance.is_active
+        variante = serializer.save()
+        # Deux entrées possibles, comme pour une zone : ce qu'elle est (nom,
+        # prix, disponibilité) et si elle est à la carte. `record_change`
+        # n'écrit rien pour ce qui n'a pas bougé.
+        self._journaliser(
+            AuditAction.VARIANT_UPDATE, variante, avant, _empreinte_de_variante(variante)
+        )
+        self._journaliser(
+            AuditAction.VARIANT_ACTIVATION,
+            variante,
+            {"is_active": etait_active},
+            {"is_active": variante.is_active},
+        )
+
+    def perform_destroy(self, instance: Variant) -> None:
+        # Une commande passée garde sa taille par copie (`OrderLine.variant_name`) :
+        # supprimer la variante ne réécrit aucun historique. Une ligne de panier
+        # qui la portait devient incommandable, et le dit.
+        self._journaliser(
+            AuditAction.VARIANT_DELETE,
+            instance,
+            {**_empreinte_de_variante(instance), "is_active": instance.is_active},
+            {},
+        )
+        instance.delete()
 
 
 class ManagedOptionTemplateViewSet(_ScopedCatalogViewSet[OptionTemplate]):

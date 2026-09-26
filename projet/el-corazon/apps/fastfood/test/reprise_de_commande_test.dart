@@ -51,6 +51,7 @@ void main() {
       nom: nom,
       quantite: quantite,
       options: const <String, String>{},
+      taille: '',
     );
   }
 
