@@ -82,6 +82,7 @@ abstract final class FamilleAudit {
     'courier.': 'Dossiers livreurs',
     'review.': 'Avis',
     'variant.': 'Tailles',
+    'category.': 'Catégories',
   };
 
   /// Libellé d'une action. Une action inconnue s'affiche telle quelle.
@@ -118,6 +119,7 @@ abstract final class FamilleAudit {
         'variant.update' => 'Taille modifiée',
         'variant.activation' => 'Taille à la carte ou retirée',
         'variant.delete' => 'Suppression de taille',
+        'category.image' => 'Photo d’une catégorie',
         _ => action,
       };
 }

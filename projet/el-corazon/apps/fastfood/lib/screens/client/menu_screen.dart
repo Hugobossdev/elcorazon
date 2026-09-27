@@ -578,7 +578,21 @@ class _MenuScreenState extends State<MenuScreen> with TickerProviderStateMixin {
                         // pas — « Salades », « Spécialités Togolaises » —
                         // n'affiche que son intitulé, plutôt qu'une assiette
                         // vide qui ne dirait rien d'elle.
-                        if (category.illustration case final illustration?) ...[
+                        // La photo posée par l'exploitation (lot 3) passe
+                        // avant l'illustration du pack.
+                        if (category.image case final photo?) ...[
+                          ClipRRect(
+                            borderRadius: DesignConstants.borderRadiusSmall,
+                            child: SizedBox.square(
+                              dimension: 40,
+                              child: ExcludeSemantics(
+                                child: FoodImage(url: photo, iconSize: 20),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                        ] else if (category.illustration
+                            case final illustration?) ...[
                           AppEmoji(
                             illustration,
                             size: AppEmoji.tailleS,

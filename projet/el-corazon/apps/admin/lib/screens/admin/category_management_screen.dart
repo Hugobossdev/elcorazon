@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import 'package:admin/presentation/autorisations.dart';
@@ -216,9 +217,22 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
               // Le repli, lui, tombe : afficher `'🍽️'` quand le champ est vide
               // rendait une catégorie sans emoji impossible à distinguer d'une
               // catégorie ayant l'assiette pour emoji.
-              child: category.emoji.isEmpty
-                  ? Icon(Icons.label_off_outlined, size: 20, color: scheme.onSurfaceVariant)
-                  : Text(category.emoji, style: const TextStyle(fontSize: 20)),
+              //
+              // La photo, quand il y en a une, passe devant : c'est elle que
+              // les clients voient sur la carte (lot 3).
+              clipBehavior: Clip.antiAlias,
+              child: category.image != null
+                  ? Image.network(
+                      category.image!,
+                      width: 40,
+                      height: 40,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          Icon(Icons.broken_image_outlined, size: 20, color: scheme.onSurfaceVariant),
+                    )
+                  : category.emoji.isEmpty
+                      ? Icon(Icons.label_off_outlined, size: 20, color: scheme.onSurfaceVariant)
+                      : Text(category.emoji, style: const TextStyle(fontSize: 20)),
             ),
             title: Text(
               category.name,
@@ -240,6 +254,11 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
                   ),
                   onPressed: peutEcrire ? () => unawaited(_basculer(category)) : null,
                   tooltip: category.isActive ? 'Désactiver' : 'Activer',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  onPressed: peutEcrire ? () => unawaited(_photo(category)) : null,
+                  tooltip: category.image == null ? 'Ajouter une photo' : 'Changer la photo',
                 ),
                 IconButton(
                   icon: const Icon(Icons.edit),
@@ -267,6 +286,73 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
       },
     );
   }
+
+  /// Pose, remplace ou retire la photo d'une catégorie.
+  ///
+  /// Le poids est vérifié ici **en plus** du serveur, pour ne pas envoyer
+  /// 20 Mo sur une connexion mobile avant d'apprendre qu'ils sont refusés ;
+  /// la règle qui fait foi reste celle du serveur, dont le refus s'affiche.
+  Future<void> _photo(eccore.ManagedCategory category) async {
+    final service = context.read<CategoryManagementService>();
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choisir une photo'),
+              subtitle: const Text('JPEG, PNG ou WebP — 5 Mo au plus'),
+              onTap: () => Navigator.pop(context, 'choisir'),
+            ),
+            if (category.image != null)
+              ListTile(
+                leading: const Icon(Icons.hide_image_outlined),
+                title: const Text('Retirer la photo'),
+                onTap: () => Navigator.pop(context, 'retirer'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choix == null || !mounted) return;
+
+    try {
+      if (choix == 'retirer') {
+        await service.retirerPhoto(category.id);
+        if (mounted) annoncer(context, 'Photo retirée');
+        return;
+      }
+      final fichier = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1600,
+      );
+      if (fichier == null) return;
+      final octets = await fichier.readAsBytes();
+      if (octets.length > _poidsMaxPhoto) {
+        if (mounted) {
+          annoncer(
+            context,
+            'Photo trop lourde (${(octets.length / 1024 / 1024).toStringAsFixed(1)} Mo) : 5 Mo au plus.',
+          );
+        }
+        return;
+      }
+      await service.definirPhoto(
+        category.id,
+        nomDeFichier: fichier.name,
+        octets: octets,
+        type: fichier.mimeType,
+      );
+      if (mounted) annoncer(context, 'Photo enregistrée');
+    } on eccore.ApiException catch (e) {
+      if (mounted) annoncerEchec(context, Echec.de(e));
+    }
+  }
+
+  static const int _poidsMaxPhoto = 5 * 1024 * 1024;
 
   Future<void> _ranger(List<eccore.ManagedCategory> ordreVoulu) async {
     try {

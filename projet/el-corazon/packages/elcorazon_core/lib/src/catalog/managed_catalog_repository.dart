@@ -260,7 +260,40 @@ class ManagedCatalogRepository {
     return ManagedMenuItem.fromJson(response.data as Map<String, dynamic>);
   }
 
-  // -------------------------------------------------------------- image
+  // -------------------------------------------------------------- images
+
+  /// Attache une photo à une catégorie (lot 3) — même chemin que celle d'un
+  /// article : `PATCH` multipart, octets et non chemin, compartiment public.
+  /// Le serveur borne le poids (5 Mo) et le format (JPEG, PNG, WebP), et
+  /// journalise le changement (`category.image`).
+  Future<ManagedCategory> uploadCategoryImage({
+    required String categoryId,
+    required String filename,
+    required List<int> bytes,
+    String? contentType,
+  }) async {
+    final response = await apiClient.patch(
+      '/catalog/manage/categories/$categoryId/',
+      data: FormData.fromMap({
+        'image': MultipartFile.fromBytes(
+          bytes,
+          filename: filename,
+          contentType: contentType == null ? null : DioMediaType.parse(contentType),
+        ),
+      }),
+    );
+    return ManagedCategory.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// Retire la photo d'une catégorie — en JSON, pour transmettre un `null`
+  /// explicite (voir [clearMenuItemImage]).
+  Future<ManagedCategory> clearCategoryImage(String categoryId) async {
+    final response = await apiClient.patch(
+      '/catalog/manage/categories/$categoryId/',
+      data: const {'image': null},
+    );
+    return ManagedCategory.fromJson(response.data as Map<String, dynamic>);
+  }
 
   /// Attache une image à un article — `PATCH` en `multipart/form-data`.
   ///

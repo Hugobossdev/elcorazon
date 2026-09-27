@@ -73,6 +73,7 @@ class AuditAction:
     VARIANT_UPDATE = "variant.update"
     VARIANT_ACTIVATION = "variant.activation"
     VARIANT_DELETE = "variant.delete"
+    CATEGORY_IMAGE = "category.image"
     RESTAURANT_STATUS = "restaurant.status"
     RESTAURANT_LOCATION = "restaurant.location"
     RESTAURANT_ZONE = "restaurant.zone"

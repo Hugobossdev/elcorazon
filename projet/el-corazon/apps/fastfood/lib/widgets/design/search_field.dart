@@ -104,6 +104,7 @@ class CategoryChipBar extends StatelessWidget {
       horizontal: DesignConstants.edgeMargin,
     ),
     this.leadingBuilder,
+    this.photoBuilder,
   });
 
   final List<String> labels;
@@ -123,6 +124,11 @@ class CategoryChipBar extends StatelessWidget {
   /// n'affiche que son intitulé, ce qui est correct.
   final AppEmojiToken? Function(int index)? leadingBuilder;
 
+  /// La photo de la catégorie (lot 3), prioritaire sur l'illustration quand
+  /// l'exploitation en a posé une. Une photo qui ne charge pas retombe sur
+  /// l'illustration : une puce ne doit jamais montrer un cadre cassé.
+  final String? Function(int index)? photoBuilder;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -139,6 +145,37 @@ class CategoryChipBar extends StatelessWidget {
         itemBuilder: (context, index) {
           final actif = index == selectedIndex;
           final pastille = leadingBuilder?.call(index);
+          final photo = photoBuilder?.call(index);
+          final encre = actif
+              ? theme.colorScheme.onPrimary
+              : theme.colorScheme.onSurfaceVariant;
+          Widget? repli;
+          if (pastille != null) {
+            // Décorative : l'intitulé juste à côté porte déjà le nom de la
+            // catégorie, et un lecteur d'écran n'a pas à l'entendre deux fois.
+            // La teinte suit l'encre de la puce, pour que le repli en icône
+            // passe en `onPrimary` avec le texte quand elle est retenue.
+            repli = AppEmoji(
+              pastille,
+              size: AppEmoji.tailleXS,
+              decoratif: true,
+              color: encre,
+            );
+          }
+          final Widget? tete = photo == null
+              ? repli
+              : ExcludeSemantics(
+                  child: ClipOval(
+                    child: Image.network(
+                      photo,
+                      width: 22,
+                      height: 22,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) =>
+                          repli ?? const SizedBox.shrink(),
+                    ),
+                  ),
+                );
 
           return Center(
             child: Material(
@@ -157,20 +194,8 @@ class CategoryChipBar extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (pastille != null) ...[
-                        // Décorative : l'intitulé juste à côté porte déjà le
-                        // nom de la catégorie, et un lecteur d'écran n'a pas
-                        // à l'entendre deux fois. La teinte suit l'encre de la
-                        // puce, pour que le repli en icône passe en
-                        // `onPrimary` avec le texte quand elle est retenue.
-                        AppEmoji(
-                          pastille,
-                          size: AppEmoji.tailleXS,
-                          decoratif: true,
-                          color: actif
-                              ? theme.colorScheme.onPrimary
-                              : theme.colorScheme.onSurfaceVariant,
-                        ),
+                      if (tete != null) ...[
+                        tete,
                         const SizedBox(width: 6),
                       ],
                       Text(

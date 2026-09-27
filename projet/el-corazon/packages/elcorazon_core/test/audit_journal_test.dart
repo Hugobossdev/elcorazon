@@ -126,6 +126,7 @@ void main() {
       'refund.request', 'refund.settle', 'refund.cancel', 'complaint.decision',
       'return.decision', 'ticket.resolution', 'courier.verification',
       'variant.create', 'variant.update', 'variant.activation', 'variant.delete',
+      'category.image',
     ];
 
     for (final action in actionsDuServeur) {

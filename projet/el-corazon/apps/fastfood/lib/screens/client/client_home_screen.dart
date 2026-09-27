@@ -184,6 +184,8 @@ class _ClientHomeScreenState extends State<ClientHomeScreen>
           // « Tout » n'illustre rien : c'est l'absence de filtre.
           leadingBuilder: (index) =>
               index == 0 ? null : categories[index - 1].illustration,
+          photoBuilder: (index) =>
+              index == 0 ? null : categories[index - 1].image,
           onSelected: (index) =>
               setState(() => _categorieRetenue = index - 1),
         );

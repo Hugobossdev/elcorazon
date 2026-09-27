@@ -9,7 +9,7 @@ client et facturait ce qu'on lui disait de facturer.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, ClassVar
 
 from rest_framework import serializers
 
@@ -27,6 +27,7 @@ from apps.catalog.models import (
 from apps.restaurants.models import Restaurant
 from common.availability import Unavailability
 from common.serializers import MoneyField
+from common.uploads import valider_image_publique
 
 __all__ = [
     "CategoryReorderSerializer",
@@ -50,7 +51,7 @@ class CategorySerializer(serializers.ModelSerializer[Category]):
 
     class Meta:
         model = Category
-        fields = ["id", "restaurant", "name", "slug", "emoji", "description", "sort_order"]
+        fields = ["id", "restaurant", "name", "slug", "emoji", "image", "description", "sort_order"]
         read_only_fields = fields
 
 
@@ -327,6 +328,7 @@ class ManagedCategorySerializer(serializers.ModelSerializer[Category]):
             "name",
             "slug",
             "emoji",
+            "image",
             "description",
             "sort_order",
             "is_active",
@@ -334,6 +336,10 @@ class ManagedCategorySerializer(serializers.ModelSerializer[Category]):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+        # Poids et format vérifiés ici, et non plus seulement dans l'écran.
+        extra_kwargs: ClassVar[dict[str, dict[str, Any]]] = {
+            "image": {"validators": [valider_image_publique]}
+        }
 
 
 class CategoryReorderSerializer(serializers.Serializer[Any]):
@@ -435,6 +441,11 @@ class ManagedMenuItemSerializer(serializers.ModelSerializer[MenuItem]):
             "created_at",
             "updated_at",
         ]
+        # La borne des 5 Mo n'existait que dans le back-office : un appel
+        # direct déposait n'importe quel poids au compartiment public.
+        extra_kwargs: ClassVar[dict[str, dict[str, Any]]] = {
+            "image": {"validators": [valider_image_publique]}
+        }
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         """Deux cohérences qu'aucune contrainte de base ne peut porter.

@@ -10,7 +10,7 @@ Six lots, livrés un par un de bout en bout (serveur, socle, écrans, tests).
 |-----|----------------|------|
 | 1 | Zones dessinées sur la carte (cercle, polygone) et zones d'une cuisine | ✅ |
 | 2 | Tailles de produit (`Variant`) | ✅ |
-| 3 | Images de catégorie | à venir |
+| 3 | Images de catégorie | ✅ |
 | 4 | Capacité des cuisines | à venir |
 | 5 | Code de connexion (OTP) du personnel | à venir |
 | 6 | Abonnements clients | à venir |
@@ -40,6 +40,22 @@ Six lots, livrés un par un de bout en bout (serveur, socle, écrans, tests).
   taille par identifiant (elle n'envoyait que des libellés, si bien que tout
   plat à choix obligatoire y était refusé).
 - ✅ Duplication d'un plat : ses tailles sont copiées.
+
+### Lot 3 — images des catégories
+
+- ✅ `Category.image`, facultative, rangée au compartiment public des plats ;
+  l'ancienne est effacée quand on la remplace ou la retire.
+- ✅ Le serveur borne **toute** image publique — plats compris : 5 Mo au
+  plus, JPEG, PNG ou WebP (`common/uploads.py`). La borne des 5 Mo ne vivait
+  que dans l'écran du back-office ; un appel direct déposait n'importe quel
+  poids, et n'importe quel format que Pillow sait ouvrir.
+- ✅ Poser ou retirer la photo est journalisé (`category.image`, famille
+  « Catégories » du journal), cloisonné par établissement.
+- ✅ ADMIN : photo choisie, remplacée ou retirée depuis la liste des
+  catégories ; la vignette de la ligne montre la photo.
+- ✅ FASTFOOD : la photo passe avant l'illustration du pack, dans les puces de
+  l'accueil comme dans les sections du menu ; une photo qui ne charge pas
+  retombe sur l'illustration.
 
 
 ## ✅ État vérifiable au 21 septembre 2026 (audit pré-production)
@@ -1203,7 +1219,7 @@ n'y vaut que si elle est vraie **du code déployé**, pas du code écrit.
    - ✅ Sélection depuis galerie ou caméra
    - ✅ Aperçu de l'image avant envoi
    - ✅ Compression automatique (85 % qualité, max 1920 px)
-   - ✅ Validation de taille (max 5 Mo)
+   - ✅ Validation de taille (max 5 Mo) — par le serveur depuis le lot 3, et non plus par le seul écran
    - ✅ Suppression automatique de l'ancienne image — faite **par le serveur**
      (`common/files.py`), pas par le client
    - ✅ Gestion d'erreurs et retours à l'écran

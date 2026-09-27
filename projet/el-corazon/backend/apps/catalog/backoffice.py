@@ -143,7 +143,22 @@ class ManagedCategoryViewSet(_ScopedCatalogViewSet[Category]):
         restaurant = serializer.validated_data.get("restaurant")
         if restaurant is not None:
             assert_in_scope(authenticated_user(self.request), restaurant.pk)
-        serializer.save()
+        avant = serializer.instance.image.name or None
+        categorie = serializer.save()
+        apres = categorie.image.name or None
+        # La photo d'une catégorie est ce que tout client voit en ouvrant la
+        # carte : qui l'a posée ou retirée se lit au journal (lot 3).
+        if avant != apres:
+            record_change(
+                actor=authenticated_user(self.request),
+                action=AuditAction.CATEGORY_IMAGE,
+                target_type="category",
+                target_id=categorie.pk,
+                target_label=categorie.name,
+                before={"image": avant},
+                after={"image": apres},
+                scope_restaurant_id=categorie.restaurant_id,
+            )
 
     @extend_schema(
         request=CategoryReorderSerializer,

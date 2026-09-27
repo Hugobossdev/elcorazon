@@ -40,6 +40,12 @@ class Category(UUIDModel, TimeStampedModel):
     name = models.CharField(max_length=80)
     slug = models.SlugField(max_length=80)
     emoji = models.CharField(max_length=8, blank=True)
+    # Photo de la catégorie (lot 3), dans le même compartiment public que
+    # celles des plats. Facultative : sans elle, les applications gardent
+    # leur illustration choisie par le slug.
+    image = models.ImageField(
+        upload_to="categories/", storage=product_images, null=True, blank=True
+    )
     description = models.TextField(blank=True)
     sort_order = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)

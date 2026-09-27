@@ -160,6 +160,39 @@ class CategoryManagementService extends ChangeNotifier {
     }
   }
 
+  /// Pose la photo d'une catégorie (lot 3). **Lève `ApiException`.**
+  ///
+  /// Le serveur borne le poids (5 Mo) et le format (JPEG, PNG, WebP) et
+  /// journalise le changement ; la liste reprend la catégorie qu'il rend.
+  Future<void> definirPhoto(
+    String categoryId, {
+    required String nomDeFichier,
+    required List<int> octets,
+    String? type,
+  }) async {
+    _remplacer(
+      await _catalog.uploadCategoryImage(
+        categoryId: categoryId,
+        filename: nomDeFichier,
+        bytes: octets,
+        contentType: type,
+      ),
+    );
+  }
+
+  /// Retire la photo d'une catégorie. **Lève `ApiException`.**
+  Future<void> retirerPhoto(String categoryId) async {
+    _remplacer(await _catalog.clearCategoryImage(categoryId));
+  }
+
+  void _remplacer(eccore.ManagedCategory relue) {
+    final index = _categories.indexWhere((c) => c.id == relue.id);
+    if (index != -1) {
+      _categories[index] = relue;
+      notifyListeners();
+    }
+  }
+
   /// Supprime une catégorie. **Lève `ApiException`.**
   ///
   /// Le refus de supprimer une catégorie encore utilisée vient du serveur

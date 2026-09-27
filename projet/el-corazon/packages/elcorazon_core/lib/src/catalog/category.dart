@@ -9,6 +9,7 @@ class Category {
     required this.emoji,
     required this.description,
     required this.sortOrder,
+    this.image,
   });
 
   factory Category.fromJson(Map<String, dynamic> json) {
@@ -20,6 +21,7 @@ class Category {
       emoji: json['emoji'] as String? ?? '',
       description: json['description'] as String? ?? '',
       sortOrder: json['sort_order'] as int,
+      image: _url(json['image']),
     );
   }
 
@@ -33,6 +35,7 @@ class Category {
         'emoji': emoji,
         'description': description,
         'sort_order': sortOrder,
+        'image': image,
       };
 
   final String id;
@@ -42,4 +45,14 @@ class Category {
   final String emoji;
   final String description;
   final int sortOrder;
+
+  /// Photo de la catégorie (lot 3) — URL publique, `null` sans photo. Les
+  /// applications gardent alors leur illustration choisie par le slug.
+  final String? image;
+}
+
+/// Une URL absente ou vide se lit `null` : « pas de photo » n'a qu'une forme.
+String? _url(Object? valeur) {
+  final texte = valeur?.toString() ?? '';
+  return texte.isEmpty ? null : texte;
 }

@@ -21,6 +21,7 @@ class ManagedCategory {
     required this.description,
     required this.sortOrder,
     required this.isActive,
+    this.image,
     this.createdAt,
     this.updatedAt,
   });
@@ -37,6 +38,7 @@ class ManagedCategory {
       // Absent d'une réponse publique : une catégorie qu'on y voit est active
       // par construction.
       isActive: json['is_active'] as bool? ?? true,
+      image: (json['image'] as String?)?.isEmpty ?? true ? null : json['image'] as String,
       createdAt: _date(json['created_at']),
       updatedAt: _date(json['updated_at']),
     );
@@ -53,6 +55,12 @@ class ManagedCategory {
   /// Une catégorie inactive reste visible du siège, et disparaît du catalogue
   /// client.
   final bool isActive;
+
+  /// Photo de la catégorie (lot 3), `null` sans photo. Elle se pose et se
+  /// retire par `ManagedCatalogRepository.uploadCategoryImage` /
+  /// `clearCategoryImage`, jamais par [copyWith] : un formulaire JSON ne
+  /// transporte pas d'octets.
+  final String? image;
 
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -73,6 +81,7 @@ class ManagedCategory {
       description: description ?? this.description,
       sortOrder: sortOrder ?? this.sortOrder,
       isActive: isActive ?? this.isActive,
+      image: image,
       createdAt: createdAt,
       updatedAt: updatedAt,
     );
