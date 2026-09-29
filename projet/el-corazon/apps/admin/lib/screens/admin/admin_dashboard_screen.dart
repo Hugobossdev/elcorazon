@@ -10,6 +10,7 @@ import 'package:admin/presentation/autorisations.dart';
 import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/couleur_statut.dart';
 import 'package:admin/presentation/echec.dart';
+import 'package:admin/presentation/relecture_en_direct.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/screens/admin/send_notification_dialog.dart';
 import 'package:admin/services/admin_auth_service.dart';
@@ -78,7 +79,8 @@ class AdminDashboardScreen extends StatefulWidget {
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
-class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+class _AdminDashboardScreenState extends State<AdminDashboardScreen>
+    with RelectureEnDirect<AdminDashboardScreen> {
   Future<Map<StatutCommande, int>>? _enCours;
   Future<List<eccore.Order>>? _recentes;
   Future<List<Map<String, dynamic>>>? _meilleuresVentes;
@@ -87,8 +89,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _charger();
+      if (!mounted) return;
+      _charger();
+      brancherLeDirect();
     });
+  }
+
+  /// Des agrégats, pas une liste : un regroupement plus large suffit.
+  @override
+  Duration get rebondDirect => const Duration(seconds: 10);
+
+  /// Le service a bougé : les compteurs, les commandes récentes et la journée.
+  /// Les meilleures ventes portent sur trente jours — elles attendent
+  /// « Actualiser ». Chaque bloc garde ses chiffres pendant la relecture.
+  @override
+  Future<void> relireEnDirect() async {
+    final auth = context.read<AdminAuthService>();
+    if (auth.can('orders.read')) {
+      final commandes = context.read<OrderManagementService>();
+      setState(() {
+        _enCours = commandes.compterEnCours();
+        _recentes = commandes.recentes();
+      });
+    }
+    if (auth.can('analytics.read')) {
+      await context.read<AnalyticsService>().chargerLaJournee();
+    }
   }
 
   /// Lance les lectures **permises** — et seulement elles : demander un
@@ -131,7 +157,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Accueil(nom: auth.nomAffiche),
+              _Accueil(nom: auth.nomAffiche, onActualiser: _charger),
               const SizedBox(height: 20),
               if (voitAnalyses) ...[
                 _Journee(onOuvrir: _ouvrir),
@@ -191,9 +217,10 @@ String _montant(int mineur, String devise) =>
     formatMontant(eccore.Money(amountMinor: mineur, currency: devise));
 
 class _Accueil extends StatelessWidget {
-  const _Accueil({required this.nom});
+  const _Accueil({required this.nom, required this.onActualiser});
 
   final String? nom;
+  final VoidCallback onActualiser;
 
   @override
   Widget build(BuildContext context) {
@@ -236,6 +263,8 @@ class _Accueil extends StatelessWidget {
               ],
             ),
           ),
+          BoutonActualiser(onPressed: onActualiser, couleur: scheme.onPrimary),
+          const SizedBox(width: 8),
           Icon(Icons.restaurant, color: scheme.onPrimary, size: 32),
         ],
       ),

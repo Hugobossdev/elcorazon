@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/presentation/flotte.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 
@@ -37,6 +38,16 @@ class DriverManagementService extends ChangeNotifier {
   List<eccore.CourierProfile> get drivers => _drivers;
   bool get isLoading => _isLoading;
   String? get error => _error;
+
+  /// Pourquoi la flotte n'a pas pu être lue — distinct de [error], qui porte
+  /// le refus d'une **écriture**. `null` après une lecture réussie.
+  ///
+  /// Sans lui, une panne vidait la liste en silence et l'écran annonçait
+  /// « Aucun livreur disponible » : une coupure se lisait comme une flotte
+  /// vide, et personne ne réessayait.
+  Echec? get erreurChargement => _erreurChargement;
+  Echec? _erreurChargement;
+
   String get recherche => _recherche;
   TriFlotte get tri => _tri;
 
@@ -72,10 +83,14 @@ class DriverManagementService extends ChangeNotifier {
     try {
       final remote = await _couriers.list();
       _drivers = remote..sort((a, b) => a.fullName.compareTo(b.fullName));
+      _erreurChargement = null;
       eccore.Journal.trace('DriverManagementService: ${_drivers.length} livreur(s)');
-    } on eccore.ApiException catch (e) {
-      eccore.Journal.trace('DriverManagementService: chargement impossible — ${e.code}');
-      _drivers = [];
+    } on Object catch (e) {
+      eccore.Journal.trace('DriverManagementService: chargement impossible — $e');
+      // La flotte déjà lue reste affichée : elle est vieille, pas fausse. Et
+      // la prochaine demande relira, au lieu de croire la flotte chargée.
+      _erreurChargement = Echec.de(e);
+      _demandee = false;
     } finally {
       _isLoading = false;
       notifyListeners();

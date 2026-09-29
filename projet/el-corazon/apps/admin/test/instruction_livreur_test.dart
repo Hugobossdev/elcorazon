@@ -56,6 +56,9 @@ class _FauxServeur implements HttpClientAdapter {
   Map<String, dynamic>? refus;
   int statutRefus = 400;
 
+  /// La lecture de la flotte tombe en panne (503).
+  bool flotteEnPanne = false;
+
   @override
   void close({bool force = false}) {}
 
@@ -65,6 +68,25 @@ class _FauxServeur implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (options.method == 'GET' && options.uri.path.endsWith('/delivery/couriers/')) {
+      if (flotteEnPanne) {
+        return ResponseBody.fromString(
+          jsonEncode({'code': 'service_unavailable', 'detail': 'Service indisponible.'}),
+          503,
+          headers: _entetesJson,
+        );
+      }
+      return ResponseBody.fromString(
+        jsonEncode({
+          'count': 1,
+          'next': null,
+          'previous': null,
+          'results': [_dossier(statut: 'approved')],
+        }),
+        200,
+        headers: _entetesJson,
+      );
+    }
     final corps = refus;
     if (corps != null) {
       return ResponseBody.fromString(jsonEncode(corps), statutRefus, headers: _entetesJson);
@@ -98,6 +120,40 @@ void main() {
   setUp(() {
     serveur.refus = null;
     serveur.statutRefus = 400;
+    serveur.flotteEnPanne = false;
+  });
+
+  group('La lecture de la flotte', () {
+    test('une panne n’est pas une flotte vide : elle se dit, et se réessaie', () async {
+      serveur.flotteEnPanne = true;
+      final sut = DriverManagementService();
+
+      await sut.ensureLoaded();
+
+      expect(sut.drivers, isEmpty);
+      expect(sut.erreurChargement, isNotNull);
+      expect(sut.erreurChargement!.nature.reessayable, isTrue);
+
+      // Le serveur revient : la demande suivante relit, au lieu de croire la
+      // flotte chargée.
+      serveur.flotteEnPanne = false;
+      await sut.ensureLoaded();
+
+      expect(sut.drivers, hasLength(1));
+      expect(sut.erreurChargement, isNull);
+    });
+
+    test('une relecture en panne garde la flotte déjà lue', () async {
+      final sut = DriverManagementService();
+      await sut.refresh();
+      expect(sut.drivers, hasLength(1));
+
+      serveur.flotteEnPanne = true;
+      await sut.refresh();
+
+      expect(sut.drivers, hasLength(1), reason: 'vieille, pas fausse');
+      expect(sut.erreurChargement, isNotNull);
+    });
   });
 
   test('un motif manquant se dit tel que le serveur l’écrit', () async {

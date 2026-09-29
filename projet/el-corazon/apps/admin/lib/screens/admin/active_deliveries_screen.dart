@@ -7,6 +7,7 @@ import 'package:admin/services/assignment_service.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:admin/presentation/commande.dart';
 import 'package:admin/presentation/dialogues/assignation_livreur.dart';
+import 'package:admin/presentation/relecture_en_direct.dart';
 import 'package:admin/presentation/statut_commande.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
@@ -21,7 +22,8 @@ class ActiveDeliveriesScreen extends StatefulWidget {
   State<ActiveDeliveriesScreen> createState() => _ActiveDeliveriesScreenState();
 }
 
-class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
+class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen>
+    with RelectureEnDirect<ActiveDeliveriesScreen> {
   // Filtre par défaut : afficher toutes les livraisons actives
   StatutCommande? _statusFilter;
 
@@ -29,11 +31,35 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshData();
+      if (!mounted) return;
+      unawaited(_chargerALOuverture());
+      brancherLeDirect();
     });
   }
 
-  Future<void> _refreshData() async {
+  /// Le service a bougé : les commandes en cours et leurs courses. La flotte
+  /// entière n'est pas relue à chaque événement — elle l'est à l'actualisation.
+  @override
+  Future<void> relireEnDirect() async {
+    await Future.wait([
+      context.read<OrderManagementService>().rechargerLaFenetre(),
+      context.read<AssignmentService>().refresh(),
+    ]);
+  }
+
+  /// « Actualiser » et le geste tactile : tout relire.
+  ///
+  /// Ils appelaient `ensureWindowLoaded`, qui ne relit **rien** quand la
+  /// fenêtre est déjà chargée — le geste ne rafraîchissait pas les commandes.
+  Future<void> _actualiser() async {
+    await Future.wait([
+      context.read<OrderManagementService>().rechargerLaFenetre(),
+      context.read<DriverManagementService>().refresh(),
+      context.read<AssignmentService>().refresh(),
+    ]);
+  }
+
+  Future<void> _chargerALOuverture() async {
     final orderService = context.read<OrderManagementService>();
     final driverService = context.read<DriverManagementService>();
     // Les courses en un appel, et non une requête par ligne affichée : c'est
@@ -98,7 +124,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                 child: activeOrders.isEmpty
                     ? _buildEmptyState()
                     : RefreshIndicator(
-                        onRefresh: _refreshData,
+                        onRefresh: _actualiser,
                         child: ListView.builder(
                           padding: const EdgeInsets.all(16),
                           itemCount: activeOrders.length,
@@ -135,6 +161,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                 Padding(
                   padding: const EdgeInsets.only(right: 16),
                   child: IconButton(
+                    tooltip: 'Retour',
                     icon: const Icon(Icons.arrow_back),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
@@ -145,6 +172,7 @@ class _ActiveDeliveriesScreenState extends State<ActiveDeliveriesScreen> {
                       fontWeight: FontWeight.bold,
                     ),
               ),
+              BoutonActualiser(onPressed: () => unawaited(_actualiser())),
               const Spacer(),
               // Filtres rapides
               Wrap(

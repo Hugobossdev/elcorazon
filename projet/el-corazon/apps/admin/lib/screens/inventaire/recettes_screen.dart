@@ -4,6 +4,7 @@ import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:admin/presentation/dialogues/confirmation.dart';
 import 'package:admin/presentation/inventaire.dart';
 import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/services/admin_auth_service.dart';
@@ -277,9 +278,18 @@ class _EditeurDeRecettesState extends State<_EditeurDeRecettes> {
     }
   }
 
+  /// Le retrait est écrit **tout de suite** sur le serveur, et la recette
+  /// décide de ce que chaque vente consomme en stock : il se confirme.
   Future<void> _retirer(String cible, eccore.RecipeLine ligne) async {
     final recette = _recettes[cible];
     if (recette == null) return;
+    final ok = await confirmer(
+      context,
+      titre: 'Retirer « ${ligne.ingredientName} » de la recette ?',
+      message: 'Les ventes suivantes ne le décompteront plus du stock.',
+      action: 'Retirer',
+    );
+    if (!ok || !mounted) return;
     try {
       final videe = await eccore.ManagedRecipeRepository(apiClient: _api)
           .removeLine(recipeId: recette.id, ingredientId: ligne.ingredientId);

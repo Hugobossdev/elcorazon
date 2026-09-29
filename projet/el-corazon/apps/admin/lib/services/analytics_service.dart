@@ -180,25 +180,44 @@ class AnalyticsService extends ChangeNotifier {
     ];
   }
 
-  /// Livraisons et gains par livreur. Les gains sont rendus avec leur devise
-  /// (`driverEarningsCurrency`) : un livreur de Douala est payé en XAF.
+  /// Livraisons par livreur, sur la période.
   Future<Map<String, dynamic>> getDriverAnalytics({
     required DateTime startDate,
     required DateTime endDate,
   }) async {
     final lignes = await _reports.couriers(start: startDate, end: endDate);
-    return {
-      'driverDeliveries': <String, int>{
-        for (final ligne in lignes) ligne.courierName: ligne.deliveries,
-      },
-      'driverEarnings': <String, double>{
-        for (final ligne in lignes)
-          ligne.courierName: montant(ligne.earningsMinor, ligne.currency),
-      },
-      'driverEarningsCurrency': <String, String>{
-        for (final ligne in lignes) ligne.courierName: ligne.currency,
-      },
-    };
+    return {'driverDeliveries': livraisonsParLivreur(lignes)};
+  }
+
+  /// Livraisons de chaque livreur, sous un libellé **unique**.
+  ///
+  /// Le rapport rend une ligne par livreur **et par devise** : un livreur payé
+  /// en deux devises y figure deux fois. Indexé par nom, le graphique gardait
+  /// la dernière ligne et perdait l'autre, et deux homonymes n'en faisaient
+  /// qu'un. On additionne donc par identifiant — un nombre de livraisons n'a
+  /// pas de devise — et un homonyme est distingué par la fin de son identifiant.
+  static Map<String, int> livraisonsParLivreur(List<eccore.CourierPerformanceRow> lignes) {
+    final parId = <String, int>{};
+    final noms = <String, String>{};
+    for (final ligne in lignes) {
+      parId.update(
+        ligne.courierId,
+        (cumul) => cumul + ligne.deliveries,
+        ifAbsent: () => ligne.deliveries,
+      );
+      noms[ligne.courierId] = ligne.courierName;
+    }
+    final homonymes = <String, int>{};
+    for (final nom in noms.values) {
+      homonymes.update(nom, (n) => n + 1, ifAbsent: () => 1);
+    }
+    String libelle(String id) {
+      final nom = noms[id]!;
+      if (homonymes[nom]! == 1) return nom;
+      return '$nom (…${id.substring(id.length < 4 ? 0 : id.length - 4)})';
+    }
+
+    return {for (final entree in parId.entries) libelle(entree.key): entree.value};
   }
 
   // --------------------------------------------------------- mise en forme

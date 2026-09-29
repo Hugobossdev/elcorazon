@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:admin/services/driver_management_service.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:admin/presentation/autorisations.dart';
+import 'package:admin/presentation/echec.dart';
 import 'package:admin/presentation/flotte.dart';
 import 'package:admin/presentation/statut_livreur.dart';
 import 'package:admin/widgets/loading_widget.dart';
@@ -96,7 +97,28 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                       message: 'Chargement des livreurs...',);
                 }
 
-                return TabBarView(
+                // Une flotte illisible n'est pas une flotte vide : sans cette
+                // branche, les onglets annonçaient « Aucun livreur disponible ».
+                final echec = driverService.erreurChargement;
+                final bandeau = echec == null
+                    ? null
+                    : BandeauEchec(
+                        key: const Key('echec-flotte'),
+                        echec: echec,
+                        onReessayer: () => unawaited(driverService.refresh()),
+                      );
+                if (bandeau != null && driverService.drivers.isEmpty) {
+                  return Column(
+                    children: [
+                      bandeau,
+                      const Expanded(
+                        child: Center(child: Text('La flotte n’a pas pu être lue.')),
+                      ),
+                    ],
+                  );
+                }
+
+                final onglets = TabBarView(
                   controller: _tabController,
                   children: [
                     _buildOverviewTab(context, driverService),
@@ -104,6 +126,9 @@ class _DriverManagementScreenState extends State<DriverManagementScreen>
                       _buildDriverListTab(context, driverService, onglet),
                   ],
                 );
+                // Une relecture échouée garde la flotte déjà lue, et le dit.
+                if (bandeau == null) return onglets;
+                return Column(children: [bandeau, Expanded(child: onglets)]);
               },
             ),
           ),

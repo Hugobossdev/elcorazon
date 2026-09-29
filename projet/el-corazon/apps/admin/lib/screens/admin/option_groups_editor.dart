@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
+import 'package:admin/presentation/dialogues/confirmation.dart';
 import 'package:admin/utils/dialog_helper.dart';
 import 'package:admin/widgets/custom_button.dart';
 import 'package:admin/services/restaurant_scope_service.dart';
@@ -83,10 +84,12 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
+                        tooltip: 'Modifier le groupe',
                         icon: const Icon(Icons.edit, size: 20),
                         onPressed: () => _editGroup(index),
                       ),
                       IconButton(
+                        tooltip: 'Supprimer le groupe',
                         icon: const Icon(Icons.delete,
                             size: 20, color: Colors.red,),
                         onPressed: () => _deleteGroup(index),
@@ -129,11 +132,13 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
                                           color: Colors.green,),
                                     ),
                                   IconButton(
+                                    tooltip: 'Modifier le choix',
                                     icon: const Icon(Icons.edit, size: 16),
                                     onPressed: () =>
                                         _editOption(index, optIndex),
                                   ),
                                   IconButton(
+                                    tooltip: 'Retirer le choix',
                                     icon: const Icon(Icons.close,
                                         size: 16, color: Colors.red,),
                                     onPressed: () =>
@@ -329,7 +334,21 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
     );
   }
 
-  void _deleteGroup(int index) {
+  /// Un groupe emporte tous ses choix : un clic égaré les faisait ressaisir un
+  /// à un. Rien n'est écrit avant l'enregistrement du plat, mais le brouillon,
+  /// lui, était perdu.
+  Future<void> _deleteGroup(int index) async {
+    final group = _groups[index];
+    final nombre = group.options.length;
+    final ok = await confirmer(
+      context,
+      titre: 'Supprimer le groupe « ${group.name} » ?',
+      message: nombre == 0
+          ? 'Le groupe sera retiré du plat à son enregistrement.'
+          : 'Ses $nombre choix partent avec lui. Le groupe sera retiré du plat '
+              'à son enregistrement.',
+    );
+    if (!ok || !mounted) return;
     setState(() {
       _groups.removeAt(index);
     });
@@ -521,7 +540,16 @@ class _OptionGroupsEditorState extends State<OptionGroupsEditor> {
     return valeur;
   }
 
-  void _deleteOption(int groupIndex, int optionIndex) {
+  Future<void> _deleteOption(int groupIndex, int optionIndex) async {
+    final option = _groups[groupIndex].options[optionIndex];
+    final ok = await confirmer(
+      context,
+      titre: 'Retirer « ${option.name} » ?',
+      message: 'Le choix sera retiré du groupe « ${_groups[groupIndex].name} » '
+          'à l’enregistrement du plat.',
+      action: 'Retirer',
+    );
+    if (!ok || !mounted) return;
     setState(() {
       final group = _groups[groupIndex];
       final newOptions = List<eccore.Option>.from(group.options)
