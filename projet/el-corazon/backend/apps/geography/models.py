@@ -15,18 +15,33 @@ s'ajoutent sans rien casser.
 
 from __future__ import annotations
 
+import datetime as dt
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.conf import settings
 from django.contrib.gis.db import models as gis
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
+from apps.geography.states import ZoneStatus
 from common.fields import MoneyField
 from common.models import TimeStampedModel, UUIDModel
 from common.money import CURRENCY_EXPONENTS
 
-__all__ = ["City", "Country", "DeliveryZone", "ZoneShape", "validate_timezone"]
+__all__ = [
+    "City",
+    "Country",
+    "DeliveryZone",
+    "Weekday",
+    "ZoneExceptionKind",
+    "ZoneOpeningHours",
+    "ZoneScheduleException",
+    "ZoneShape",
+    "ZoneStatus",
+    "validate_timezone",
+]
 
 
 def validate_timezone(value: str) -> None:
@@ -230,8 +245,48 @@ class DeliveryZone(UUIDModel, TimeStampedModel):
         help_text="Au-delà, la zone refuse la course même si le point est dans le contour.",
     )
 
-    estimated_delivery_minutes = models.PositiveSmallIntegerField(default=30)
-    is_active = models.BooleanField(default=True)
+    estimated_delivery_minutes = models.PositiveSmallIntegerField(
+        default=30, validators=[MinValueValidator(1)]
+    )
+
+    # Cycle de vie — voir `apps.geography.states`. **Seule `published` livre.**
+    #
+    # Le défaut du modèle est `published` et non `draft` : c'est celui des
+    # commandes de peuplement, des fixtures et de `django-admin`, qui décrivent
+    # un réseau en service. Le back-office, lui, crée toujours en brouillon
+    # (`apps.geography.lifecycle`) — c'est là que naît une zone qu'on n'a pas
+    # encore relue.
+    status = models.CharField(
+        max_length=16, choices=ZoneStatus.choices, default=ZoneStatus.PUBLISHED
+    )
+    #: Projection de `status == published`, recalculée à chaque `save()`.
+    #: Conservée parce que la résolution, l'annuaire et le juge de cuisine la
+    #: filtrent ; une contrainte l'empêche de contredire le statut.
+    is_active = models.BooleanField(default=True, editable=False)
+
+    # Traçabilité. `SET_NULL` : un compte du personnel qui part ne doit pas
+    # emporter la zone qu'il a dessinée, ni son historique.
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    # Suspension en cours — vides hors de l'état `suspended`. La fin prévue est
+    # **annoncée, pas automatique** : rouvrir un quartier après une coupure
+    # reste une décision humaine, prise en voyant l'état du terrain.
+    suspension_reason = models.CharField(max_length=255, blank=True)
+    suspended_at = models.DateTimeField(null=True, blank=True)
+    suspension_expected_end_at = models.DateTimeField(null=True, blank=True)
+    suspended_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    archived_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "zone de livraison"
@@ -254,6 +309,19 @@ class DeliveryZone(UUIDModel, TimeStampedModel):
                 ),
                 name="zone_circle_carries_center_and_radius",
             ),
+            # Les deux colonnes ne se contredisent jamais, même par un
+            # `QuerySet.update()` qui contournerait `save()`.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status="published", is_active=True)
+                    | (~models.Q(status="published") & models.Q(is_active=False))
+                ),
+                name="zone_is_active_mirrors_status",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(estimated_delivery_minutes__gte=1),
+                name="zone_eta_positive",
+            ),
         ]
         indexes = [
             # Index GiST sur le contour : sans lui, déterminer la zone d'un
@@ -264,7 +332,120 @@ class DeliveryZone(UUIDModel, TimeStampedModel):
             # devis : sans cet index, la clause qui les distingue des zones
             # municipales balaie la table.
             models.Index(fields=["restaurant", "is_active"], name="zone_restaurant_active_idx"),
+            models.Index(fields=["city", "status"], name="zone_city_status_idx"),
         ]
 
     def __str__(self) -> str:
         return f"{self.name} — {self.city.name}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.is_active = self.status == ZoneStatus.PUBLISHED
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "status" in update_fields:
+            kwargs["update_fields"] = {*update_fields, "is_active"}
+        super().save(*args, **kwargs)
+
+    @property
+    def timezone(self) -> str:
+        """Fuseau du pays : les horaires d'une zone se lisent à l'heure locale."""
+        return self.city.country.timezone
+
+
+class Weekday(models.IntegerChoices):
+    """Jour de la semaine, aligné sur `date.weekday()` : lundi = 0.
+
+    Déclaré dans la géographie, près de la racine du graphe, pour servir aux
+    horaires des zones **et** des cuisines (`apps.restaurants` le réexporte) :
+    un seul alignement, donc aucun décalage d'un jour entre les deux.
+    """
+
+    MONDAY = 0, "Lundi"
+    TUESDAY = 1, "Mardi"
+    WEDNESDAY = 2, "Mercredi"
+    THURSDAY = 3, "Jeudi"
+    FRIDAY = 4, "Vendredi"
+    SATURDAY = 5, "Samedi"
+    SUNDAY = 6, "Dimanche"
+
+
+class ZoneOpeningHours(UUIDModel):
+    """Plage hebdomadaire pendant laquelle une zone livre.
+
+    **Une zone sans plage suit sa cuisine** : c'est le cas courant, et celui de
+    toutes les zones antérieures à ce modèle. Dès qu'une plage existe, la zone
+    ne livre que pendant ses plages — *en plus* des horaires de la cuisine,
+    jamais à leur place (décision du 2026-09-28 : intersection).
+
+    Même représentation que les horaires de cuisine : une plage qui franchit
+    minuit s'écrit `closes_at < opens_at`.
+    """
+
+    zone = models.ForeignKey(DeliveryZone, on_delete=models.CASCADE, related_name="opening_hours")
+    weekday = models.SmallIntegerField(choices=Weekday.choices)
+    opens_at = models.TimeField()
+    closes_at = models.TimeField()
+
+    class Meta:
+        verbose_name = "horaire de zone"
+        verbose_name_plural = "horaires de zone"
+        ordering = ["weekday", "opens_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["zone", "weekday", "opens_at"], name="zone_hours_unique_slot"
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(opens_at=models.F("closes_at")),
+                name="zone_hours_not_empty",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_weekday_display()} {self.opens_at:%H:%M}–{self.closes_at:%H:%M}"
+
+    @property
+    def crosses_midnight(self) -> bool:
+        return self.closes_at < self.opens_at
+
+
+class ZoneExceptionKind(models.TextChoices):
+    #: Fermeture exceptionnelle — un jour férié, une nuit de couvre-feu.
+    CLOSED = "closed", "Fermeture exceptionnelle"
+    #: Ouverture hors des plages — une nuit de match, un jour de fête.
+    OPEN = "open", "Ouverture exceptionnelle"
+
+
+class ZoneScheduleException(UUIDModel, TimeStampedModel):
+    """Écart daté aux horaires d'une zone — il **se lève de lui-même** à sa fin.
+
+    Même forme que la fermeture d'une cuisine (`KitchenClosure`) : un début et
+    une fin datés, plutôt qu'une plage hebdomadaire qu'il faudrait penser à
+    remettre. Une fermeture l'emporte sur une ouverture qui la recouvre : dans
+    le doute, on ne livre pas.
+    """
+
+    zone = models.ForeignKey(DeliveryZone, on_delete=models.CASCADE, related_name="exceptions")
+    kind = models.CharField(max_length=8, choices=ZoneExceptionKind.choices)
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    reason = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    class Meta:
+        verbose_name = "exception d'horaires de zone"
+        verbose_name_plural = "exceptions d'horaires de zone"
+        ordering = ["starts_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(ends_at__gt=models.F("starts_at")),
+                name="zone_exception_ends_after_start",
+            ),
+        ]
+        indexes = [models.Index(fields=["zone", "ends_at"], name="zone_exception_active_idx")]
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} {self.starts_at:%d/%m %H:%M}–{self.ends_at:%d/%m %H:%M}"
+
+    def covers(self, moment: dt.datetime) -> bool:
+        return self.starts_at <= moment < self.ends_at

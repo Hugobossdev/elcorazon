@@ -36,6 +36,7 @@ posée à travers une position.
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
@@ -46,9 +47,9 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from apps.geography.models import DeliveryZone
-from apps.geography.resolution import covering_zones, resolve_zone
+from apps.geography.resolution import ZoneResolution, covering_zones, explain_resolution
 from apps.geography.services import DeliveryQuote, quote_delivery
-from apps.restaurants.availability import kitchen_unavailability
+from apps.restaurants.availability import kitchen_unavailability, reopening_label
 from apps.restaurants.models import Restaurant, kitchen_state_prefetches
 from common.availability import AddressNotServed, UnavailabilityCode
 from common.exceptions import BusinessRuleViolation
@@ -110,6 +111,10 @@ class DeliveryAvailability:
     #: refus lui-même.
     unavailable_code: str | None = None
 
+    #: Le raisonnement de la résolution — candidates et motifs d'exclusion.
+    #: Nul quand aucune cuisine n'a été trouvée : la question n'a pas été posée.
+    resolution: ZoneResolution | None = None
+
     @property
     def estimated_minutes(self) -> int | None:
         """Délai annoncé : préparation en cuisine **plus** course.
@@ -131,6 +136,7 @@ def check_delivery(
     point: Point,
     restaurant: Restaurant | None = None,
     subtotal: Money | None = None,
+    at: dt.datetime | None = None,
 ) -> DeliveryAvailability:
     """Livrabilité d'un point : établissement, zone, distance, frais, délai.
 
@@ -175,18 +181,34 @@ def check_delivery(
     # ville voisine qui couvre le point, et « desservir » une adresse que le
     # choix automatique (`_desservantes`) lui refuse. Deux réponses pour une
     # seule adresse : la règle doit être la même dans les deux sens.
-    zone = resolve_zone(point, restaurant_id=restaurant.pk, city_id=restaurant.zone.city_id)
+    resolution = explain_resolution(
+        point, restaurant_id=restaurant.pk, city_id=restaurant.zone.city_id, at=at
+    )
+    zone = resolution.zone
+    logger.info(
+        "zone_resolution",
+        extra={
+            "kitchen": restaurant.slug,
+            "zone": str(zone.pk) if zone is not None else None,
+            "blocked": resolution.blocked_code,
+            "candidates": [
+                {"zone": str(c.zone.pk), "excluded": c.excluded_because}
+                for c in resolution.candidates
+            ],
+        },
+    )
     if zone is None:
-        hors_zone = AddressNotServed("Cette adresse n'est couverte par aucune zone de livraison.")
+        refus = _refus_sans_zone(resolution, restaurant)
         return DeliveryAvailability(
             is_available=False,
             restaurant=restaurant,
             zone=None,
             distance_m=None,
             quote=None,
-            reason=hors_zone.detail,
-            refusal=hors_zone,
-            unavailable_code=str(UnavailabilityCode.ADDRESS_NOT_SERVED),
+            reason=refus.detail,
+            refusal=refus,
+            unavailable_code=refus.extra["unavailable_code"],
+            resolution=resolution,
         )
 
     distance_m = _distance_metres(restaurant, point)
@@ -211,6 +233,7 @@ def check_delivery(
             reason=trop_loin.detail,
             refusal=trop_loin,
             unavailable_code=str(UnavailabilityCode.ADDRESS_NOT_SERVED),
+            resolution=resolution,
         )
 
     quote = None
@@ -231,6 +254,7 @@ def check_delivery(
                 reason=str(refus),
                 refusal=refus,
                 unavailable_code=refus.code,
+                resolution=resolution,
             )
 
     return DeliveryAvailability(
@@ -239,7 +263,36 @@ def check_delivery(
         zone=zone,
         distance_m=distance_m,
         quote=quote,
+        resolution=resolution,
     )
+
+
+def _refus_sans_zone(resolution: ZoneResolution, restaurant: Restaurant) -> AddressNotServed:
+    """Le refus quand aucune zone ne s'applique — avec le motif qui dit quoi faire.
+
+    « Hors zone » invite à changer d'adresse ; « zone fermée » à revenir plus
+    tard ; « zone suspendue » à patienter sans date. Les confondre ferait
+    chercher une autre adresse à quelqu'un qui n'a qu'à attendre 11 h.
+    """
+    if resolution.blocked_code == UnavailabilityCode.ZONE_CLOSED:
+        extra: dict[str, str] = {}
+        message = "La livraison est fermée dans votre quartier pour le moment."
+        if resolution.reopens_at is not None:
+            extra["reopens_at"] = resolution.reopens_at.isoformat()
+            message = (
+                "La livraison est fermée dans votre quartier ; elle rouvre "
+                + reopening_label(
+                    resolution.reopens_at, now=timezone.now(), timezone_name=restaurant.timezone
+                )
+                + "."
+            )
+        return AddressNotServed(message, unavailable=UnavailabilityCode.ZONE_CLOSED, **extra)
+    if resolution.blocked_code == UnavailabilityCode.ZONE_SUSPENDED:
+        return AddressNotServed(
+            "La livraison est suspendue dans votre quartier pour le moment.",
+            unavailable=UnavailabilityCode.ZONE_SUSPENDED,
+        )
+    return AddressNotServed("Cette adresse n'est couverte par aucune zone de livraison.")
 
 
 def overlapping_zones(zone: DeliveryZone) -> list[DeliveryZone]:

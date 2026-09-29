@@ -5,7 +5,7 @@ from __future__ import annotations
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from apps.delivery import backoffice, views
+from apps.delivery import backoffice, coverage, views
 
 app_name = "delivery"
 
@@ -42,6 +42,18 @@ urlpatterns = [
         "assignments/<uuid:assignment_id>/cancel/",
         views.CancelAssignmentView.as_view(),
         name="assignment-cancel",
+    ),
+    # « Tester une adresse », et une zone vue depuis ses cuisines et sa flotte.
+    path("coverage-test/", coverage.CoverageTestView.as_view(), name="coverage-test"),
+    path(
+        "zones/<uuid:zone_id>/kitchens/",
+        coverage.ZoneKitchensView.as_view(),
+        name="zone-kitchens",
+    ),
+    path(
+        "zones/<uuid:zone_id>/couriers/",
+        coverage.ZoneCouriersView.as_view(),
+        name="zone-couriers",
     ),
     path("", include(router.urls)),
 ]

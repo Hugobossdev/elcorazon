@@ -168,6 +168,15 @@ pending → processing → completed → refunded
 
 `completed` ne redescend jamais : un webhook rejoué ne peut pas rétrograder un encaissement.
 
+**Zone de livraison** — `backend/apps/geography/states.py` (`ZoneStatus`, `ZONE_TRANSITIONS`)
+
+```text
+draft ⇄ pending_review → published ⇄ suspended
+  └──────────┴──────────────┴────────────┴──→ archived
+```
+
+Seule `published` livre ; `is_active` n'en est que le reflet. Toute zone créée au back-office naît `draft`.
+
 **Stock** — `backend/apps/inventory/models.py` (`MovementKind`)
 
 Deux colonnes, `on_hand` et `reserved`. Chaque mouvement agit sur une seule :

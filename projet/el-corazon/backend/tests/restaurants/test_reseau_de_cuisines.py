@@ -225,7 +225,10 @@ class TestLeRattachementDUneCuisine:
             "city": restaurant.zone.city,
             "country": restaurant.zone.city.country,
         }[etage]
-        type(cible).objects.filter(pk=cible.pk).update(is_active=False)
+        champs: dict[str, object] = {"is_active": False}
+        if etage == "zone":
+            champs["status"] = "suspended"
+        type(cible).objects.filter(pk=cible.pk).update(**champs)
         restaurant.refresh_from_db()
 
         manques = restaurant.configuration_gaps()

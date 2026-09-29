@@ -85,6 +85,21 @@ class PresentationSituation {
                 'Choisissez une autre adresse de livraison.',
         icone: Icons.wrong_location_outlined,
       ),
+      SituationCuisine.zoneFermee => PresentationSituation(
+        titre: 'Livraison fermée dans votre quartier',
+        message:
+            motif ??
+            'La livraison ne dessert pas votre quartier à cette heure. '
+                'Revenez plus tard.',
+        icone: Icons.schedule_outlined,
+        reessayable: true,
+      ),
+      SituationCuisine.zoneSuspendue => PresentationSituation(
+        titre: 'Livraison suspendue dans votre quartier',
+        message: motif ?? 'La livraison est momentanément suspendue dans votre quartier.',
+        icone: Icons.pause_circle_outline,
+        reessayable: true,
+      ),
       SituationCuisine.erreurReseau => const PresentationSituation(
         titre: 'Connexion impossible',
         message:

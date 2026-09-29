@@ -124,7 +124,7 @@ class TestResolutionDeZone:
     def test_une_zone_desactivee_ne_couvre_plus(
         self, client: APIClient, zone: DeliveryZone
     ) -> None:
-        DeliveryZone.objects.filter(pk=zone.pk).update(is_active=False)
+        DeliveryZone.objects.filter(pk=zone.pk).update(status="suspended", is_active=False)
 
         response = client.get(reverse("v1:geography:zone-resolve"), {"lat": 6.1319, "lon": 1.2255})
 

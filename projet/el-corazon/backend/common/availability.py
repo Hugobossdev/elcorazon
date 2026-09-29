@@ -63,6 +63,12 @@ class UnavailabilityCode(StrEnum):
     NO_KITCHEN_AVAILABLE = "no_kitchen_available"
     #: Une cuisine existe, mais cette adresse sort de ses zones ou de son rayon.
     ADDRESS_NOT_SERVED = "address_not_served"
+    #: La zone qui dessert l'adresse est hors de ses horaires, ou dans une
+    #: fermeture exceptionnelle — revenir plus tard, sans changer d'adresse.
+    ZONE_CLOSED = "zone_closed"
+    #: La zone qui dessert l'adresse est suspendue par l'exploitation, sans
+    #: autre zone pour prendre le relais.
+    ZONE_SUSPENDED = "zone_suspended"
 
     # --- la cuisine ---------------------------------------------------------
     #: Jamais mise en service, ou marché (pays, ville, zone) désactivé.
@@ -151,7 +157,15 @@ class AddressNotServed(BusinessRuleViolation):
     code = "address_not_served"
     title = "Adresse non desservie"
 
-    def __init__(self, detail: str, **extra: Any) -> None:
-        super().__init__(
-            detail, unavailable_code=str(UnavailabilityCode.ADDRESS_NOT_SERVED), **extra
-        )
+    def __init__(
+        self,
+        detail: str,
+        *,
+        unavailable: UnavailabilityCode = UnavailabilityCode.ADDRESS_NOT_SERVED,
+        **extra: Any,
+    ) -> None:
+        # `code` reste `address_not_served` pour les trois motifs : c'est la
+        # famille du refus, que les clients existants savent lire. Le motif
+        # précis — hors zone, zone fermée, zone suspendue — voyage dans
+        # `unavailable_code`, comme pour la cuisine.
+        super().__init__(detail, unavailable_code=str(unavailable), **extra)

@@ -157,6 +157,20 @@ class TestReseauDeBoutEnBout:
             status.HTTP_201_CREATED,
         )
 
+        # Une zone naît en brouillon : elle se relit, puis se publie. Sans
+        # publication, la cuisine qu'elle porte refuserait de se mettre en
+        # service (« zone désactivée »).
+        for zone in (cocody, yopougon):
+            for geste in ("submit", "publish"):
+                ok(
+                    siege.post(
+                        reverse(f"v1:geography:managed-zone-{geste}", args=[zone["id"]]),
+                        {},
+                        format="json",
+                    ),
+                    status.HTTP_200_OK,
+                )
+
         # =================================================== 4. la cuisine
         cuisine = ok(
             siege.post(

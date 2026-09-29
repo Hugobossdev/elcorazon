@@ -1,4 +1,3 @@
-
 import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/foundation.dart';
 
@@ -23,10 +22,12 @@ class DeliveryZone {
     required this.currency,
     this.freeDeliveryThreshold,
     this.minOrderAmount,
+    this.remote,
   });
 
   factory DeliveryZone.fromRemote(eccore.DeliveryZone remote) {
     return DeliveryZone(
+      remote: remote,
       id: remote.id,
       cityId: remote.cityId,
       name: remote.name,
@@ -85,11 +86,40 @@ class DeliveryZone {
 
   bool get hasFreeDelivery => freeDeliveryThreshold != null;
 
-  /// Premier anneau du premier polygone.
+  /// La fiche telle que le serveur l'a rendue — statut, transitions permises,
+  /// horaires, traçabilité. Nulle seulement pour une zone construite à la
+  /// main par un test.
+  final eccore.DeliveryZone? remote;
+
+  /// Statut serveur ; `published` à défaut de fiche (ancien comportement).
+  String get status => remote?.status ?? eccore.StatutZone.publiee;
+
+  /// L'interrupteur ouvrir/fermer vaut-il pour cette zone ?
   ///
-  /// Suffisant pour une carte de supervision : les trous et les îlots d'un
-  /// `MultiPolygon` ne changent pas le repère visuel qu'on cherche, et le
-  /// serveur reste seul juge de l'appartenance d'un point (PostGIS).
+  /// Le serveur traduit `is_active` en geste (`zone_actions.save_zone_changes`) :
+  /// `false` suspend une zone publiée, `true` réactive une zone suspendue, et
+  /// il refuse tout le reste (409). Un brouillon, une zone en revue ou archivée
+  /// ne se basculent donc pas : ils passent par leur fiche. Le droit est lu
+  /// dans `transitions`, pas recopié du graphe.
+  bool get basculable {
+    final fiche = remote;
+    if (fiche == null) return true;
+    return switch (fiche.status) {
+      eccore.StatutZone.publiee => fiche.transitions.contains(eccore.StatutZone.suspendue),
+      eccore.StatutZone.suspendue => fiche.transitions.contains(eccore.StatutZone.publiee),
+      _ => false,
+    };
+  }
+
+  /// **Tout** le contour : chaque morceau, avec ses trous — ce que la carte
+  /// dessine. [polygon] n'en garde que le premier anneau.
+  List<List<List<eccore.GeoPoint>>> get polygones => remote?.polygones ?? const [];
+
+  /// Premier anneau du premier polygone — **repère** de centrage seulement.
+  ///
+  /// Une zone importée peut compter plusieurs morceaux et des trous : pour la
+  /// dessiner, lire [polygones]. Le serveur reste seul juge de l'appartenance
+  /// d'un point (PostGIS).
   static List<Map<String, double>> _contour(Map<String, dynamic>? geojson) {
     if (geojson == null) return const [];
 
@@ -149,8 +179,7 @@ class DeliveryZoneService extends ChangeNotifier {
   bool _isInitialized = false;
 
   List<DeliveryZone> get zones => _zones;
-  List<DeliveryZone> get activeZones =>
-      _zones.where((zone) => zone.isActive).toList();
+  List<DeliveryZone> get activeZones => _zones.where((zone) => zone.isActive).toList();
   bool get isLoading => _isLoading;
   String? get error => _error;
 
@@ -160,6 +189,9 @@ class DeliveryZoneService extends ChangeNotifier {
   static const String _villeInconnue = 'Ville non rattachée';
 
   /// Nom de la ville d'une zone.
+  /// Villes connues, `{id: nom}` — pour choisir la ville d'un import.
+  Map<String, String> get villes => Map.unmodifiable(_cityNames);
+
   String cityName(String cityId) => _cityNames[cityId] ?? _villeInconnue;
 
   /// Zones regroupées par ville, chaque groupe trié par nom.
@@ -211,8 +243,7 @@ class DeliveryZoneService extends ChangeNotifier {
         retenus[entree.key] = entree.value;
         continue;
       }
-      final zones =
-          entree.value.where((zone) => zone.name.toLowerCase().contains(terme)).toList();
+      final zones = entree.value.where((zone) => zone.name.toLowerCase().contains(terme)).toList();
       if (zones.isNotEmpty) retenus[entree.key] = zones;
     }
     return retenus;
@@ -262,7 +293,7 @@ class DeliveryZoneService extends ChangeNotifier {
     } on eccore.ApiException catch (e) {
       _error = e.status == 403
           ? 'Les zones relèvent du siège : votre compte est rattaché à un '
-                'périmètre.'
+              'périmètre.'
           : e.detail;
       eccore.Journal.trace('Zones : chargement impossible — ${e.code}');
       _zones = [];
@@ -344,9 +375,8 @@ class DeliveryZoneService extends ChangeNotifier {
         freeDeliveryThreshold: freeDeliveryThreshold == null
             ? null
             : eccore.Money.fromMajorUnits(freeDeliveryThreshold, currency),
-        minOrderAmount: minOrderAmount == null
-            ? null
-            : eccore.Money.fromMajorUnits(minOrderAmount, currency),
+        minOrderAmount:
+            minOrderAmount == null ? null : eccore.Money.fromMajorUnits(minOrderAmount, currency),
         // Par défaut, la zone refuse au-delà de son propre rayon : un plafond
         // plus large que le contour ne sert à rien, un plafond plus étroit
         // ferait refuser des points pourtant dans la zone.
@@ -360,7 +390,7 @@ class DeliveryZoneService extends ChangeNotifier {
     } on eccore.ApiException catch (e) {
       _error = e.status == 403
           ? "L'ouverture d'une zone relève du siège : votre compte est "
-                'rattaché à un périmètre.'
+              'rattaché à un périmètre.'
           : e.detail;
       eccore.Journal.trace('Zones : ouverture refusée — ${e.code}');
       return null;
@@ -416,7 +446,9 @@ class DeliveryZoneService extends ChangeNotifier {
     var modifiees = 0;
     for (final zoneId in zoneIds) {
       final zone = zoneById(zoneId);
-      if (zone == null || zone.isActive == isActive) continue;
+      // Un brouillon ou une zone en revue n'ont rien à « ouvrir » : le serveur
+      // refuserait (409), et ce refus interromprait toute la ville.
+      if (zone == null || zone.isActive == isActive || !zone.basculable) continue;
 
       if (!await setZoneActive(zoneId, isActive)) {
         return (modifiees: modifiees, echec: true);
@@ -491,7 +523,7 @@ class DeliveryZoneService extends ChangeNotifier {
     } on eccore.ApiException catch (e) {
       _error = e.status == 403
           ? 'Les barèmes relèvent du siège : votre compte est rattaché à un '
-                'périmètre.'
+              'périmètre.'
           : e.detail;
       eccore.Journal.trace('Zones : écriture refusée — ${e.code}');
       return false;
@@ -503,6 +535,31 @@ class DeliveryZoneService extends ChangeNotifier {
       _writing.remove(zoneId);
       notifyListeners();
     }
+  }
+
+  /// Applique un geste de cycle de vie (soumettre, publier, suspendre…) et
+  /// remplace la zone locale par celle que rend le serveur. Rend le message
+  /// du refus, ou `null` si le serveur a accepté.
+  Future<String?> appliquer(
+    String zoneId,
+    Future<eccore.DeliveryZone> Function(eccore.ZoneLifecycleRepository depot) geste,
+  ) async {
+    final ok = await _write(
+      zoneId,
+      () => geste(eccore.ZoneLifecycleRepository.ville(apiClient: AdminAuthService().apiClient)),
+    );
+    return ok ? null : _error;
+  }
+
+  /// Intègre une zone que le serveur vient de rendre — créée (import,
+  /// duplication) ou modifiée (un geste depuis sa fiche).
+  void integrer(eccore.DeliveryZone rendue) {
+    final locale = DeliveryZone.fromRemote(rendue);
+    final index = _zones.indexWhere((zone) => zone.id == rendue.id);
+    _zones = index == -1
+        ? [..._zones, locale]
+        : [..._zones.sublist(0, index), locale, ..._zones.sublist(index + 1)];
+    notifyListeners();
   }
 
   DeliveryZone? zoneById(String id) {

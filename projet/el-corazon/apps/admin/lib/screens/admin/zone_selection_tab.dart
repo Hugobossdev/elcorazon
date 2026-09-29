@@ -1,3 +1,4 @@
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -283,7 +284,9 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
     bool peutRegler,
   ) {
     final ouvertes = zones.where((zone) => zone.isActive).length;
-    final toutesOuvertes = ouvertes == zones.length;
+    // Un brouillon ne s'ouvre pas d'un geste : il ne doit pas empêcher la
+    // ville entière de se dire « toute ouverte ».
+    final toutesOuvertes = zones.where((zone) => zone.basculable).every((zone) => zone.isActive);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -346,7 +349,9 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
       // Neutralisé pendant l'écriture : voir `DeliveryZoneService.isWriting`.
       // Sans le droit, l'interrupteur reste lisible — ouverte ou fermée — mais
       // ne se manipule pas.
-      onChanged: enCours || !peutRegler
+      // Un brouillon, une zone en revue ou archivée se règlent depuis leur
+      // fiche : le serveur refuserait la bascule.
+      onChanged: enCours || !peutRegler || !zone.basculable
           ? null
           : (ouverte) => _basculerZone(service, zone, ouverte),
       title: Text(
@@ -376,6 +381,7 @@ class _ZoneSelectionTabState extends State<ZoneSelectionTab> {
     String montant(double valeur) => formatMajeur(valeur, zone.currency);
 
     final parties = [
+      if (!zone.basculable) eccore.StatutZone.libelle(zone.status),
       '${montant(zone.deliveryFee)} + ${montant(zone.feePerKm)}/km',
       '~${zone.estimatedTimeMinutes} min',
       if (zone.freeDeliveryThreshold != null)

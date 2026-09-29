@@ -50,7 +50,7 @@ def sans_zone_municipale(city: City) -> None:
     Désactivée plutôt que supprimée : `Restaurant.zone` est une clé étrangère
     non nulle, et l'effacer emporterait le restaurant du décor.
     """
-    DeliveryZone.objects.filter(city=city).update(is_active=False)
+    DeliveryZone.objects.filter(city=city).update(status="suspended", is_active=False)
 
 
 def zone_circulaire(
@@ -619,11 +619,19 @@ class TestZonesDEtablissement:
         self, as_siege: APIClient, city: City, restaurant: Restaurant
     ) -> None:
         """C'est ce qui permet à deux cuisines d'une ville de facturer différemment."""
-        as_siege.post(
+        creee = as_siege.post(
             reverse("v1:restaurants:managed-restaurant-zone-list"),
             self._corps(city, restaurant),
             format="json",
         )
+        # Née en brouillon, elle ne tarifie rien avant d'être publiée.
+        assert resolve_zone(LOME, restaurant_id=restaurant.pk).restaurant_id is None
+        for geste in ("submit", "publish"):
+            as_siege.post(
+                reverse(f"v1:restaurants:managed-restaurant-zone-{geste}", args=[creee.data["id"]]),
+                {},
+                format="json",
+            )
 
         retenue = resolve_zone(LOME, restaurant_id=restaurant.pk)
 

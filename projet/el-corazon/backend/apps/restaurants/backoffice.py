@@ -50,7 +50,10 @@ from apps.geography.journal import (
     record_zone_deletion,
     zone_fingerprint,
 )
+from apps.geography.lifecycle import transition_zone
 from apps.geography.models import DeliveryZone
+from apps.geography.states import ZoneStatus
+from apps.geography.zone_actions import ZoneLifecycleMixin
 from apps.restaurants.duplication import SECTION_GENERAL, copy_sections
 from apps.restaurants.models import (
     AreaMembership,
@@ -745,7 +748,7 @@ def _etablissement_proprietaire(zone: DeliveryZone) -> Restaurant:
     return zone.restaurant
 
 
-class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
+class ManagedRestaurantZoneViewSet(ZoneLifecycleMixin, ModelViewSet[DeliveryZone]):
     """Zones **propres à un établissement** — `/restaurants/manage/zones/`.
 
     ## Pourquoi ces zones-là vivent ici
@@ -769,13 +772,13 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
     ailleurs : une zone est un levier tarifaire, et l'ouvrir plus largement que
     les commandes n'aurait aucun sens.
 
-    ## La suppression est réelle
+    ## La suppression n'est réelle que pour une zone qui n'a rien tarifé
 
-    Contrairement aux établissements et aux villes, une zone d'établissement
-    n'est référencée par rien : les commandes figent leurs montants, elles ne
-    pointent pas la zone qui les a produits. La retirer ne rend donc aucun
-    historique illisible, et une zone désactivée qu'on ne pourrait pas effacer
-    encombrerait l'écran qui sert à en dessiner.
+    Une commande garde la zone qui l'a tarifée (`Order.delivery_zone`). Effacer
+    cette zone mettrait la clé à nul et rendrait l'historique moins lisible —
+    ville, barème, contour perdus. Une zone qui a servi est donc **archivée**
+    par `DELETE`, pas effacée ; un brouillon jamais utilisé, lui, s'efface pour
+    ne pas encombrer l'écran qui sert à en dessiner.
     """
 
     serializer_class = ManagedRestaurantZoneSerializer
@@ -789,15 +792,27 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
         "restaurant__slug": ["exact"],
         "city__slug": ["exact"],
         "shape": ["exact"],
+        "status": ["exact", "in"],
         "is_active": ["exact"],
     }
     search_fields: ClassVar[list[str]] = ["name"]
+
+    def check_zone_write(self, zone: DeliveryZone) -> None:
+        assert_in_scope(authenticated_user(self.request), _etablissement_proprietaire(zone).pk)
 
     def get_queryset(self) -> QuerySet[DeliveryZone]:
         user = authenticated_user(self.request)
         base = (
             DeliveryZone.objects.filter(restaurant__isnull=False)
-            .select_related("city__country", "restaurant")
+            .select_related(
+                "city__country",
+                "restaurant",
+                "created_by",
+                "updated_by",
+                "published_by",
+                "suspended_by",
+            )
+            .prefetch_related("opening_hours")
             .order_by("restaurant__name", "name")
         )
         if is_unscoped(user):
@@ -808,7 +823,7 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
         assert_in_scope(
             authenticated_user(self.request), serializer.validated_data["restaurant"].pk
         )
-        zone = serializer.save()
+        zone = self.save_new_zone(serializer)
         record_zone_creation(authenticated_user(self.request), zone)
 
     def perform_update(self, serializer: Any) -> None:
@@ -823,7 +838,7 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
             assert_in_scope(acteur, cible.pk)
 
         avant = zone_fingerprint(serializer.instance)
-        zone = serializer.save()
+        zone = self.save_zone_changes(serializer)
         record_zone_changes(acteur, avant, zone)
 
     def perform_destroy(self, instance: DeliveryZone) -> None:
@@ -840,6 +855,16 @@ class ManagedRestaurantZoneViewSet(ModelViewSet[DeliveryZone]):
                 "rattachez-le à une autre zone avant de la supprimer.",
                 zone=str(instance.pk),
             )
+        if instance.orders.exists():
+            # Elle a tarifé des commandes : on la retire du service sans
+            # effacer ce qui permet de relire ces commandes.
+            transition_zone(
+                instance,
+                ZoneStatus.ARCHIVED,
+                actor=authenticated_user(self.request),
+                reason="Supprimée depuis le back-office ; conservée pour l'historique.",
+            )
+            return
         record_zone_deletion(authenticated_user(self.request), instance)
         instance.delete()
 

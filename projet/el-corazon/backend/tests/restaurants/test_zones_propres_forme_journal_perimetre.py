@@ -206,7 +206,9 @@ class TestJournal:
         siege.patch(fiche, {"is_active": False}, format="json")
         siege.patch(fiche, {"shape": "polygon", "polygon_coordinates": CARRE}, format="json")
 
-        assert self.actions(zone.pk) == ["zone.tariff", "zone.activation", "zone.boundary"]
+        # Désactiver depuis la fiche passe par la machine à états : le journal
+        # dit `zone.status`, avec son motif, comme le geste `suspend`.
+        assert self.actions(zone.pk) == ["zone.tariff", "zone.status", "zone.boundary"]
 
     def test_suppression(self, siege: APIClient, city: City, restaurant: Restaurant) -> None:
         zone = zone_de(city, restaurant)

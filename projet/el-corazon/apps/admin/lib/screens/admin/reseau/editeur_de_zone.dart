@@ -78,15 +78,20 @@ class _EditeurDeZoneState extends State<EditeurDeZone> {
 
   Set<Polygon> _polygones(ColorScheme couleurs) {
     return {
+      // Chaque morceau de chaque voisine, trous compris : ne dessiner que le
+      // premier anneau montrait couverte une enclave qui ne l'est pas, et
+      // cachait les autres morceaux d'une zone importée.
       for (final (index, voisine) in widget.voisines.indexed)
-        if (voisine.sommets.length >= 3)
-          Polygon(
-            polygonId: PolygonId('voisine-$index'),
-            points: voisine.sommets.map(_latLng).toList(),
-            strokeWidth: 1,
-            strokeColor: Colors.grey.shade600,
-            fillColor: Colors.grey.withValues(alpha: 0.15),
-          ),
+        for (final (morceau, anneaux) in voisine.polygones.indexed)
+          if (anneaux.isNotEmpty && anneaux.first.length >= 3)
+            Polygon(
+              polygonId: PolygonId('voisine-$index-$morceau'),
+              points: anneaux.first.map(_latLng).toList(),
+              holes: [for (final trou in anneaux.skip(1)) trou.map(_latLng).toList()],
+              strokeWidth: 1,
+              strokeColor: Colors.grey.shade600,
+              fillColor: Colors.grey.withValues(alpha: 0.15),
+            ),
       if (!_brouillon.estCercle && _brouillon.sommets.length >= 3)
         Polygon(
           polygonId: const PolygonId('trace'),
@@ -180,8 +185,10 @@ class _EditeurDeZoneState extends State<EditeurDeZone> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: SegmentedButton<bool>(
               segments: const [
-                ButtonSegment(value: false, icon: Icon(Icons.polyline_outlined), label: Text('Polygone')),
-                ButtonSegment(value: true, icon: Icon(Icons.circle_outlined), label: Text('Cercle')),
+                ButtonSegment(
+                    value: false, icon: Icon(Icons.polyline_outlined), label: Text('Polygone'),),
+                ButtonSegment(
+                    value: true, icon: Icon(Icons.circle_outlined), label: Text('Cercle'),),
               ],
               selected: {_brouillon.estCercle},
               onSelectionChanged: (choix) =>

@@ -217,6 +217,8 @@ class TestZones:
             format="json",
         )
 
-        entree = AuditEntry.objects.get(action=AuditAction.ZONE_ACTIVATION)
-        assert entree.before == {"is_active": True}
-        assert entree.after == {"is_active": False}
+        # Désactiver passe désormais par la machine à états : l'entrée dit le
+        # statut, et le motif posé par défaut pour ce geste historique.
+        entree = AuditEntry.objects.get(action=AuditAction.ZONE_STATUS)
+        assert entree.before == {"status": "published"}
+        assert entree.after["status"] == "suspended"

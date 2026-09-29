@@ -48,6 +48,8 @@ export 'src/directions/route_step.dart';
 export 'src/geography/city.dart';
 export 'src/geography/delivery_zone.dart';
 export 'src/geography/zone_shape.dart';
+export 'src/geography/zone_lifecycle_repository.dart';
+export 'src/geography/zone_schedule.dart';
 export 'src/geography/managed_city.dart';
 export 'src/geography/managed_country.dart';
 export 'src/geography/managed_geography_repository.dart';

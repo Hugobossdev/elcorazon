@@ -131,6 +131,24 @@ REGISTRE: tuple[Vocabulaire, ...] = (
         "GenreNotification",
         "apps.notifications.models.NotificationKind",
     ),
+    # Le cycle de vie des zones (2026-09-28) : l'écran lit le statut et les
+    # transitions que rend le serveur, et doit en connaître tous les noms.
+    Vocabulaire(
+        "packages/elcorazon_core/lib/src/geography/zone_schedule.dart",
+        "StatutZone",
+        "apps.geography.states.ZoneStatus",
+    ),
+    Vocabulaire(
+        "packages/elcorazon_core/lib/src/geography/zone_schedule.dart",
+        "NatureExceptionZone",
+        "apps.geography.models.ZoneExceptionKind",
+    ),
+    # Les motifs d'indisponibilité : le client traduit chacun en message.
+    Vocabulaire(
+        "packages/elcorazon_core/lib/src/catalog/indisponibilite.dart",
+        "MotifIndisponibilite",
+        "common.availability.UnavailabilityCode",
+    ),
 )
 
 #: Là où le back-office écrit des permissions.
@@ -194,7 +212,8 @@ from apps.accounts.permissions import PERMISSIONS
 resultat = {"__permissions__": sorted(PERMISSIONS)}
 for chemin in json.loads(sys.argv[1]):
     module, _, nom = chemin.rpartition(".")
-    resultat[chemin] = sorted(getattr(importlib.import_module(module), nom).values)
+    enum = getattr(importlib.import_module(module), nom)
+    resultat[chemin] = sorted(getattr(enum, "values", None) or [m.value for m in enum])
 print(json.dumps(resultat))
 """
 

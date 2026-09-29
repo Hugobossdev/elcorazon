@@ -10,6 +10,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:admin/screens/admin/onglet_horaires.dart';
 import 'package:admin/screens/admin/zone_form_dialog.dart';
 import 'package:admin/screens/admin/zone_selection_tab.dart';
+import 'package:admin/screens/admin/reseau/fiche_de_zone_screen.dart';
+import 'package:admin/screens/admin/reseau/import_geojson_dialog.dart';
+import 'package:admin/screens/admin/reseau/tester_une_adresse_screen.dart';
+import 'package:elcorazon_core/elcorazon_core.dart' as eccore;
 
 /// Les onglets des paramètres. Seul « Sécurité » est ouvert à tout compte :
 /// c'est un réglage du poste, pas une donnée du serveur.
@@ -117,8 +121,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// `restaurants.read` ou `restaurants.operate` (`restaurants/backoffice.py`).
   List<_Onglet> _ongletsPermis(BuildContext context) => [
         if (context.peut('restaurants.read')) ...[_Onglet.zones, _Onglet.tarifs],
-        if (context.peutUne(const ['restaurants.read', 'restaurants.operate']))
-          _Onglet.horaires,
+        if (context.peutUne(const ['restaurants.read', 'restaurants.operate'])) _Onglet.horaires,
         _Onglet.securite,
       ];
 
@@ -216,6 +219,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'modification s’applique à la commande suivante, sans '
                   'republier les applications.',
                   style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    if (context.peut('restaurants.read'))
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(builder: (_) => const TesterUneAdresseScreen()),
+                        ),
+                        icon: const Icon(Icons.travel_explore),
+                        label: const Text('Tester une adresse'),
+                      ),
+                    if (context.peutReglerLesZones)
+                      OutlinedButton.icon(
+                        onPressed: () => _importerUneZone(service),
+                        icon: const Icon(Icons.upload_file),
+                        label: const Text('Importer une zone'),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 24),
                 if (service.isLoading && service.zones.isEmpty)
@@ -329,14 +352,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                 ),
-                if (!zone.isActive)
+                // Le statut serveur, et non plus « inactive » : un brouillon,
+                // une zone en revue et une zone suspendue n'appellent pas le
+                // même geste.
+                if (zone.status != eccore.StatutZone.publiee)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: Chip(
-                      label: const Text('Inactive'),
+                      label: Text(eccore.StatutZone.libelle(zone.status)),
                       backgroundColor: scheme.surfaceContainerHighest,
                       visualDensity: VisualDensity.compact,
                     ),
+                  ),
+                if (zone.remote != null)
+                  TextButton.icon(
+                    onPressed: () => _ouvrirFiche(service, zone.remote!),
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('Ouvrir'),
                   ),
                 // Le barème d'une zone relève du siège, comme son ouverture.
                 if (context.peutReglerLesZones)
@@ -407,6 +439,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Text('$libelle : ', style: TextStyle(color: scheme.onSurfaceVariant)),
         Text(valeur, style: const TextStyle(fontWeight: FontWeight.w600)),
       ],
+    );
+  }
+
+  Future<void> _ouvrirFiche(DeliveryZoneService service, eccore.DeliveryZone zone) async {
+    // `read` et non `watch` : on est hors de `build`.
+    final auth = context.read<AdminAuthService>();
+    final peutEcrire = auth.can('restaurants.write') && auth.estSiege;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FicheDeZoneScreen(
+          zone: zone,
+          peutEcrire: peutEcrire,
+          surChangement: service.integrer,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _importerUneZone(DeliveryZoneService service) async {
+    final creee = await ImportGeoJsonDialog.show(context, service.villes);
+    if (creee == null || !mounted) return;
+    service.integrer(creee);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content:
+              Text('« ${creee.name} » importée en brouillon : tarifez-la, puis soumettez-la.'),),
     );
   }
 

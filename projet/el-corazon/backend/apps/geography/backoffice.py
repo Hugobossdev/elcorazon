@@ -19,14 +19,20 @@ geste qui correspond à l'intention : on ferme un marché, on ne l'efface pas.
 
 from __future__ import annotations
 
+import json
 from typing import Any, ClassVar
 
+from drf_spectacular.utils import extend_schema
+from rest_framework import serializers, status
+from rest_framework.decorators import action
 from rest_framework.mixins import (
     CreateModelMixin,
     ListModelMixin,
     RetrieveModelMixin,
     UpdateModelMixin,
 )
+from rest_framework.request import Request
+from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
 from apps.geography.journal import record_zone_changes, record_zone_creation, zone_fingerprint
@@ -35,7 +41,10 @@ from apps.geography.serializers import (
     ManagedCitySerializer,
     ManagedCountrySerializer,
     ManagedDeliveryZoneSerializer,
+    ZoneImportSerializer,
 )
+from apps.geography.shapes import count_holes, geojson_to_boundary
+from apps.geography.zone_actions import ZoneLifecycleMixin
 from common.permissions import HasReadWritePermission, assert_unscoped, authenticated_user
 
 __all__ = ["ManagedCityViewSet", "ManagedCountryViewSet", "ManagedDeliveryZoneViewSet"]
@@ -93,7 +102,7 @@ class ManagedCityViewSet(_SiegeViewSet[City]):
     search_fields: ClassVar[list[str]] = ["name"]
 
 
-class ManagedDeliveryZoneViewSet(_SiegeViewSet[DeliveryZone]):
+class ManagedDeliveryZoneViewSet(ZoneLifecycleMixin, _SiegeViewSet[DeliveryZone]):
     """Zones et barèmes — **journalisés**, contrairement au reste du back-office.
 
     Un contour redessiné et un forfait doublé ont une propriété qui les
@@ -105,23 +114,100 @@ class ManagedDeliveryZoneViewSet(_SiegeViewSet[DeliveryZone]):
 
     quoi = "Le barème d'une zone"
     serializer_class = ManagedDeliveryZoneSerializer
-    queryset = DeliveryZone.objects.select_related("city__country", "restaurant").order_by(
-        "city__name", "name"
+    queryset = (
+        DeliveryZone.objects.select_related(
+            "city__country",
+            "restaurant",
+            "created_by",
+            "updated_by",
+            "published_by",
+            "suspended_by",
+        )
+        .prefetch_related("opening_hours")
+        .order_by("city__name", "name")
     )
     filterset_fields: ClassVar[dict[str, list[str]]] = {
         "city": ["exact"],
         "city__slug": ["exact"],
         "restaurant__slug": ["exact"],
         "shape": ["exact"],
+        "status": ["exact", "in"],
         "is_active": ["exact"],
     }
     search_fields: ClassVar[list[str]] = ["name"]
 
+    def check_zone_write(self, zone: DeliveryZone) -> None:
+        assert_unscoped(authenticated_user(self.request), self.quoi)
+
     def perform_create(self, serializer: Any) -> None:
-        super().perform_create(serializer)
-        record_zone_creation(authenticated_user(self.request), serializer.instance)
+        assert_unscoped(authenticated_user(self.request), self.quoi)
+        zone = self.save_new_zone(serializer)
+        record_zone_creation(authenticated_user(self.request), zone)
 
     def perform_update(self, serializer: Any) -> None:
+        assert_unscoped(authenticated_user(self.request), self.quoi)
         avant = zone_fingerprint(serializer.instance)
-        super().perform_update(serializer)
-        record_zone_changes(authenticated_user(self.request), avant, serializer.instance)
+        zone = self.save_zone_changes(serializer)
+        record_zone_changes(authenticated_user(self.request), avant, zone)
+
+    @extend_schema(
+        request=ZoneImportSerializer,
+        responses={200: ManagedDeliveryZoneSerializer, 201: ManagedDeliveryZoneSerializer},
+        tags=["geography"],
+    )
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_geojson(self, request: Request) -> Response:
+        """Importe un contour GeoJSON — prévisualisation d'abord, création ensuite.
+
+        `dry_run=true` (le défaut) valide tout — structure, coordonnées,
+        géométrie, cohérence avec la ville — et rend les chevauchements, sans
+        rien écrire. Renvoyé avec `dry_run=false`, le même corps crée la zone
+        **en brouillon**, au barème nul : elle se relit et se tarife avant
+        d'être soumise.
+        """
+        assert_unscoped(authenticated_user(request), "L'import d'une zone")
+        corps = ZoneImportSerializer(data=request.data)
+        corps.is_valid(raise_exception=True)
+        donnees = corps.validated_data
+        try:
+            contour = geojson_to_boundary(donnees["geojson"])
+        except ValueError as erreur:
+            raise serializers.ValidationError({"geojson": str(erreur)}) from erreur
+
+        ville = donnees["city"]
+        zero = {"amount": "0", "currency": ville.country.currency}
+        fiche = ManagedDeliveryZoneSerializer(
+            data={
+                "city": str(ville.pk),
+                "name": donnees["name"],
+                "shape": "administrative",
+                "boundary": json.loads(contour.geojson),
+                "base_fee": zero,
+                "fee_per_km": zero,
+            }
+        )
+        fiche.is_valid(raise_exception=True)
+
+        chevauchements = list(
+            DeliveryZone.objects.filter(
+                boundary__intersects=fiche.validated_data["boundary"],
+                city__country=ville.country_id,
+            )
+            .exclude(status="archived")
+            .order_by("name")
+            .values("id", "name", "status", "priority")[:20]
+        )
+        if donnees["dry_run"]:
+            return Response(
+                {
+                    "valid": True,
+                    "boundary": json.loads(contour.geojson),
+                    "polygons": len(contour),
+                    "holes": count_holes(contour),
+                    "overlaps": [{**c, "id": str(c["id"])} for c in chevauchements],
+                }
+            )
+
+        zone = self.save_new_zone(fiche)
+        record_zone_creation(authenticated_user(request), zone)
+        return Response(ManagedDeliveryZoneSerializer(zone).data, status=status.HTTP_201_CREATED)

@@ -625,6 +625,37 @@ void main() {
       expect(monte1.contexte.motifDesserte, contains('zone de livraison'));
     });
 
+    for (final (code, desserte, situation) in [
+      (eccore.MotifIndisponibilite.zoneFermee, DesserteAdresse.zoneFermee, SituationCuisine.zoneFermee),
+      (
+        eccore.MotifIndisponibilite.zoneSuspendue,
+        DesserteAdresse.zoneSuspendue,
+        SituationCuisine.zoneSuspendue,
+      ),
+    ]) {
+      test('une zone « $code » n’est ni desservie ni hors zone', () async {
+        // Ce motif tombait dans la branche des refus de panier, et l'adresse
+        // se lisait « desservie » : le client allait jusqu'au paiement.
+        final monte1 = monte(
+          () => annuaire,
+          verification: ({required latitude, required longitude, restaurantSlug}) async =>
+              eccore.DeliveryAvailability(
+                isAvailable: false,
+                unavailableCode: code,
+                reason: 'La livraison est fermée dans votre quartier ; elle rouvre demain à 11 h 00.',
+                restaurant: annuaire.first,
+              ),
+        );
+        await monte1.contexte.resolve();
+
+        await monte1.contexte.suivreLAdresse(latitude: 6.13, longitude: 1.22);
+
+        expect(monte1.contexte.desserte, desserte);
+        expect(monte1.contexte.situation, situation);
+        expect(monte1.contexte.motifDesserte, contains('quartier'));
+      });
+    }
+
     test('une vérification en panne ne dit pas « hors zone »', () async {
       final monte1 = monte(
         () => annuaire,

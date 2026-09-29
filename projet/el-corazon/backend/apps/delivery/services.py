@@ -558,33 +558,95 @@ class CourierService:
         Une proposition en attente n'exclut pas : elle n'occupe personne, et un
         livreur qui laisse traîner une offre bloquerait sinon sa propre file.
         """
+        return (
+            CourierService.eligible_couriers(order.restaurant, order.delivery_zone_id)
+            .select_related("user")
+            .annotate(to_restaurant=Distance("last_location", order.restaurant.location))
+            .order_by("to_restaurant")
+        )
+
+    @staticmethod
+    def eligible_couriers(restaurant: Restaurant, zone_id: UUID | None) -> QuerySet[CourierProfile]:
+        """**La** règle d'éligibilité d'un livreur à une course — une seule écriture.
+
+        Rattaché à la cuisine, dossier validé, en ligne, compte ouvert, sans
+        course engagée, et dans son périmètre de zone. Lue par le dispatch
+        (`available_for`) et par l'outil « Tester une adresse » du back-office
+        (`explain_eligibility`), qui ne font donc qu'une seule et même réponse.
+        """
         # Le périmètre de zone : un livreur sans zone roule partout où sa
         # cuisine livre ; restreint, seulement dans ses zones — et jamais pour
         # une commande dont la zone est inconnue (voir `serves_zone`, la même
         # règle en Python, que `offer` relit).
         liaisons = CourierProfile.service_zones.through.objects
         perimetre = Q(~Exists(liaisons.filter(courierprofile_id=OuterRef("pk"))))
-        if order.delivery_zone_id is not None:
+        if zone_id is not None:
             perimetre |= Q(
-                Exists(
-                    liaisons.filter(
-                        courierprofile_id=OuterRef("pk"), deliveryzone_id=order.delivery_zone_id
-                    )
-                )
+                Exists(liaisons.filter(courierprofile_id=OuterRef("pk"), deliveryzone_id=zone_id))
             )
         return (
             CourierProfile.objects.filter(
-                restaurant=order.restaurant,
+                restaurant=restaurant,
                 is_online=True,
                 verification_status=VerificationStatus.APPROVED,
                 user__is_active=True,
             )
             .filter(perimetre)
             .exclude(assignments__status__in=ENGAGED_STATUSES)
-            .select_related("user")
-            .annotate(to_restaurant=Distance("last_location", order.restaurant.location))
-            .order_by("to_restaurant")
         )
+
+    @staticmethod
+    def explain_eligibility(
+        restaurant: Restaurant, zone_id: UUID | None
+    ) -> list[tuple[CourierProfile, str | None]]:
+        """Chaque livreur de la cuisine, et ce qui l'écarte — `None` s'il est éligible.
+
+        **La décision vient de `eligible_couriers`** ; ce qui suit ne fait que
+        *nommer* le premier critère manqué, dans l'ordre où un superviseur le
+        corrigerait : le compte, le dossier, la connexion, la course en cours,
+        la zone. S'y ajoutent les livreurs d'une **autre** cuisine qui roulent
+        dans cette zone (`other_kitchen`) — le cas qu'on croit couvert et qui
+        ne l'est pas.
+        """
+        eligibles = set(
+            CourierService.eligible_couriers(restaurant, zone_id).values_list("pk", flat=True)
+        )
+        engages = set(
+            Assignment.objects.filter(
+                courier__restaurant=restaurant, status__in=ENGAGED_STATUSES
+            ).values_list("courier_id", flat=True)
+        )
+        verdicts: list[tuple[CourierProfile, str | None]] = []
+        for livreur in (
+            CourierProfile.objects.filter(restaurant=restaurant)
+            .select_related("user")
+            .prefetch_related("service_zones")
+            .order_by("user__full_name")
+        ):
+            motif: str | None = None
+            if livreur.pk not in eligibles:
+                if not livreur.user.is_active:
+                    motif = "account_disabled"
+                elif livreur.verification_status != VerificationStatus.APPROVED:
+                    motif = "not_verified"
+                elif not livreur.is_online:
+                    motif = "offline"
+                elif livreur.pk in engages:
+                    motif = "busy"
+                elif not livreur.serves_zone(zone_id):
+                    motif = "out_of_zone"
+                else:  # pragma: no cover - un critère ajouté à la règle sans son nom
+                    motif = "other_rule"
+            verdicts.append((livreur, motif))
+        if zone_id is not None:
+            for livreur in (
+                CourierProfile.objects.filter(service_zones__id=zone_id)
+                .exclude(restaurant=restaurant)
+                .select_related("user")
+                .distinct()
+            ):
+                verdicts.append((livreur, "other_kitchen"))
+        return verdicts
 
 
 class AssignmentService:

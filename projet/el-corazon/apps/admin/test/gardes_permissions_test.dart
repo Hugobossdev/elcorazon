@@ -90,6 +90,9 @@ const _zoneOuverte = {
   'max_distance_km': '8.00',
   'estimated_delivery_minutes': 30,
   'is_active': true,
+  // Ce que rend le serveur : le statut, et les gestes qu'il permet.
+  'status': 'published',
+  'transitions': ['suspended', 'archived'],
 };
 
 eccore.ManagedRestaurant _lome() => const eccore.ManagedRestaurant(

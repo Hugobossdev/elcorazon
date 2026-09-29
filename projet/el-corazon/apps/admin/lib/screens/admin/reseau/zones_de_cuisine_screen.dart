@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:admin/presentation/messages_erreur.dart';
 import 'package:admin/screens/admin/reseau/brouillon_de_zone.dart';
 import 'package:admin/screens/admin/reseau/editeur_de_zone.dart';
+import 'package:admin/screens/admin/reseau/fiche_de_zone_screen.dart';
 import 'package:admin/services/admin_auth_service.dart';
 
 /// « Cuisine → Zones de livraison » : les zones **propres** à une cuisine.
@@ -200,7 +201,7 @@ class _ZonesDeCuisineScreenState extends State<ZonesDeCuisineScreen> {
               title: Text(zone.name),
               subtitle: Text(
                 '${_forme(zone)} · forfait ${zone.baseFee.format()}'
-                '${zone.isActive ? '' : ' · désactivée'}',
+                ' · ${eccore.StatutZone.libelle(zone.status)}',
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -211,9 +212,13 @@ class _ZonesDeCuisineScreenState extends State<ZonesDeCuisineScreen> {
                   ),
                   PopupMenuButton<String>(
                     tooltip: 'Actions',
-                    onSelected: (action) =>
-                        action == 'modifier' ? _ouvrirFiche(zone) : _supprimer(zone),
+                    onSelected: (action) => switch (action) {
+                      'modifier' => _ouvrirFiche(zone),
+                      'cycle' => _ouvrirCycleDeVie(zone),
+                      _ => _supprimer(zone),
+                    },
                     itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'cycle', child: Text('Statut, horaires, livreurs')),
                       PopupMenuItem(value: 'modifier', child: Text('Modifier')),
                       PopupMenuItem(value: 'supprimer', child: Text('Supprimer')),
                     ],
@@ -228,7 +233,19 @@ class _ZonesDeCuisineScreenState extends State<ZonesDeCuisineScreen> {
     );
   }
 
+  /// Publication, suspension, horaires, cuisines et livreurs de la zone —
+  /// par les gestes des zones propres (`/restaurants/manage/zones/`).
+  Future<void> _ouvrirCycleDeVie(eccore.DeliveryZone zone) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => FicheDeZoneScreen(zone: zone, cuisine: true)),
+    );
+    if (mounted) await _charger();
+  }
+
   static String _forme(eccore.DeliveryZone zone) {
+    if (zone.estComplexe) {
+      return '${zone.polygones.length} morceau(x), contour importé';
+    }
     if (zone.estCirculaire) {
       final rayon = zone.radiusMeters ?? 0;
       return 'cercle de ${(rayon / 1000).toStringAsFixed(1)} km';

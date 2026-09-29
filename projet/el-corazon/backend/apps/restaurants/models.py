@@ -18,7 +18,8 @@ from django.db import models
 from django.utils import timezone
 
 from apps.accounts.models import User
-from apps.geography.models import City, Country, DeliveryZone
+from apps.geography.models import City, Country, DeliveryZone, Weekday
+from apps.geography.schedule import slots_cover
 from apps.restaurants.readiness import gaps_from_registry
 from apps.restaurants.signals import restaurant_status_changed
 from apps.restaurants.states import RESTAURANT_MACHINE, RestaurantStatus
@@ -319,21 +320,9 @@ class Restaurant(UUIDModel, TimeStampedModel):
         heure trop tôt en heure d'été européenne — le genre de décalage qu'on
         ne découvre qu'en production, un dimanche soir.
         """
-        local = moment.astimezone(ZoneInfo(self.timezone))
-        now, weekday = local.time(), local.weekday()
-        yesterday = (weekday - 1) % 7
-
-        for slot in self.opening_hours.all():
-            if slot.weekday == weekday and slot.opens_at <= now:
-                if slot.crosses_midnight or now < slot.closes_at:
-                    return True
-            # Une plage ouverte hier et à cheval sur minuit couvre encore le
-            # petit matin d'aujourd'hui : c'est le créneau de nuit du week-end,
-            # pas un cas de bord théorique.
-            if slot.weekday == yesterday and slot.crosses_midnight and now < slot.closes_at:
-                return True
-
-        return False
+        # La lecture des plages — minuit franchi compris — est celle des zones
+        # (`apps.geography.schedule`) : une règle, deux usages.
+        return slots_cover(self.opening_hours.all(), moment.astimezone(ZoneInfo(self.timezone)))
 
     # ------------------------------------------------ fermetures exceptionnelles
 
@@ -545,18 +534,6 @@ class AreaMembership(UUIDModel, TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.user.full_name} — {self.country or self.city}"
-
-
-class Weekday(models.IntegerChoices):
-    # Aligné sur `date.weekday()` : lundi = 0. Cet alignement évite la
-    # conversion manuelle qui est la source classique du décalage d'un jour.
-    MONDAY = 0, "Lundi"
-    TUESDAY = 1, "Mardi"
-    WEDNESDAY = 2, "Mercredi"
-    THURSDAY = 3, "Jeudi"
-    FRIDAY = 4, "Vendredi"
-    SATURDAY = 5, "Samedi"
-    SUNDAY = 6, "Dimanche"
 
 
 class OpeningHours(UUIDModel):

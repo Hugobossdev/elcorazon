@@ -45,6 +45,8 @@ eccore.DeliveryZone _zone(String id, String nom, {bool active = true}) =>
       'max_distance_km': '10.00',
       'estimated_delivery_minutes': 30,
       'is_active': active,
+      // Ce que rend le serveur : `is_active` est le reflet du statut.
+      'status': active ? 'published' : 'suspended',
     });
 
 class _Depot implements eccore.RestaurantZoneRepository {
@@ -190,7 +192,7 @@ void main() {
 
       expect(find.text('Bè'), findsOneWidget);
       expect(find.textContaining('cercle de 3.0 km'), findsNWidgets(2));
-      expect(find.textContaining('désactivée'), findsOneWidget);
+      expect(find.textContaining('Suspendue'), findsOneWidget);
     });
 
     testWidgets('désactiver passe par le serveur', (tester) async {
@@ -201,7 +203,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(depot.actions, ['modifier z1 active=false']);
-      expect(find.textContaining('désactivée'), findsOneWidget);
+      expect(find.textContaining('Suspendue'), findsOneWidget);
     });
 
     testWidgets('une suppression refusée (409) montre la phrase du serveur', (tester) async {

@@ -106,6 +106,11 @@ class ApiClient {
   Future<Response<dynamic>> patch(String path, {Object? data}) =>
       _send(() => dio.patch<dynamic>(path, data: data));
 
+  /// Remplacement **entier** d'une ressource — la semaine d'horaires d'une
+  /// zone, par exemple, que l'écran envoie telle qu'il la montre.
+  Future<Response<dynamic>> put(String path, {Object? data}) =>
+      _send(() => dio.put<dynamic>(path, data: data));
+
   Future<Response<dynamic>> delete(String path, {Object? data}) =>
       _send(() => dio.delete<dynamic>(path, data: data));
 

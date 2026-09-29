@@ -1,6 +1,6 @@
 # 📊 État des Fonctionnalités - Écosystème El Corazón
 
-**Dernière révision** : 26 septembre 2026
+**Dernière révision** : 29 septembre 2026
 
 ## 🧩 Intégration des fonctionnalités manquantes (25–26 septembre 2026)
 
@@ -58,6 +58,59 @@ Six lots, livrés un par un de bout en bout (serveur, socle, écrans, tests).
   retombe sur l'illustration.
 
 
+### Finalisation des zones (28–29 septembre 2026)
+
+Suite du lot 1. Décisions du 28 septembre : cycle de statuts complet sans
+double validation ; pas de capacité propre à la zone (elle reste celle de la
+cuisine) ; horaires de zone en **intersection** avec ceux de la cuisine ;
+rattachement zone → cuisines inchangé.
+
+- ✅ Cycle de vie `draft → pending_review → published ⇄ suspended → archived`
+  (`geography/states.py`, `ZONE_MACHINE`). Toute zone créée au back-office
+  naît en brouillon ; les zones existantes ont été migrées (actives →
+  `published`, inactives → `suspended`). `is_active` reste lisible, reflet du
+  statut garanti par une contrainte en base ; son écriture historique passe
+  par la machine à états (suspendre / réactiver), jamais à côté.
+- ✅ Suspension : motif exigé, fin annoncée facultative ; chaque geste est
+  journalisé avec son auteur. La fiche rend `transitions`, les statuts
+  atteignables : les écrans ne recopient pas le graphe.
+- ✅ Horaires hebdomadaires et exceptions datées (fermeture / ouverture) ;
+  une zone sans horaires suit sa cuisine. Une adresse dans une zone fermée ou
+  suspendue est refusée avec `zone_closed` / `zone_suspended`, et non plus
+  « hors zone ».
+- ✅ Résolution expliquée (`explain_resolution`) : zones candidates, rang,
+  motif d'exclusion, et départage final par identifiant — deux zones à
+  égalité ne se départagent plus au hasard.
+- ✅ Import GeoJSON (Polygon, MultiPolygon, Feature, FeatureCollection) avec
+  vérification sans écriture (`dry_run`), puis création en brouillon.
+  Duplication : contour, barème et horaires, jamais l'historique.
+- ✅ Outil « Tester une adresse » (`/delivery/coverage-test/`) et vue d'une
+  zone depuis ses cuisines et ses livreurs (`/delivery/zones/{id}/kitchens|couriers/`),
+  calculés par les mêmes fonctions que la commande et le dispatch. La flotte
+  reste tue sans `couriers.read`.
+- ✅ ADMIN : fiche de zone (statut, gestes permis, contour **entier** —
+  plusieurs morceaux et leurs trous, là où l'écran n'en montrait que le
+  premier anneau —, chevauchements et règle de résolution, horaires,
+  exceptions, cuisines, livreurs), import, duplication, testeur d'adresse.
+  L'interrupteur ouvrir/fermer de l'onglet « Zones » ne s'offre plus sur un
+  brouillon, une zone en revue ou archivée : le serveur les refusait, et
+  « Tout ouvrir » s'arrêtait sur le premier refus.
+- ✅ FASTFOOD : `zone_closed` et `zone_suspended` s'affichent comme une
+  fermeture momentanée (« revenez plus tard »), sans demander de changer
+  d'adresse ; ils tombaient auparavant dans la branche des refus de panier et
+  se lisaient « desservie ».
+- ✅ Une zone écartée (suspendue, fermée) **passe la main** à la zone
+  suivante qui couvre l'adresse : une petite zone posée dans une grande est
+  une exception, la suspendre rend ses adresses au barème général.
+  `zone_closed` / `zone_suspended` ne tombent que lorsque plus aucune zone ne
+  sert. Règle figée par un test ; la fiche de la zone l'annonce au moment de
+  suspendre, avec les zones qui prendront le relais.
+- ✅ E2E 41/41 contre le serveur local (29 septembre 2026) : import vérifié
+  puis créé, brouillon → revue → publication, gestes refusés (409), gestes
+  rejoués idempotents, diagnostic, suspension et fermetures avec relais vu du
+  client, duplication, archive définitive.
+- ⏳ Vérification de la carte multi-polygone sur appareil : à faire.
+
 ## ✅ État vérifiable au 21 septembre 2026 (audit pré-production)
 
 Ce tableau remplace tout pourcentage global : un « ~97 % » ne dit ni ce qui
@@ -109,6 +162,7 @@ plus bas.
 | Contenus FAQ / CGV | À FAIRE (contenu à fournir, D6) | À FAIRE | À FAIRE | À FAIRE | — | — | — | — | — |
 | Éditeur de contour de zone (cercle, polygone) | COMPLET — contour refusé s'il se croise, sort du globe, dépasse 500 sommets ou 5 000 km² | COMPLET | — | COMPLET — carte : centre + curseur de rayon, sommets posés, glissés, retirés, zones voisines en gris (zones propres) | COMPLET | COMPLET | COMPLET — 13/13 contre le serveur local (2026-09-25) | À VÉRIFIER (carte sur appareil) | BLOQUÉ |
 | Zones propres à un établissement | COMPLET — journal distinct : création, contour, barème, ouverture, suppression | COMPLET | — | COMPLET — Réseau → établissement → ⋮ → Zones de livraison : liste, création, modification, activation, suppression (409 lisible) | COMPLET — autre cuisine : 404 ; client : 403 ; sans session : 401 | COMPLET | COMPLET — adresse dedans desservie par la zone, dehors non | À VÉRIFIER | BLOQUÉ |
+| Cycle de vie, horaires et diagnostic des zones | COMPLET — statuts, gestes journalisés, horaires en intersection, import GeoJSON, résolution expliquée | COMPLET | COMPLET — `zone_closed` / `zone_suspended` distincts du hors-zone | COMPLET — fiche de zone, import, duplication, testeur d'adresse | COMPLET — gestes cloisonnés ; flotte tue sans `couriers.read` | COMPLET | COMPLET — 41/41 contre le serveur local (2026-09-29) | À VÉRIFIER (carte multi-polygone sur appareil) | BLOQUÉ |
 
 ### Ce que l'audit du 21 septembre a corrigé
 
@@ -1193,6 +1247,10 @@ n'y vaut que si elle est vraie **du code déployé**, pas du code écrit.
   et le minimum de commande sont affichés en lecture
 - ✅ Le **contour** d'une zone se dessine sur la carte — cercle ou polygone —
   depuis l'écran « Zones » d'une cuisine (lot 1, 25 septembre 2026)
+- ✅ Chaque zone a un **statut** (brouillon, en revue, publiée, suspendue,
+  archivée), des horaires, une fiche et un import GeoJSON ; un outil
+  « Tester une adresse » explique quelle zone et quelle cuisine servent un
+  point (29 septembre 2026)
 - 🔴 **Retiré le 5 août 2026** : les cinq zones en dur dont les tarifs
   n'atteignaient jamais le serveur
 

@@ -47,6 +47,9 @@ __all__ = [
     "MAX_ZONE_AREA_KM2",
     "check_boundary",
     "circle_to_boundary",
+    "count_holes",
+    "geojson_to_boundary",
+    "metres_between",
     "polygon_to_boundary",
 ]
 
@@ -194,3 +197,100 @@ def polygon_to_boundary(coordinates: list[list[float]]) -> MultiPolygon:
     contour = MultiPolygon(Polygon(LinearRing(sommets, srid=4326), srid=4326), srid=4326)
     check_boundary(contour)
     return contour
+
+
+def metres_between(a: Point, b: Point) -> float:
+    """Distance orthodromique, en mètres, sur la sphère de référence.
+
+    Pour **borner** une saisie (la zone est-elle près de sa ville ?), pas pour
+    facturer : les distances qui facturent sont mesurées par PostGIS.
+    """
+    lat1, lat2 = math.radians(a.y), math.radians(b.y)
+    dlat, dlon = lat2 - lat1, math.radians(b.x - a.x)
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(h))
+
+
+def geojson_to_boundary(data: object) -> MultiPolygon:
+    """Contour importé d'un fichier GeoJSON — géométrie, `Feature` ou collection.
+
+    Accepte ce qu'exportent QGIS, geojson.io et les jeux administratifs :
+    `Polygon` et `MultiPolygon`, **trous compris** (un anneau intérieur est une
+    enclave non desservie, conservée telle quelle). Les polygones d'une
+    `FeatureCollection` sont réunis en un seul `MultiPolygon`.
+
+    Refuse — avec la phrase à montrer — une structure qui n'est pas du GeoJSON,
+    un type qui n'est pas surfacique, des coordonnées hors du globe, une
+    géométrie vide ou qui se croise.
+    """
+    import json
+
+    from django.contrib.gis.geos import GEOSException, GEOSGeometry
+
+    if not isinstance(data, dict):
+        raise ValueError("Le fichier doit contenir un objet GeoJSON.")
+
+    geometries: list[dict[str, object]] = []
+    genre = data.get("type")
+    if genre == "FeatureCollection":
+        features = data.get("features")
+        if not isinstance(features, list) or not features:
+            raise ValueError("La collection ne contient aucune entité.")
+        for feature in features:
+            if not isinstance(feature, dict) or not isinstance(feature.get("geometry"), dict):
+                raise ValueError("Une entité de la collection n'a pas de géométrie.")
+            geometries.append(feature["geometry"])
+    elif genre == "Feature":
+        if not isinstance(data.get("geometry"), dict):
+            raise ValueError("L'entité n'a pas de géométrie.")
+        geometries.append(data["geometry"])
+    elif genre in ("Polygon", "MultiPolygon"):
+        geometries.append(data)
+    else:
+        raise ValueError(
+            f"Type GeoJSON « {genre} » non pris en charge : une zone est un Polygon "
+            "ou un MultiPolygon."
+        )
+
+    polygones: list[Polygon] = []
+    for geometrie in geometries:
+        if geometrie.get("type") not in ("Polygon", "MultiPolygon"):
+            raise ValueError(
+                f"Géométrie « {geometrie.get('type')} » refusée : seules les surfaces "
+                "(Polygon, MultiPolygon) délimitent une zone."
+            )
+        try:
+            forme = GEOSGeometry(json.dumps(geometrie), srid=4326)
+        except (GEOSException, ValueError, TypeError) as erreur:
+            raise ValueError("Géométrie GeoJSON illisible.") from erreur
+        if isinstance(forme, Polygon):
+            polygones.append(forme)
+        elif isinstance(forme, MultiPolygon):
+            polygones.extend(p for p in forme if isinstance(p, Polygon))
+
+    if not polygones or all(p.empty for p in polygones):
+        raise ValueError("La géométrie est vide.")
+    sommets = 0
+    for polygone in polygones:
+        for anneau in polygone:
+            sommets += len(anneau)
+            for longitude, latitude in anneau.coords:
+                if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
+                    raise ValueError(
+                        f"Le sommet [{longitude}, {latitude}] est hors du globe : le GeoJSON "
+                        "s'écrit [longitude, latitude]."
+                    )
+    if sommets > MAX_POLYGON_VERTICES * 10:
+        raise ValueError(
+            f"Le contour compte {sommets} sommets : simplifiez-le (au plus "
+            f"{MAX_POLYGON_VERTICES * 10})."
+        )
+
+    contour = MultiPolygon(*polygones, srid=4326)
+    check_boundary(contour)
+    return contour
+
+
+def count_holes(boundary: MultiPolygon) -> int:
+    """Anneaux intérieurs — les enclaves non desservies d'un contour importé."""
+    return sum(len(p) - 1 for p in boundary if isinstance(p, Polygon))

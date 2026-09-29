@@ -218,4 +218,38 @@ void main() {
       expect(chercher('sokodé'), isEmpty);
     });
   });
+
+  group('Interrupteur ouvrir/fermer', () {
+    DeliveryZone avec(String statut, List<String> transitions) => DeliveryZone.fromRemote(
+          eccore.DeliveryZone(
+            id: 'z',
+            cityId: 'city-lome',
+            name: 'Bè',
+            baseFee: xof(600),
+            feePerKm: xof(150),
+            maxDistanceKm: 12,
+            estimatedDeliveryMinutes: 35,
+            isActive: statut == eccore.StatutZone.publiee,
+            status: statut,
+            transitions: transitions,
+          ),
+        );
+
+    test('une zone publiée se ferme, une zone suspendue se rouvre', () {
+      expect(avec('published', const ['suspended', 'archived']).basculable, isTrue);
+      expect(avec('suspended', const ['published', 'archived']).basculable, isTrue);
+    });
+
+    test('brouillon, revue et archive se règlent depuis leur fiche, pas d’un geste', () {
+      // Le serveur refuse la bascule (409) ; « Tout ouvrir » s'arrêtait sur ce
+      // refus et laissait fermées les zones suivantes de la ville.
+      expect(avec('draft', const ['pending_review', 'archived']).basculable, isFalse);
+      expect(avec('pending_review', const ['draft', 'published', 'archived']).basculable, isFalse);
+      expect(avec('archived', const []).basculable, isFalse);
+    });
+
+    test('ce que la machine du serveur n’autorise pas ne se propose pas', () {
+      expect(avec('published', const ['archived']).basculable, isFalse);
+    });
+  });
 }

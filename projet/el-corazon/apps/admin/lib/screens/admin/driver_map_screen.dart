@@ -268,10 +268,10 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                       return false;
                     }
                     // Vérifier si le livreur est dans le polygone de la zone
-                    return _isPointInPolygon(
+                    return _estDansLaZone(
                       driver.lastLatitude!,
                       driver.lastLongitude!,
-                      selectedZone.polygon,
+                      selectedZone,
                     );
                   }).toList();
                 }
@@ -1092,7 +1092,34 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     );
   }
 
-  /// Vérifier si un point est dans un polygone (algorithme Ray Casting)
+  /// Filtre d'**affichage** : le livreur est-il dans l'un des morceaux de la
+  /// zone, hors de ses trous ? Aucune décision n'en découle — l'éligibilité
+  /// d'un livreur à une course est jugée au serveur (`eligible_couriers`).
+  ///
+  /// Ne lisait que le premier anneau du premier polygone : une zone importée
+  /// en plusieurs morceaux perdait ses livreurs, et une enclave comptait
+  /// comme couverte.
+  bool _estDansLaZone(double latitude, double longitude, DeliveryZone zone) {
+    if (zone.polygones.isEmpty) {
+      return _isPointInPolygon(latitude, longitude, zone.polygon);
+    }
+    List<Map<String, double>> anneau(List<eccore.GeoPoint> points) => [
+          for (final p in points) {'latitude': p.latitude, 'longitude': p.longitude},
+        ];
+    for (final morceau in zone.polygones) {
+      if (morceau.isEmpty ||
+          !_isPointInPolygon(latitude, longitude, anneau(morceau.first))) {
+        continue;
+      }
+      final dansUnTrou = morceau
+          .skip(1)
+          .any((trou) => _isPointInPolygon(latitude, longitude, anneau(trou)));
+      if (!dansUnTrou) return true;
+    }
+    return false;
+  }
+
+  /// Vérifier si un point est dans un anneau (algorithme Ray Casting)
   bool _isPointInPolygon(
     double latitude,
     double longitude,

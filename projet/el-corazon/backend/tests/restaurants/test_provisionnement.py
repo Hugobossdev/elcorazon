@@ -428,8 +428,8 @@ class TestCascadeGeographique:
     def test_fermer_la_zone_retire_ses_etablissements(
         self, publie: Restaurant, zone: DeliveryZone
     ) -> None:
-        zone.is_active = False
-        zone.save(update_fields=["is_active"])
+        zone.status = "suspended"
+        zone.save(update_fields=["status"])
 
         reponse = APIClient().get(reverse("v1:restaurants:restaurant-list"))
         assert reponse.data["count"] == 0

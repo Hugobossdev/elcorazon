@@ -1,4 +1,5 @@
 import 'package:elcorazon_core/src/directions/geo_point.dart';
+import 'package:elcorazon_core/src/geography/zone_schedule.dart';
 import 'package:elcorazon_core/src/models/money.dart';
 
 /// Zone de livraison et son barème — miroir de `ManagedDeliveryZoneSerializer`.
@@ -30,6 +31,21 @@ class DeliveryZone {
     this.center,
     this.radiusMeters,
     this.restaurantSlug,
+    this.status = StatutZone.publiee,
+    this.transitions = const [],
+    this.priority = 0,
+    this.overlaps = const [],
+    this.horaires = const [],
+    this.exceptions = const [],
+    this.createdBy,
+    this.createdAt,
+    this.updatedBy,
+    this.updatedAt,
+    this.publishedBy,
+    this.publishedAt,
+    this.suspensionReason = '',
+    this.suspendedAt,
+    this.suspensionExpectedEndAt,
   });
 
   factory DeliveryZone.fromJson(Map<String, dynamic> json) {
@@ -49,6 +65,34 @@ class DeliveryZone {
       center: _point(json['center']),
       radiusMeters: json['radius_meters'] as int?,
       restaurantSlug: json['restaurant'] as String?,
+      // Un serveur antérieur au cycle de vie ne rend pas `status` : la zone
+      // est alors ce que disait `is_active`.
+      status: json['status'] as String? ??
+          ((json['is_active'] as bool? ?? true) ? StatutZone.publiee : StatutZone.suspendue),
+      transitions: [
+        for (final t in json['transitions'] as List? ?? const []) t as String,
+      ],
+      priority: json['priority'] as int? ?? 0,
+      overlaps: [
+        for (final nom in json['overlaps'] as List? ?? const []) nom as String,
+      ],
+      horaires: [
+        for (final h in json['opening_hours'] as List? ?? const [])
+          HoraireDeZone.fromJson(h as Map<String, dynamic>),
+      ],
+      exceptions: [
+        for (final e in json['exceptions'] as List? ?? const [])
+          ExceptionDeZone.fromJson(e as Map<String, dynamic>),
+      ],
+      createdBy: json['created_by'] as String?,
+      createdAt: _date(json['created_at']),
+      updatedBy: json['updated_by'] as String?,
+      updatedAt: _date(json['updated_at']),
+      publishedBy: json['published_by'] as String?,
+      publishedAt: _date(json['published_at']),
+      suspensionReason: json['suspension_reason'] as String? ?? '',
+      suspendedAt: _date(json['suspended_at']),
+      suspensionExpectedEndAt: _date(json['suspension_expected_end_at']),
     );
   }
 
@@ -83,6 +127,83 @@ class DeliveryZone {
   final String? restaurantSlug;
 
   bool get estCirculaire => shape == 'circle';
+
+  /// Statut serveur — `draft`, `pending_review`, `published`, `suspended`,
+  /// `archived` (voir [StatutZone]). Seule `published` livre.
+  final String status;
+
+  /// Statuts atteignables depuis [status], **lus dans la machine à états du
+  /// serveur** : l'écran ne propose que ceux-là.
+  final List<String> transitions;
+
+  /// Départage entre zones qui se recouvrent — la plus haute l'emporte.
+  final int priority;
+
+  /// Noms des zones publiées dont le contour recoupe celui-ci.
+  final List<String> overlaps;
+
+  /// Plages hebdomadaires ; vide, la zone suit les horaires de sa cuisine.
+  final List<HoraireDeZone> horaires;
+
+  /// Exceptions en cours ou à venir.
+  final List<ExceptionDeZone> exceptions;
+
+  final String? createdBy;
+  final DateTime? createdAt;
+  final String? updatedBy;
+  final DateTime? updatedAt;
+  final String? publishedBy;
+  final DateTime? publishedAt;
+  final String suspensionReason;
+  final DateTime? suspendedAt;
+  final DateTime? suspensionExpectedEndAt;
+
+  bool peutPasserA(String cible) => transitions.contains(cible);
+
+  /// **Tout** le contour : chaque polygone, chacun avec ses anneaux — le
+  /// premier est l'extérieur, les suivants des trous (enclaves non
+  /// desservies). Sans point de fermeture répété.
+  ///
+  /// C'est ce que la carte doit dessiner. [sommets] n'en rend que le premier
+  /// anneau du premier polygone, ce que rouvre l'éditeur d'une zone tracée à
+  /// la main ; afficher une zone importée avec lui cachait ses autres
+  /// morceaux et ses trous.
+  List<List<List<GeoPoint>>> get polygones {
+    final geometrie = boundary;
+    if (geometrie == null) return const [];
+    final coordonnees = geometrie['coordinates'];
+    if (coordonnees is! List) return const [];
+    final bruts = geometrie['type'] == 'Polygon' ? [coordonnees] : coordonnees;
+    return [
+      for (final polygone in bruts)
+        if (polygone is List)
+          [
+            for (final anneau in polygone)
+              if (anneau is List) _anneau(anneau),
+          ],
+    ];
+  }
+
+  /// Vrai si le contour a plusieurs morceaux ou des trous — l'éditeur de
+  /// polygone ne saurait pas le rouvrir sans le simplifier.
+  bool get estComplexe {
+    final morceaux = polygones;
+    return morceaux.length > 1 || morceaux.any((p) => p.length > 1);
+  }
+
+  static List<GeoPoint> _anneau(List<dynamic> points) {
+    final anneau = [
+      for (final point in points)
+        GeoPoint(
+          ((point as List)[1] as num).toDouble(),
+          (point[0] as num).toDouble(),
+        ),
+    ];
+    if (anneau.length > 1 && anneau.first == anneau.last) anneau.removeLast();
+    return anneau;
+  }
+
+  static DateTime? _date(Object? value) => value is String ? DateTime.tryParse(value) : null;
 
   /// Les sommets du contour, dans l'ordre, **sans** le point qui ferme
   /// l'anneau — ce que l'éditeur de polygone rouvre.
@@ -123,6 +244,5 @@ class DeliveryZone {
   /// pour un visiteur (`DeliveryZoneSerializer`, qui l'imbrique pour porter la
   /// devise du pays avec elle). Les deux désignent la même ville ; seule sa
   /// clé est retenue ici.
-  static String _cityId(Object? value) =>
-      value is Map ? value['id'].toString() : value.toString();
+  static String _cityId(Object? value) => value is Map ? value['id'].toString() : value.toString();
 }

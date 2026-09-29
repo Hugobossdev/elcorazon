@@ -22,6 +22,9 @@ __all__ = [
     "record_zone_changes",
     "record_zone_creation",
     "record_zone_deletion",
+    "record_zone_schedule",
+    "record_zone_status",
+    "schedule_fingerprint",
     "zone_fingerprint",
     "zone_label",
 ]
@@ -35,7 +38,13 @@ def zone_label(zone: DeliveryZone) -> str:
 
 def _instantane(zone: DeliveryZone) -> dict[str, Any]:
     empreinte = zone_fingerprint(zone)
-    return {**empreinte["geometrie"], **empreinte["bareme"], "is_active": zone.is_active}
+    return {
+        **empreinte["geometrie"],
+        **empreinte["bareme"],
+        "priority": zone.priority,
+        "status": zone.status,
+        "is_active": zone.is_active,
+    }
 
 
 def record_zone_creation(actor: User | None, zone: DeliveryZone) -> None:
@@ -89,12 +98,66 @@ def record_zone_changes(actor: User | None, avant: dict[str, Any], zone: Deliver
         )
     record_change(
         actor=actor,
-        action=AuditAction.ZONE_ACTIVATION,
+        action=AuditAction.ZONE_PRIORITY,
         target_type="zone",
         target_id=zone.pk,
         target_label=zone_label(zone),
-        before={"is_active": avant["is_active"]},
-        after={"is_active": apres["is_active"]},
+        before={"priority": avant["priority"]},
+        after={"priority": apres["priority"]},
+        scope_restaurant_id=zone.restaurant_id,
+    )
+    # L'ouverture ne change plus par une écriture de fiche : elle passe par
+    # `apps.geography.lifecycle`, qui journalise `zone.status` avec son motif.
+
+
+def record_zone_status(
+    actor: User | None,
+    zone: DeliveryZone,
+    before: str,
+    *,
+    reason: str = "",
+    expected_end_at: str | None = None,
+) -> None:
+    after: dict[str, Any] = {"status": zone.status}
+    if reason:
+        after["reason"] = reason
+    if expected_end_at:
+        after["expected_end_at"] = expected_end_at
+    record_change(
+        actor=actor,
+        action=AuditAction.ZONE_STATUS,
+        target_type="zone",
+        target_id=zone.pk,
+        target_label=zone_label(zone),
+        before={"status": before},
+        after=after,
+        scope_restaurant_id=zone.restaurant_id,
+    )
+
+
+def schedule_fingerprint(zone: DeliveryZone) -> dict[str, Any]:
+    """Plages et exceptions à venir, sous une forme qui se relit au journal."""
+    return {
+        "hours": [
+            f"{h.weekday}:{h.opens_at:%H:%M}-{h.closes_at:%H:%M}"
+            for h in zone.opening_hours.order_by("weekday", "opens_at")
+        ],
+        "exceptions": [
+            f"{e.kind}:{e.starts_at.isoformat()}/{e.ends_at.isoformat()}:{e.reason}"
+            for e in zone.exceptions.order_by("starts_at")
+        ],
+    }
+
+
+def record_zone_schedule(actor: User | None, zone: DeliveryZone, avant: dict[str, Any]) -> None:
+    record_change(
+        actor=actor,
+        action=AuditAction.ZONE_SCHEDULE,
+        target_type="zone",
+        target_id=zone.pk,
+        target_label=zone_label(zone),
+        before=avant,
+        after=schedule_fingerprint(zone),
         scope_restaurant_id=zone.restaurant_id,
     )
 
@@ -128,5 +191,6 @@ def zone_fingerprint(zone: DeliveryZone) -> dict[str, Any]:
             "max_distance_km": str(zone.max_distance_km),
             "estimated_delivery_minutes": zone.estimated_delivery_minutes,
         },
+        "priority": zone.priority,
         "is_active": zone.is_active,
     }

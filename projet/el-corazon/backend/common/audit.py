@@ -82,6 +82,12 @@ class AuditAction:
     ZONE_TARIFF = "zone.tariff"
     ZONE_ACTIVATION = "zone.activation"
     ZONE_DELETE = "zone.delete"
+    #: Publication, suspension, archivage — avec le motif et la fin annoncée.
+    ZONE_STATUS = "zone.status"
+    #: Départage entre zones qui se recouvrent : change qui tarifie un point.
+    ZONE_PRIORITY = "zone.priority"
+    #: Plages hebdomadaires et exceptions datées d'une zone.
+    ZONE_SCHEDULE = "zone.schedule"
     COUNTRY_ACTIVATION = "country.activation"
 
     # Les droits — qui peut faire quoi, et sur quoi. Même propriété que la

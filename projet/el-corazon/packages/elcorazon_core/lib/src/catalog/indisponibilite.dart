@@ -26,6 +26,13 @@ abstract final class MotifIndisponibilite {
   /// Une cuisine existe, mais l'adresse sort de sa desserte.
   static const adresseNonDesservie = 'address_not_served';
 
+  /// La zone de l'adresse est hors de ses horaires, ou fermée exceptionnellement
+  /// — revenir plus tard, sans changer d'adresse.
+  static const zoneFermee = 'zone_closed';
+
+  /// La zone de l'adresse est suspendue par l'exploitation.
+  static const zoneSuspendue = 'zone_suspended';
+
   // --- la cuisine ----------------------------------------------------------
   /// Jamais mise en service, ou marché fermé.
   static const cuisineNonPubliee = 'kitchen_unpublished';

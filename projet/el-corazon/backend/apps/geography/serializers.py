@@ -9,12 +9,22 @@ desservi, la base répond.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from apps.geography.models import City, Country, DeliveryZone
+from apps.geography.models import (
+    City,
+    Country,
+    DeliveryZone,
+    Weekday,
+    ZoneExceptionKind,
+    ZoneOpeningHours,
+    ZoneScheduleException,
+)
+from apps.geography.states import ZoneStatus
 from common.serializers import BoundaryField, LocationField, MoneyField
 
 __all__ = [
@@ -27,8 +37,14 @@ __all__ = [
     "ManagedDeliveryZoneSerializer",
     "ReverseGeocodeQuerySerializer",
     "ReverseGeocodeSerializer",
+    "ZoneDuplicateSerializer",
+    "ZoneExceptionSerializer",
+    "ZoneHoursSerializer",
+    "ZoneImportSerializer",
+    "ZoneOpeningHoursSerializer",
     "ZoneResolutionQuerySerializer",
     "ZoneResolutionSerializer",
+    "ZoneTransitionSerializer",
 ]
 
 
@@ -210,6 +226,40 @@ class ManagedCitySerializer(serializers.ModelSerializer[City]):
         read_only_fields = ["id", "created_at", "updated_at"]
 
 
+class ZoneOpeningHoursSerializer(serializers.ModelSerializer[ZoneOpeningHours]):
+    weekday = serializers.ChoiceField(choices=Weekday.choices)
+
+    class Meta:
+        model = ZoneOpeningHours
+        fields = ["weekday", "opens_at", "closes_at"]
+
+
+class ZoneHoursSerializer(serializers.Serializer[Any]):
+    """Corps de `PUT …/zones/{id}/schedule/` — la semaine **entière**."""
+
+    hours = ZoneOpeningHoursSerializer(many=True)
+
+
+class ZoneExceptionSerializer(serializers.ModelSerializer[ZoneScheduleException]):
+    kind = serializers.ChoiceField(choices=ZoneExceptionKind.choices)
+
+    class Meta:
+        model = ZoneScheduleException
+        fields = ["id", "kind", "starts_at", "ends_at", "reason", "created_at"]
+        read_only_fields = ["id", "created_at"]
+
+
+class ZoneTransitionSerializer(serializers.Serializer[Any]):
+    """Corps des gestes de cycle de vie — le motif, et pour une suspension sa fin."""
+
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=255, default="")
+    expected_end_at = serializers.DateTimeField(required=False, allow_null=True, default=None)
+
+
+class ZoneDuplicateSerializer(serializers.Serializer[Any]):
+    name = serializers.CharField(max_length=100)
+
+
 class ManagedDeliveryZoneSerializer(serializers.ModelSerializer[DeliveryZone]):
     """Zone et son barème — le seul endroit où se décide un frais de livraison.
 
@@ -275,6 +325,34 @@ class ManagedDeliveryZoneSerializer(serializers.ModelSerializer[DeliveryZone]):
     #: pour que la décision soit consciente.
     overlaps = serializers.SerializerMethodField()
 
+    # Cycle de vie : **lu ici, écrit par les gestes** (`…/publish/`,
+    # `…/suspend/`…), qui valident la transition et journalisent le motif.
+    status = serializers.ChoiceField(choices=ZoneStatus.choices, read_only=True)
+    #: Écriture **historique** conservée : `true` réactive une zone suspendue,
+    #: `false` suspend une zone publiée — par les mêmes gestes, jamais en
+    #: contournant la machine à états. Ne publie pas un brouillon.
+    is_active = serializers.BooleanField(required=False)
+    created_by = serializers.CharField(source="created_by.full_name", read_only=True, default=None)
+    updated_by = serializers.CharField(source="updated_by.full_name", read_only=True, default=None)
+    published_by = serializers.CharField(
+        source="published_by.full_name", read_only=True, default=None
+    )
+    suspended_by = serializers.CharField(
+        source="suspended_by.full_name", read_only=True, default=None
+    )
+    opening_hours = ZoneOpeningHoursSerializer(many=True, read_only=True)
+    exceptions = serializers.SerializerMethodField()
+    #: Les statuts atteignables depuis celui-ci — ce que l'écran peut proposer,
+    #: lu dans `ZONE_MACHINE` plutôt que recopié dans chaque application.
+    transitions = serializers.SerializerMethodField()
+    priority = serializers.IntegerField(min_value=0, max_value=1000, required=False)
+    max_distance_km = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=Decimal("0.1"), max_value=500, required=False
+    )
+    estimated_delivery_minutes = serializers.IntegerField(
+        min_value=1, max_value=600, required=False
+    )
+
     class Meta:
         model = DeliveryZone
         fields = [
@@ -294,12 +372,56 @@ class ManagedDeliveryZoneSerializer(serializers.ModelSerializer[DeliveryZone]):
             "min_order_amount",
             "max_distance_km",
             "estimated_delivery_minutes",
+            "status",
+            "transitions",
             "is_active",
+            "overlaps",
+            "opening_hours",
+            "exceptions",
+            "created_by",
+            "created_at",
+            "updated_by",
+            "updated_at",
+            "published_by",
+            "published_at",
+            "suspension_reason",
+            "suspended_at",
+            "suspended_by",
+            "suspension_expected_end_at",
+            "archived_at",
+        ]
+        read_only_fields = [
+            "id",
+            "restaurant",
             "overlaps",
             "created_at",
             "updated_at",
+            "published_at",
+            "suspension_reason",
+            "suspended_at",
+            "suspension_expected_end_at",
+            "archived_at",
         ]
-        read_only_fields = ["id", "restaurant", "overlaps", "created_at", "updated_at"]
+
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
+    def get_transitions(self, obj: DeliveryZone) -> list[str]:
+        from apps.geography.states import ZONE_MACHINE
+
+        return sorted(ZONE_MACHINE.targets_from(obj.status))
+
+    @extend_schema_field(ZoneExceptionSerializer(many=True))
+    def get_exceptions(self, obj: DeliveryZone) -> list[dict[str, Any]]:
+        """Les exceptions **à venir ou en cours** — l'historique vit au journal."""
+        if obj.pk is None:
+            return []
+        from django.utils import timezone
+
+        return list(
+            ZoneExceptionSerializer(
+                obj.exceptions.filter(ends_at__gt=timezone.now()).order_by("starts_at"),
+                many=True,
+            ).data
+        )
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_overlaps(self, obj: DeliveryZone) -> list[str]:
@@ -338,9 +460,26 @@ class ManagedDeliveryZoneSerializer(serializers.ModelSerializer[DeliveryZone]):
                 raise serializers.ValidationError(
                     {champ: f"Ce pays facture en {devise} ; montant reçu en {montant.currency}."}
                 )
+            if montant is not None and montant.amount_minor < 0:
+                raise serializers.ValidationError({champ: "Un montant ne peut pas être négatif."})
+
+        if instance is not None and "city" in attrs and attrs["city"] != instance.city:
+            # Changer la ville d'une zone publiée changerait les cuisines qui la
+            # servent sans que personne ne relise le contour : on la duplique.
+            raise serializers.ValidationError(
+                {"city": "La ville d'une zone ne change pas ; dupliquez-la dans l'autre ville."}
+            )
 
         attrs["boundary"] = self._contour(attrs)
+        if instance is None or "boundary" in self.initial_data or self._geometrie_envoyee():
+            _verifier_proximite_ville(attrs["boundary"], city)
         return attrs
+
+    def _geometrie_envoyee(self) -> bool:
+        donnees = getattr(self, "initial_data", {}) or {}
+        return any(
+            cle in donnees for cle in ("polygon_coordinates", "center", "radius_meters", "shape")
+        )
 
     def _contour(self, attrs: dict[str, Any]) -> Any:
         """Construit le `MultiPolygon` depuis le mode de saisie demandé.
@@ -427,6 +566,61 @@ class ManagedDeliveryZoneSerializer(serializers.ModelSerializer[DeliveryZone]):
                 )
             }
         )
+
+
+def _verifier_proximite_ville(contour: Any, city: City) -> None:
+    """Refuse un contour posé loin de sa ville — la zone serait incohérente.
+
+    Une ville n'a pas de frontière en base, seulement un centre : la règle est
+    donc une distance, `ZONE_MAX_DISTANCE_FROM_CITY_KM` (100 km par défaut),
+    assez large pour une agglomération, assez étroite pour attraper la zone de
+    Lomé dessinée par erreur sur Abidjan — un clic dans le mauvais onglet.
+    """
+    from django.conf import settings
+
+    limite_km = float(getattr(settings, "ZONE_MAX_DISTANCE_FROM_CITY_KM", 100))
+    centre = city.centroid
+    if contour.intersects(centre):
+        return
+    # Distance au sommet le plus proche : un majorant de la vraie distance, à
+    # quelques kilomètres près — assez pour une borne de l'ordre de 100 km.
+    from django.contrib.gis.geos import Point as GeoPoint
+
+    from apps.geography.shapes import metres_between
+
+    distance_km = (
+        min(
+            metres_between(centre, GeoPoint(x, y, srid=4326))
+            for polygone in contour
+            for anneau in polygone
+            for x, y in anneau.coords
+        )
+        / 1000
+    )
+    if distance_km > limite_km:
+        raise serializers.ValidationError(
+            {
+                "boundary": (
+                    f"Ce contour est à {distance_km:.0f} km de {city.name} "
+                    f"(au plus {limite_km:.0f} km) : vérifiez la ville choisie."
+                )
+            }
+        )
+
+
+class ZoneImportSerializer(serializers.Serializer[Any]):
+    """Corps de `POST /geography/manage/zones/import/`.
+
+    `geojson` accepte une géométrie (`Polygon`, `MultiPolygon`), un `Feature`
+    ou une `FeatureCollection` de polygones — ce qu'exportent QGIS, geojson.io
+    et les jeux de données administratifs. `dry_run` rend la prévisualisation
+    sans rien créer : c'est l'étape « vérifier avant de confirmer ».
+    """
+
+    city = serializers.PrimaryKeyRelatedField[City](queryset=City.objects.all())
+    name = serializers.CharField(max_length=100)
+    geojson = serializers.JSONField()
+    dry_run = serializers.BooleanField(default=True)
 
 
 class ZoneResolutionQuerySerializer(serializers.Serializer[Any]):

@@ -430,6 +430,10 @@ SPECTACULAR_SETTINGS = {
         "StockMovementKindEnum": "apps.inventory.models.MovementKind.choices",
         "AdjustmentStatusEnum": "apps.inventory.models.AdjustmentStatus.choices",
         "IngredientDimensionEnum": "apps.inventory.models.Dimensions.choices",
+        # Le statut d'une zone, lu par ses deux routes de gestion (ville et
+        # cuisine) : sans nom, il sortirait en `Status607Enum`.
+        "ZoneStatusEnum": "apps.geography.states.ZoneStatus.choices",
+        "ZoneExceptionKindEnum": "apps.geography.models.ZoneExceptionKind.choices",
     },
 }
 

@@ -57,6 +57,13 @@ enum DesserteAdresse {
   /// serveur, jamais une panne.
   aucuneCuisine,
 
+  /// La zone de l'adresse est fermée à cette heure (horaires ou fermeture
+  /// exceptionnelle) — revenir plus tard, **sans** changer d'adresse.
+  zoneFermee,
+
+  /// La zone de l'adresse est suspendue par l'exploitation.
+  zoneSuspendue,
+
   /// La vérification n'a pas abouti. Ce n'est pas « non desservie ».
   verificationImpossible,
 }
@@ -75,6 +82,8 @@ enum SituationCuisine {
   indisponible,
   aucuneCuisine,
   adresseNonDesservie,
+  zoneFermee,
+  zoneSuspendue,
   erreurReseau,
   erreurAuthentification,
   erreurAutorisation,
@@ -128,6 +137,8 @@ enum SituationCuisine {
     SituationCuisine.indisponible => 'KITCHEN_UNAVAILABLE',
     SituationCuisine.aucuneCuisine => 'NO_KITCHEN_AVAILABLE',
     SituationCuisine.adresseNonDesservie => 'ADDRESS_NOT_SERVED',
+    SituationCuisine.zoneFermee => 'ZONE_CLOSED',
+    SituationCuisine.zoneSuspendue => 'ZONE_SUSPENDED',
     SituationCuisine.erreurReseau => 'NETWORK_ERROR',
     SituationCuisine.erreurAuthentification => 'AUTHENTICATION_ERROR',
     SituationCuisine.erreurAutorisation => 'AUTHORIZATION_ERROR',
@@ -301,6 +312,8 @@ class KitchenContextService extends ChangeNotifier {
 
     if (_desserte == DesserteAdresse.aucuneCuisine) return SituationCuisine.aucuneCuisine;
     if (_desserte == DesserteAdresse.nonDesservie) return SituationCuisine.adresseNonDesservie;
+    if (_desserte == DesserteAdresse.zoneFermee) return SituationCuisine.zoneFermee;
+    if (_desserte == DesserteAdresse.zoneSuspendue) return SituationCuisine.zoneSuspendue;
     return SituationCuisine.depuisMotif(cuisine.canOrderNow ? '' : cuisine.unavailableCode);
   }
 
@@ -593,6 +606,14 @@ class KitchenContextService extends ChangeNotifier {
     } else if (reponse.unavailableCode == eccore.MotifIndisponibilite.adresseNonDesservie ||
         reponse.unavailableCode == null) {
       _desserte = DesserteAdresse.nonDesservie;
+      _motifDesserte = reponse.reason;
+    } else if (reponse.unavailableCode == eccore.MotifIndisponibilite.zoneFermee) {
+      // La zone existe et livre — pas maintenant. Ce motif tombait dans la
+      // branche « refus de panier » et se lisait « desservie ».
+      _desserte = DesserteAdresse.zoneFermee;
+      _motifDesserte = reponse.reason;
+    } else if (reponse.unavailableCode == eccore.MotifIndisponibilite.zoneSuspendue) {
+      _desserte = DesserteAdresse.zoneSuspendue;
       _motifDesserte = reponse.reason;
     } else {
       // Un refus de panier (minimum de commande) : l'adresse est desservie, la
